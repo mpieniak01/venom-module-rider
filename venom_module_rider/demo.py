@@ -17,6 +17,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 from PIL import Image, ImageDraw
 
+from .demo_compute import GOALS, compute_response, goal_rows
+
 CONTRACTS = json.loads(
     (Path(__file__).parent / "fixtures/pi-contracts.json").read_text()
 )
@@ -50,6 +52,9 @@ def envelope(data, family="rider.safety", version=1, *, status=200, operation=No
 
 class DemoPi:
     def __init__(self):
+        from .demo_conversation import attach
+
+        attach(self)
         self.controls = copy.deepcopy(CONTRACTS["settings"])
         self.library = copy.deepcopy(CONTRACTS["face"])
         self.runtime = {"running": False, **copy.deepcopy(self.library)}
@@ -63,6 +68,9 @@ class DemoPi:
         self.camera_on = False
         self.lcd_on = False
         self.goals = {"s2_camera_preview": False, "s5_voice": False, "s0_core": True}
+        self.goals.update(dict.fromkeys(GOALS, False))
+        self.compute_executor = None
+        self.compute_revision = 1
         self.trace: list[dict] = []
         self.history: list[dict] = []
         self.ack = None
@@ -183,6 +191,8 @@ class DemoPi:
             "request_id": body.get("request_id"),
             "action": action,
             "source": body.get("source"),
+            "execution_context": body.get("execution_context"),
+            "channel": body.get("channel"),
             "seq": body.get("seq"),
             "command_generation": body.get("generation"),
             "observed_at": time.time(),
@@ -360,7 +370,12 @@ def create_app(pi: DemoPi | None = None):
     @app.api_route("/{path:path}", methods=["GET", "HEAD", "POST", "DELETE"])
     async def dispatch(path: str, request: Request):
         path = "/" + path
-        body = await request.json() if request.method == "POST" else {}
+        body = (
+            await request.json()
+            if request.method == "POST"
+            and request.headers.get("content-type", "").startswith("application/json")
+            else {}
+        )
         state.trace.append({"path": path, "method": request.method, "body": body})
         state.trace = state.trace[-2000:]
         if path == "/__demo__/trace":
@@ -375,6 +390,16 @@ def create_app(pi: DemoPi | None = None):
             return {"ok": True}
         if state.offline:
             return envelope({"error": "demo_offline"}, status=503)
+        from .demo_conversation import response as conversation_response
+
+        conversation_result = await conversation_response(
+            state, path, body, request, envelope
+        )
+        if conversation_result is not None:
+            return conversation_result
+        response = compute_response(state, path, body, envelope)
+        if response is not None:
+            return response
         if path == "/api/control/state":
             return envelope(
                 {
@@ -384,7 +409,12 @@ def create_app(pi: DemoPi | None = None):
                 }
             )
         if path in {"/api/control", "/api/safety"}:
-            return state.control(body)
+            result = state.control(body)
+            if result.status_code < 400:
+                from .demo_conversation import manual
+
+                manual(state)
+            return result
         if path == "/api/calibration/controls":
             return (
                 state.settings(body)
@@ -488,7 +518,8 @@ def create_app(pi: DemoPi | None = None):
                         copy.deepcopy(row)
                         for row in CONTRACTS["catalog"]["features"]
                         if row["name"] in state.goals
-                    ],
+                    ]
+                    + goal_rows(),
                 },
                 "rider.catalog",
                 2,
@@ -512,9 +543,13 @@ def create_app(pi: DemoPi | None = None):
             name = path.split("/")[-1]
             if name not in state.goals:
                 return envelope({"error": "unknown_goal"}, status=404)
+            if name in GOALS and body["enabled"] and state.compute_executor is None:
+                return envelope({"error": "compute_executor_unavailable"}, status=503)
             state.goals[name] = body["enabled"]
-            if name == "s2_camera_preview":
-                state.camera_on = body["enabled"]
+            if name in {"s2_camera_preview", "s12_venom_vision"}:
+                state.camera_on = (
+                    state.goals["s2_camera_preview"] or state.goals["s12_venom_vision"]
+                )
             return envelope(
                 {"name": name, "enabled": body["enabled"]}, "rider.tasks", 2
             )

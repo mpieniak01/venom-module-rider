@@ -20,6 +20,7 @@ All paths below are under /api/v1/rider. Mutations carry X-Rider-Session from GE
 | GET/POST /face/runtime | Pi runtime settings with revision conflict detection |
 | POST /face/play, /face/stop, /face/event | Explicit runtime operations |
 | GET /face/runtime/frame | Runtime preview frame |
+| GET/POST /conversation/config | Session-scoped optional conversation tools; revisioned ON/OFF, no ARM |
 
 ## Negotiated Pi contracts
 
@@ -32,6 +33,7 @@ Transport requests application/vnd.rider.api+json;version=1. The envelope has me
 | rider.resources | 1 |
 | rider.catalog, rider.tasks, rider.service_graph, rider.services | 2 |
 | rider.face_studio, rider.face | 1 |
+| rider.audio | 1; private shared playback/cancel |
 
 Manual settings additionally require parameter_schema.version=1 and control_modes.version=1. Units, bounds, display factors, curves, hold timing and posture descriptors come from Pi. Unsupported versions produce an explicit error; legacy responses are not guessed.
 

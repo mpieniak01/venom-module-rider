@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import re
@@ -13,12 +14,29 @@ from .errors import RiderError
 IDENTIFIER = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 
 
+def credential_transport_secure(url: str) -> bool:
+    """Bearer credentials require TLS or a locally terminated encrypted tunnel."""
+    parsed = urlsplit(url)
+    if parsed.scheme == "https":
+        return True
+    if parsed.scheme != "http":
+        return False
+    if parsed.hostname == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(parsed.hostname or "").is_loopback
+    except ValueError:
+        return False
+
+
 @dataclass(frozen=True)
 class Device:
     id: str
     label: str
     url: str
     mode: str = "device"
+    compute_token_env: str | None = None
+    agent_token_env: str = "RIDER_AGENT_TOKEN"
 
     def public(self) -> dict:
         return {"id": self.id, "label": self.label, "mode": self.mode}
@@ -35,12 +53,21 @@ def configured_devices(raw: str | None = None) -> tuple[Device, ...]:
         raise RiderError("invalid_device_configuration", 503)
     devices: list[Device] = []
     for row in rows:
-        if not isinstance(row, dict) or set(row) - {"id", "label", "url", "mode"}:
+        if not isinstance(row, dict) or set(row) - {
+            "id",
+            "label",
+            "url",
+            "mode",
+            "compute_token_env",
+            "agent_token_env",
+        }:
             raise RiderError("invalid_device_configuration", 503)
         id_ = row.get("id")
         label = row.get("label")
         url = row.get("url")
         mode = row.get("mode", "device")
+        token_env = row.get("compute_token_env")
+        agent_env = row.get("agent_token_env", "RIDER_AGENT_TOKEN")
         if (
             not isinstance(id_, str)
             or not IDENTIFIER.fullmatch(id_)
@@ -48,6 +75,13 @@ def configured_devices(raw: str | None = None) -> tuple[Device, ...]:
             or not 1 <= len(label) <= 128
             or not isinstance(url, str)
             or mode not in {"demo", "device"}
+            or not isinstance(agent_env, str)
+            or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", agent_env)
+            or token_env is not None
+            and (
+                not isinstance(token_env, str)
+                or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", token_env)
+            )
             or os.getenv("RIDER_DEMO_ONLY", "").lower() in {"1", "true"}
             and mode != "demo"
         ):
@@ -73,5 +107,5 @@ def configured_devices(raw: str | None = None) -> tuple[Device, ...]:
             raise RiderError("demo_requires_loopback", 503)
         if id_ in {device.id for device in devices}:
             raise RiderError("duplicate_device_id", 503)
-        devices.append(Device(id_, label, url.rstrip("/"), mode))
+        devices.append(Device(id_, label, url.rstrip("/"), mode, token_env, agent_env))
     return tuple(devices)

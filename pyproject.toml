@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "venom-module-rider"
-version = "0.1.0"
-description = "Optional Venom module for manual Rider-Pi operation"
+version = "0.3.0"
+description = "Optional Venom module for Rider-Pi control and remote perception"
 requires-python = ">=3.12"
 dependencies = ["fastapi>=0.115,<1", "httpx>=0.28,<1", "pydantic>=2,<3"]
 
