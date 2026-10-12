@@ -12,11 +12,13 @@ test("conversation option does not arm, start hardware or create a second poller
   assert.equal(source.includes("result.stale === true"), true);
   assert.equal(source.includes(".catch(() => undefined)"), true);
   assert.equal(source.includes("config.credential_transport_secure === false"), true);
+  const client = fs.readFileSync(new URL("../../web-next/lib/use-rider.ts", import.meta.url), "utf8");
+  assert.equal(client.includes('path === "/conversation/config" ? "conversationConfigured" : "saved"'), true);
 });
 
 test("conversation guidance and compute capability are translated in all host languages", () => {
   for (const language of ["pl", "en", "de"] as const) {
-    for (const key of ["conversationTitle", "conversationHint", "conversationEnable", "conversationDisable", "conversationExample", "conversationCredentialMissing", "conversationTransportInsecure", "compute.task.conversation.respond"]) {
+    for (const key of ["conversationTitle", "conversationHint", "conversationEnable", "conversationDisable", "conversationExample", "conversationCredentialMissing", "conversationTransportInsecure", "conversationConfigured", "compute.task.conversation.respond"]) {
       assert.notEqual(translate(language, key), key);
     }
   }

@@ -25,6 +25,21 @@ not depend on this option or an AI model.
    `Rider` or `/rider` prefix. Authenticated Pi voice is already addressed to the
    selected device. Requests must name one bounded action.
 
+An SSH alternative uses the existing robot SSH service. For example, from the
+Venom host (replace the robot hostname and ports with your private configuration):
+
+```bash
+ssh -NT -o ExitOnForwardFailure=yes \
+  -L 127.0.0.1:18080:127.0.0.1:8080 \
+  -R 127.0.0.1:18800:127.0.0.1:8800 pi@rider.local
+```
+
+Set the module's device URL to `http://127.0.0.1:18080`. Pi's executor URL becomes
+`http://127.0.0.1:18800/api/v1/rider/compute`. Both HTTP connections end locally;
+the network segment is encrypted by SSH. Keep the tunnel alive while using these
+features; its loss yields an explicit unavailable response, without replaying
+motion. This example provisions nothing automatically.
+
 | Action | PL example | EN example | DE example | Result |
 | --- | --- | --- | --- | --- |
 | Status | Rider, stan | Rider, status | Rider, Zustand | Current state/battery; missing data stays missing |

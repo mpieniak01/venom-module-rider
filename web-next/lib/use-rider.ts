@@ -132,7 +132,7 @@ export function useRider(section: Section) {
       const response = await apiFetch<JsonRecord>(`${BASE}${path}`, { method, headers: { "X-Rider-Session": session }, body: method === "DELETE" ? undefined : JSON.stringify(body) });
       if (!commandAccepted(response)) { const rejected = new Error(str(data(response).error) || "command_rejected"); Object.assign(rejected, { data: response }); throw rejected; }
       if (session !== sessionRef.current && path !== "/config") throw new Error("session_changed");
-      if (!quiet) setNotice({ key: "saved", tone: "success" });
+      if (!quiet) setNotice({ key: path === "/conversation/config" ? "conversationConfigured" : "saved", tone: "success" });
       return data(response);
     } catch (error) { if (!quiet) setNotice({ key: errorCode(error) === "pi_operation_timeout" ? "operationUnconfirmed" : errorCode(error).includes("conflict") ? "conflict" : "requestFailed", code: errorCode(error), tone: "error" }); throw error; }
   }, [isConnected]);
