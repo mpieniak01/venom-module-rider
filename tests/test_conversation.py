@@ -241,6 +241,165 @@ def test_arguments_do_not_accept_identity_or_consent():
         ToolCall(name="move", direction="forward", operator_consent=True, actor="panel")
 
 
+@pytest.mark.parametrize(
+    "text", ["Rider buźka friendly.", "Gesicht friendly!?", "face friendly!"]
+)
+def test_voice_gesture_strips_terminal_punctuation_only(text):
+    _, call = parse_request(text, addressed=True)
+    assert call is not None and call.gesture == "friendly"
+    _, speech = parse_request("Rider say Hello, world!")
+    assert speech is not None and speech.text == "Hello, world!"
+
+
+async def test_manual_control_keeps_configuration_revision_and_off_accepts_old_revision(
+    rig,
+):
+    row = enable(rig)
+    turn = context()
+    assert "89%" in await rig.registry.handle("Rider stan", turn)
+    epoch = rig.provider.intent_epoch
+    await rig.domain.control({"action": "stop", "source": "manual"}, None)
+    assert rig.provider.intent_epoch > epoch
+    assert rig.provider.config()["revision"] == row["revision"]
+    assert rig.provider.config()["last_result"]["stale"] is True
+    rig.provider.configure(False, row["revision"] - 1, rig.domain.session)
+    assert rig.provider.config()["enabled"] is False
+
+
+@pytest.mark.parametrize("action", ["move", "height", "balance"])
+async def test_conversation_stop_cancels_pending_manual_actuator_request(
+    rig, monkeypatch, action
+):
+    from test_rider import command
+
+    rig.pi.state = "ARMED"
+    entered = asyncio.Event()
+    client = rig.domain.transport()
+    original = client.json
+
+    async def blocked(path, **kwargs):
+        if path == "/api/control":
+            entered.set()
+            await asyncio.Event().wait()
+        return await original(path, **kwargs)
+
+    monkeypatch.setattr(client, "json", blocked)
+    pending = asyncio.create_task(
+        rig.domain.control(command(rig.pi, action), rig.domain.session)
+    )
+    await asyncio.wait_for(entered.wait(), 1)
+    reply = await asyncio.wait_for(rig.registry.urgent("Rider stop", context()), 1)
+    assert "STOP" in reply and rig.pi.state == "DISARMED"
+    with pytest.raises(RiderError, match="command_superseded"):
+        await pending
+    assert not rig.domain.commands and not rig.domain.stops
+    assert not any(row["path"] == "/api/control" for row in rig.pi.trace)
+
+
+async def test_unrelated_expired_chat_falls_through_without_extending_robot_deadline(
+    rig,
+):
+    now = time.monotonic()
+    turn = context(created_at=now - 2, deadline=now - 1)
+    assert rig.provider.accepts("Ordinary chat", turn) is False
+    assert await rig.registry.handle("Ordinary chat", turn) is None
+    assert rig.provider.accepts("Rider forward", turn) is True
+    assert turn.deadline < time.monotonic()
+
+
+@pytest.mark.parametrize("mode", ["device", "demo"])
+async def test_agent_credentials_are_not_sent_over_plain_remote_http(monkeypatch, mode):
+    monkeypatch.setenv("RIDER_AGENT_TOKEN", "fixture-only-agent")
+    sent = []
+
+    def handler(request):
+        sent.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "meta": {
+                    "envelope_version": 1,
+                    "contract_id": "rider.safety",
+                    "contract_version": 1,
+                },
+                "data": {},
+            },
+        )
+
+    client = PiClient(
+        Device("robot", "Fixture", "http://robot.invalid:8080", mode),
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        for path in (
+            "/api/control/agent/pulse",
+            "/api/voice/playback",
+            "/api/voice/playback/cancel",
+        ):
+            with pytest.raises(RiderError, match="agent_transport_insecure"):
+                await client.json(path, method="POST", body={})
+        assert not sent
+        await client.json("/api/control/agent/state")
+        assert len(sent) == 1 and "Authorization" not in sent[0].headers
+    finally:
+        await client.close()
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://robot.invalid",
+        "http://127.0.0.1:8080",
+        "http://127.0.0.2:8080",
+        "http://localhost:8080",
+        "http://[::1]:8080",
+    ],
+)
+async def test_secure_agent_transport_accepts_tls_and_literal_loopback(
+    monkeypatch, url
+):
+    monkeypatch.setenv("RIDER_AGENT_TOKEN", "fixture-only-agent")
+    sent = []
+
+    def handler(request):
+        sent.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "meta": {
+                    "envelope_version": 1,
+                    "contract_id": "rider.safety",
+                    "contract_version": 1,
+                },
+                "data": {},
+            },
+        )
+
+    client = PiClient(
+        Device("robot", "Fixture", url), transport=httpx.MockTransport(handler)
+    )
+    try:
+        await client.json("/api/control/agent/pulse", method="POST", body={})
+        assert (
+            len(sent) == 1
+            and sent[0].headers["Authorization"] == "Bearer fixture-only-agent"
+        )
+    finally:
+        await client.close()
+
+
+async def test_urgent_demo_unhandled_result_is_typed_error(monkeypatch):
+    from venom_module_rider import conversation_engine
+    from venom_module_rider.engines import EngineError
+
+    async def unhandled(*args):
+        return None
+
+    monkeypatch.setattr(conversation_engine, "execute", unhandled)
+    with pytest.raises(EngineError, match="conversation_unhandled"):
+        await DemoEngines().urgent_conversation(b"stop", {}, "pl")
+
+
 def job(rig, *, task="conversation.respond", client="voice", **changes):
     service = rig.app.state.rider_compute
     lease = service.open_session("demo", "fixture-boot", client)
@@ -328,6 +487,61 @@ async def voice_input(rig, request, text="forward"):
         engine.execute = original
     assert row["state"] == "succeeded"
     return stream.getvalue()
+
+
+async def test_voice_stop_releases_each_captured_asr_scope(rig):
+    enable(rig)
+    service = rig.app.state.rider_compute
+    for index in range(20):
+        request = job(
+            rig, job_id=f"stop{index}", input_id=f"segment{index}", sequence=index
+        )
+        await voice_input(rig, request, "stop")
+        assert rig.provider.scopes and rig.registry._prepared
+        row = await service.submit("demo", request, b"stop", "text/plain")
+        assert row["state"] == "succeeded" and "STOP" in row["data"]["text"]
+        assert not rig.provider.scopes and not rig.registry._prepared
+        assert not service.lease("demo", request.session_id).voice_turns
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("seq", "1"),
+        ("seq", []),
+        ("seq", True),
+        ("ts", None),
+        ("ts", "now"),
+        ("ts", []),
+        ("ts", True),
+        ("ttl_ms", None),
+        ("ttl_ms", "500"),
+        ("ttl_ms", []),
+        ("ttl_ms", True),
+        ("channel", []),
+        ("direction", []),
+        ("settings_revision", None),
+    ],
+)
+async def test_agent_fixture_malformed_values_return_400(rig, field, value):
+    body = {
+        "generation": rig.pi.generation,
+        "agent_epoch": rig.pi.agent_epoch,
+        "seq": 0,
+        "ts": time.time(),
+        "ttl_ms": 500,
+        "settings_revision": rig.pi.controls["revision"],
+        "request_id": "fixture-request",
+        "intent_id": "fixture-intent",
+        "channel": "voice",
+        "direction": "forward",
+        field: value,
+    }
+    with pytest.raises(RiderError, match="agent_payload_invalid") as error:
+        await rig.domain.transport().json(
+            "/api/control/agent/pulse", method="POST", body=body
+        )
+    assert error.value.status == 400
 
 
 def test_long_ordinary_chat_and_friendly_pi_voice_fall_through():
@@ -481,6 +695,15 @@ async def test_known_face_and_scene_use_existing_domain_and_shared_compute(rig):
     turn = context()
     assert "opis" in await rig.registry.handle("Rider opisz scenę", turn)
     assert rig.provider.completed[turn.task_id]["result"]["quality"]["simulated"]
+
+
+async def test_key_identified_gesture_ignores_malformed_library_rows(rig):
+    enable(rig)
+    rig.pi.library["gestures"] = [None, "broken", {"key": "friendly", "expr": "happy"}]
+    turn = context()
+    assert "LCD" in await rig.registry.handle("Rider face friendly.", turn)
+    sent = next(row for row in rig.pi.trace if row["path"].endswith("/runtime/play"))
+    assert sent["body"]["gesture_id"] == "friendly" and sent["body"]["expr"] == "happy"
 
 
 @pytest.mark.parametrize("host_manual", [False, True])

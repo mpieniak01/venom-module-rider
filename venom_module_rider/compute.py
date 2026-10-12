@@ -6,7 +6,7 @@ import asyncio
 import copy
 import time
 import uuid
-from collections import deque
+from collections import OrderedDict, deque
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from typing import Any
@@ -92,7 +92,7 @@ class ComputeService:
         self.engines = engines
         self.executor_session = uuid.uuid4().hex
         self.leases: dict[tuple[str, str], Lease] = {}
-        self.retired_boots: dict[str, set[str]] = {}
+        self.retired_boots: dict[str, OrderedDict[str, None]] = {}
         self.jobs: dict[str, Job] = {}
         self.pending: deque[str] = deque()
         self.worker: asyncio.Task | None = None
@@ -139,10 +139,10 @@ class ComputeService:
             raise RiderError("compute_stale_session", 409)
         for old in list(self.leases.values()):
             if old.device_id == device_id and old.device_session != device_session:
-                retired = self.retired_boots.setdefault(device_id, set())
-                if len(retired) >= 32:
-                    raise RiderError("compute_session_limit", 429)
-                retired.add(old.device_session)
+                retired = self.retired_boots.setdefault(device_id, OrderedDict())
+                retired[old.device_session] = None
+                while len(retired) > 32:
+                    retired.popitem(last=False)
                 self.close_session(device_id, old.session_id)
         previous = self.leases.get((device_id, client_id))
         if previous and previous.client_instance != client_instance:

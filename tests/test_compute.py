@@ -150,6 +150,31 @@ async def test_duplicate_order_identity_and_cross_device_read_are_rejected():
     await service.close()
 
 
+async def test_retired_boot_cache_is_bounded_without_rejecting_new_boots():
+    service = ComputeService(DemoEngines())
+    try:
+        for index in range(40):
+            session = service.open_session("pi", f"boot{index}")
+        assert len(service.retired_boots["pi"]) == 32
+        assert "boot0" not in service.retired_boots["pi"]
+        with pytest.raises(RiderError, match="compute_stale_session"):
+            service.open_session("pi", "boot38")
+        assert service.lease("pi", session["session_id"]).device_session == "boot39"
+    finally:
+        await service.close()
+
+
+def test_demo_configuration_with_omitted_executor_is_controlled():
+    from venom_module_rider.demo import DemoPi, envelope
+    from venom_module_rider.demo_compute import compute_response
+
+    state = DemoPi()
+    result = compute_response(
+        state, "/api/compute/config", {"revision": state.compute_revision}, envelope
+    )
+    assert result.status_code == 200 and state.compute_executor is None
+
+
 async def test_saturation_is_explicit_and_does_not_change_manual_state():
     engines = BlockingEngines()
     service = ComputeService(engines)

@@ -277,6 +277,7 @@ export const messages = {
   conversationDisable: ["Wyłącz polecenia rozmów", "Disable conversation commands", "Gesprächsbefehle deaktivieren"],
   conversationExample: ["Np. „Rider, stan”, „Rider, do przodu” lub /rider stop.", "For example: Rider, status; Rider, forward; or /rider stop.", "Zum Beispiel: Rider, Zustand; Rider, vorwärts; oder /rider stop."],
   conversationCredentialMissing: ["Odczyt dostępny. Połączenie poleceń i audio na Pi wymaga konfiguracji poświadczenia.", "Read access is available. Pi commands and audio require a configured credential.", "Lesen ist möglich. Pi-Befehle und Audio benötigen konfigurierte Zugangsdaten."],
+  conversationTransportInsecure: ["Polecenia i audio wymagają HTTPS lub lokalnego tunelu SSH.", "Commands and audio require HTTPS or a local SSH tunnel.", "Befehle und Audio erfordern HTTPS oder einen lokalen SSH-Tunnel."],
   computeExecutor: ["Wykonawca obliczeń", "Compute executor", "Rechenausführer"],
   computeExecutorHint: ["Wspólny wybór na Pi. Wizję i głos uruchamiasz w „Cele i zasoby”.", "A shared selection on Pi. Start vision and voice in Goals and resources.", "Gemeinsame Auswahl auf Pi. Bild und Sprache unter Ziele und Ressourcen starten."],
   computeModels: ["Modele Venom", "Venom models", "Venom Modelle"],

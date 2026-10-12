@@ -93,7 +93,7 @@ The manifest uses module API 1.0 and minimum core runtime 1.5, which differs fro
 
 Configure devices on the **server**, using private environment configuration:
 
-    RIDER_DEVICES_JSON=[{"id":"robot","label":"Rider-Pi","url":"http://rider.local:8080","mode":"device"}]
+    RIDER_DEVICES_JSON=[{"id":"robot","label":"Rider-Pi","url":"https://rider.local","mode":"device"}]
 
 The default list is empty. A browser can select only configured IDs; it cannot provide a destination URL. Selection creates a new session and drops old observations/commands. RIDER_DEFAULT_DEVICE can select an explicitly configured ID at startup; it never arms or starts hardware.
 

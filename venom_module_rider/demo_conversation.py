@@ -1,6 +1,7 @@
 """Hardware-free producer fixture for delegated pulses and audio playback."""
 
 import hmac
+import math
 import os
 import time
 import uuid
@@ -47,7 +48,25 @@ async def response(state, path, body, request, envelope):
             "channel",
             "direction",
         }
-        if set(body) != fields or body["channel"] not in {"chat", "voice"}:
+        if (
+            not isinstance(body, dict)
+            or set(body) != fields
+            or not isinstance(body["channel"], str)
+            or body["channel"] not in {"chat", "voice"}
+            or type(body["seq"]) is not int
+            or not 0 <= body["seq"] < 2**63
+            or type(body["ts"]) not in {int, float}
+            or not math.isfinite(body["ts"])
+            or type(body["ttl_ms"]) is not int
+            or not 1 <= body["ttl_ms"] <= 500
+            or type(body["settings_revision"]) is not int
+            or body["settings_revision"] < 0
+            or not isinstance(body["direction"], str)
+            or any(
+                not isinstance(body[key], str) or not 1 <= len(body[key]) <= 128
+                for key in ("generation", "agent_epoch", "request_id", "intent_id")
+            )
+        ):
             return envelope({"error": "agent_payload_invalid"}, status=400)
         if state.state != "ARMED":
             return envelope({"error": "motion_not_armed"}, status=409)

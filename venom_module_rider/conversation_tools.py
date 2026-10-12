@@ -110,6 +110,8 @@ def parse_request(text: str, *, addressed=False) -> tuple[bool, ToolCall | None]
         for prefix in prefixes:
             if value.startswith(prefix):
                 argument = message.strip()[len(prefix) :].strip()
+                if name == "face":
+                    argument = argument.rstrip(" .!?")
                 try:
                     return True, ToolCall.model_validate(
                         {

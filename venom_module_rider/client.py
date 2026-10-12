@@ -7,7 +7,7 @@ import os
 
 import httpx
 
-from .config import Device
+from .config import Device, credential_transport_secure
 from .errors import RiderError
 
 ACCEPT = "application/vnd.rider.api+json;version=1"
@@ -84,6 +84,10 @@ def json_timeout(path: str, method: str, stop: bool) -> httpx.Timeout:
 class PiClient:
     def __init__(self, device: Device, *, transport=None):
         self.device = device
+        # ASGI fixtures are in-process and never transmit credentials on a network.
+        self.credential_transport_secure = credential_transport_secure(
+            device.url
+        ) or isinstance(transport, httpx.ASGITransport)
         options = {
             "base_url": device.url,
             "trust_env": False,
@@ -111,6 +115,8 @@ class PiClient:
             "/api/voice/playback",
             "/api/voice/playback/cancel",
         }:
+            if not self.credential_transport_secure:
+                raise RiderError("agent_transport_insecure", 503)
             token = os.getenv(self.device.agent_token_env, "")
             if not token:
                 raise RiderError("agent_credentials_unavailable", 503)

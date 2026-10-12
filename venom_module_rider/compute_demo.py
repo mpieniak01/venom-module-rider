@@ -101,7 +101,10 @@ class DemoEngines:
 
     async def urgent_conversation(self, data, metadata, language):
         from .conversation_engine import execute
+        from .engines import EngineError
 
         result = await execute(self.app, data, metadata, language)
+        if result is None:
+            raise EngineError("conversation_unhandled", 422)
         result.quality = {"simulated": True}
         return result

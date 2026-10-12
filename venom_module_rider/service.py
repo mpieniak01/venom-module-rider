@@ -242,12 +242,22 @@ class RiderService:
             raise RiderError("manual_panel_only")
         return safety
 
+    def cancel_pending_motion(self):
+        """Shared STOP boundary for manual and conversation actuator requests."""
+        self.epoch += 1
+        if self.conversation_invalidator:
+            self.conversation_invalidator()
+        for task in tuple(self.commands - self.stops):
+            task.cancel()
+
     async def control(self, body: dict, session):
         action = body.get("action")
         stop = action in {"stop", "disarm"}
         if not stop:
             self.check_session(session)
-        if self.conversation_invalidator:
+        if stop:
+            self.cancel_pending_motion()
+        elif self.conversation_invalidator:
             self.conversation_invalidator()
         client = self.transport()
         epoch = self.epoch
@@ -255,6 +265,8 @@ class RiderService:
             safety = await self.validate_intent(
                 body, session, require_ready=action != "clear_estop"
             )
+            if epoch != self.epoch:
+                raise RiderError("command_superseded")
             generation = safety["generation"]
             seq = body["seq"]
             if action in {"move", "height", "balance"}:
@@ -269,11 +281,6 @@ class RiderService:
                 ).get("revision"):
                     raise RiderError("manual_settings_stale")
             self.sequences[generation] = seq
-        else:
-            self.epoch += 1
-            epoch = self.epoch
-            for task in tuple(self.commands - self.stops):
-                task.cancel()
         path = (
             "/api/safety"
             if action in {"arm", "disarm", "stop", "clear_estop"}

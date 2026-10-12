@@ -50,9 +50,9 @@ def compute_response(state, path, body, envelope):
                 return envelope(
                     {"error": "compute_stop_goals_first"}, "rider.compute", status=409
                 )
-            if body["executor_id"] != state.compute_executor:
+            if body.get("executor_id") != state.compute_executor:
                 state.compute_revision += 1
-                state.compute_executor = body["executor_id"]
+                state.compute_executor = body.get("executor_id")
         return envelope(
             {
                 "protocol_version": 1,

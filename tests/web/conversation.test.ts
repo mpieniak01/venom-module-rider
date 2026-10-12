@@ -10,11 +10,13 @@ test("conversation option does not arm, start hardware or create a second poller
   assert.equal(source.includes('client.mutate("/conversation/config", { enabled: !enabled, revision: config.revision })'), true);
   assert.equal(source.includes("!known || !client.canMutate"), true);
   assert.equal(source.includes("result.stale === true"), true);
+  assert.equal(source.includes(".catch(() => undefined)"), true);
+  assert.equal(source.includes("config.credential_transport_secure === false"), true);
 });
 
 test("conversation guidance and compute capability are translated in all host languages", () => {
   for (const language of ["pl", "en", "de"] as const) {
-    for (const key of ["conversationTitle", "conversationHint", "conversationEnable", "conversationDisable", "conversationExample", "conversationCredentialMissing", "compute.task.conversation.respond"]) {
+    for (const key of ["conversationTitle", "conversationHint", "conversationEnable", "conversationDisable", "conversationExample", "conversationCredentialMissing", "conversationTransportInsecure", "compute.task.conversation.respond"]) {
       assert.notEqual(translate(language, key), key);
     }
   }

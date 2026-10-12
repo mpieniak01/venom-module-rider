@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import re
@@ -11,6 +12,21 @@ from urllib.parse import urlsplit
 from .errors import RiderError
 
 IDENTIFIER = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+
+
+def credential_transport_secure(url: str) -> bool:
+    """Bearer credentials require TLS or a locally terminated encrypted tunnel."""
+    parsed = urlsplit(url)
+    if parsed.scheme == "https":
+        return True
+    if parsed.scheme != "http":
+        return False
+    if parsed.hostname == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(parsed.hostname or "").is_loopback
+    except ValueError:
+        return False
 
 
 @dataclass(frozen=True)

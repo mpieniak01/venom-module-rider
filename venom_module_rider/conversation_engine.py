@@ -55,7 +55,7 @@ async def prepare(app, data, metadata, language):
     registry = getattr(app.state, "conversation_providers", None)
     if registry is None:
         raise EngineError("conversation_disabled", 503)
-    config = provider.config()
+    provider.config()
     text = "" if audio_input else data.decode("utf-8")
     _, call = parse_request(text, addressed=True)
     urgent = bool(call and call.name == "stop")
@@ -63,11 +63,15 @@ async def prepare(app, data, metadata, language):
         turn = metadata.get("conversation_turn")
         if not isinstance(turn, PreparedTurn):
             raise EngineError("conversation_input_scope_required", 409)
-        if turn.revision != config["revision"]:
+        if turn.revision != provider.intent_epoch:
             raise EngineError("conversation_intent_expired", 409)
         if turn.transcript != text.strip():
             raise EngineError("conversation_transcript_mismatch", 409)
         return turn
+    if urgent:
+        captured_turn = metadata.get("conversation_turn")
+        if isinstance(captured_turn, PreparedTurn):
+            await registry.finish(captured_turn.context)
     now = metadata.get("received_monotonic", time.monotonic())
     context = ConversationContext(
         task_id=metadata["job_id"],
@@ -78,7 +82,7 @@ async def prepare(app, data, metadata, language):
         language=language,
         target_device_id=metadata["device_id"],
     )
-    revision = config["revision"]
+    revision = provider.intent_epoch
     try:
         await registry.prepare(text, context)
     except BaseException:
@@ -102,7 +106,8 @@ async def execute(app, data, metadata, language):
     if metadata.get("client_id") != "voice":
         raise EngineError("conversation_actor_invalid", 403)
     provider = create_provider(app)
-    if not turn.urgent and turn.revision != provider.config()["revision"]:
+    provider.config()  # Apply any selected-device invalidation before checking intent.
+    if not turn.urgent and turn.revision != provider.intent_epoch:
         raise EngineError("conversation_intent_expired", 409)
     registry = getattr(app.state, "conversation_providers", None)
     if registry is None:

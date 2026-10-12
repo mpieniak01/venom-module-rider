@@ -12,6 +12,13 @@ not depend on this option or an AI model.
 2. Configure a private `RIDER_AGENT_TOKEN` on Venom and in Pi's compute/executor
    service environment. A device's `agent_token_env` can reference a different
    server environment variable. Tokens are never returned in configuration.
+   Credential-bearing requests require HTTPS with a valid certificate, or an
+   HTTP loopback address (`localhost`, `127.0.0.1`, `::1`) terminating an encrypted
+   SSH tunnel. Plain LAN HTTP can still serve manual control and reads, but agent
+   pulses and audio uploads/cancellation fail before transmitting a token. An
+   in-process ASGI fixture does not use the network. Provision TLS or the tunnel
+   before physical R2/R3 acceptance; firmware and robot services are not changed
+   by this transport requirement.
 3. Enable Conversation commands in Perception. This only enables tool access.
    Operator ARM remains the existing global red/green control.
 4. Use the existing chat or voice interface. A host chat needs the explicit
@@ -37,10 +44,14 @@ operator consent, raw actuator parameters or authorization.
 ## Host interfaces and lifecycle
 
 `GET /api/v1/rider/conversation/config` returns enabled/revision, selected device,
-credential presence and the last result. `POST` accepts exactly enabled/revision
+credential presence, credential transport readiness and the last result.
+`POST` accepts exactly enabled/revision
 and the existing `X-Rider-Session`; module access/origin/environment guards apply.
 Enablement is ephemeral and defaults OFF after host restart or device selection.
 Disablement cancels pending work and removes tools from the provider catalog.
+Configuration revisions are separate from intent epochs: manual control expires
+pending intentions without changing the ON/OFF revision. OFF also accepts an old
+configuration revision for the current device session.
 
 The host creates immutable `ConversationContext` for native chat or actual speech
 transcription. Correlation IDs are not credentials. Pi compute
@@ -55,6 +66,9 @@ request. This precedes capability,
 model waits and inference queueing. The 30-second host turn deadline
 is further bounded by the compute TTL. STOP bypasses model probes and the inference
 slot, including queue saturation. It retains normal job correlation/result state.
+The pure provider `accepts(text, context)` hook lets unrelated chat fall through
+even after lengthy host preparation. It does not renew a matched command's TTL.
+Conversation STOP uses the same local pending-actuator cancellation as panel STOP.
 
 Manual control invalidates the host intent. Pi additionally rotates a distinct
 agent epoch on accepted manual commands, so another Pi client can supersede an

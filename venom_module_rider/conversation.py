@@ -87,6 +87,7 @@ class RiderConversation:
         self.app = app
         self.enabled = False
         self.revision = 0
+        self.intent_epoch = 0
         self.session = None
         self.scopes: dict[str, Scope] = {}
         self.completed: OrderedDict[str, dict] = OrderedDict()
@@ -108,7 +109,7 @@ class RiderConversation:
 
     def invalidate(self):
         """Drop intentions; do not disarm or send an automatic global STOP."""
-        self.revision += 1
+        self.intent_epoch += 1
         try:
             current = asyncio.current_task()
         except RuntimeError:
@@ -121,6 +122,7 @@ class RiderConversation:
         domain = self.domain
         if self.session is not None and self.session != domain.session:
             self.enabled, self.session = False, None
+            self.revision += 1
             self.invalidate()
         device = domain.device
         last = next(reversed(self.completed.values()), None) if self.completed else None
@@ -129,10 +131,13 @@ class RiderConversation:
             "revision": self.revision,
             "device_id": device.id if device else None,
             "credential_configured": bool(device and os.getenv(device.agent_token_env)),
+            "credential_transport_secure": bool(
+                device and getattr(domain.client, "credential_transport_secure", False)
+            ),
             "tools": ["status", "observe", "speak", "face", "move", "stop"]
             if self.enabled
             else [],
-            "last_result": {**last, "stale": last["revision"] != self.revision}
+            "last_result": {**last, "stale": last["revision"] != self.intent_epoch}
             if last
             else None,
         }
@@ -142,11 +147,12 @@ class RiderConversation:
         current = self.config()
         if type(enabled) is not bool or type(revision) is not int:
             raise RiderError("conversation_configuration_invalid", 400)
-        if revision != current["revision"]:
+        if enabled and revision != current["revision"]:
             raise RiderError("conversation_configuration_conflict", 409)
         if enabled and (self.closed or self.domain.device is None):
             raise RiderError("device_not_selected", 503)
         self.enabled, self.session = enabled, self.domain.session
+        self.revision += 1
         self.invalidate()
         return self.config()
 
@@ -198,7 +204,7 @@ class RiderConversation:
             return
         if (
             not self.config()["enabled"]
-            or scope.revision != self.revision
+            or scope.revision != self.intent_epoch
             or time.monotonic() >= scope.context.deadline
         ):
             raise RiderError("conversation_intent_expired", 409)
@@ -220,7 +226,7 @@ class RiderConversation:
             return
         if len(self.scopes) >= 16:
             raise RiderError("conversation_busy", 429)
-        scope = Scope(context, call, self.domain.session, self.revision, {}, None)
+        scope = Scope(context, call, self.domain.session, self.intent_epoch, {}, None)
         self.scopes[context.task_id] = scope
         try:
             self._check(scope)
@@ -255,6 +261,13 @@ class RiderConversation:
             await asyncio.gather(scope.task, return_exceptions=True)
         self._drop(scope)
 
+    def accepts(self, text, context) -> bool:
+        """Pure routing check; unrelated chat does not consume a robot deadline."""
+        addressed, _ = parse_request(
+            text, addressed=context.target_device_id is not None
+        )
+        return addressed
+
     async def urgent(self, text, context):
         addressed, call = parse_request(
             text, addressed=context.target_device_id is not None
@@ -286,7 +299,9 @@ class RiderConversation:
                 return message("failed", language) + exc.code
             scope = self.scopes.get(context.task_id)
         if scope is None:
-            scope = Scope(context, call, self.domain.session, self.revision, {}, None)
+            scope = Scope(
+                context, call, self.domain.session, self.intent_epoch, {}, None
+            )
         if len(self.scopes) >= 16 and context.task_id not in self.scopes:
             return message("failed", language) + "conversation_busy"
         scope.task = asyncio.current_task()
@@ -384,8 +399,7 @@ class RiderConversation:
                 f"{message('battery', context.language)}: {reading}"
             )
         elif call.name == "stop":
-            domain.epoch += 1
-            self.invalidate()
+            domain.cancel_pending_motion()
             result = await domain.transport().json(
                 "/api/stop",
                 method="POST",
@@ -447,22 +461,24 @@ class RiderConversation:
         elif call.name == "face":
             library = domain.data(await domain.read("/api/face-studio/gestures", 5))
             gestures = library.get("gestures") or {}
-            if isinstance(gestures, list):
-                known = {
-                    row.get("id") or row.get("key")
-                    for row in gestures
-                    if isinstance(row, dict)
-                }
-            else:
-                known = set(gestures)
-            if call.gesture not in known:
+            gesture = (
+                next(
+                    (
+                        row
+                        for row in gestures
+                        if isinstance(row, dict)
+                        and (row.get("id") or row.get("key")) == call.gesture
+                    ),
+                    None,
+                )
+                if isinstance(gestures, list)
+                else gestures.get(call.gesture)
+                if isinstance(gestures, dict)
+                else None
+            )
+            if not isinstance(gesture, dict):
                 raise RiderError("unknown_gesture", 404)
             self._check(scope)
-            gesture = (
-                next((row for row in gestures if row.get("id") == call.gesture), {})
-                if isinstance(gestures, list)
-                else gestures.get(call.gesture, {})
-            )
             result = await domain.mutate(
                 "/api/face-studio/runtime/play",
                 {
@@ -537,7 +553,7 @@ class RiderConversation:
             "result": result,
             "speech_played": speech_played,
             "observed_at": time.time(),
-            "revision": self.revision,
+            "revision": self.intent_epoch,
         }
         while len(self.completed) > 16:
             self.completed.popitem(last=False)
