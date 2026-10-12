@@ -66,3 +66,13 @@ export function cameraOn(status: RiderStatus | null): boolean {
   }
   return false;
 }
+
+export function telemetryAge(status: RiderStatus | null): number | null {
+  const telemetry = data(status?.telemetry);
+  const xgo = record(record(telemetry.devices).xgo);
+  const observation = record(xgo.observation);
+  const observed = timestampMs(observation.observed_at ?? xgo.observed_at ?? telemetry.observed_at);
+  const clocks = [data(status?.control).server_time, telemetry.server_time].map(timestampMs).filter((time): time is number => time !== null);
+  const server = clocks.length ? Math.max(...clocks) : null;
+  return observed !== null && server !== null && server >= observed ? (server - observed) / 1000 : null;
+}

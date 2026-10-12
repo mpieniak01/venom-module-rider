@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { calibrationDraft, calibrationValues, validCalibration } from "../../web-next/lib/calibration";
 import { gestureBody, gestureFrom, validFaceSettings, validGesture } from "../../web-next/lib/face";
 import { messages, translate } from "../../web-next/lib/i18n";
-import { cameraOn, commandAccepted, data, displayValue, errorCode, featureRows, formatNumber, sensorRows, timestampMs, type JsonRecord, type RiderStatus } from "../../web-next/lib/model";
+import { cameraOn, commandAccepted, data, displayValue, errorCode, featureRows, formatNumber, sensorRows, telemetryAge, timestampMs, type JsonRecord, type RiderStatus } from "../../web-next/lib/model";
 
 const contracts = JSON.parse(fs.readFileSync(new URL("../../venom_module_rider/fixtures/pi-contracts.json", import.meta.url), "utf8")) as { settings: JsonRecord; face: JsonRecord };
 test("all module messages have complete PL, EN and DE values", () => {
@@ -80,4 +80,12 @@ test("known OFF and unknown cameras never trigger a frame poll", () => {
 test("pending transport acceptance stays pending and errors stay rejected", () => {
   assert.equal(commandAccepted({ ok: true, meta: {}, data: { pending: true }, operation: { status: "pending" } }), true);
   assert.equal(commandAccepted({ ok: false, meta: {}, data: { error: "rejected" } }), false);
+});
+
+test("parallel observations use the latest Pi source clock for the shared telemetry age", () => {
+  const status = { control: { server_time: 100 }, telemetry: { server_time: 100.01, devices: { xgo: { observed_at: 100.005 } } } } as unknown as RiderStatus;
+  assert.ok(Math.abs((telemetryAge(status) ?? -1) - .005) < 1e-9);
+  status.control = { server_time: 101 };
+  assert.ok(Math.abs((telemetryAge(status) ?? -1) - .995) < 1e-9);
+  assert.equal(telemetryAge({ telemetry: { devices: { xgo: {} } } } as unknown as RiderStatus), null);
 });

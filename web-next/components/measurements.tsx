@@ -1,5 +1,5 @@
 import { Activity } from "lucide-react";
-import { data, finite, formatNumber, formatTime, record, rows, sensorRows, str, timestampMs, type JsonRecord, type RiderStatus } from "../lib/model";
+import { data, finite, formatNumber, formatTime, record, rows, sensorRows, str, telemetryAge, timestampMs, type JsonRecord, type RiderStatus } from "../lib/model";
 import type { Translator } from "../lib/i18n";
 import { Details, Empty, Panel, Pill } from "./primitives";
 import styles from "../rider.module.css";
@@ -17,9 +17,7 @@ export function SensorMetrics({ status, t, language }: { status: RiderStatus | n
     return { name, sample, value, quality, ratio };
   });
   const sharedQuality = samples.every(sample => sample.quality === samples[0].quality) ? samples[0].quality : "partial";
-  const observed = timestampMs(observation.observed_at ?? xgo.observed_at ?? telemetry.observed_at);
-  const server = timestampMs(data(status?.control).server_time ?? telemetry.server_time);
-  const age = observed !== null && server !== null && server >= observed ? (server - observed) / 1000 : null;
+  const age = telemetryAge(status);
   return <><div className={styles.meta} style={{ marginBottom: 14, marginTop: 0 }}><span>{t("telemetryAge")}: {formatNumber(age, language)} {age !== null ? "s" : ""}</span><Pill tone={sharedQuality === "fresh" ? "good" : "warning"}>{t(sharedQuality)}</Pill></div><div className={styles.metrics}>{samples.map(({ name, sample, value, quality, ratio }) => <Metric key={name} label={t(name)} value={value} unit={ratio ? "%" : sample.unit === "sdk_raw" ? t("sdkRaw") : str(sample.unit)} quality={quality !== sharedQuality && quality !== "fresh" ? quality : undefined} language={language} t={t} />)}</div><Details value={{ source: observation.source ?? xgo.source, observed_at: observation.observed_at ?? xgo.observed_at, sensors: Object.fromEntries(sensors) }} t={t} /></>;
 }
 const series = [{ key: "hist_cpu", label: "cpu", color: "var(--primary, #00ff9d)" }, { key: "hist_cpu_peak", label: "cpuPeak", color: "var(--warning, #ffcc00)" }, { key: "hist_mem", label: "memory", color: "var(--secondary, #00b8ff)" }];
