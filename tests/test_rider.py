@@ -263,6 +263,54 @@ async def test_all_directions_pulse_hold_release_and_global_stop():
     await service.close()
 
 
+async def test_concurrent_stops_both_complete_and_old_ack_keeps_newest_cache(
+    monkeypatch,
+):
+    service, pi = domain()
+    await service.select("demo", service.session)
+    await service.read("/api/control/state", 30)
+    original = service.client.json
+    accepted = asyncio.Event()
+    finish = asyncio.Event()
+    count = 0
+
+    async def delayed_stop(*args, **kwargs):
+        nonlocal count
+        count += 1
+        order = count
+        result = await original(*args, **kwargs)
+        if order == 1:
+            accepted.set()
+            await finish.wait()
+        return result
+
+    monkeypatch.setattr(service.client, "json", delayed_stop)
+    first = asyncio.create_task(service.control({"action": "stop"}, service.session))
+    await asyncio.wait_for(accepted.wait(), 1)
+    second = await service.control({"action": "disarm"}, service.session)
+    finish.set()
+    earlier = await first
+    assert earlier["ok"] and second["ok"]
+    latest = service.cache["/api/control/state"][1]["data"]["safety"]
+    assert latest["generation"] == second["data"]["safety"]["generation"]
+    assert not service.stops and not service.commands
+    await service.close()
+
+
+async def test_camera_instance_logs_use_valid_systemd_names():
+    service, pi = domain()
+    await service.select("demo", service.session)
+    with TestClient(host_app(service)) as client:
+        for instance in ["raw", "edge", "ssd"]:
+            response = client.get(
+                f"/api/v1/rider/logs/camera-capture@{instance}.service"
+            )
+            assert response.status_code == 200
+        for unit in [".hidden.service", "camera.service.bad", "camera;echo.service"]:
+            assert client.get(f"/api/v1/rider/logs/{unit}").status_code == 400
+    await service.close()
+
+
 async def test_no_replay_after_device_session_change():
     service, pi = domain()
     await service.select("demo", service.session)

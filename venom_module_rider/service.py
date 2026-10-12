@@ -51,6 +51,7 @@ class RiderService:
         self.cache: dict[str, tuple[float, dict]] = {}
         self.inflight: dict[str, asyncio.Task] = {}
         self.commands: set[asyncio.Task] = set()
+        self.stops: set[asyncio.Task] = set()
         self.operations: set[asyncio.Task] = set()
         self.last_seen: float | None = None
         self.closed = False
@@ -260,7 +261,7 @@ class RiderService:
         else:
             self.epoch += 1
             epoch = self.epoch
-            for task in tuple(self.commands):
+            for task in tuple(self.commands - self.stops):
                 task.cancel()
         path = (
             "/api/safety"
@@ -276,12 +277,14 @@ class RiderService:
             )
         )
         self.commands.add(task)
+        if stop:
+            self.stops.add(task)
         try:
             result = await task
-            if epoch != self.epoch:
+            if not stop and epoch != self.epoch:
                 raise RiderError("command_superseded")
             safety = result["data"].get("safety")
-            if isinstance(safety, dict):
+            if epoch == self.epoch and isinstance(safety, dict):
                 previous = copy.deepcopy(
                     self.cache.get("/api/control/state", (0, {}))[1]
                 )
@@ -295,6 +298,7 @@ class RiderService:
             raise RiderError("command_superseded") from exc
         finally:
             self.commands.discard(task)
+            self.stops.discard(task)
 
     async def mutate(self, path, body, session, *, method="POST"):
         self.check_session(session)
@@ -362,6 +366,7 @@ class RiderService:
             await asyncio.gather(*tasks, return_exceptions=True)
         self.inflight.clear()
         self.commands.clear()
+        self.stops.clear()
         self.operations.clear()
         if self.client:
             await self.client.close()

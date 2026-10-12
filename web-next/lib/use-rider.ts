@@ -5,7 +5,7 @@ import { apiFetch } from "@/lib/api-client";
 import { getApiBaseUrl } from "@/lib/env";
 import { configForConnection } from "./device-session";
 import { HoldController, readHoldTiming, type MovementIntent } from "./hold-controller";
-import { cameraOn, canRequestArm, commandAccepted, controlIdentity, data, errorCode, faceRunning, featureRows, finite, record, safetyOf, settingsOf, str, timestampMs, type DeviceConfig, type Direction, type JsonRecord, type RiderStatus, type Section } from "./model";
+import { cameraOn, canRequestArm, commandAccepted, controlIdentity, data, errorCode, faceRunning, featureRows, finite, frameRequested, record, safetyOf, settingsOf, str, timestampMs, type DeviceConfig, type Direction, type JsonRecord, type RiderStatus, type Section } from "./model";
 
 const BASE = "/api/v1/rider";
 export type Notice = { key: string; code?: string; tone: "error" | "success" | "info" };
@@ -61,12 +61,13 @@ export function useRider(section: Section) {
   }, []);
   const fetchFrame = useCallback(async (path: string, signal: AbortSignal, kind: "camera" | "face") => {
     const response = await fetch(`${getApiBaseUrl()}${BASE}${path}`, { cache: "no-store", signal });
+    if (signal.aborted || !frameRequested(kind, path, sectionRef.current, mediaRef.current)) return;
     if (!response.ok || !response.headers.get("Content-Type")?.startsWith("image/")) { replaceFrame(kind, null); setMediaError("frameMissing"); return; }
     const stale = response.headers.get("X-Rider-Stale");
     const placeholder = response.headers.get("X-Rider-Placeholder") === "true";
     if (stale === "true" || placeholder) { replaceFrame(kind, null); setMediaError("frameStale"); return; }
     const blob = await response.blob();
-    if (signal.aborted) return;
+    if (signal.aborted || !frameRequested(kind, path, sectionRef.current, mediaRef.current)) return;
     replaceFrame(kind, { url: URL.createObjectURL(blob), stale: false, knownFreshness: stale === "false", source: response.headers.get("X-Rider-Source") || response.headers.get("X-Face-Source") || "", fileAt: response.headers.get("X-Rider-File-Observed-At") || "", id: response.headers.get("X-Rider-Frame-Id") || "" });
     setMediaError(null);
   }, [replaceFrame]);

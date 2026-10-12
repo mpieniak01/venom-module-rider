@@ -34,6 +34,9 @@ export function canRequestArm(status: RiderStatus | null): boolean {
   const safety = safetyOf(status);
   return ["online", "degraded"].includes(status?.connection.status ?? "") && safety.stale !== true && !!str(safety.generation) && (safety.state === "ESTOP" || safety.ready === true);
 }
+export function frameRequested(kind: "camera" | "face", path: string, section: Section, media: { camera: "raw" | "proc" | null; face: boolean }): boolean {
+  return kind === "camera" ? section === "control" && media.camera !== null && path === `/camera/${media.camera}` : section === "face" && media.face && path === "/face/runtime/frame";
+}
 export const timestampMs = (value: unknown): number | null => { if (finite(value)) return value < 1e12 ? value * 1000 : value; if (typeof value === "string") { const at = Date.parse(value); return Number.isFinite(at) ? at : null; } return null; };
 export const formatNumber = (value: unknown, locale: string, precision = 1): string => finite(value) ? new Intl.NumberFormat(locale, { maximumFractionDigits: precision }).format(value) : "—";
 export const formatTime = (value: unknown, locale: string): string => { const at = timestampMs(value); return at === null ? "—" : new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(at); };

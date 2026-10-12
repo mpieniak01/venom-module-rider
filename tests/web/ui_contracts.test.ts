@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { calibrationDraft, calibrationValues, validCalibration } from "../../web-next/lib/calibration";
 import { gestureBody, gestureFrom, validFaceSettings, validGesture } from "../../web-next/lib/face";
 import { messages, translate } from "../../web-next/lib/i18n";
-import { actuatorState, cameraOn, canRequestArm, commandAccepted, data, displayValue, errorCode, faceRunning, featureRows, formatNumber, sensorRows, telemetryAge, timestampMs, type JsonRecord, type RiderStatus } from "../../web-next/lib/model";
+import { actuatorState, cameraOn, canRequestArm, commandAccepted, data, displayValue, errorCode, faceRunning, featureRows, formatNumber, frameRequested, sensorRows, telemetryAge, timestampMs, type JsonRecord, type RiderStatus } from "../../web-next/lib/model";
 
 const contracts = JSON.parse(fs.readFileSync(new URL("../../venom_module_rider/fixtures/pi-contracts.json", import.meta.url), "utf8")) as { settings: JsonRecord; face: JsonRecord };
 test("all module messages have complete PL, EN and DE values", () => {
@@ -89,6 +89,15 @@ test("face activity comes from the canonical nested Pi runtime state", () => {
   assert.equal(faceRunning(status({ state: { running: false, playing: false }, running: true })), false);
   assert.equal(faceRunning(status({})), false);
   assert.equal(faceRunning(null), false);
+});
+test("late frames are discarded after hiding, changing a stream or leaving its view", () => {
+  assert.equal(frameRequested("camera", "/camera/raw", "control", { camera: "raw", face: false }), true);
+  assert.equal(frameRequested("camera", "/camera/raw", "control", { camera: null, face: false }), false);
+  assert.equal(frameRequested("camera", "/camera/raw", "control", { camera: "proc", face: false }), false);
+  assert.equal(frameRequested("camera", "/camera/raw", "face", { camera: "raw", face: true }), false);
+  assert.equal(frameRequested("face", "/face/runtime/frame", "face", { camera: null, face: true }), true);
+  assert.equal(frameRequested("face", "/face/runtime/frame", "face", { camera: null, face: false }), false);
+  assert.equal(frameRequested("face", "/face/runtime/frame", "control", { camera: "raw", face: true }), false);
 });
 test("slow diagnostic reads can request a fresh ARM check without granting movement", () => {
   const ready = { connection: { status: "online" }, control: { safety: { state: "DISARMED", ready: true, can_move: false, stale: false, generation: "instance" } } } as unknown as RiderStatus;

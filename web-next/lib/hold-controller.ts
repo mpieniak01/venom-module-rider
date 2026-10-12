@@ -91,8 +91,9 @@ export class HoldController {
     if (this.sending) await this.inFlight;
     if (!valid()) return;
     this.sending = true;
+    const sentToken = this.token;
     this.inFlight = this.options.send(intent).catch(error => {
-      this.cancel();
+      if (this.token === sentToken) this.cancel();
       this.options.onError(error);
     }).finally(() => { this.sending = false; });
     await this.inFlight;

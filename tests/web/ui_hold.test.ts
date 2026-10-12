@@ -75,3 +75,18 @@ test("duplicate blur and visibility releases preserve a release waiting for the 
   controller.release(); controller.release(); finish?.(); await flush();
   assert.deepEqual(intents.map(intent => intent.mode), ["hold", "release"]);
 });
+
+test("a late release failure does not cancel a newer operator press", async t => {
+  let rejectRelease: ((error: Error) => void) | undefined;
+  const { controller, intents, errors } = setup(t, async intent => {
+    if (intent.mode === "release") await new Promise<void>((_, reject) => { rejectRelease = reject; });
+  });
+  controller.start("forward", 1); t.mock.timers.tick(timing.click_threshold_ms); await flush();
+  controller.end(1); await flush();
+  controller.start("right", 2); t.mock.timers.tick(timing.click_threshold_ms); await flush();
+  rejectRelease?.(new Error("old release failed")); await flush();
+  assert.equal(errors.length, 1);
+  assert.equal(intents.at(-1)?.direction, "right");
+  assert.equal(intents.at(-1)?.mode, "hold");
+  controller.cancel();
+});

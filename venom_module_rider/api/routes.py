@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hmac
 import os
+import re
 from contextlib import asynccontextmanager
 from typing import Annotated
 from urllib.parse import urlsplit
@@ -17,6 +18,8 @@ from ..config import IDENTIFIER, configured_devices
 from ..errors import RiderError
 from ..service import RESOURCE_NAMES, RiderService
 from .schemas import Command, GoalAction, ResourceAction, Selection, SettingsPatch
+
+UNIT = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9_@.-]{0,95}\.service")
 
 
 class RiderRoute(APIRoute):
@@ -198,7 +201,7 @@ async def logs(
     request: Request,
     lines: Annotated[int, Query(ge=1, le=200)] = 100,
 ):
-    if not unit.endswith(".service") or not IDENTIFIER.fullmatch(unit[:-8]):
+    if not UNIT.fullmatch(unit):
         raise RiderError("invalid_name", 400)
     result = await service(request).read(
         f"/api/services/{unit}/logs?lines={lines}", 2.0
