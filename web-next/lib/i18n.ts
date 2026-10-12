@@ -1,5 +1,6 @@
 // Module-owned translations. Every key contains PL, EN and DE by construction.
 export const messages = {
+  operationUnconfirmed: ["Brak potwierdzenia operacji. Odśwież stan przed ponowną próbą.", "Operation not confirmed. Refresh the state before trying again.", "Vorgang nicht bestätigt. Status vor einem erneuten Versuch aktualisieren."],
   readDiagnostics: ["Odczytaj stan usług", "Read service state", "Dienststatus lesen"],
   services: ["Diagnostyka usług", "Service diagnostics", "Dienstdiagnose"],
   unit: ["Usługa", "Service", "Dienst"],

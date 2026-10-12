@@ -1,7 +1,7 @@
 /* eslint-disable @next/next/no-img-element -- Pi binary frames use revocable object URLs. */
 import { useState } from "react";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Camera, CirclePause, Shield } from "lucide-react";
-import { data, displayValue, finite, formatTime, record, safetyOf, settingsOf, type Direction, type NumericDescriptor } from "../lib/model";
+import { actuatorState, displayValue, finite, formatTime, record, safetyOf, settingsOf, type Direction, type NumericDescriptor } from "../lib/model";
 import type { Translator } from "../lib/i18n";
 import type { RiderClient } from "../lib/use-rider";
 import { Button, Empty, Field, Panel, Pill } from "./primitives";
@@ -38,12 +38,12 @@ export function ManualPad({ client, t, language, compact = false }: { client: Ri
 export function Posture({ client, t, language }: { client: RiderClient; t: Translator; language: string }) {
   const [draftHeight, setDraftHeight] = useState<number | null>(null);
   const settings = settingsOf(client.status);
-  const control = data(client.status?.control);
   const actuator = record(record(settings.parameter_schema).actuator_fields);
   const descriptor = record(actuator.height) as NumericDescriptor;
   const balanceDescriptor = record(actuator.balance);
-  const target = record(control.height);
-  const balance = record(control.balance);
+  const actuators = actuatorState(client.status);
+  const target = record(actuators.height);
+  const balance = record(actuators.balance);
   const height = draftHeight ?? (finite(target.value) ? target.value : descriptor.minimum);
   const capabilities = record(safetyOf(client.status).capabilities);
   const heightAvailable = record(capabilities.height).available !== false && descriptor.type === "integer" && finite(descriptor.minimum) && finite(descriptor.maximum);

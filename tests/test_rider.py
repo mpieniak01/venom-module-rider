@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from venom_core.services.module_registry import include_optional_api_routers
 
 from venom_module_rider.api.routes import router
-from venom_module_rider.client import PiClient
+from venom_module_rider.client import PiClient, json_timeout
 from venom_module_rider.config import Device, configured_devices
 from venom_module_rider.demo import DemoPi, create_app, envelope
 from venom_module_rider.errors import RiderError
@@ -38,6 +38,24 @@ def host_app(service):
     app.state.rider = service
     app.include_router(router)
     return app
+
+
+def test_face_fixture_matches_nested_pi_runtime_contract():
+    with TestClient(create_app(DemoPi())) as client:
+        path = "/api/face-studio/runtime"
+        idle = client.get(path).json()["data"]
+        assert idle["state"]["running"] is False
+        assert "running" not in idle
+        assert idle["actuation"] is False
+        assert client.post(path + "/play", json={"sink": "lcd"}).status_code == 200
+        active = client.get(path).json()["data"]
+        assert active["state"] == {
+            "running": True,
+            "playing": True,
+            "sink": "lcd",
+        }
+        assert client.post(path + "/stop", json={}).status_code == 200
+        assert client.get(path).json()["data"]["state"]["running"] is False
 
 
 def command(pi, action, **fields):
@@ -148,6 +166,67 @@ async def test_reads_deduplicate_and_idle_has_no_background_collector():
     assert len(pi.trace) == count and not service.inflight
     await service.close()
     assert service.client is None and not service.cache
+
+
+def test_service_operations_have_separate_bounded_timeouts():
+    assert (
+        json_timeout("/api/logic/feature/s2_camera_preview", "POST", False).read == 20
+    )
+    assert json_timeout("/api/resource/lcd", "POST", False).read == 20
+    assert json_timeout("/api/face-studio/runtime/play", "POST", False).read == 20
+    assert json_timeout("/api/services/graph", "GET", False).read == 10
+    for path, method, stop in [
+        ("/api/control", "POST", False),
+        ("/api/control", "POST", True),
+        ("/api/resource/camera", "GET", False),
+        ("/api/logic/feature/s2_camera_preview", "POST", True),
+    ]:
+        timeout = json_timeout(path, method, stop)
+        assert timeout.read == 1.5
+        assert timeout.connect == timeout.pool == 0.5
+
+
+async def test_timed_out_operation_is_unconfirmed_and_never_retried():
+    requests = []
+
+    async def timeout(request):
+        requests.append(request)
+        raise httpx.ReadTimeout("late response", request=request)
+
+    client = PiClient(DEVICE, transport=httpx.MockTransport(timeout))
+    with pytest.raises(RiderError, match="pi_operation_timeout") as error:
+        await client.json(
+            "/api/logic/feature/s2_camera_preview",
+            method="POST",
+            body={"enabled": True},
+        )
+    assert error.value.status == 504
+    assert error.value.details == {"outcome": "unknown"}
+    assert len(requests) == 1
+    await client.close()
+
+
+async def test_timed_out_mutation_discards_old_observations(monkeypatch):
+    service, pi = domain()
+    await service.select("demo", service.session)
+    await service.read("/api/resource/camera", 30)
+    assert service.cache
+
+    async def completed_without_ack(*args, **kwargs):
+        pi.camera_on = True
+        raise RiderError("pi_operation_timeout", 504, {"outcome": "unknown"})
+
+    with monkeypatch.context() as patch:
+        patch.setattr(service.client, "json", completed_without_ack)
+        with pytest.raises(RiderError, match="pi_operation_timeout"):
+            await service.mutate(
+                "/api/logic/feature/s2_camera_preview",
+                {"enabled": True},
+                service.session,
+            )
+    assert not service.cache
+    assert (await service.read("/api/resource/camera", 30))["data"]["activity"]["on"]
+    await service.close()
 
 
 async def test_camera_off_skips_frames_and_keeps_binary_headers():

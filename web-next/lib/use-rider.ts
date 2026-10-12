@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api-client";
 import { getApiBaseUrl } from "@/lib/env";
+import { configForConnection } from "./device-session";
 import { HoldController, readHoldTiming, type MovementIntent } from "./hold-controller";
-import { cameraOn, commandAccepted, controlIdentity, data, errorCode, featureRows, finite, record, safetyOf, settingsOf, str, timestampMs, type DeviceConfig, type Direction, type JsonRecord, type RiderStatus, type Section } from "./model";
+import { cameraOn, canRequestArm, commandAccepted, controlIdentity, data, errorCode, faceRunning, featureRows, finite, record, safetyOf, settingsOf, str, timestampMs, type DeviceConfig, type Direction, type JsonRecord, type RiderStatus, type Section } from "./model";
 
 const BASE = "/api/v1/rider";
 export type Notice = { key: string; code?: string; tone: "error" | "success" | "info" };
@@ -83,8 +84,10 @@ export function useRider(section: Section) {
         const next = await apiFetch<RiderStatus>(`${BASE}/status?section=${requestedSection}`, { signal: abort.signal });
         const received = Date.now();
         if (abort.signal.aborted) return;
+        const nextConfig = await configForConnection(configRef.current!, next.connection, () => apiFetch<DeviceConfig>(`${BASE}/config`, { signal: abort.signal }));
+        if (abort.signal.aborted) return;
         const previous = statusRef.current;
-        if (previous && controlIdentity(previous) !== controlIdentity(next)) { hold.cancel(); seqRef.current = 0; }
+        if (previous && controlIdentity(previous) !== controlIdentity(next)) { hold.cancel(); seqRef.current = 0; replaceFrame("camera", null); replaceFrame("face", null); }
         if (!["online", "degraded"].includes(next.connection.status)) { hold.cancel(); replaceFrame("camera", null); replaceFrame("face", null); }
         if (sessionRef.current && sessionRef.current !== next.connection.session) { hold.cancel(); setNotice({ key: "conflict", tone: "info" }); }
         sessionRef.current = next.connection.session;
@@ -98,17 +101,14 @@ export function useRider(section: Section) {
         clockRef.current = server === null ? null : { offset: server - (started + received) / 2, rtt: received - started, at: received };
         const last = safetyOf(next).last_seq;
         if (finite(last)) seqRef.current = Math.max(seqRef.current, last);
-        if (configRef.current && configRef.current.session !== next.connection.session) {
-          const updated = { ...configRef.current, device_id: next.connection.device_id, session: next.connection.session };
-          configRef.current = updated; setConfig(updated);
-        }
+        if (configRef.current !== nextConfig) { configRef.current = nextConfig; setConfig(nextConfig); }
         if (requestedSection === sectionRef.current && ["online", "degraded"].includes(next.connection.status)) {
           if (requestedSection === "control" && mediaRef.current.camera) {
             if (cameraOn(next)) await fetchFrame(`/camera/${mediaRef.current.camera}`, abort.signal, "camera");
             else replaceFrame("camera", null);
           }
           if (requestedSection === "face" && mediaRef.current.face) {
-            if (data(next.face.runtime).running === true) await fetchFrame("/face/runtime/frame", abort.signal, "face");
+            if (faceRunning(next)) await fetchFrame("/face/runtime/frame", abort.signal, "face");
             else replaceFrame("face", null);
           }
         }
@@ -133,7 +133,7 @@ export function useRider(section: Section) {
       if (session !== sessionRef.current && path !== "/config") throw new Error("session_changed");
       if (!quiet) setNotice({ key: "saved", tone: "success" });
       return data(response);
-    } catch (error) { if (!quiet) setNotice({ key: errorCode(error).includes("conflict") ? "conflict" : "requestFailed", code: errorCode(error), tone: "error" }); throw error; }
+    } catch (error) { if (!quiet) setNotice({ key: errorCode(error) === "pi_operation_timeout" ? "operationUnconfirmed" : errorCode(error).includes("conflict") ? "conflict" : "requestFailed", code: errorCode(error), tone: "error" }); throw error; }
   }, [isConnected]);
   const makeEnvelope = useCallback((body: JsonRecord, source = "manual"): JsonRecord => {
     const action = str(body.action);
@@ -181,7 +181,7 @@ export function useRider(section: Section) {
       }
       const result = await mutation(path, request, method); await poll(); return result;
     }
-    catch (error) { setNotice({ key: "requestFailed", code: errorCode(error), tone: "error" }); return null; }
+    catch (error) { const code = errorCode(error); setNotice({ key: code === "pi_operation_timeout" ? "operationUnconfirmed" : "requestFailed", code, tone: "error" }); if (code === "pi_operation_timeout") await poll(); return null; }
     finally { setBusy(null); }
   }, [makeEnvelope, mutation, poll]);
   const selectDevice = useCallback(async (device_id: string | null) => {
@@ -220,8 +220,9 @@ export function useRider(section: Section) {
     return () => { alive = false; if (timer) clearTimeout(timer); document.removeEventListener("visibilitychange", visibility); window.removeEventListener("blur", blur); hold.release(); abortRef.current?.abort(); };
   }, [cameraStream, hold, poll, replaceFrame, section, showRuntimeFrame]);
   useEffect(() => () => { hold.release(); abortRef.current?.abort(); }, [hold]);
-  const safety = safetyOf(status);
-  const canArm = isConnected() && hasFreshControl() && safety.stale !== true && !!str(safety.generation) && (safety.state === "ESTOP" || safety.ready === true);
+  // ARM always refreshes the fast control endpoint before making its envelope.
+  // The latency of a diagnostics view must not prevent that refresh request.
+  const canArm = canRequestArm(status);
   return { config, status, loading, notice, setNotice, busy, activeDirection, canMutate: isConnected(), canArm, canMove: movementReady(), poll, command, mutate: runMutation, selectDevice, hold, camera, cameraStream, setCameraStream, runtimeFrame, showRuntimeFrame, setShowRuntimeFrame, mediaError };
 }
 export type RiderClient = ReturnType<typeof useRider>;

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getApiBaseUrl } from "@/lib/env";
 import { Play, Plus, Smile, Square } from "lucide-react";
 import { gestureBody, gestureFrom, validFaceSettings, validGesture } from "../lib/face";
-import { data, errorCode, finite, formatNumber, record, rows, str, type Gesture, type JsonRecord, type Segment } from "../lib/model";
+import { data, errorCode, faceRunning, finite, formatNumber, record, rows, str, type Gesture, type JsonRecord, type Segment } from "../lib/model";
 import type { Translator } from "../lib/i18n";
 import type { RiderClient } from "../lib/use-rider";
 import { Button, Details, Empty, Field, NumberField, Panel, Pill } from "./primitives";
@@ -80,7 +80,7 @@ function Runtime({ client, library, selected, unsaved, t }: { client: RiderClien
   const patch = (key: string, value: unknown) => setDraft({ ...effective, if_revision: draft?.if_revision ?? runtime.settings_revision, [key]: value });
   const save = async () => { const result = await client.mutate("/face/runtime", { ...effective, if_revision: draft?.if_revision ?? runtime.settings_revision }); if (result) setDraft(null); };
   const validSettings = validFaceSettings(effective, descriptors, library);
-  const playing = runtime.playing === true || runtime.running === true;
+  const playing = faceRunning(client.status);
   const eventBody = intent === "gesture" ? { intent, id: selected.id } : intent === "audio" ? { intent, level, playing: true } : { intent, expr: expression };
   return <Panel title={t("runtime")} hint={t("runtimeHint")} extra={<Pill tone={playing ? "good" : undefined}>{t(playing ? "active" : "inactive")}</Pill>}>
     {conflict && <p className={styles.hint}>{t("conflict")}</p>}

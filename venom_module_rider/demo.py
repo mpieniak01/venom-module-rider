@@ -380,8 +380,6 @@ def create_app(pi: DemoPi | None = None):
                 {
                     "server_time": time.time(),
                     "safety": state.safety(),
-                    "height": state.height,
-                    "balance": state.balance,
                     "ack": state.ack,
                 }
             )
@@ -575,7 +573,12 @@ def create_app(pi: DemoPi | None = None):
                 ).hexdigest()
             return envelope(
                 {
-                    "running": state.runtime["running"],
+                    "state": {
+                        "running": state.runtime["running"],
+                        "playing": state.runtime["running"],
+                        "sink": "lcd" if state.lcd_on else "file",
+                    },
+                    "actuation": False,
                     "settings": state.library["settings"],
                     "settings_revision": state.library["settings_revision"],
                     "descriptors": state.library["descriptors"],

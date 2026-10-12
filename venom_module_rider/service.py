@@ -304,12 +304,14 @@ class RiderService:
         try:
             result = await task
             self.check_session(session)
-            self.cache.clear()
             return result
         except asyncio.CancelledError as exc:
             raise RiderError("stale_device_session") from exc
         finally:
             self.operations.discard(task)
+            # A timed-out operation may have completed on Pi; never reuse its old state.
+            if session == self.session:
+                self.cache.clear()
 
     async def settings(self, body, session):
         result = await self.mutate("/api/calibration/controls", body, session)

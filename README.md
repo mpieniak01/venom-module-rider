@@ -45,6 +45,18 @@ The launcher reuses existing Python and Node environments, starts a loopback Pi 
 
 The demo forces RIDER_DEMO_ONLY=true, disables physical IoT and LLM startup, and accepts only loopback fixtures. Simulated values and actuator acknowledgements are marked DEMO. Fixture state is ephemeral. A fixture result is not evidence of physical motion or device rendering.
 
+### Local panel connected to a real Pi
+
+Use a private device allowlist JSON under ignored config/local/. Pass it explicitly:
+
+    make demo ARGS="--device-file config/local/devices.json --device-id robot"
+
+Alternatively invoke scripts/run_demo.py with those arguments. Without the file flag the launcher always starts the isolated fixture, even if a real device exists in the inherited environment. File mode starts only the Venom API/UI, preserves the hardware authority on Pi, and never automatically arms or starts a resource. It is an operator panel, not an automated physical-motion test runner.
+
+Service and resource operations have a separate bounded response timeout. Motion
+and STOP retain their fast transport path. `pi_operation_timeout` means the result
+is unconfirmed: the panel refreshes observations and does not resend the operation.
+
 ## Quality checks
 
     source ../../.venv/bin/activate

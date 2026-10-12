@@ -58,6 +58,19 @@ def reject_constant(_):
     raise ValueError("Non-finite JSON")
 
 
+def json_timeout(path: str, method: str, stop: bool) -> httpx.Timeout:
+    duration = 1.5
+    path = path.split("?", 1)[0]
+    if not stop:
+        if method in {"POST", "DELETE"} and path.startswith(
+            ("/api/logic/feature/", "/api/resource/", "/api/face-studio/runtime/")
+        ):
+            duration = 20.0
+        elif method == "GET" and path.startswith("/api/services/"):
+            duration = 10.0
+    return httpx.Timeout(duration, connect=0.5, pool=0.5)
+
+
 class PiClient:
     def __init__(self, device: Device, *, transport=None):
         options = {
@@ -81,7 +94,11 @@ class PiClient:
         client = self.stop_http if stop else self.http
         try:
             async with client.stream(
-                method, path, json=body, headers={"Accept": ACCEPT}
+                method,
+                path,
+                json=body,
+                headers={"Accept": ACCEPT},
+                timeout=json_timeout(path, method, stop),
             ) as response:
                 content = bytearray()
                 async for chunk in response.aiter_bytes():
@@ -136,6 +153,12 @@ class PiClient:
                 ):
                     raise RiderError("unsupported_safety_contract", 502)
                 return payload
+        except httpx.TimeoutException as exc:
+            if method != "GET":
+                raise RiderError(
+                    "pi_operation_timeout", 504, {"outcome": "unknown"}
+                ) from exc
+            raise RiderError("pi_unreachable", 503) from exc
         except httpx.HTTPError as exc:
             raise RiderError("pi_unreachable", 503) from exc
 

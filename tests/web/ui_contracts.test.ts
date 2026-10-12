@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { calibrationDraft, calibrationValues, validCalibration } from "../../web-next/lib/calibration";
 import { gestureBody, gestureFrom, validFaceSettings, validGesture } from "../../web-next/lib/face";
 import { messages, translate } from "../../web-next/lib/i18n";
-import { cameraOn, commandAccepted, data, displayValue, errorCode, featureRows, formatNumber, sensorRows, telemetryAge, timestampMs, type JsonRecord, type RiderStatus } from "../../web-next/lib/model";
+import { actuatorState, cameraOn, canRequestArm, commandAccepted, data, displayValue, errorCode, faceRunning, featureRows, formatNumber, sensorRows, telemetryAge, timestampMs, type JsonRecord, type RiderStatus } from "../../web-next/lib/model";
 
 const contracts = JSON.parse(fs.readFileSync(new URL("../../venom_module_rider/fixtures/pi-contracts.json", import.meta.url), "utf8")) as { settings: JsonRecord; face: JsonRecord };
 test("all module messages have complete PL, EN and DE values", () => {
@@ -32,6 +32,12 @@ test("canonical sensor rows preserve source units, quality and unknown times", (
   const status = { telemetry: { devices: { xgo: { sensor_quality: { sensors: { roll: sample } } } } } } as unknown as RiderStatus;
   assert.deepEqual(sensorRows(status), [["roll", sample]]);
   assert.equal(timestampMs(null), null); assert.equal(timestampMs(1720000000), 1720000000000);
+});
+test("posture feedback reads the same canonical safety actuator state in every view", () => {
+  const actual = { height: { value: 95, ts: null }, balance: { enabled: false } };
+  const status = { control: { safety: { actuators: actual }, height: { value: 115 } } } as unknown as RiderStatus;
+  assert.equal(actuatorState(status), actual);
+  assert.deepEqual(actuatorState(null), {});
 });
 test("catalog metadata merges with separate goal runtime state", () => {
   const status = { catalog: { features: [{ name: "s2_camera_preview", can_move: false }] }, logic: { features: { s2_camera_preview: { enabled: true, state: "running" } } } } as unknown as RiderStatus;
@@ -76,6 +82,22 @@ test("known OFF and unknown cameras never trigger a frame poll", () => {
   assert.equal(cameraOn(status({ activity: { on: true } })), true);
   assert.equal(cameraOn(status({ state: "OFF" })), false);
   assert.equal(cameraOn(status({})), false);
+});
+test("face activity comes from the canonical nested Pi runtime state", () => {
+  const status = (runtime: JsonRecord) => ({ face: { runtime } } as unknown as RiderStatus);
+  assert.equal(faceRunning(status({ meta: {}, data: { state: { running: true, playing: false, sink: "lcd" } } })), true);
+  assert.equal(faceRunning(status({ state: { running: false, playing: false }, running: true })), false);
+  assert.equal(faceRunning(status({})), false);
+  assert.equal(faceRunning(null), false);
+});
+test("slow diagnostic reads can request a fresh ARM check without granting movement", () => {
+  const ready = { connection: { status: "online" }, control: { safety: { state: "DISARMED", ready: true, can_move: false, stale: false, generation: "instance" } } } as unknown as RiderStatus;
+  assert.equal(canRequestArm(ready), true);
+  for (const safety of [{ ready: false }, { stale: true }, { generation: null }]) {
+    assert.equal(canRequestArm({ ...ready, control: { safety: { ...data(ready.control).safety as JsonRecord, ...safety } } }), false);
+  }
+  assert.equal(canRequestArm({ ...ready, connection: { ...ready.connection, status: "offline" } }), false);
+  assert.equal(canRequestArm(null), false);
 });
 test("pending transport acceptance stays pending and errors stay rejected", () => {
   assert.equal(commandAccepted({ ok: true, meta: {}, data: { pending: true }, operation: { status: "pending" } }), true);

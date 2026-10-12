@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run a hardware-free R1 demo in the existing Venom checkout/environment."""
+"""Run the local R1 panel: isolated demo by default, explicit device file for Pi."""
 
 from __future__ import annotations
 
@@ -12,7 +12,32 @@ import subprocess
 import sys
 import time
 import urllib.request
+from dataclasses import asdict
 from pathlib import Path
+
+from venom_module_rider.config import configured_devices
+
+
+def targets(device_file, device_id, pi_port):
+    if device_file is None:
+        if device_id not in {None, "demo"}:
+            raise ValueError("Demo supports only the demo device ID.")
+        return (
+            [
+                {
+                    "id": "demo",
+                    "label": "Rider-Pi demo",
+                    "mode": "demo",
+                    "url": f"http://127.0.0.1:{pi_port}",
+                }
+            ],
+            "demo",
+            True,
+        )
+    devices = configured_devices(device_file.read_text())
+    if device_id and device_id not in {device.id for device in devices}:
+        raise ValueError("Selected ID is absent from the private device file.")
+    return ([asdict(device) for device in devices], device_id or "", False)
 
 
 def free_port(port):
@@ -28,7 +53,16 @@ def main():
     parser.add_argument("--api-port", type=int, default=8800)
     parser.add_argument("--web-port", type=int, default=3300)
     parser.add_argument("--pi-port", type=int, default=18880)
+    parser.add_argument(
+        "--device-file",
+        type=Path,
+        help="Explicit private JSON device allowlist; omits the fixture",
+    )
+    parser.add_argument("--device-id", help="Optional default device ID; never arms")
     args = parser.parse_args()
+    devices, default_device, demo_only = targets(
+        args.device_file, args.device_id, args.pi_port
+    )
     core = args.core_root.resolve()
     python = core / ".venv/bin/python"
     web = core / "web-next"
@@ -38,9 +72,13 @@ def main():
         parser.error(
             "Keep this module checkout inside the selected core modules/ collection."
         )
-    ports = (args.api_port, args.web_port, args.pi_port)
-    if len(set(ports)) != 3 or not all(free_port(port) for port in ports):
-        parser.error("Choose three distinct available loopback ports.")
+    ports = (
+        (args.api_port, args.web_port, args.pi_port)
+        if demo_only
+        else (args.api_port, args.web_port)
+    )
+    if len(set(ports)) != len(ports) or not all(free_port(port) for port in ports):
+        parser.error("Choose distinct available loopback ports.")
     logs = core / "logs"
     logs.mkdir(exist_ok=True)
     for script in (
@@ -75,24 +113,16 @@ def main():
         CACHE_NAMESPACE="rider-dev",
         QUEUE_NAMESPACE="rider-dev",
         API_OPTIONAL_MODULES="manifest:" + str(module / "module.json"),
-        RIDER_DEMO_ONLY="true",
-        RIDER_DEFAULT_DEVICE="demo",
-        RIDER_DEVICES_JSON=json.dumps(
-            [
-                {
-                    "id": "demo",
-                    "label": "Rider-Pi demo",
-                    "mode": "demo",
-                    "url": f"http://127.0.0.1:{args.pi_port}",
-                }
-            ]
-        ),
+        RIDER_DEMO_ONLY="true" if demo_only else "false",
+        RIDER_DEFAULT_DEVICE=default_device,
+        RIDER_DEVICES_JSON=json.dumps(devices),
         RIDER_ALLOWED_ORIGINS=web_url + f",http://localhost:{args.web_port}",
         PYTHONPATH=str(core) + ":" + str(module),
     )
     api_env = {**os.environ, **flags}
     # A real-device access token does not belong to the isolated demo.
-    api_env.pop("RIDER_ACCESS_TOKEN", None)
+    if demo_only:
+        api_env.pop("RIDER_ACCESS_TOKEN", None)
     web_env = {
         **api_env,
         "API_PROXY_TARGET": api_url,
@@ -159,6 +189,8 @@ def main():
                 web_env,
             ),
         ]
+        if not demo_only:
+            specifications = [row for row in specifications if row[0] != "pi"]
         for name, command, cwd, env in specifications:
             log = (logs / f"r1-demo-{name}.log").open("w")
             streams.append(log)
@@ -172,7 +204,7 @@ def main():
                     "launcher_pid": os.getpid(),
                     "child_pids": [p.pid for p in children],
                     "ports": ports,
-                    "mode": "demo_only",
+                    "mode": "demo_only" if demo_only else "configured_devices",
                     "core_root": str(core),
                 },
                 indent=2,
@@ -191,18 +223,26 @@ def main():
                         pass
                     with urllib.request.urlopen(web_url + "/rider", timeout=2):
                         pass
-                    with urllib.request.urlopen(
-                        f"http://127.0.0.1:{args.pi_port}/healthz", timeout=1
-                    ):
-                        pass
+                    if demo_only:
+                        with urllib.request.urlopen(
+                            f"http://127.0.0.1:{args.pi_port}/healthz", timeout=1
+                        ):
+                            pass
                     ready = True
                     print(
-                        f"R1 demo ready: http://localhost:{args.web_port}/rider",
+                        f"R1 panel ready: http://localhost:{args.web_port}/rider",
                         flush=True,
                     )
                     print(
-                        "Hardware-free Pi fixture; "
-                        "LLM and physical IoT bridge disabled.",
+                        (
+                            "Hardware-free Pi fixture; "
+                            "LLM and physical IoT bridge disabled."
+                        )
+                        if demo_only
+                        else (
+                            "Configured Pi via API; "
+                            "no automatic ARM or hardware activation."
+                        ),
                         flush=True,
                     )
                 except (OSError, TimeoutError):

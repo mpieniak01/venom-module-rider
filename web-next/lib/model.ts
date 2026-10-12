@@ -27,7 +27,13 @@ export const finite = (value: unknown): value is number => typeof value === "num
 export const str = (value: unknown): string => typeof value === "string" ? value : "";
 export const data = (value: unknown): JsonRecord => { const row = record(value); return row.meta && row.data ? record(row.data) : row; };
 export const safetyOf = (status: RiderStatus | null): JsonRecord => record(data(status?.control).safety);
+export const actuatorState = (status: RiderStatus | null): JsonRecord => record(safetyOf(status).actuators);
 export const settingsOf = (status: RiderStatus | null): JsonRecord => data(status?.settings);
+export const faceRunning = (status: RiderStatus | null): boolean => record(data(status?.face.runtime).state).running === true;
+export function canRequestArm(status: RiderStatus | null): boolean {
+  const safety = safetyOf(status);
+  return ["online", "degraded"].includes(status?.connection.status ?? "") && safety.stale !== true && !!str(safety.generation) && (safety.state === "ESTOP" || safety.ready === true);
+}
 export const timestampMs = (value: unknown): number | null => { if (finite(value)) return value < 1e12 ? value * 1000 : value; if (typeof value === "string") { const at = Date.parse(value); return Number.isFinite(at) ? at : null; } return null; };
 export const formatNumber = (value: unknown, locale: string, precision = 1): string => finite(value) ? new Intl.NumberFormat(locale, { maximumFractionDigits: precision }).format(value) : "—";
 export const formatTime = (value: unknown, locale: string): string => { const at = timestampMs(value); return at === null ? "—" : new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(at); };

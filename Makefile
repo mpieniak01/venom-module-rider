@@ -21,7 +21,7 @@ test:
 	PYTHONPATH=$(HOST):. $(PYTHON) -m pytest -q
 
 demo:
-	PYTHONPATH=$(HOST):. $(PYTHON) scripts/run_demo.py
+	PYTHONPATH=$(HOST):. $(PYTHON) scripts/run_demo.py $(ARGS)
 
 demo-pi:
 	$(PYTHON) -m venom_module_rider.demo --port 18880
