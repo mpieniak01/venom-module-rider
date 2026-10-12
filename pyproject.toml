@@ -9,6 +9,9 @@ description = "Optional Venom module for manual Rider-Pi operation"
 requires-python = ">=3.12"
 dependencies = ["fastapi>=0.115,<1", "httpx>=0.28,<1", "pydantic>=2,<3"]
 
+[project.optional-dependencies]
+demo = ["pillow>=10,<13", "uvicorn>=0.30,<1"]
+
 [project.scripts]
 venom-rider-demo = "venom_module_rider.demo:main"
 

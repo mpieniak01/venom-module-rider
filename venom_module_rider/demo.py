@@ -11,6 +11,7 @@ import math
 import time
 import uuid
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
@@ -57,11 +58,11 @@ class DemoPi:
         self.state = "DISARMED"
         self.seq = -1
         self.deadline = 0.0
-        self.height = {"value": 95, "ts": None}
-        self.balance = {"enabled": True, "ts": None}
+        self.height: dict[str, Any] = {"value": 95, "ts": None}
+        self.balance: dict[str, Any] = {"enabled": True, "ts": None}
         self.camera_on = False
         self.lcd_on = False
-        self.goals = {"s2_camera_preview": False, "s5_voice": False, "s1_idle": True}
+        self.goals = {"s2_camera_preview": False, "s5_voice": False, "s0_core": True}
         self.trace: list[dict] = []
         self.history: list[dict] = []
         self.ack = None
@@ -135,7 +136,11 @@ class DemoPi:
                 or body["ts"] > time.time() + 0.1
             ):
                 return envelope({"error": "expired_command"}, status=409)
-            if action == "arm":
+            if action == "clear_estop":
+                self.state = "DISARMED"
+                self.generation = uuid.uuid4().hex
+                self.deadline = 0.0
+            elif action == "arm":
                 if body.get("operator_consent") is not True or not body.get(
                     "operator_plan"
                 ):
@@ -298,6 +303,7 @@ class DemoPi:
             "activity": {
                 "state": "on" if state else "off",
                 "enabled": state,
+                "on": state,
                 "known": True,
                 "observed_at": time.time(),
             },
@@ -479,23 +485,14 @@ def create_app(pi: DemoPi | None = None):
             return envelope(
                 {
                     "contract_version": 2,
-                    "units": [],
+                    "units": CONTRACTS["catalog"]["units"],
                     "features": [
-                        {
-                            "name": name,
-                            "label": name,
-                            "can_move": False,
-                            "available": True,
-                            "resources": ["camera"]
-                            if name == "s2_camera_preview"
-                            else [],
-                            "option_schema": {},
-                            "members": [],
-                        }
-                        for name in state.goals
+                        copy.deepcopy(row)
+                        for row in CONTRACTS["catalog"]["features"]
+                        if row["name"] in state.goals
                     ],
                 },
-                "rider.tasks",
+                "rider.catalog",
                 2,
             )
         if path == "/api/logic/state":
@@ -529,7 +526,16 @@ def create_app(pi: DemoPi | None = None):
             )
         if path == "/api/services/graph":
             return envelope(
-                {"nodes": [], "edges": [], "contract_version": 2}, "rider.services", 2
+                {
+                    "nodes": [
+                        {**row, "state": {"active": "active", "source": "demo"}}
+                        for row in CONTRACTS["catalog"]["units"]
+                    ],
+                    "edges": [],
+                    "contract_version": 2,
+                },
+                "rider.service_graph",
+                2,
             )
         if path.startswith("/api/services/") and path.endswith("/logs"):
             return envelope(

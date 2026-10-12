@@ -10,7 +10,7 @@ from .config import Device
 from .errors import RiderError
 
 ACCEPT = "application/vnd.rider.api+json;version=1"
-MAX_JSON_BYTES = 512 * 1024
+MAX_JSON_BYTES = 2 * 1024 * 1024
 MAX_IMAGE_BYTES = 4 * 1024 * 1024
 IMAGE_HEADERS = {
     "x-rider-contract",
@@ -23,6 +23,39 @@ IMAGE_HEADERS = {
     "x-rider-placeholder",
     "x-face-source",
 }
+
+
+def expected_contract(path: str):
+    path = path.split("?", 1)[0]
+    exact = {
+        "/state": ("rider.telemetry", 1),
+        "/healthz": ("rider.health", 1),
+        "/sysinfo": ("rider.system", 1),
+        "/api/control/state": ("rider.safety", 1),
+        "/api/control": ("rider.safety", 1),
+        "/api/safety": ("rider.safety", 1),
+        "/api/motion/queue": ("rider.safety", 1),
+        "/api/calibration/controls": ("rider.calibration", 1),
+        "/api/logic/catalog": ("rider.catalog", 2),
+        "/api/logic/state": ("rider.tasks", 2),
+        "/api/services/graph": ("rider.service_graph", 2),
+    }
+    if path in exact:
+        return exact[path]
+    for prefix, contract in (
+        ("/api/resource/", ("rider.resources", 1)),
+        ("/api/logic/feature/", ("rider.tasks", 2)),
+        ("/api/services/", ("rider.services", 2)),
+        ("/api/face-studio/gestures", ("rider.face_studio", 1)),
+        ("/api/face-studio/runtime", ("rider.face", 1)),
+    ):
+        if path.startswith(prefix):
+            return contract
+    raise RiderError("unsupported_pi_path", 400)
+
+
+def reject_constant(_):
+    raise ValueError("Non-finite JSON")
 
 
 class PiClient:
@@ -58,7 +91,7 @@ class PiClient:
                 if response.is_redirect:
                     raise RiderError("pi_redirect_refused", 502)
                 try:
-                    payload = json.loads(content)
+                    payload = json.loads(content, parse_constant=reject_constant)
                 except (ValueError, UnicodeError) as exc:
                     raise RiderError("invalid_pi_response", 502) from exc
                 if not isinstance(payload, dict):
@@ -72,10 +105,36 @@ class PiClient:
                         payload,
                     )
                 meta = payload.get("meta")
-                if not isinstance(meta, dict) or meta.get("envelope_version") != 1:
+                if (
+                    not isinstance(meta, dict)
+                    or type(meta.get("envelope_version")) is not int
+                    or meta.get("envelope_version") != 1
+                ):
                     raise RiderError("unsupported_pi_contract", 502)
                 if not isinstance(payload.get("data"), dict):
                     raise RiderError("invalid_pi_response", 502)
+                expected = expected_contract(path)
+                if (
+                    type(meta.get("contract_version")) is not int
+                    or (meta.get("contract_id"), meta.get("contract_version"))
+                    != expected
+                ):
+                    raise RiderError("unsupported_pi_contract", 502)
+                data = payload["data"]
+                if path == "/api/calibration/controls" and (
+                    data.get("contract_id") != "rider.manual_settings"
+                    or data.get("contract_version") != 2
+                    or not isinstance(data.get("parameter_schema"), dict)
+                    or data["parameter_schema"].get("version") != 1
+                    or not isinstance(data.get("control_modes"), dict)
+                    or data["control_modes"].get("version") != 1
+                ):
+                    raise RiderError("unsupported_manual_settings", 502)
+                if (
+                    path == "/api/control/state"
+                    and (data.get("safety") or {}).get("contract_version") != 1
+                ):
+                    raise RiderError("unsupported_safety_contract", 502)
                 return payload
         except httpx.HTTPError as exc:
             raise RiderError("pi_unreachable", 503) from exc

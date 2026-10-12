@@ -8,6 +8,7 @@ import math
 import time
 import uuid
 from contextlib import suppress
+from typing import Any
 
 from .client import PiClient
 from .config import Device
@@ -34,8 +35,8 @@ SECTIONS = {
     "overview": ("control", "settings", "telemetry", "health", "system"),
     "control": ("control", "settings", "telemetry", "health", "history"),
     "calibration": ("control", "settings", "history"),
-    "resources": ("control", "health", "catalog", "logic"),
-    "face": ("control", "health"),
+    "resources": ("control", "settings", "health", "catalog", "logic"),
+    "face": ("control", "settings", "health"),
 }
 RESOURCE_NAMES = ("camera", "lcd", "led", "mic", "speaker", "uart")
 
@@ -50,6 +51,7 @@ class RiderService:
         self.cache: dict[str, tuple[float, dict]] = {}
         self.inflight: dict[str, asyncio.Task] = {}
         self.commands: set[asyncio.Task] = set()
+        self.operations: set[asyncio.Task] = set()
         self.last_seen: float | None = None
         self.closed = False
         self.epoch = 0
@@ -99,6 +101,8 @@ class RiderService:
         cached = self.cache.get(path)
         if cached and not force and now - cached[0] < ttl:
             return copy.deepcopy(cached[1])
+        session = self.session
+        epoch = self.epoch
         task = self.inflight.get(path)
         if task is None:
             client = self.transport()
@@ -106,6 +110,9 @@ class RiderService:
             self.inflight[path] = task
         try:
             payload = await asyncio.shield(task)
+            self.check_session(session)
+            if epoch != self.epoch:
+                raise RiderError("stale_device_session")
             self.cache[path] = (time.monotonic(), payload)
             self.last_seen = time.time()
             return copy.deepcopy(payload)
@@ -123,7 +130,7 @@ class RiderService:
     async def status(self, section="overview"):
         if section not in SECTIONS:
             raise RiderError("unknown_section", 400)
-        snapshot = {
+        snapshot: dict[str, Any] = {
             "connection": {
                 "status": "unconfigured",
                 "configured": self.device is not None,
@@ -186,6 +193,45 @@ class RiderService:
             connection["error"] = next(iter(snapshot["errors"].values()))
         return snapshot
 
+    async def validate_intent(
+        self, body, session, *, source="manual", require_ready=True
+    ):
+        control = await self.read("/api/control/state", 0.8)
+        self.check_session(session)
+        safety = control["data"].get("safety") or {}
+        generation = safety.get("generation")
+        if not generation or body.get("generation") != generation:
+            raise RiderError("stale_generation")
+        if (
+            safety.get("stale") is True
+            or require_ready
+            and safety.get("ready") is not True
+        ):
+            raise RiderError("motion_not_ready")
+        cache_time = self.cache["/api/control/state"][0]
+        server_now = (
+            control["meta"].get("server_time", 0) + time.monotonic() - cache_time
+        )
+        ts = body.get("ts")
+        ttl = body.get("ttl_ms")
+        if (
+            not isinstance(ts, (int, float))
+            or isinstance(ts, bool)
+            or not math.isfinite(ts)
+            or type(ttl) is not int
+            or not 1 <= ttl <= 500
+            or (server_now - ts) * 1000 > ttl
+            or ts > server_now + 0.1
+        ):
+            raise RiderError("expired_command")
+        seq = body.get("seq")
+        floor = max(safety.get("last_seq", -1), self.sequences.get(generation, -1))
+        if type(seq) is not int or not floor < seq < 2**63:
+            raise RiderError("stale_sequence")
+        if body.get("source") != source or body.get("execution_context") != "panel":
+            raise RiderError("manual_panel_only")
+        return safety
+
     async def control(self, body: dict, session):
         action = body.get("action")
         stop = action in {"stop", "disarm"}
@@ -194,37 +240,11 @@ class RiderService:
         client = self.transport()
         epoch = self.epoch
         if not stop:
-            control = await self.read("/api/control/state", 0.8)
-            safety = control["data"].get("safety") or {}
-            generation = safety.get("generation")
-            if not generation or body.get("generation") != generation:
-                raise RiderError("stale_generation")
-            if safety.get("stale") is True or safety.get("ready") is not True:
-                raise RiderError("motion_not_ready")
-            cache_time = self.cache["/api/control/state"][0]
-            server_now = (
-                control["meta"].get("server_time", 0) + time.monotonic() - cache_time
+            safety = await self.validate_intent(
+                body, session, require_ready=action != "clear_estop"
             )
-            ts = body.get("ts")
-            ttl = body.get("ttl_ms")
-            if (
-                type(ts) not in (int, float)
-                or not math.isfinite(ts)
-                or type(ttl) is not int
-                or not 1 <= ttl <= 500
-                or (server_now - ts) * 1000 > ttl
-                or ts > server_now + 0.1
-            ):
-                raise RiderError("expired_command")
-            seq = body.get("seq")
-            floor = max(safety.get("last_seq", -1), self.sequences.get(generation, -1))
-            if type(seq) is not int or not floor < seq < 2**63:
-                raise RiderError("stale_sequence")
-            if (
-                body.get("source") != "manual"
-                or body.get("execution_context") != "panel"
-            ):
-                raise RiderError("manual_panel_only")
+            generation = safety["generation"]
+            seq = body["seq"]
             if action in {"move", "height", "balance"}:
                 if (
                     safety.get("can_move") is not True
@@ -279,17 +299,38 @@ class RiderService:
     async def mutate(self, path, body, session, *, method="POST"):
         self.check_session(session)
         client = self.transport()
-        epoch = self.epoch
-        result = await client.json(path, method=method, body=body)
-        if epoch != self.epoch:
-            raise RiderError("stale_device_session")
-        self.cache.clear()
-        return result
+        task = asyncio.create_task(client.json(path, method=method, body=body))
+        self.operations.add(task)
+        try:
+            result = await task
+            self.check_session(session)
+            self.cache.clear()
+            return result
+        except asyncio.CancelledError as exc:
+            raise RiderError("stale_device_session") from exc
+        finally:
+            self.operations.discard(task)
 
     async def settings(self, body, session):
         result = await self.mutate("/api/calibration/controls", body, session)
         self.cache["/api/calibration/controls"] = (time.monotonic(), result)
         return result
+
+    async def goal(self, name, body, session):
+        catalog = self.data(await self.read("/api/logic/catalog", 30))
+        feature = next(
+            (row for row in catalog.get("features", []) if row.get("name") == name),
+            None,
+        )
+        if feature is None:
+            raise RiderError("unknown_goal", 404)
+        if feature.get("can_move") is True and body.get("enabled") is True:
+            owner = feature.get("control_owner") or feature.get("motion_owner")
+            safety = await self.validate_intent(body, session, source=owner)
+            if safety.get("owner") != owner or safety.get("can_move") is not True:
+                raise RiderError("operator_motion_permission_required")
+            self.sequences[safety["generation"]] = body["seq"]
+        return await self.mutate("/api/logic/feature/" + name, body, session)
 
     async def camera(self, stream):
         if stream not in {"raw", "proc"}:
@@ -298,18 +339,28 @@ class RiderService:
         camera = self.data(await self.read("/api/resource/camera", 2.0))
         activity = camera.get("activity") or camera
         state = activity.get("state") or camera.get("state")
-        if state in {"off", "OFF", "disabled"} or activity.get("enabled") is False:
+        enabled = activity.get("on", activity.get("enabled"))
+        if enabled is False or str(state).lower() in {"off", "stopped", "disabled"}:
             raise RiderError("camera_off", 404)
+        if enabled is not True and str(state).lower() not in {
+            "on",
+            "running",
+            "active",
+        }:
+            raise RiderError("camera_unknown", 503)
         return await client.image("/camera/" + stream)
 
     async def _close_transport(self):
-        tasks = list(self.inflight.values()) + list(self.commands)
+        tasks = (
+            list(self.inflight.values()) + list(self.commands) + list(self.operations)
+        )
         for task in tasks:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         self.inflight.clear()
         self.commands.clear()
+        self.operations.clear()
         if self.client:
             await self.client.close()
         self.client = None

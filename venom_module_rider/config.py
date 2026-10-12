@@ -48,11 +48,19 @@ def configured_devices(raw: str | None = None) -> tuple[Device, ...]:
             or not 1 <= len(label) <= 128
             or not isinstance(url, str)
             or mode not in {"demo", "device"}
+            or os.getenv("RIDER_DEMO_ONLY", "").lower() in {"1", "true"}
+            and mode != "demo"
         ):
             raise RiderError("invalid_device_configuration", 503)
-        parsed = urlsplit(url)
+        try:
+            parsed = urlsplit(url)
+            port = parsed.port
+        except ValueError as exc:
+            raise RiderError("invalid_device_configuration", 503) from exc
         if (
-            parsed.scheme not in {"http", "https"}
+            port is not None
+            and not 1 <= port <= 65535
+            or parsed.scheme not in {"http", "https"}
             or not parsed.hostname
             or parsed.username
             or parsed.password

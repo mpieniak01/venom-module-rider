@@ -725,5 +725,1646 @@
     "settings_revision": "5d027e8a3c5f94b53a9e1f58530fd11b3a47c09c2e1278e032e7d8aa7e46d8ec",
     "revision": 1,
     "actuation": false
+  },
+  "catalog": {
+    "contract_version": 2,
+    "catalog_version": 2,
+    "host": "pi",
+    "source": "pi",
+    "api_envelope_versions": [
+      1
+    ],
+    "api_media_type": "application/vnd.rider.api+json;version=1",
+    "units": [
+      {
+        "unit": "rider-api.service",
+        "id": "api",
+        "group": "core",
+        "label": "API",
+        "description": "API",
+        "lifecycle": "startup",
+        "host": "pi",
+        "can_move": false,
+        "resources": [],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "edges_out": [],
+        "motion_owner": null,
+        "runtime_modules": [
+          "flask",
+          "PIL",
+          "requests",
+          "zmq"
+        ],
+        "start_available": true,
+        "start_unavailable_reason": null
+      },
+      {
+        "unit": "rider-broker.service",
+        "id": "broker",
+        "group": "core",
+        "label": "BUS",
+        "description": "BUS",
+        "lifecycle": "startup",
+        "host": "pi",
+        "can_move": false,
+        "resources": [],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "edges_out": [],
+        "motion_owner": null,
+        "runtime_modules": [
+          "zmq"
+        ],
+        "start_available": true,
+        "start_unavailable_reason": null
+      },
+      {
+        "unit": "rider-web-bridge.service",
+        "id": "web-bridge",
+        "group": "core",
+        "label": "Web bridge",
+        "description": "Web bridge",
+        "lifecycle": "startup",
+        "host": "pi",
+        "can_move": false,
+        "resources": [],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "edges_out": [],
+        "motion_owner": null,
+        "runtime_modules": [
+          "flask",
+          "zmq"
+        ],
+        "start_available": true,
+        "start_unavailable_reason": null
+      },
+      {
+        "unit": "motion-executor.service",
+        "id": "motion-executor",
+        "group": "motion",
+        "label": "Executor / UART",
+        "description": "Executor / UART",
+        "lifecycle": "startup",
+        "host": "pi",
+        "can_move": true,
+        "resources": [
+          "uart"
+        ],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "edges_out": [],
+        "motion_owner": "manual",
+        "runtime_modules": [
+          "zmq",
+          "serial"
+        ],
+        "start_available": true,
+        "start_unavailable_reason": null
+      },
+      {
+        "unit": "sensor-reader.service",
+        "id": "sensor-reader",
+        "group": "motion",
+        "label": "Telemetria BUS",
+        "description": "Telemetria BUS",
+        "lifecycle": "startup",
+        "host": "pi",
+        "can_move": false,
+        "resources": [],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "edges_out": [],
+        "motion_owner": null,
+        "runtime_modules": [
+          "zmq"
+        ],
+        "start_available": true,
+        "start_unavailable_reason": null
+      },
+      {
+        "unit": "lcd-renderer.service",
+        "id": "lcd-renderer",
+        "group": "core",
+        "label": "LCD",
+        "description": "LCD",
+        "lifecycle": "startup",
+        "host": "pi",
+        "can_move": false,
+        "resources": [
+          "lcd"
+        ],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "edges_out": [],
+        "motion_owner": null,
+        "runtime_modules": [
+          "PIL"
+        ],
+        "start_available": true,
+        "start_unavailable_reason": null
+      },
+      {
+        "unit": "rider-boot-splash.service",
+        "id": "boot-splash",
+        "group": "core",
+        "label": "Boot splash",
+        "description": "Boot splash",
+        "lifecycle": "startup",
+        "host": "pi",
+        "can_move": false,
+        "resources": [
+          "lcd"
+        ],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "edges_out": [],
+        "motion_owner": null,
+        "runtime_modules": [
+          "PIL"
+        ],
+        "start_available": true,
+        "start_unavailable_reason": null
+      },
+      {
+        "unit": "wifi-unblock.service",
+        "id": "wifi-unblock",
+        "group": "core",
+        "label": "Wi-Fi radio",
+        "description": "Wi-Fi radio",
+        "lifecycle": "startup",
+        "host": "pi",
+        "can_move": false,
+        "resources": [],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "edges_out": [],
+        "motion_owner": null,
+        "runtime_modules": [],
+        "start_available": true,
+        "start_unavailable_reason": null
+      },
+      {
+        "unit": "rider-minimal.target",
+        "id": "minimal-target",
+        "group": "core",
+        "label": "Minimal boot",
+        "description": "Minimal boot",
+        "lifecycle": "startup",
+        "host": "pi",
+        "can_move": false,
+        "resources": [],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "edges_out": [],
+        "motion_owner": null,
+        "runtime_modules": [],
+        "start_available": true,
+        "start_unavailable_reason": null
+      },
+      {
+        "unit": "rider-core.target",
+        "id": "core-target",
+        "group": "core",
+        "label": "Core",
+        "description": "Core",
+        "lifecycle": "startup",
+        "host": "pi",
+        "can_move": false,
+        "resources": [],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "edges_out": [],
+        "motion_owner": null,
+        "runtime_modules": [],
+        "task_members": {
+          "s0_core": [
+            "rider-broker.service",
+            "rider-api.service",
+            "motion-executor.service",
+            "sensor-reader.service",
+            "rider-web-bridge.service"
+          ],
+          "s1_manual": [
+            "rider-broker.service",
+            "rider-api.service",
+            "motion-executor.service",
+            "sensor-reader.service",
+            "rider-web-bridge.service"
+          ],
+          "s2_camera_preview": [
+            "rider-broker.service",
+            "rider-api.service",
+            "motion-executor.service",
+            "sensor-reader.service",
+            "rider-web-bridge.service",
+            "camera-capture@raw.service",
+            "frame-distributor.service"
+          ]
+        },
+        "start_available": true,
+        "start_unavailable_reason": null
+      },
+      {
+        "unit": "camera-capture@raw.service",
+        "id": "camera-capture-raw",
+        "group": "vision",
+        "label": "Kamera RAW",
+        "description": "Kamera RAW",
+        "lifecycle": "on-demand",
+        "host": "pi",
+        "can_move": false,
+        "resources": [
+          "camera"
+        ],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "edges_out": [],
+        "motion_owner": null,
+        "runtime_modules": [
+          "cv2",
+          "numpy",
+          "PIL",
+          "zmq"
+        ],
+        "start_available": true,
+        "start_unavailable_reason": null
+      },
+      {
+        "unit": "camera-capture@edge.service",
+        "id": "camera-capture-edge",
+        "group": "vision",
+        "label": "Kamera EDGE",
+        "description": "Kamera EDGE",
+        "lifecycle": "dev",
+        "host": "pi",
+        "can_move": false,
+        "resources": [
+          "camera"
+        ],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "edges_out": [],
+        "motion_owner": null,
+        "runtime_modules": [
+          "cv2",
+          "numpy"
+        ],
+        "start_available": true,
+        "start_unavailable_reason": null
+      },
+      {
+        "unit": "camera-capture@ssd.service",
+        "id": "camera-capture-ssd",
+        "group": "vision",
+        "label": "Kamera SSD",
+        "description": "Kamera SSD",
+        "lifecycle": "dev",
+        "host": "pi",
+        "can_move": false,
+        "resources": [
+          "camera"
+        ],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "edges_out": [],
+        "motion_owner": null,
+        "runtime_modules": [
+          "cv2",
+          "numpy",
+          "PIL"
+        ],
+        "start_available": true,
+        "start_unavailable_reason": null
+      },
+      {
+        "unit": "frame-distributor.service",
+        "id": "frame-distributor",
+        "group": "vision",
+        "label": "Feed",
+        "description": "Feed",
+        "lifecycle": "on-demand",
+        "host": "pi",
+        "can_move": false,
+        "resources": [
+          "frame_feed"
+        ],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "edges_out": [],
+        "motion_owner": null,
+        "runtime_modules": [
+          "cv2",
+          "numpy",
+          "zmq"
+        ],
+        "start_available": true,
+        "start_unavailable_reason": null
+      },
+      {
+        "unit": "rider-vision.service",
+        "id": "vision",
+        "group": "vision",
+        "label": "Vision",
+        "description": "Vision",
+        "lifecycle": "on-demand",
+        "host": "pi",
+        "can_move": false,
+        "resources": [],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "edges_out": [],
+        "motion_owner": null,
+        "runtime_modules": [
+          "zmq"
+        ],
+        "start_available": true,
+        "start_unavailable_reason": null
+      },
+      {
+        "unit": "rider-obstacle.service",
+        "id": "obstacle",
+        "group": "vision",
+        "label": "Przeszkody",
+        "description": "Przeszkody",
+        "lifecycle": "on-demand",
+        "host": "pi",
+        "can_move": false,
+        "resources": [],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "edges_out": [],
+        "motion_owner": null,
+        "runtime_modules": [
+          "cv2",
+          "numpy",
+          "zmq"
+        ],
+        "start_available": true,
+        "start_unavailable_reason": null
+      },
+      {
+        "unit": "rider-tracker.service",
+        "id": "tracker",
+        "group": "vision",
+        "label": "Tracker pasywny",
+        "description": "Tracker pasywny",
+        "lifecycle": "on-demand",
+        "host": "pi",
+        "can_move": false,
+        "resources": [],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "edges_out": [],
+        "motion_owner": null,
+        "runtime_modules": [
+          "cv2",
+          "mediapipe",
+          "zmq"
+        ],
+        "start_available": true,
+        "start_unavailable_reason": null
+      },
+      {
+        "unit": "rider-tracking-controller.service",
+        "id": "tracking-controller",
+        "group": "motion",
+        "label": "Follow controller",
+        "description": "Follow controller",
+        "lifecycle": "on-demand",
+        "host": "pi",
+        "can_move": true,
+        "resources": [
+          "control"
+        ],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "edges_out": [],
+        "motion_owner": "follow_me",
+        "runtime_modules": [
+          "zmq"
+        ],
+        "start_available": true,
+        "start_unavailable_reason": null
+      },
+      {
+        "unit": "rider-navigator.service",
+        "id": "navigator",
+        "group": "motion",
+        "label": "Nawigator",
+        "description": "Nawigator",
+        "lifecycle": "on-demand",
+        "host": "pi",
+        "can_move": true,
+        "resources": [
+          "control"
+        ],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "edges_out": [],
+        "motion_owner": "navigation",
+        "runtime_modules": [
+          "numpy",
+          "zmq"
+        ],
+        "start_available": false,
+        "start_unavailable_reason": "navigation_traversal_unverified"
+      },
+      {
+        "unit": "rider-mapper.service",
+        "id": "mapper",
+        "group": "vision",
+        "label": "Mapa",
+        "description": "Mapa",
+        "lifecycle": "on-demand",
+        "host": "pi",
+        "can_move": false,
+        "resources": [],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "edges_out": [],
+        "motion_owner": null,
+        "runtime_modules": [
+          "numpy",
+          "zmq"
+        ],
+        "start_available": true,
+        "start_unavailable_reason": null
+      },
+      {
+        "unit": "rider-odometry.service",
+        "id": "odometry",
+        "group": "vision",
+        "label": "Odometria",
+        "description": "Odometria",
+        "lifecycle": "on-demand",
+        "host": "pi",
+        "can_move": false,
+        "resources": [],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "edges_out": [],
+        "motion_owner": null,
+        "runtime_modules": [
+          "zmq"
+        ],
+        "start_available": true,
+        "start_unavailable_reason": null
+      },
+      {
+        "unit": "rider-vision-offload.service",
+        "id": "vision-offload",
+        "group": "vision",
+        "label": "Offload PC",
+        "description": "Offload PC",
+        "lifecycle": "on-demand",
+        "host": "pi",
+        "can_move": false,
+        "resources": [
+          "camera",
+          "frame_feed"
+        ],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "edges_out": [],
+        "motion_owner": null,
+        "runtime_modules": [
+          "cv2",
+          "numpy",
+          "zmq"
+        ],
+        "start_available": true,
+        "start_unavailable_reason": null
+      },
+      {
+        "unit": "rider-voice.service",
+        "id": "voice",
+        "group": "voice",
+        "label": "Pełna rozmowa CLI",
+        "description": "Pełna rozmowa CLI",
+        "lifecycle": "on-demand",
+        "host": "pi",
+        "can_move": false,
+        "resources": [
+          "mic",
+          "speaker"
+        ],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "edges_out": [],
+        "motion_owner": null,
+        "runtime_modules": [
+          "requests"
+        ],
+        "start_available": true,
+        "start_unavailable_reason": null
+      },
+      {
+        "unit": "rider-voice-web.service",
+        "id": "voice-web",
+        "group": "voice",
+        "label": "Worker wybranej domeny ASR/TTS/chat",
+        "description": "Worker wybranej domeny ASR/TTS/chat",
+        "lifecycle": "on-demand",
+        "host": "pi",
+        "can_move": false,
+        "resources": [],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "edges_out": [],
+        "motion_owner": null,
+        "runtime_modules": [
+          "flask"
+        ],
+        "start_available": true,
+        "start_unavailable_reason": null
+      },
+      {
+        "unit": "rider-google-bridge.service",
+        "id": "google-bridge",
+        "group": "cloud",
+        "label": "Google bridge",
+        "description": "Google bridge",
+        "lifecycle": "on-demand",
+        "host": "pi",
+        "can_move": false,
+        "resources": [],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "edges_out": [],
+        "motion_owner": null,
+        "runtime_modules": [],
+        "start_available": true,
+        "start_unavailable_reason": null
+      },
+      {
+        "unit": "rider-choreographer.service",
+        "id": "choreographer",
+        "group": "motion",
+        "label": "Gesty",
+        "description": "Gesty",
+        "lifecycle": "on-demand",
+        "host": "pi",
+        "can_move": true,
+        "resources": [
+          "control"
+        ],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "edges_out": [],
+        "motion_owner": "manual",
+        "runtime_modules": [],
+        "start_available": true,
+        "start_unavailable_reason": null
+      },
+      {
+        "unit": "jupyter.service",
+        "id": "jupyter",
+        "group": "dev",
+        "label": "Jupyter ręczny",
+        "description": "Jupyter ręczny",
+        "lifecycle": "manual",
+        "host": "pi",
+        "can_move": false,
+        "resources": [],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "edges_out": [],
+        "motion_owner": null,
+        "runtime_modules": [],
+        "start_available": true,
+        "start_unavailable_reason": null
+      },
+      {
+        "unit": "audio-input.target",
+        "id": "audio-input",
+        "group": "voice",
+        "label": "Audio input",
+        "description": "Audio input",
+        "lifecycle": "on-demand",
+        "host": "pi",
+        "can_move": false,
+        "resources": [
+          "mic"
+        ],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "edges_out": [],
+        "motion_owner": null,
+        "runtime_modules": [],
+        "start_available": true,
+        "start_unavailable_reason": null
+      },
+      {
+        "unit": "audio-output.target",
+        "id": "audio-output",
+        "group": "voice",
+        "label": "Audio output",
+        "description": "Audio output",
+        "lifecycle": "on-demand",
+        "host": "pi",
+        "can_move": false,
+        "resources": [
+          "speaker"
+        ],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "edges_out": [],
+        "motion_owner": null,
+        "runtime_modules": [],
+        "start_available": true,
+        "start_unavailable_reason": null
+      },
+      {
+        "unit": "rider-followme.target",
+        "id": "followme-target",
+        "group": "motion",
+        "label": "Follow Me — twarz",
+        "description": "Śledzenie z napędami.",
+        "lifecycle": "on-demand",
+        "host": "pi",
+        "can_move": true,
+        "resources": [],
+        "edges_out": [],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "motion_owner": "follow_me",
+        "runtime_modules": [],
+        "task_members": {
+          "s3_follow_me_face": [
+            "rider-broker.service",
+            "rider-api.service",
+            "motion-executor.service",
+            "sensor-reader.service",
+            "rider-web-bridge.service",
+            "camera-capture@raw.service",
+            "frame-distributor.service",
+            "rider-tracker.service",
+            "rider-tracking-controller.service"
+          ],
+          "s3_follow_me_hand": [
+            "rider-broker.service",
+            "rider-api.service",
+            "motion-executor.service",
+            "sensor-reader.service",
+            "rider-web-bridge.service",
+            "camera-capture@raw.service",
+            "frame-distributor.service",
+            "rider-tracker.service",
+            "rider-tracking-controller.service"
+          ]
+        },
+        "start_available": true,
+        "start_unavailable_reason": null
+      },
+      {
+        "unit": "rider-recon.target",
+        "id": "recon-target",
+        "group": "motion",
+        "label": "Rekonesans",
+        "description": "Nawigacja i mapowanie z napędami.",
+        "lifecycle": "on-demand",
+        "host": "pi",
+        "can_move": true,
+        "resources": [],
+        "edges_out": [],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "motion_owner": "navigation",
+        "runtime_modules": [],
+        "task_members": {
+          "s4_recon": [
+            "rider-broker.service",
+            "rider-api.service",
+            "motion-executor.service",
+            "sensor-reader.service",
+            "rider-web-bridge.service",
+            "camera-capture@raw.service",
+            "frame-distributor.service",
+            "rider-vision.service",
+            "rider-obstacle.service",
+            "rider-odometry.service",
+            "rider-mapper.service",
+            "rider-navigator.service"
+          ]
+        },
+        "start_available": false,
+        "start_unavailable_reason": "navigation_traversal_unverified"
+      },
+      {
+        "unit": "rider-voice.target",
+        "id": "voice-target",
+        "group": "core",
+        "label": "Głos",
+        "description": "Wyłącznie wybrana domena audio.",
+        "lifecycle": "on-demand",
+        "host": "pi",
+        "can_move": false,
+        "resources": [],
+        "edges_out": [],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "motion_owner": null,
+        "runtime_modules": [],
+        "task_members": {
+          "s5_voice": [
+            "rider-broker.service",
+            "rider-api.service",
+            "motion-executor.service",
+            "sensor-reader.service",
+            "rider-web-bridge.service",
+            "rider-voice-web.service",
+            "rider-voice.service"
+          ]
+        },
+        "start_available": true,
+        "start_unavailable_reason": null
+      },
+      {
+        "unit": "rider-tracker.target",
+        "id": "tracker-target",
+        "group": "core",
+        "label": "Tracker pasywny",
+        "description": "Obserwacja bez kontrolera ruchu.",
+        "lifecycle": "on-demand",
+        "host": "pi",
+        "can_move": false,
+        "resources": [],
+        "edges_out": [],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "motion_owner": null,
+        "runtime_modules": [],
+        "task_members": {
+          "s6_tracker_module": [
+            "rider-broker.service",
+            "rider-api.service",
+            "motion-executor.service",
+            "sensor-reader.service",
+            "rider-web-bridge.service",
+            "camera-capture@raw.service",
+            "frame-distributor.service",
+            "rider-tracker.service"
+          ]
+        },
+        "start_available": true,
+        "start_unavailable_reason": null
+      },
+      {
+        "unit": "rider-obstacle.target",
+        "id": "obstacle-target",
+        "group": "core",
+        "label": "Przeszkody",
+        "description": "Wizja lokalna albo offload.",
+        "lifecycle": "on-demand",
+        "host": "pi",
+        "can_move": false,
+        "resources": [],
+        "edges_out": [],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "motion_owner": null,
+        "runtime_modules": [],
+        "task_members": {
+          "s7_obstacle_module": [
+            "rider-broker.service",
+            "rider-api.service",
+            "motion-executor.service",
+            "sensor-reader.service",
+            "rider-web-bridge.service",
+            "camera-capture@raw.service",
+            "frame-distributor.service",
+            "rider-vision.service",
+            "rider-obstacle.service"
+          ]
+        },
+        "start_available": true,
+        "start_unavailable_reason": null
+      },
+      {
+        "unit": "rider-mapbuild.target",
+        "id": "mapbuild-target",
+        "group": "core",
+        "label": "Mapa pasywna",
+        "description": "Budowa mapy z danych; nie uruchamia nawigatora.",
+        "lifecycle": "on-demand",
+        "host": "pi",
+        "can_move": false,
+        "resources": [],
+        "edges_out": [],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "motion_owner": null,
+        "runtime_modules": [],
+        "task_members": {
+          "s8_mapping": [
+            "rider-broker.service",
+            "rider-api.service",
+            "motion-executor.service",
+            "sensor-reader.service",
+            "rider-web-bridge.service",
+            "camera-capture@raw.service",
+            "frame-distributor.service",
+            "rider-vision.service",
+            "rider-obstacle.service",
+            "rider-odometry.service",
+            "rider-mapper.service"
+          ]
+        },
+        "start_available": true,
+        "start_unavailable_reason": null
+      },
+      {
+        "unit": "rider-navigate.target",
+        "id": "navigate-target",
+        "group": "motion",
+        "label": "Pasywna nawigacja",
+        "description": "Odczyt istniejącego planu; ruch i osobne żądanie planowania w DISARMED są niedostępne.",
+        "lifecycle": "on-demand",
+        "host": "pi",
+        "can_move": true,
+        "resources": [],
+        "edges_out": [],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "motion_owner": "navigation",
+        "runtime_modules": [],
+        "task_members": {
+          "s9_navigation": [
+            "rider-broker.service",
+            "rider-api.service",
+            "motion-executor.service",
+            "sensor-reader.service",
+            "rider-web-bridge.service",
+            "camera-capture@raw.service",
+            "frame-distributor.service",
+            "rider-vision.service",
+            "rider-obstacle.service",
+            "rider-odometry.service",
+            "rider-mapper.service",
+            "rider-navigator.service"
+          ]
+        },
+        "start_available": false,
+        "start_unavailable_reason": "navigation_traversal_unverified"
+      },
+      {
+        "unit": "rider-ai-provider.target",
+        "id": "ai-provider-target",
+        "group": "core",
+        "label": "Domena AI",
+        "description": "Uruchamia tylko wybraną domenę.",
+        "lifecycle": "on-demand",
+        "host": "pi",
+        "can_move": false,
+        "resources": [],
+        "edges_out": [],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "motion_owner": null,
+        "runtime_modules": [],
+        "task_members": {
+          "s10_ai_providers": [
+            "rider-broker.service",
+            "rider-api.service",
+            "motion-executor.service",
+            "sensor-reader.service",
+            "rider-web-bridge.service",
+            "rider-voice-web.service"
+          ]
+        },
+        "start_available": true,
+        "start_unavailable_reason": null
+      },
+      {
+        "unit": "rider-dev.target",
+        "id": "dev-target",
+        "group": "core",
+        "label": "Narzędzie deweloperskie",
+        "description": "Jedno narzędzie; Jupyter ręcznie.",
+        "lifecycle": "dev",
+        "host": "pi",
+        "can_move": false,
+        "resources": [],
+        "edges_out": [],
+        "capabilities": [
+          "read",
+          "start",
+          "stop",
+          "restart"
+        ],
+        "motion_owner": null,
+        "runtime_modules": [],
+        "task_members": {
+          "s11_dev_mode": [
+            "rider-broker.service",
+            "rider-api.service",
+            "motion-executor.service",
+            "sensor-reader.service",
+            "rider-web-bridge.service",
+            "camera-capture@edge.service"
+          ]
+        },
+        "start_available": true,
+        "start_unavailable_reason": null
+      }
+    ],
+    "features": [
+      {
+        "name": "s0_core",
+        "services": [
+          "rider-core.target"
+        ],
+        "ensure_cam": false,
+        "tracking_mode": null,
+        "scenario": "S0",
+        "title": "Baza / odczyt",
+        "description": "API i telemetria, bez zgody na napędy.",
+        "members": [
+          "rider-broker.service",
+          "rider-api.service",
+          "motion-executor.service",
+          "sensor-reader.service",
+          "rider-web-bridge.service",
+          "rider-core.target"
+        ],
+        "resources": [
+          "uart"
+        ],
+        "can_move": false,
+        "control_owner": null,
+        "option_kind": null,
+        "title_en": "Base / observation",
+        "description_en": "API and telemetry, without actuator permission.",
+        "motion_owner": null,
+        "option_schema": null
+      },
+      {
+        "name": "s1_manual",
+        "services": [
+          "rider-core.target"
+        ],
+        "ensure_cam": false,
+        "tracking_mode": null,
+        "scenario": "S1",
+        "title": "Sterowanie ręczne",
+        "description": "Wymaga osobnego uzbrojenia operatora.",
+        "members": [
+          "rider-broker.service",
+          "rider-api.service",
+          "motion-executor.service",
+          "sensor-reader.service",
+          "rider-web-bridge.service",
+          "rider-core.target"
+        ],
+        "resources": [
+          "control",
+          "uart"
+        ],
+        "can_move": true,
+        "control_owner": "manual",
+        "option_kind": null,
+        "title_en": "Manual control",
+        "description_en": "Requires separate operator arming.",
+        "motion_owner": "manual",
+        "option_schema": null
+      },
+      {
+        "name": "s2_camera_preview",
+        "services": [
+          "rider-core.target"
+        ],
+        "ensure_cam": true,
+        "tracking_mode": null,
+        "scenario": "S2",
+        "title": "Podgląd kamery",
+        "description": "Pasywny obraz z kamery.",
+        "members": [
+          "rider-broker.service",
+          "rider-api.service",
+          "motion-executor.service",
+          "sensor-reader.service",
+          "rider-web-bridge.service",
+          "camera-capture@raw.service",
+          "frame-distributor.service",
+          "rider-core.target"
+        ],
+        "resources": [
+          "camera",
+          "frame_feed",
+          "uart"
+        ],
+        "can_move": false,
+        "control_owner": null,
+        "option_kind": null,
+        "title_en": "Camera preview",
+        "description_en": "Passive camera feed.",
+        "motion_owner": null,
+        "option_schema": null
+      },
+      {
+        "name": "s3_follow_me_face",
+        "services": [
+          "rider-followme.target"
+        ],
+        "ensure_cam": true,
+        "tracking_mode": "face",
+        "scenario": "S3",
+        "title": "Follow Me — twarz",
+        "description": "Śledzenie z napędami.",
+        "members": [
+          "rider-broker.service",
+          "rider-api.service",
+          "motion-executor.service",
+          "sensor-reader.service",
+          "rider-web-bridge.service",
+          "camera-capture@raw.service",
+          "frame-distributor.service",
+          "rider-tracker.service",
+          "rider-tracking-controller.service",
+          "rider-followme.target"
+        ],
+        "resources": [
+          "camera",
+          "control",
+          "frame_feed",
+          "uart"
+        ],
+        "can_move": true,
+        "control_owner": "follow_me",
+        "option_kind": null,
+        "title_en": "Follow Me — face",
+        "description_en": "Tracking with actuators.",
+        "motion_owner": "follow_me",
+        "option_schema": null
+      },
+      {
+        "name": "s3_follow_me_hand",
+        "services": [
+          "rider-followme.target"
+        ],
+        "ensure_cam": true,
+        "tracking_mode": "hand",
+        "scenario": "S3",
+        "title": "Follow Me — dłoń",
+        "description": "Śledzenie z napędami.",
+        "members": [
+          "rider-broker.service",
+          "rider-api.service",
+          "motion-executor.service",
+          "sensor-reader.service",
+          "rider-web-bridge.service",
+          "camera-capture@raw.service",
+          "frame-distributor.service",
+          "rider-tracker.service",
+          "rider-tracking-controller.service",
+          "rider-followme.target"
+        ],
+        "resources": [
+          "camera",
+          "control",
+          "frame_feed",
+          "uart"
+        ],
+        "can_move": true,
+        "control_owner": "follow_me",
+        "option_kind": null,
+        "title_en": "Follow Me — hand",
+        "description_en": "Tracking with actuators.",
+        "motion_owner": "follow_me",
+        "option_schema": null
+      },
+      {
+        "name": "s4_recon",
+        "services": [
+          "rider-recon.target"
+        ],
+        "ensure_cam": true,
+        "tracking_mode": null,
+        "scenario": "S4",
+        "title": "Rekonesans",
+        "description": "Nawigacja i mapowanie z napędami.",
+        "members": [
+          "rider-broker.service",
+          "rider-api.service",
+          "motion-executor.service",
+          "sensor-reader.service",
+          "rider-web-bridge.service",
+          "camera-capture@raw.service",
+          "frame-distributor.service",
+          "rider-vision.service",
+          "rider-obstacle.service",
+          "rider-odometry.service",
+          "rider-mapper.service",
+          "rider-navigator.service",
+          "rider-recon.target"
+        ],
+        "resources": [
+          "camera",
+          "control",
+          "frame_feed",
+          "uart"
+        ],
+        "can_move": true,
+        "control_owner": "navigation",
+        "option_kind": null,
+        "title_en": "Reconnaissance",
+        "description_en": "Navigation and mapping with actuators.",
+        "motion_owner": "navigation",
+        "option_schema": null
+      },
+      {
+        "name": "s5_voice",
+        "services": [
+          "rider-voice.target"
+        ],
+        "ensure_cam": false,
+        "tracking_mode": null,
+        "scenario": "S5",
+        "title": "Głos",
+        "description": "Wyłącznie wybrana domena audio.",
+        "members": [
+          "rider-broker.service",
+          "rider-api.service",
+          "motion-executor.service",
+          "sensor-reader.service",
+          "rider-web-bridge.service",
+          "rider-voice-web.service",
+          "rider-voice.service",
+          "rider-voice.target"
+        ],
+        "resources": [
+          "mic",
+          "speaker",
+          "uart"
+        ],
+        "can_move": false,
+        "control_owner": null,
+        "option_kind": "voice",
+        "title_en": "Voice",
+        "description_en": "Only the selected audio domain.",
+        "motion_owner": null,
+        "option_schema": {
+          "field": "domain",
+          "default": "voice",
+          "choices": [
+            {
+              "value": "voice",
+              "label": "Pełny głos (ASR + chat + TTS)"
+            },
+            {
+              "value": "asr",
+              "label": "ASR"
+            },
+            {
+              "value": "tts",
+              "label": "TTS"
+            }
+          ]
+        }
+      },
+      {
+        "name": "s6_tracker_module",
+        "services": [
+          "rider-tracker.target"
+        ],
+        "ensure_cam": true,
+        "tracking_mode": null,
+        "scenario": "S6",
+        "title": "Tracker pasywny",
+        "description": "Obserwacja bez kontrolera ruchu.",
+        "members": [
+          "rider-broker.service",
+          "rider-api.service",
+          "motion-executor.service",
+          "sensor-reader.service",
+          "rider-web-bridge.service",
+          "camera-capture@raw.service",
+          "frame-distributor.service",
+          "rider-tracker.service",
+          "rider-tracker.target"
+        ],
+        "resources": [
+          "camera",
+          "frame_feed",
+          "uart"
+        ],
+        "can_move": false,
+        "control_owner": null,
+        "option_kind": "tracking",
+        "title_en": "Passive tracker",
+        "description_en": "Observation without a motion controller.",
+        "motion_owner": null,
+        "option_schema": {
+          "field": "mode",
+          "default": "face",
+          "end_value": "none",
+          "choices": [
+            {
+              "value": "face",
+              "label": "Twarz — pasywnie",
+              "label_en": "Face — passive"
+            },
+            {
+              "value": "hand",
+              "label": "Dłoń — pasywnie",
+              "label_en": "Hand — passive"
+            },
+            {
+              "value": "none",
+              "label": "Zakończ obserwację",
+              "label_en": "End observation"
+            }
+          ]
+        }
+      },
+      {
+        "name": "s7_obstacle_module",
+        "services": [
+          "rider-obstacle.target"
+        ],
+        "ensure_cam": true,
+        "tracking_mode": null,
+        "scenario": "S7",
+        "title": "Przeszkody",
+        "description": "Wizja lokalna albo offload.",
+        "members": [
+          "rider-broker.service",
+          "rider-api.service",
+          "motion-executor.service",
+          "sensor-reader.service",
+          "rider-web-bridge.service",
+          "camera-capture@raw.service",
+          "frame-distributor.service",
+          "rider-vision.service",
+          "rider-obstacle.service",
+          "rider-obstacle.target"
+        ],
+        "resources": [
+          "camera",
+          "frame_feed",
+          "uart"
+        ],
+        "can_move": false,
+        "control_owner": null,
+        "option_kind": "vision",
+        "title_en": "Obstacles",
+        "description_en": "Local vision or PC offload.",
+        "motion_owner": null,
+        "option_schema": {
+          "field": "provider",
+          "default": "local",
+          "choices": [
+            {
+              "value": "local",
+              "label": "Lokalnie Pi"
+            },
+            {
+              "value": "pc",
+              "label": "Offload PC"
+            }
+          ]
+        }
+      },
+      {
+        "name": "s8_mapping",
+        "services": [
+          "rider-mapbuild.target"
+        ],
+        "ensure_cam": true,
+        "tracking_mode": null,
+        "scenario": "S8",
+        "title": "Mapa pasywna",
+        "description": "Budowa mapy z danych; nie uruchamia nawigatora.",
+        "members": [
+          "rider-broker.service",
+          "rider-api.service",
+          "motion-executor.service",
+          "sensor-reader.service",
+          "rider-web-bridge.service",
+          "camera-capture@raw.service",
+          "frame-distributor.service",
+          "rider-vision.service",
+          "rider-obstacle.service",
+          "rider-odometry.service",
+          "rider-mapper.service",
+          "rider-mapbuild.target"
+        ],
+        "resources": [
+          "camera",
+          "frame_feed",
+          "uart"
+        ],
+        "can_move": false,
+        "control_owner": null,
+        "option_kind": null,
+        "title_en": "Passive mapping",
+        "description_en": "Build a map from observations without starting navigation.",
+        "motion_owner": null,
+        "option_schema": null
+      },
+      {
+        "name": "s9_navigation",
+        "services": [
+          "rider-navigate.target"
+        ],
+        "ensure_cam": true,
+        "tracking_mode": null,
+        "scenario": "S9",
+        "title": "Pasywna nawigacja",
+        "description": "Odczyt istniejącego planu; ruch i osobne żądanie planowania w DISARMED są niedostępne.",
+        "members": [
+          "rider-broker.service",
+          "rider-api.service",
+          "motion-executor.service",
+          "sensor-reader.service",
+          "rider-web-bridge.service",
+          "camera-capture@raw.service",
+          "frame-distributor.service",
+          "rider-vision.service",
+          "rider-obstacle.service",
+          "rider-odometry.service",
+          "rider-mapper.service",
+          "rider-navigator.service",
+          "rider-navigate.target"
+        ],
+        "resources": [
+          "camera",
+          "control",
+          "frame_feed",
+          "uart"
+        ],
+        "can_move": true,
+        "control_owner": "navigation",
+        "option_kind": null,
+        "title_en": "Passive navigation",
+        "description_en": "Observe existing plans; physical traversal and DISARMED planning requests are unavailable.",
+        "motion_owner": "navigation",
+        "option_schema": null
+      },
+      {
+        "name": "s10_ai_providers",
+        "services": [
+          "rider-ai-provider.target"
+        ],
+        "ensure_cam": false,
+        "tracking_mode": null,
+        "scenario": "S10",
+        "title": "Domena AI",
+        "description": "Uruchamia tylko wybraną domenę.",
+        "members": [
+          "rider-broker.service",
+          "rider-api.service",
+          "motion-executor.service",
+          "sensor-reader.service",
+          "rider-web-bridge.service",
+          "rider-voice-web.service",
+          "rider-ai-provider.target"
+        ],
+        "resources": [
+          "uart"
+        ],
+        "can_move": false,
+        "control_owner": null,
+        "option_kind": "provider",
+        "title_en": "AI domain",
+        "description_en": "Start only the selected domain.",
+        "motion_owner": null,
+        "option_schema": {
+          "field": "domain",
+          "default": "text",
+          "choices": [
+            {
+              "value": "text",
+              "label": "Tekst"
+            },
+            {
+              "value": "vision",
+              "label": "Wizja PC"
+            },
+            {
+              "value": "google",
+              "label": "Google"
+            },
+            {
+              "value": "voice",
+              "label": "Pełny głos (ASR + chat + TTS)"
+            },
+            {
+              "value": "asr",
+              "label": "ASR"
+            },
+            {
+              "value": "tts",
+              "label": "TTS"
+            }
+          ]
+        }
+      },
+      {
+        "name": "s11_dev_mode",
+        "services": [
+          "rider-dev.target"
+        ],
+        "ensure_cam": false,
+        "tracking_mode": null,
+        "scenario": "S11",
+        "title": "Narzędzie deweloperskie",
+        "description": "Jedno narzędzie; Jupyter ręcznie.",
+        "members": [
+          "rider-broker.service",
+          "rider-api.service",
+          "motion-executor.service",
+          "sensor-reader.service",
+          "rider-web-bridge.service",
+          "camera-capture@edge.service",
+          "rider-dev.target"
+        ],
+        "resources": [
+          "camera",
+          "uart"
+        ],
+        "can_move": false,
+        "control_owner": null,
+        "option_kind": "tool",
+        "title_en": "Developer tool",
+        "description_en": "One tool; Jupyter is manual.",
+        "motion_owner": null,
+        "option_schema": {
+          "field": "tool",
+          "default": "edge",
+          "choices": [
+            {
+              "value": "edge",
+              "label": "EDGE"
+            },
+            {
+              "value": "ssd",
+              "label": "SSD"
+            },
+            {
+              "value": "raw",
+              "label": "RAW"
+            }
+          ]
+        }
+      }
+    ],
+    "capabilities": [
+      "task_lifecycle",
+      "resource_consumers",
+      "installed_state",
+      "motion_gate",
+      "domain_selection"
+    ]
   }
 }

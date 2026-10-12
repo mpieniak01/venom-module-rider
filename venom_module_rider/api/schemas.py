@@ -52,3 +52,11 @@ class ResourceAction(StrictModel):
 class GoalAction(StrictModel):
     enabled: StrictBool
     options: dict = {}
+    request_id: str | None = None
+    source: Literal["manual", "follow_me", "navigation"] | None = None
+    execution_context: Literal["panel"] | None = None
+    generation: str | None = None
+    seq: StrictInt | None = None
+    ts: float | None = None
+    ttl_ms: StrictInt | None = None
+    settings_revision: StrictInt | None = None

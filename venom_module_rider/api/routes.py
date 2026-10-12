@@ -68,12 +68,17 @@ async def guard(request: Request):
     if origin and origin not in allowed:
         parsed = urlsplit(origin)
         if parsed.scheme not in {"http", "https"} or (
-            parsed.hostname != request.url.hostname
+            (parsed.scheme, parsed.netloc) != (request.url.scheme, request.url.netloc)
         ):
             raise RiderError("origin_denied", 403)
     if request.headers.get("Sec-Fetch-Site") == "cross-site" and not origin:
         raise RiderError("origin_denied", 403)
-    payload = await request.json() if request.method != "DELETE" else {}
+    try:
+        payload = await request.json() if request.method != "DELETE" else {}
+    except ValueError as exc:
+        raise RiderError("invalid_request", 400) from exc
+    if not isinstance(payload, dict):
+        raise RiderError("invalid_request", 400)
     # A safety STOP must work in read-only environments as well.
     if request.url.path.endswith("/control") and payload.get("action") in {
         "stop",
@@ -182,10 +187,8 @@ async def resource(
 async def goal(
     name: str, payload: GoalAction, request: Request, session: Session = None
 ):
-    return await service(request).mutate(
-        "/api/logic/feature/" + safe_name(name),
-        payload.model_dump(),
-        session,
+    return await service(request).goal(
+        safe_name(name), payload.model_dump(exclude_none=True), session
     )
 
 

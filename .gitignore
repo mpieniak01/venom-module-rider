@@ -33,3 +33,6 @@ web-next/optional-modules/
 build/
 dist/
 *.egg-info/
+output/
+.playwright-cli/
+.playwright/

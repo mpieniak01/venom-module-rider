@@ -440,3 +440,361 @@ async def test_stop_bypasses_pending_command_and_drops_its_result():
     with pytest.raises(RiderError, match="command_superseded"):
         await pending
     await service.close()
+
+
+@pytest.mark.parametrize(
+    "path,family,version",
+    [
+        ("/state", "rider.telemetry", 1),
+        ("/sysinfo", "rider.system", 1),
+        ("/api/logic/catalog", "rider.catalog", 2),
+        ("/api/services/graph", "rider.service_graph", 2),
+        ("/api/resource/lcd", "rider.resources", 1),
+        ("/api/face-studio/gestures", "rider.face_studio", 1),
+    ],
+)
+async def test_transport_rejects_unknown_versions(path, family, version):
+    payload = json.loads(envelope({}, family, version + 99).body)
+    client = PiClient(
+        DEVICE,
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=payload)),
+    )
+    with pytest.raises(RiderError, match="unsupported_pi_contract"):
+        await client.json(path)
+    await client.close()
+
+
+@pytest.mark.parametrize(
+    "response,code",
+    [
+        (httpx.Response(200, content=b"not-json"), "invalid_pi_response"),
+        (httpx.Response(200, content=b'{"value":NaN}'), "invalid_pi_response"),
+        (httpx.Response(200, json={"safety": {}}), "unsupported_pi_contract"),
+        (
+            httpx.Response(302, headers={"Location": "http://other.invalid"}),
+            "pi_redirect_refused",
+        ),
+        (httpx.Response(404, json={"error": "not_found"}), "not_found"),
+    ],
+)
+async def test_transport_invalid_or_error_response(response, code):
+    client = PiClient(DEVICE, transport=httpx.MockTransport(lambda _: response))
+    with pytest.raises(RiderError, match=code):
+        await client.json("/state")
+    await client.close()
+
+
+async def test_binary_transport_rejects_non_image():
+    client = PiClient(
+        DEVICE,
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(
+                200, content=b"html", headers={"Content-Type": "text/html"}
+            )
+        ),
+    )
+    with pytest.raises(RiderError, match="invalid_image_type"):
+        await client.image("/camera/raw")
+    await client.close()
+
+
+def test_demo_only_configuration_cannot_select_real_mode(monkeypatch):
+    monkeypatch.setenv("RIDER_DEMO_ONLY", "true")
+    raw = json.dumps(
+        [{"id": "real", "label": "Real", "url": "http://localhost", "mode": "device"}]
+    )
+    with pytest.raises(RiderError, match="invalid_device_configuration"):
+        configured_devices(raw)
+
+
+@pytest.mark.parametrize(
+    "url", ["http://[", "http://localhost:noport", "http://localhost:0"]
+)
+def test_malformed_ports_are_configuration_errors(url):
+    with pytest.raises(RiderError, match="invalid_device_configuration"):
+        configured_devices(json.dumps([{"id": "a", "label": "A", "url": url}]))
+
+
+def test_all_readonly_and_mutation_routes_use_the_same_fixture(monkeypatch):
+    monkeypatch.delenv("RIDER_DEFAULT_DEVICE", raising=False)
+    pi = DemoPi()
+    service, _ = domain(pi)
+    with TestClient(host_app(service)) as client:
+        initial = client.get("/api/v1/rider/config").json()
+        config = client.post(
+            "/api/v1/rider/config",
+            json={"device_id": "demo"},
+            headers={"X-Rider-Session": initial["session"]},
+        ).json()
+        h = {"X-Rider-Session": config["session"]}
+        for section in ("overview", "control", "calibration", "resources", "face"):
+            result = client.get("/api/v1/rider/status?section=" + section)
+            assert result.status_code == 200
+            assert result.json()["connection"]["status"] == "online"
+        assert client.get("/api/v1/rider/status?section=bad").status_code == 400
+        assert client.get("/api/v1/rider/diagnostics").status_code == 200
+        assert client.get("/api/v1/rider/logs/rider-api.service").status_code == 200
+        assert client.get("/api/v1/rider/face/library").status_code == 200
+        assert client.get("/api/v1/rider/face/runtime").status_code == 200
+        spec = copy.deepcopy(pi.library["gestures"][2])
+        spec.pop("id")
+        spec.pop("builtin")
+        saved = client.post("/api/v1/rider/face/library", json=spec, headers=h)
+        assert saved.status_code == 200
+        key = saved.json()["data"]["id"]
+        assert (
+            client.delete("/api/v1/rider/face/library/" + key, headers=h).status_code
+            == 200
+        )
+        settings = client.get("/api/v1/rider/face/runtime").json()
+        assert (
+            client.post(
+                "/api/v1/rider/face/runtime",
+                json={"if_revision": settings["settings_revision"], "tempo": 1.1},
+                headers=h,
+            ).status_code
+            == 200
+        )
+        assert (
+            client.post(
+                "/api/v1/rider/face/event",
+                json={"type": "speech", "active": True},
+                headers=h,
+            ).status_code
+            == 200
+        )
+        assert (
+            client.post(
+                "/api/v1/rider/resource/lcd", json={"action": "on"}, headers=h
+            ).status_code
+            == 200
+        )
+        assert (
+            client.post(
+                "/api/v1/rider/resource/lcd", json={"action": "off"}, headers=h
+            ).status_code
+            == 200
+        )
+        assert not pi.lcd_on
+        assert (
+            client.post(
+                "/api/v1/rider/resource/unknown", json={"action": "stop"}, headers=h
+            ).status_code
+            == 404
+        )
+        assert (
+            client.post(
+                "/api/v1/rider/goal/s2_camera_preview",
+                json={"enabled": True},
+                headers=h,
+            ).status_code
+            == 200
+        )
+        assert pi.camera_on
+        assert (
+            client.get("/api/v1/rider/camera/raw").headers["content-type"]
+            == "image/png"
+        )
+        assert (
+            client.post(
+                "/api/v1/rider/goal/s2_camera_preview",
+                json={"enabled": False},
+                headers=h,
+            ).status_code
+            == 200
+        )
+        assert not pi.camera_on
+        assert (
+            client.post(
+                "/api/v1/rider/goal/unknown", json={"enabled": True}, headers=h
+            ).status_code
+            == 404
+        )
+        assert (
+            client.post(
+                "/api/v1/rider/control",
+                content="{broken",
+                headers={**h, "Content-Type": "application/json"},
+            ).status_code
+            == 422
+        )
+        pi.state = "ESTOP"
+        response = client.post(
+            "/api/v1/rider/control",
+            json=command(
+                pi,
+                "clear_estop",
+                operator_consent=True,
+                operator_plan="Clear fixture latch",
+                owner="manual",
+                arming_mode="operator",
+            ),
+            headers=h,
+        )
+        assert response.status_code == 200 and pi.state == "DISARMED"
+
+
+def test_access_token_and_environment_guard(monkeypatch):
+    monkeypatch.setenv("RIDER_ACCESS_TOKEN", "fixture-token")
+    service, _ = domain()
+    with TestClient(host_app(service)) as client:
+        assert client.get("/api/v1/rider/config").status_code == 403
+        assert (
+            client.get(
+                "/api/v1/rider/config",
+                headers={"Authorization": "Bearer fixture-token"},
+            ).status_code
+            == 200
+        )
+
+
+async def test_pending_ack_is_preserved_as_pending_not_physical_success():
+    pi = DemoPi()
+
+    async def reply(request):
+        if request.method == "GET":
+            return httpx.Response(
+                200, json=json.loads(envelope({"safety": pi.safety()}).body)
+            )
+        return httpx.Response(
+            202,
+            json=json.loads(
+                envelope(
+                    {
+                        "pending": True,
+                        "confirmed": False,
+                        "physical_completion": "unverified",
+                    },
+                    status=202,
+                    operation={
+                        "status": "pending",
+                        "confirmed": False,
+                        "physical_completion": "unverified",
+                    },
+                ).body
+            ),
+        )
+
+    service = RiderService(
+        (DEVICE,),
+        client_factory=lambda device: PiClient(
+            device, transport=httpx.MockTransport(reply)
+        ),
+    )
+    await service.select("demo", service.session)
+    result = await arm(service, pi)
+    assert result["operation"]["status"] == "pending"
+    assert result["data"]["confirmed"] is False
+    await service.close()
+
+
+async def test_moving_goal_requires_matching_operator_owner_and_fresh_intent():
+    pi = DemoPi()
+    asgi = httpx.ASGITransport(app=create_app(pi))
+    forwarded = []
+    navigation_owner = False
+
+    async def respond(request):
+        if request.url.path == "/api/logic/feature/fixture_move":
+            forwarded.append(json.loads(request.content))
+            return httpx.Response(
+                200, content=envelope({"enabled": True}, "rider.tasks", 2).body
+            )
+        response = await asgi.handle_async_request(request)
+        await response.aread()
+        if request.url.path == "/api/logic/catalog":
+            value = response.json()
+            value["data"]["features"].append(
+                {
+                    "name": "fixture_move",
+                    "can_move": True,
+                    "control_owner": "navigation",
+                }
+            )
+            return httpx.Response(200, json=value)
+        if navigation_owner and request.url.path == "/api/control/state":
+            value = response.json()
+            value["data"]["safety"]["owner"] = "navigation"
+            return httpx.Response(200, json=value)
+        return response
+
+    service = RiderService(
+        (DEVICE,),
+        client_factory=lambda device: PiClient(
+            device, transport=httpx.MockTransport(respond)
+        ),
+    )
+    await service.select("demo", service.session)
+    with pytest.raises(RiderError):
+        await service.goal("fixture_move", {"enabled": True}, service.session)
+    await arm(service, pi)
+    with pytest.raises(RiderError, match="operator_motion_permission_required"):
+        await service.goal(
+            "fixture_move",
+            command(pi, "arm", enabled=True, source="navigation"),
+            service.session,
+        )
+    assert not forwarded
+    navigation_owner = True
+    service.cache.clear()
+    body = command(pi, "arm", enabled=True, source="navigation")
+    await service.goal("fixture_move", body, service.session)
+    assert forwarded == [body]
+    await service.close()
+
+
+def test_readonly_environment_allows_stop_but_no_state_changes(monkeypatch):
+    import venom_module_rider.api.routes as routes
+
+    def denied(**_):
+        raise PermissionError("fixture read-only")
+
+    monkeypatch.setattr(routes, "ensure_module_mutation_allowed", denied)
+    service, pi = domain()
+    with TestClient(host_app(service)) as client:
+        # Select before changing policy through the domain, not the blocked API.
+        asyncio.run(service.select("demo", service.session))
+        h = {"X-Rider-Session": service.session}
+        assert (
+            client.post(
+                "/api/v1/rider/resource/lcd", json={"action": "on"}, headers=h
+            ).status_code
+            == 403
+        )
+        assert (
+            client.post(
+                "/api/v1/rider/control", json={"action": "stop"}, headers=h
+            ).status_code
+            == 200
+        )
+        assert not pi.lcd_on and pi.state == "DISARMED"
+        assert (
+            client.post("/api/v1/rider/face/library", json=[], headers=h).status_code
+            == 400
+        )
+
+
+async def test_camera_unknown_does_not_request_a_frame():
+    async def respond(request):
+        return httpx.Response(
+            200, content=envelope({"activity": {}}, "rider.resources", 1).body
+        )
+
+    transport = httpx.MockTransport(respond)
+    service = RiderService(
+        (DEVICE,), client_factory=lambda device: PiClient(device, transport=transport)
+    )
+    await service.select("demo", service.session)
+    with pytest.raises(RiderError, match="camera_unknown"):
+        await service.camera("raw")
+    await service.close()
+
+
+async def test_every_view_has_pi_settings_needed_for_global_arm():
+    service, pi = domain()
+    await service.select("demo", service.session)
+    for section in ("overview", "control", "calibration", "resources", "face"):
+        status = await service.status(section)
+        assert status["settings"]["control_modes"]["version"] == 1
+    assert sum(row["path"] == "/api/calibration/controls" for row in pi.trace) == 1
+    await service.close()
