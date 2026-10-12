@@ -1,0 +1,6 @@
+{
+  "extends": "../../../web-next/tsconfig.json",
+  "compilerOptions": { "incremental": false, "plugins": [], "types": ["node"] },
+  "include": ["**/*.ts", "**/*.tsx", "../tests/web/*.ts"],
+  "exclude": ["node_modules"]
+}

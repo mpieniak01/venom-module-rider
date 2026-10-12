@@ -26,3 +26,13 @@ playwright-report/
 web-next/.next/
 web-next/optional-modules/
 *.pid
+
+/node_modules
+/.venv
+.mypy_cache/
+build/
+dist/
+*.egg-info/
+output/
+.playwright-cli/
+.playwright/
