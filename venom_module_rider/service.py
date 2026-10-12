@@ -20,6 +20,7 @@ POLLING = {
     "calibration_ms": 1000,
     "resources_ms": 5000,
     "face_ms": 5000,
+    "compute_ms": 5000,
 }
 READS = {
     "telemetry": ("/state", 2.0),
@@ -37,6 +38,7 @@ SECTIONS = {
     "calibration": ("control", "settings", "history"),
     "resources": ("control", "settings", "health", "catalog", "logic"),
     "face": ("control", "settings", "health"),
+    "compute": ("control", "settings", "health"),
 }
 RESOURCE_NAMES = ("camera", "lcd", "led", "mic", "speaker", "uart")
 
@@ -58,6 +60,8 @@ class RiderService:
         self.epoch = 0
         self.sequences: dict[str, int] = {}
         self._selection_lock = asyncio.Lock()
+        self.conversation_invalidator = None
+        self.conversation_drainer = None
 
     def config(self):
         return {
@@ -81,6 +85,10 @@ class RiderService:
             # No new command can use this epoch. Pi's hold watchdog remains
             # authoritative; selection never auto-arms the new target.
             self.epoch += 1
+            if self.conversation_invalidator:
+                self.conversation_invalidator()
+            if self.conversation_drainer:
+                await self.conversation_drainer()
             await self._close_transport()
             self.device = self.devices.get(device_id)
             self.client = self.factory(self.device) if self.device else None
@@ -147,6 +155,7 @@ class RiderService:
             **dict.fromkeys(READS),
             "resources": {},
             "face": {"library": None, "runtime": None},
+            "compute": None,
         }
         if self.device is None:
             return snapshot
@@ -238,6 +247,8 @@ class RiderService:
         stop = action in {"stop", "disarm"}
         if not stop:
             self.check_session(session)
+        if self.conversation_invalidator:
+            self.conversation_invalidator()
         client = self.transport()
         epoch = self.epoch
         if not stop:
@@ -374,6 +385,10 @@ class RiderService:
 
     async def close(self):
         self.epoch += 1
+        if self.conversation_invalidator:
+            self.conversation_invalidator()
+        if self.conversation_drainer:
+            await self.conversation_drainer()
         self.closed = True
         await self._close_transport()
         self.cache.clear()

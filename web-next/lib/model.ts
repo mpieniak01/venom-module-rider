@@ -1,5 +1,5 @@
 export type JsonRecord = Record<string, unknown>;
-export type Section = "control" | "overview" | "calibration" | "resources" | "face";
+export type Section = "control" | "overview" | "calibration" | "resources" | "face" | "compute";
 export type Direction = "forward" | "backward" | "left" | "right";
 export const DIRECTIONS: Direction[] = ["forward", "backward", "left", "right"];
 export type DeviceConfig = { devices: { id: string; label: string; mode: "demo" | "device" }[]; device_id: string | null; session: string };
@@ -17,6 +17,8 @@ export type RiderStatus = {
   history: JsonRecord | null;
   face: { library: JsonRecord | null; runtime: JsonRecord | null };
   errors: Record<string, string>;
+  compute?: JsonRecord | null;
+  conversation?: JsonRecord | null;
 };
 export type NumericDescriptor = { type?: string; unit?: string; display_unit?: string; display_factor?: number; minimum?: number; maximum?: number; step?: number; display_precision?: number; meaning?: string; available?: boolean };
 export type Gesture = { id?: string; builtin?: boolean; name: string; expr: string; duration: number; contract_version: number; initial: Record<string, number>; tracks: Record<string, Segment[]> };

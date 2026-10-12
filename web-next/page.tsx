@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Activity, Bot, Boxes, CircleStop, RefreshCw, ShieldCheck, SlidersHorizontal, Smile, Wifi, WifiOff, X } from "lucide-react";
+import { Activity, Bot, Boxes, BrainCircuit, CircleStop, RefreshCw, ShieldCheck, SlidersHorizontal, Smile, Wifi, WifiOff, X } from "lucide-react";
 import { useLanguage } from "@/lib/i18n";
 import { useTheme } from "@/lib/theme";
 import { translate } from "./lib/i18n";
@@ -13,9 +13,10 @@ import { FaceStudio } from "./components/face";
 import { Measurements, RequestHistory, SensorMetrics } from "./components/measurements";
 import { Button, Empty, Panel, Pill } from "./components/primitives";
 import { Resources } from "./components/resources";
+import { Compute } from "./components/compute";
 import styles from "./rider.module.css";
 
-const tabs = [{ id: "control", Icon: Bot }, { id: "overview", Icon: Activity }, { id: "calibration", Icon: SlidersHorizontal }, { id: "resources", Icon: Boxes }, { id: "face", Icon: Smile }] as const;
+const tabs = [{ id: "control", Icon: Bot }, { id: "overview", Icon: Activity }, { id: "calibration", Icon: SlidersHorizontal }, { id: "resources", Icon: Boxes }, { id: "face", Icon: Smile }, { id: "compute", Icon: BrainCircuit }] as const;
 export default function RiderPage() {
   const { language } = useLanguage();
   const { theme } = useTheme();
@@ -55,6 +56,7 @@ export default function RiderPage() {
         {section === "calibration" && <Calibration key={connection.session} client={client} t={t} language={language} />}
         {section === "resources" && <Resources key={connection.session} client={client} t={t} language={language} />}
         {section === "face" && <FaceStudio key={connection.session} client={client} t={t} language={language} />}
+        {section === "compute" && <Compute key={connection.session} client={client} t={t} language={language} />}
       </>}
     </div>
     {!!Object.keys(client.status?.errors ?? {}).length && <details className={styles.details}><summary>{t("partial")}</summary><pre className={styles.pre}>{JSON.stringify(client.status?.errors, null, 2)}</pre></details>}

@@ -123,6 +123,8 @@ def main():
     # A real-device access token does not belong to the isolated demo.
     if demo_only:
         api_env.pop("RIDER_ACCESS_TOKEN", None)
+        api_env["RIDER_COMPUTE_TOKEN"] = "rider-demo-only-token"
+        api_env["RIDER_AGENT_TOKEN"] = "rider-demo-only-agent-token"
     web_env = {
         **api_env,
         "API_PROXY_TARGET": api_url,

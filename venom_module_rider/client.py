@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 import httpx
 
@@ -32,6 +33,11 @@ def expected_contract(path: str):
         "/healthz": ("rider.health", 1),
         "/sysinfo": ("rider.system", 1),
         "/api/control/state": ("rider.safety", 1),
+        "/api/control/agent/state": ("rider.safety", 1),
+        "/api/control/agent/pulse": ("rider.safety", 1),
+        "/api/stop": ("rider.safety", 1),
+        "/api/voice/playback": ("rider.audio", 1),
+        "/api/voice/playback/cancel": ("rider.audio", 1),
         "/api/control": ("rider.safety", 1),
         "/api/safety": ("rider.safety", 1),
         "/api/motion/queue": ("rider.safety", 1),
@@ -39,6 +45,8 @@ def expected_contract(path: str):
         "/api/logic/catalog": ("rider.catalog", 2),
         "/api/logic/state": ("rider.tasks", 2),
         "/api/services/graph": ("rider.service_graph", 2),
+        "/api/compute/config": ("rider.compute", 1),
+        "/api/compute/status": ("rider.compute", 1),
     }
     if path in exact:
         return exact[path]
@@ -62,6 +70,8 @@ def json_timeout(path: str, method: str, stop: bool) -> httpx.Timeout:
     duration = 1.5
     path = path.split("?", 1)[0]
     if not stop:
+        if path == "/api/voice/playback":
+            duration = 60.0
         if method in {"POST", "DELETE"} and path.startswith(
             ("/api/logic/feature/", "/api/resource/", "/api/face-studio/runtime/")
         ):
@@ -73,6 +83,7 @@ def json_timeout(path: str, method: str, stop: bool) -> httpx.Timeout:
 
 class PiClient:
     def __init__(self, device: Device, *, transport=None):
+        self.device = device
         options = {
             "base_url": device.url,
             "trust_env": False,
@@ -90,14 +101,29 @@ class PiClient:
         )
         self.closed = False
 
-    async def json(self, path: str, *, method="GET", body=None, stop=False) -> dict:
+    async def json(
+        self, path: str, *, method="GET", body=None, stop=False, headers=None
+    ) -> dict:
         client = self.stop_http if stop else self.http
+        request_headers = {"Accept": ACCEPT, **(headers or {})}
+        if method != "GET" and path in {
+            "/api/control/agent/pulse",
+            "/api/voice/playback",
+            "/api/voice/playback/cancel",
+        }:
+            token = os.getenv(self.device.agent_token_env, "")
+            if not token:
+                raise RiderError("agent_credentials_unavailable", 503)
+            request_headers["Authorization"] = "Bearer " + token
+        binary = body if isinstance(body, bytes) else None
+        payload = None if isinstance(body, bytes) else body
         try:
             async with client.stream(
                 method,
                 path,
-                json=body,
-                headers={"Accept": ACCEPT},
+                content=binary,
+                json=payload,
+                headers=request_headers,
                 timeout=json_timeout(path, method, stop),
             ) as response:
                 content = bytearray()

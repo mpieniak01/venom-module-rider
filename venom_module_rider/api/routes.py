@@ -9,32 +9,19 @@ from contextlib import asynccontextmanager
 from typing import Annotated
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.responses import Response
-from fastapi.routing import APIRoute
 from venom_core.core.module_data_policy import ensure_module_mutation_allowed
 
+from ..compute import ComputeService
 from ..config import IDENTIFIER, configured_devices
 from ..errors import RiderError
 from ..service import RESOURCE_NAMES, RiderService
+from . import compute_routes, conversation_routes
+from .routing import RiderRoute
 from .schemas import Command, GoalAction, ResourceAction, Selection, SettingsPatch
 
 UNIT = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9_@.-]{0,95}\.service")
-
-
-class RiderRoute(APIRoute):
-    def get_route_handler(self):
-        original = super().get_route_handler()
-
-        async def handler(request):
-            try:
-                return await original(request)
-            except RiderError as exc:
-                raise HTTPException(
-                    exc.status, detail={"code": exc.code, "details": exc.details}
-                ) from exc
-
-        return handler
 
 
 @asynccontextmanager
@@ -42,19 +29,50 @@ async def lifespan(app):
     existing = getattr(app.state, "rider", None)
     service = existing or RiderService(configured_devices())
     app.state.rider = service
+    from ..engines import VenomEngines
+
+    engines: object = VenomEngines(app)
+    if (
+        os.getenv("RIDER_DEMO_ONLY", "").lower() in {"1", "true"}
+        and service.devices
+        and all(device.mode == "demo" for device in service.devices.values())
+    ):
+        from ..compute_demo import DemoEngines
+
+        engines = DemoEngines(app)
+    compute = getattr(app.state, "rider_compute", None) or ComputeService(engines)
+    app.state.rider_compute = compute
     default = os.getenv("RIDER_DEFAULT_DEVICE")
     if default and existing is None:
         await service.select(default, service.session)
     try:
         yield
     finally:
+        provider = getattr(app.state, "rider_conversation", None)
+        if provider:
+            await provider.close()
+        await compute.close()
         await service.close()
 
 
 async def guard(request: Request):
+    if compute_routes.device_path(request.url.path):
+        compute_routes.authenticate(request)
+        if request.headers.get("Origin") or request.headers.get("Sec-Fetch-Site"):
+            raise RiderError("origin_denied", 403)
+        if request.method in {"GET", "DELETE"}:
+            return
+        try:
+            ensure_module_mutation_allowed(
+                module_id="rider", operation_name="compute:" + request.method.lower()
+            )
+        except PermissionError as exc:
+            raise RiderError("environment_read_only", 403) from exc
+        return
     token = os.getenv("RIDER_ACCESS_TOKEN")
     if token and not hmac.compare_digest(
-        request.headers.get("Authorization", ""), "Bearer " + token
+        request.headers.get("Authorization", "").encode("utf-8"),
+        ("Bearer " + token).encode("utf-8"),
     ):
         raise RiderError("access_denied", 403)
     if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
@@ -106,6 +124,8 @@ router = APIRouter(
     dependencies=[Depends(guard)],
     lifespan=lifespan,
 )
+router.include_router(compute_routes.router)
+router.include_router(conversation_routes.router)
 Session = Annotated[str | None, Header(alias="X-Rider-Session")]
 
 
@@ -139,7 +159,11 @@ async def status(
     request: Request,
     section: Annotated[str, Query()] = "overview",
 ):
-    return await service(request).status(section)
+    result = await service(request).status(section)
+    result["conversation"] = conversation_routes.create_provider(request.app).config()
+    if section == "compute" and result["connection"]["configured"]:
+        result["compute"] = await compute_routes.operator_status(request)
+    return result
 
 
 @router.post("/control")

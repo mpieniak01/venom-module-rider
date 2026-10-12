@@ -12,7 +12,72 @@ An optional Venom module for manual operation of Rider-Pi. Venom supplies the UI
 - Face Studio: built-in and custom gestures, field/track editing, PNG/timeline preview, skins, styles, runtime configuration and explicit LCD playback.
 - PL, EN and DE translations. The module uses Venom themes and navigation.
 
-Manual operation does not require chat, voice recognition, an LLM or Rider-PC. R1 provides the common domain for later integrations; compute offload and chat/voice control belong to subsequent increments.
+Manual operation does not require chat, voice recognition, an LLM or Rider-PC.
+
+## R2 — compute and perception
+
+Pi submits versioned, bounded binary jobs to Venom's shared active LLM and
+AudioEngine: text, Whisper STT, Piper WAV TTS and camera **scene description**.
+There is no copied Rider-PC model stack. Ordinary inference results carry no
+actuator fields; explicit conversation commands use the separate R3 tool path.
+
+The Perception tab reads executor selection from Pi and shows installed,
+configured and actually ready models, queues, source age, inference time and
+results. Opening it starts no capture/inference. Use Goals & resources to start
+S12 scene description or S13 conversation; their Pi services work with the UI
+closed. Goal OFF releases its own HTTP/session/media handles without cancelling
+the other goal. STOP and operator ARM use their original independent lane.
+
+Configure each device's compute token on the host (RIDER_COMPUTE_TOKEN, or its
+private compute_token_env reference in RIDER_DEVICES_JSON), and the same token
+in Pi's private rider-compute service env. Never use a public frontend variable.
+Pi's services.compute_config CLI stores the single executor address/configuration;
+the panel selects a configured ID with an optimistic Pi revision. Stop compute
+goals before changing executor. Heartbeats and AI failure cannot change the
+choice or operator ARM. A missing model or overload is an explicit error, never
+a silent simulated/local fallback.
+
+R2 needs the matching Pi compute v1 producer and Venom core exposing the shared
+checked AudioEngine. Without that host speech support, capabilities report
+unavailable. Enable/configure speech in the existing Venom voice/model settings;
+the module does not create a second engine. A Piper voice only supports its
+declared language. Cold model loading is included in inference time.
+
+See [Compute v1](docs/COMPUTE_V1.md) and Pi docs_pl/COMPUTE_VENOM.md for transport,
+limits, source-time semantics, lifecycle, provisioning and emergency CLI. Release
+Pi/module/core together. Isolated demo engines are explicitly simulated; WSL
+inference on synthetic inputs does not constitute physical-device acceptance.
+
+## R3 — optional conversation tools
+
+Enable **Conversation commands** in Perception for the selected robot. The option
+defaults to OFF, is scoped to that host/device session, and does not arm the robot.
+Use the existing Venom chat and voice interface, for example `Rider, status`,
+`Rider, describe scene`, `Rider, say hello`, `Rider, face friendly`, or
+`Rider, forward`. PL, EN and DE have an explicit bounded command vocabulary.
+Authenticated Pi voice also accepts a bare direction/status command; ordinary
+speech continues through the selected Venom model. Ambiguous or compound motion
+requests are refused. AI cannot choose consent, actor, duration or command level.
+
+Typed RiderSkill tools and native conversation dispatch use the same module
+domain/transport. Observation requires an already active camera; face playback
+uses an existing gesture and preserves LCD settings/orientation. Speech uses the
+shared Venom AudioEngine and Pi's single playback owner; capture discards audio
+overlapping playback, including its short drain period.
+
+Movement is one pulse from the current Pi calibration and needs the operator's
+global ARM plus a private `RIDER_AGENT_TOKEN` configured on both host and Pi.
+It remains `source=agent`, `execution_context=agent`, `channel=chat|voice`.
+The intent binds Pi's agent epoch before planning or queueing. Manual takeover,
+option OFF, session/device changes, expiry and cancellation invalidate pending
+work. Agent refusal never disarms or stops newer manual motion. `/rider stop`
+uses the independent STOP lane even while the conversation option is OFF or a
+model/queue is busy. It cannot stop a different authenticated target robot.
+
+See [Conversation tools](docs/CONVERSATION.md) for configuration and contracts.
+R2 + R3 require the matching Pi/core companion changes. Automated acceptance uses
+isolated fixtures; physical motion, audio quality and energy acceptance remain
+separate operator checks.
 
 ## Installation
 
@@ -22,7 +87,7 @@ Use Venom's existing environment and optional-module installation workflow. Keep
 
 Retain other installed entries. Set NEXT_PUBLIC_FEATURE_RIDER=true for the UI and run the host's existing optional-module preparation/generation commands before building. The route is /rider, the API prefix is /api/v1/rider. Backend imports need the module root on PYTHONPATH or the package installed in the host virtualenv. Frontend dependencies come from Venom; no duplicate frontend stack is needed.
 
-The manifest uses module API 1.0 and minimum core 1.5; R1 integration is validated on Venom 1.9. Pi must provide the negotiated HTTP envelope v1 and the versions listed in [docs/API.md](docs/API.md). Posture descriptors are supplied by the companion Pi change; unsupported capabilities are unavailable in the UI.
+The manifest uses module API 1.0 and minimum core runtime 1.5, which differs from Venom's package version (validated on 1.9). R2/R3 also require the matching conversation-provider and shared AudioEngine companion changes. Pi must provide the negotiated HTTP envelope v1 and the versions listed in [docs/API.md](docs/API.md). Posture descriptors are supplied by the companion Pi change; unsupported capabilities are unavailable in the UI.
 
 ## Device configuration
 
