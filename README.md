@@ -12,7 +12,7 @@ Optional Venom extension for operating Rider-Pi as Venom's mobile eyes, ears and
 
 ## Repository status
 
-Phase 0: repository and development preparation. The runtime module, manifest, UI and tests will be delivered together with the first functional increment. This repository is not yet an installable robot application.
+R1 development: the optional router, shared Pi client, demand-driven observations and hardware-free acceptance fixture are implemented locally. The operator UI and complete local acceptance are being integrated. No physical robot operation has been validated by these tests.
 
 Business logic belongs in this repository. Venom core supplies the host and shared services. Local development uses the existing Venom environment; do not install dependencies globally or copy the complete Rider-PC AI stack.
 

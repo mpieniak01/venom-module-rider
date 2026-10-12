@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "module_id": "rider",
+  "display_name": "Rider-Pi",
+  "backend": {
+    "router_import": "venom_module_rider.api.routes:router",
+    "module_api_version": "1.0.0",
+    "min_core_version": "1.5.0",
+    "data_policy": {
+      "storage_mode": "core_prefixed",
+      "mutation_guard": "core_environment_policy",
+      "state_files": []
+    }
+  },
+  "frontend": {
+    "nav_path": "/rider",
+    "feature_flag": "NEXT_PUBLIC_FEATURE_RIDER",
+    "nav_label": "Rider-Pi",
+    "nav_labels": {
+      "pl": "Robot Rider-Pi",
+      "en": "Rider-Pi robot",
+      "de": "Rider-Pi Roboter"
+    },
+    "component_import": "../../../modules/venom-module-rider/web-next/page"
+  }
+}

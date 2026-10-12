@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "venom-module-rider"
+version = "0.1.0"
+description = "Optional Venom module for manual Rider-Pi operation"
+requires-python = ">=3.12"
+dependencies = ["fastapi>=0.115,<1", "httpx>=0.28,<1", "pydantic>=2,<3"]
+
+[project.scripts]
+venom-rider-demo = "venom_module_rider.demo:main"
+
+[tool.setuptools.packages.find]
+include = ["venom_module_rider*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+exclude = ["node_modules", "web-next"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.12"
+check_untyped_defs = true
+ignore_missing_imports = true
+
+[tool.setuptools.package-data]
+venom_module_rider = ["fixtures/*.json"]
