@@ -140,3 +140,13 @@ Views poll only required observations, share cached/deduplicated Pi reads, stop 
 To disable the module, remove its backend manifest entry, set its UI flag to false, regenerate the host module list, and restart/rebuild the host. Pi's emergency panel/CLI remains the hardware path. Removing the module does not erase calibration or profiles on Pi.
 
 For a configured device host, `--enable-audio` enables the shared Venom STT/TTS stack. Audio stays off by default and the isolated demo rejects this option. This does not start Pi media goals or arm the robot.
+
+## Robot-owned motion permission
+
+Rider-Pi's sole UART executor owns operator authorization. Manual commands are
+forwarded without a telemetry GET prerequisite; the robot validates generation,
+sequence, TTL, settings revision and actuator readiness and returns the ACK.
+A missing observation retains the last permission with an explicit warning.
+It never converts ARM to DISARMED or replays a failed gesture. Execution inhibition
+and connectivity are shown separately. Tests require independent permission and
+chat/voice cannot arm the robot. Deploy the Pi authority change before this client.

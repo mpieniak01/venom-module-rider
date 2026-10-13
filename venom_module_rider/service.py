@@ -211,41 +211,25 @@ class RiderService:
     async def validate_intent(
         self, body, session, *, source="manual", require_ready=True
     ):
-        control = await self.read("/api/control/state", 0.8)
         self.check_session(session)
-        safety = control["data"].get("safety") or {}
-        generation = safety.get("generation")
-        if not generation or body.get("generation") != generation:
+        # This gateway verifies request shape/session, never synthesizes ARM
+        # from a status GET. The Pi executor owns all motion admission decisions.
+        generation = body.get("generation")
+        ts, ttl, seq = (body.get(key) for key in ("ts", "ttl_ms", "seq"))
+        if not isinstance(generation, str) or not generation:
             raise RiderError("stale_generation")
         if (
-            safety.get("stale") is True
-            or require_ready
-            and safety.get("ready") is not True
-        ):
-            raise RiderError("motion_not_ready")
-        cache_time = self.cache["/api/control/state"][0]
-        server_now = (
-            control["meta"].get("server_time", 0) + time.monotonic() - cache_time
-        )
-        ts = body.get("ts")
-        ttl = body.get("ttl_ms")
-        if (
-            not isinstance(ts, (int, float))
-            or isinstance(ts, bool)
+            type(ts) not in (int, float)
             or not math.isfinite(ts)
             or type(ttl) is not int
             or not 1 <= ttl <= 500
-            or (server_now - ts) * 1000 > ttl
-            or ts > server_now + 0.1
         ):
             raise RiderError("expired_command")
-        seq = body.get("seq")
-        floor = max(safety.get("last_seq", -1), self.sequences.get(generation, -1))
-        if type(seq) is not int or not floor < seq < 2**63:
+        if type(seq) is not int or not 0 <= seq < 2**63:
             raise RiderError("stale_sequence")
         if body.get("source") != source or body.get("execution_context") != "panel":
             raise RiderError("manual_panel_only")
-        return safety
+        return {"generation": generation}
 
     def cancel_pending_motion(self):
         """Shared STOP boundary for manual and conversation actuator requests."""
@@ -274,17 +258,6 @@ class RiderService:
                 raise RiderError("command_superseded")
             generation = safety["generation"]
             seq = body["seq"]
-            if action in {"move", "height", "balance"}:
-                if (
-                    safety.get("can_move") is not True
-                    or safety.get("panel_motion_enabled") is not True
-                    or safety.get("owner") != "manual"
-                ):
-                    raise RiderError("motion_not_armed")
-                if body.get("settings_revision") != (
-                    safety.get("manual_settings") or {}
-                ).get("revision"):
-                    raise RiderError("manual_settings_stale")
             self.sequences[generation] = seq
         path = (
             "/api/safety"
@@ -355,7 +328,11 @@ class RiderService:
             raise RiderError("unknown_goal", 404)
         if feature.get("can_move") is True and body.get("enabled") is True:
             owner = feature.get("control_owner") or feature.get("motion_owner")
-            safety = await self.validate_intent(body, session, source=owner)
+            await self.validate_intent(body, session, source=owner)
+            safety = (
+                self.data(await self.read("/api/control/state", 0.8)).get("safety")
+                or {}
+            )
             if safety.get("owner") != owner or safety.get("can_move") is not True:
                 raise RiderError("operator_motion_permission_required")
             self.sequences[safety["generation"]] = body["seq"]

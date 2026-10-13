@@ -31,7 +31,7 @@ export function ManualPad({ client, t, language, compact = false }: { client: Ri
       </button>)}
       <div className={styles.padCenter} style={{ gridRow: 2, gridColumn: 2 }}><Shield size={27} /></div>
     </div>
-    <div className={styles.padStatus}><Pill tone={safety.state === "ARMED" ? "good" : "warning"}>{t(safety.state === "ARMED" ? "armed" : safety.state === "ESTOP" ? "estop" : safety.state === "DISARMED" ? "disarmed" : "unknown")}</Pill>{client.activeDirection && <Pill tone="good">{t("held")} · {t(client.activeDirection)}</Pill>}</div>
+    <div className={styles.padStatus}><Pill tone={safety.state === "ARMED" ? "good" : "warning"}>{t(safety.state === "ARMED" ? "armed" : safety.state === "ESTOP" ? "estop" : safety.state === "DISARMED" ? "disarmed" : "unknown")}</Pill>{(client.status?.errors.control || safety.stale === true) && <Pill tone="warning">{t("lastPermission")}</Pill>}{!!record(safety.execution).inhibit && <Pill tone="warning">{t("executionPaused")}</Pill>}{client.activeDirection && <Pill tone="good">{t("held")} · {t(client.activeDirection)}</Pill>}</div>
     <div className={`${styles.flex} ${styles.space}`} style={{ marginTop: 15 }}><span className={styles.small}>{t("owner")}: {typeof safety.owner === "string" ? safety.owner : "—"}</span><Button onClick={() => client.hold.release()} disabled={!client.activeDirection}><CirclePause size={15} />{t("release")}</Button></div>
   </div>;
 }

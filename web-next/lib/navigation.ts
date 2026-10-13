@@ -21,9 +21,11 @@ export function retainControl(previous: RiderStatus | null, next: RiderStatus): 
   const oldTime = timestampMs(data(previous.control).server_time);
   const newTime = timestampMs(data(next.control).server_time);
   const older = oldTime !== null && newTime !== null && newTime < oldTime;
-  const control = next.control === null || older ? previous.control : next.control;
+  const missingPermission = !["ARMED", "DISARMED", "ESTOP"].includes(str(safetyOf(next).state));
+  const control = next.control === null || missingPermission || older ? previous.control : next.control;
   const settings = next.settings === null || older ? previous.settings : next.settings;
-  return { ...next, control, settings };
+  const errors = missingPermission ? { ...next.errors, control: "executor_observation_unavailable" } : next.errors;
+  return { ...next, control, settings, errors };
 }
 export function observationClock(previous: ControlClock | null, next: RiderStatus, started: number, received: number): ControlClock | null {
   const server = timestampMs(data(next.control).server_time);

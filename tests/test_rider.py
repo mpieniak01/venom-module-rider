@@ -338,7 +338,12 @@ async def test_invalid_envelope_does_not_reach_actuator(field, value, code):
     await service.select("demo", service.session)
     with pytest.raises(RiderError, match=code):
         await service.control(command(pi, "arm", **{field: value}), service.session)
-    assert not any(row["method"] == "POST" for row in pi.trace)
+    # Shape errors stop at the gateway; valid-shaped stale requests are
+    # forwarded and rejected by the simulated robot authority.
+    assert any(row["method"] == "POST" for row in pi.trace) == (
+        field in {"generation", "ts"}
+    )
+    assert pi.state == "DISARMED"
     await service.close()
 
 
@@ -401,8 +406,8 @@ async def test_offline_and_stale_state_do_not_enable_motion():
     pi.offline = False
     pi.stale = True
     assert (await service.status("control"))["control"]["safety"]["stale"]
-    with pytest.raises(RiderError, match="motion_not_ready"):
-        await arm(service, pi)
+    await arm(service, pi)
+    assert pi.state == "ARMED"  # Telemetry staleness does not revoke operator consent.
     await service.close()
 
 
@@ -951,3 +956,18 @@ async def test_navigation_snapshot_skips_diagnostics_and_refreshes_settings():
         assert paths.count("/api/calibration/controls") == 2
     finally:
         await service.close()
+
+
+async def test_manual_intent_has_no_telemetry_get_dependency():
+    service, pi = domain()
+    await service.select("demo", service.session)
+    await arm(service, pi)
+    pi.stale = True
+    before = len(pi.trace)
+    result = await service.control(
+        command(pi, "move", direction="forward", device_settings=True), service.session
+    )
+    assert result["data"]["confirmed"]
+    assert [row["method"] for row in pi.trace[before:]] == ["POST"]
+    assert pi.state == "ARMED"
+    await service.close()

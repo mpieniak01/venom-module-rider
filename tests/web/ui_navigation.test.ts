@@ -67,3 +67,13 @@ test("Pi heartbeat freshness is authoritative instead of an invented browser hea
   safety.stale = true;
   assert.equal(freshControl(current, { at: 10000, offset: 0, rtt: 20 }, 10020, 500), false);
 });
+
+
+test("unknown observation retains ARM with an explicit observation error", () => {
+  const previous = state();
+  const next = state(); next.control = { server_time: 11, safety: { state: "UNKNOWN", stale: true } };
+  const retained = retainControl(previous, next);
+  assert.equal(navigationAvailable(retained), true);
+  assert.equal(retained.errors.control, "executor_observation_unavailable");
+  assert.equal(retained.control, previous.control);
+});

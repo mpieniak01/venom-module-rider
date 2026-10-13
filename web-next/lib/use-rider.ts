@@ -40,10 +40,7 @@ export function useRider(section: Section) {
   const isConnected = useCallback(() => ["online", "degraded"].includes(statusRef.current?.connection.status ?? ""), []);
   const hasFreshControl = useCallback(() => freshControl(statusRef.current, clockRef.current, Date.now(), statusRef.current?.polling[`${sectionRef.current}_ms`] ?? 0), []);
   const canNavigate = useCallback(() => motionBlocked.current === 0 && navigationAvailable(statusRef.current), []);
-  const movementReady = useCallback(() => {
-    const safety = safetyOf(statusRef.current);
-    return motionBlocked.current === 0 && isConnected() && hasFreshControl() && safety.state === "ARMED" && safety.owner === "manual" && safety.ready === true && safety.can_move === true && safety.panel_motion_enabled === true && record(record(safety.capabilities).move).available === true && !!str(safety.generation) && Number.isInteger(settingsOf(statusRef.current).revision);
-  }, [hasFreshControl, isConnected]);
+  const movementReady = canNavigate;
   const [hold] = useState(() => new HoldController({
     timing: () => readHoldTiming(settingsOf(statusRef.current).control_modes),
     canMove: canNavigate,
@@ -116,7 +113,6 @@ export function useRider(section: Section) {
         }
       } catch (error) {
         if (abort.signal.aborted) return;
-        clockRef.current = null;
         const previous = statusRef.current;
         if (previous) { const offline = { ...previous, connection: { ...previous.connection, status: "offline" as const } }; statusRef.current = offline; setStatus(offline); }
         replaceFrame("camera", null); replaceFrame("face", null);
@@ -140,7 +136,8 @@ export function useRider(section: Section) {
   const makeEnvelope = useCallback((body: JsonRecord, source = "manual"): JsonRecord => {
     const action = str(body.action);
     const stopping = action === "stop" || action === "disarm";
-    if (!stopping && (!isConnected() || !hasFreshControl())) throw Object.assign(new Error("stale_control"), { data: { error: "stale_control" } });
+    const manualIntent = ["move", "height", "balance", "arm", "clear_estop"].includes(action);
+    if (!stopping && (manualIntent ? !clockRef.current || !str(safetyOf(statusRef.current).generation) : !isConnected() || !hasFreshControl())) throw Object.assign(new Error("stale_control"), { data: { error: "stale_control" } });
     const current = statusRef.current;
     const safety = safetyOf(current);
     const settings = settingsOf(current);
@@ -158,7 +155,8 @@ export function useRider(section: Section) {
     const stopping = ["stop", "disarm"].includes(str(body.action));
     const origin = controlIdentity(statusRef.current);
     const revision = settingsOf(statusRef.current).revision;
-    if (!stopping && !hasFreshControl()) await poll("control", true);
+    const manualIntent = ["move", "height", "balance", "arm", "clear_estop"].includes(str(body.action));
+    if (!stopping && !manualIntent && !hasFreshControl()) await poll("control", true);
     // Never send an old press after STOP, replacement, device or generation change.
     if (!current()) return {};
     if (!stopping && (origin !== controlIdentity(statusRef.current) || revision !== settingsOf(statusRef.current).revision)) throw Object.assign(new Error("stale_control"), { data: { error: "stale_control" } });
@@ -173,7 +171,7 @@ export function useRider(section: Section) {
     const safetyAction = ["arm", "clear_estop", "stop", "disarm"].includes(key);
     if (safetyAction) motionBlocked.current += 1;
     setBusy(key);
-    try { if (key === "arm" || key === "clear_estop") await poll("control", true); await sendControl(body); if (key !== "move") await poll(); }
+    try { if ((key === "arm" || key === "clear_estop") && !clockRef.current) await poll("control", true); await sendControl(body); if (key !== "move") await poll(); }
     catch (error) { hold.cancel(); setNotice({ key: errorCode(error).includes("stale") ? "staleControl" : "requestFailed", code: errorCode(error), tone: "error" }); }
     finally { if (safetyAction) motionBlocked.current = Math.max(0, motionBlocked.current - 1); setBusy(null); }
   }, [hold, poll, sendControl]);
