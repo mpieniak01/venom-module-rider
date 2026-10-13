@@ -40,6 +40,16 @@ def targets(device_file, device_id, pi_port):
     return ([asdict(device) for device in devices], device_id or "", False)
 
 
+def resolve_runtime_profile(demo_only, requested_profile=None):
+    if requested_profile not in {None, "full", "light", "llm_off"}:
+        raise ValueError("Unsupported runtime profile.")
+    if demo_only:
+        if requested_profile not in {None, "llm_off"}:
+            raise ValueError("The isolated demo requires the llm_off runtime profile.")
+        return "llm_off"
+    return requested_profile or "full"
+
+
 def free_port(port):
     with socket.socket() as connection:
         connection.settimeout(0.2)
@@ -59,10 +69,19 @@ def main():
         help="Explicit private JSON device allowlist; omits the fixture",
     )
     parser.add_argument("--device-id", help="Optional default device ID; never arms")
+    parser.add_argument(
+        "--runtime-profile",
+        choices=("full", "light", "llm_off"),
+        help="Runtime profile: device host defaults to full; demo uses llm_off",
+    )
     args = parser.parse_args()
     devices, default_device, demo_only = targets(
         args.device_file, args.device_id, args.pi_port
     )
+    try:
+        runtime_profile = resolve_runtime_profile(demo_only, args.runtime_profile)
+    except ValueError as exc:
+        parser.error(str(exc))
     core = args.core_root.resolve()
     python = core / ".venv/bin/python"
     web = core / "web-next"
@@ -107,7 +126,7 @@ def main():
         )
     }
     flags.update(
-        VENOM_RUNTIME_PROFILE="llm_off",
+        VENOM_RUNTIME_PROFILE=runtime_profile,
         ENVIRONMENT_ROLE="dev",
         STORAGE_PREFIX="rider-dev",
         CACHE_NAMESPACE="rider-dev",

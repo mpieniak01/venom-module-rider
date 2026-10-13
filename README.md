@@ -116,7 +116,7 @@ Use a private device allowlist JSON under ignored config/local/. Pass it explici
 
     make demo ARGS="--device-file config/local/devices.json --device-id robot"
 
-Alternatively invoke scripts/run_demo.py with those arguments. Without the file flag the launcher always starts the isolated fixture, even if a real device exists in the inherited environment. File mode starts only the Venom API/UI, preserves the hardware authority on Pi, and never automatically arms or starts a resource. It is an operator panel, not an automated physical-motion test runner.
+Alternatively invoke scripts/run_demo.py with those arguments. Without the file flag the launcher always starts the isolated fixture, even if a real device exists in the inherited environment. File mode starts only the Venom API/UI, preserves the hardware authority on Pi, and never automatically arms or starts a resource. It is an operator panel, not an automated physical-motion test runner. The configured-device host defaults to the `full` LLM runtime profile so the Venom cockpit can select installed models. Use `--runtime-profile light` or `--runtime-profile llm_off` explicitly to restrict the host. The isolated fixture always remains `llm_off`; model warmup and background optional services remain disabled by this launcher.
 
 Service and resource operations have a separate bounded response timeout. Motion
 and STOP retain their fast transport path. `pi_operation_timeout` means the result

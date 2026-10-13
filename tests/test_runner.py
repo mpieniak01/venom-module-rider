@@ -45,3 +45,27 @@ def test_live_requires_explicit_validated_file(tmp_path, monkeypatch):
     monkeypatch.setenv("RIDER_DEMO_ONLY", "true")
     with pytest.raises(Exception, match="invalid_device_configuration"):
         runner.targets(path, "robot", 18880)
+
+
+@pytest.mark.parametrize("profile", [None, "llm_off"])
+def test_isolated_demo_keeps_llm_disabled(profile):
+    assert runner.resolve_runtime_profile(True, profile) == "llm_off"
+
+
+@pytest.mark.parametrize("profile", ["full", "light"])
+def test_isolated_demo_rejects_llm_runtime_override(profile):
+    with pytest.raises(ValueError, match="isolated demo requires"):
+        runner.resolve_runtime_profile(True, profile)
+
+
+@pytest.mark.parametrize(
+    "requested,expected",
+    [(None, "full"), ("full", "full"), ("light", "light"), ("llm_off", "llm_off")],
+)
+def test_configured_host_uses_operator_runtime_profile(requested, expected):
+    assert runner.resolve_runtime_profile(False, requested) == expected
+
+
+def test_invalid_runtime_profile_is_rejected():
+    with pytest.raises(ValueError, match="Unsupported runtime profile"):
+        runner.resolve_runtime_profile(False, "unknown")
