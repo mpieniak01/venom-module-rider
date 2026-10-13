@@ -21,6 +21,7 @@ POLLING = {
     "resources_ms": 5000,
     "face_ms": 5000,
     "compute_ms": 5000,
+    "vision_ms": 500,
 }
 READS = {
     "telemetry": ("/state", 2.0),
@@ -34,6 +35,7 @@ READS = {
 }
 SECTIONS = {
     "navigation": ("control", "settings"),
+    "vision": ("control", "settings", "health", "telemetry", "catalog", "logic"),
     "overview": ("control", "settings", "telemetry", "health", "system"),
     "control": ("control", "settings", "telemetry", "health", "history"),
     "calibration": ("control", "settings", "history"),

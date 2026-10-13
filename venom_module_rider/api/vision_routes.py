@@ -46,6 +46,7 @@ async def configuration(request: Request):
             raise RiderError("navigation_api_unavailable", 503) from exc
         raise
     state = await domain.read("/api/navigation/status", 0.2, force=True)
+    goals = await loop_goals(domain)
     catalog = await domain.read("/api/logic/catalog", 1.0, force=True)
     features = catalog["data"].get("features")
     rows = features if isinstance(features, list) else []
@@ -76,6 +77,7 @@ async def configuration(request: Request):
             "known": isinstance(features, list),
             "drive_reason": drive_row.get("start_unavailable_reason"),
         },
+        "goals": goals,
         "status": state["data"],
         "config": config["data"],
         "detector": request.app.state.rider_vision.status(),
@@ -96,6 +98,32 @@ async def navigation_state(request: Request):
         "/api/navigation/status", 0.2, force=True
     )
     return {
+        "goals": await loop_goals(request.app.state.rider),
         "status": state["data"],
         "detector": request.app.state.rider_vision.status(),
     }
+
+
+async def loop_goals(domain):
+    response = await domain.read("/api/logic/state", 0.2, force=True)
+    state = response["data"]
+    state = state.get("state", state)
+    features = state.get("features", {}) if isinstance(state, dict) else {}
+    if isinstance(features, list):
+        rows = {row.get("name"): row for row in features if isinstance(row, dict)}
+    elif isinstance(features, dict):
+        rows = features
+    else:
+        return {}
+    result = {}
+    for mode, name in (
+        ("observe", "s15_venom_perception"),
+        ("drive", "s14_venom_navigation"),
+    ):
+        row = rows.get(name)
+        if not isinstance(row, dict) or row.get("stale") is True:
+            continue
+        requested = row.get("requested", row.get("enabled"))
+        if isinstance(requested, bool):
+            result[mode] = requested
+    return result

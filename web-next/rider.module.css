@@ -99,3 +99,15 @@
 @container rider (max-width: 960px) { .faceGrid { grid-template-columns: minmax(0, 1fr); } .gestureList { max-height: 180px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @container rider (max-width: 720px) { .grid { grid-template-columns: minmax(0, 1fr); } .grid3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .track { grid-template-columns: repeat(2, minmax(55px, 1fr)); } }
 @container rider (max-width: 420px) { .header { padding: 12px; } .brand, .toolbar { flex-basis: 100%; } .grid3 { grid-template-columns: minmax(0, 1fr); } .gestureList { grid-template-columns: repeat(2, minmax(0, 1fr)); } .panel { padding: 14px; } .pad { grid-template-columns: repeat(3, minmax(0, 80px)); gap: 8px; } .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .metric { padding: 12px; } .metricValue { font-size: 24px; } }
+
+.loopStatus { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; font-size: 13px; }
+.loopActions { display: flex; flex-wrap: wrap; gap: 12px; margin: 16px 0; }
+.loopActions .button { min-height: 46px; padding: 10px 18px; }
+.loopError { padding: 12px; border: 1px solid var(--tone-danger-border); border-radius: 10px; color: var(--tone-danger-text); background: var(--tone-danger-bg); font-size: 13px; overflow-wrap: anywhere; }
+
+.loopWorkspace { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: 20px; align-items: start; }
+.loopWorkspace > div { min-width: 0; }
+.cameraEmbedded { border: 0; border-radius: 0; padding: 0; background: transparent; }
+.cameraEmbedded .camera { min-height: 180px; max-height: 440px; aspect-ratio: 4/3; }
+.cameraEmbedded .panelTitle { font-size: 14px; }
+@container rider (max-width: 820px) { .loopWorkspace { grid-template-columns: minmax(0, 1fr); gap: 10px; } .cameraEmbedded .camera { max-height: 320px; } }

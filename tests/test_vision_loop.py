@@ -353,8 +353,9 @@ async def test_navigation_config_proxies_selected_pi():
     assert (await configure(request))["data"]["revision"] == 2
     assert calls[0] == ("read", "/api/navigation/config", True)
     assert calls[1] == ("read", "/api/navigation/status", True)
-    assert calls[2] == ("read", "/api/logic/catalog", True)
-    assert calls[3][1] == "/api/navigation/config"
+    assert calls[2] == ("read", "/api/logic/state", True)
+    assert calls[3] == ("read", "/api/logic/catalog", True)
+    assert calls[4][1] == "/api/navigation/config"
 
 
 async def test_navigation_configuration_reports_runtime_readiness():
@@ -418,3 +419,48 @@ async def test_old_pi_configuration_returns_specific_error():
     assert (
         error.value.code == "navigation_api_unavailable" and error.value.status == 503
     )
+
+
+@pytest.mark.parametrize(
+    "features",
+    [
+        {
+            "s15_venom_perception": {"enabled": True},
+            "s14_venom_navigation": {"enabled": False},
+        },
+        [
+            {"name": "s15_venom_perception", "requested": True},
+            {"name": "s14_venom_navigation", "requested": False},
+        ],
+    ],
+)
+async def test_loop_state_handles_real_pi_rows_and_fixture_map(features):
+    from venom_module_rider.api.vision_routes import loop_goals
+
+    class Domain:
+        async def read(self, *args, **kwargs):
+            return {"data": {"state": {"features": features}}}
+
+    assert await loop_goals(Domain()) == {"observe": True, "drive": False}
+
+
+async def test_stale_or_missing_goal_observation_is_never_a_confirmed_stop():
+    from venom_module_rider.api.vision_routes import loop_goals
+
+    class Domain:
+        async def read(self, *args, **kwargs):
+            return {
+                "data": {
+                    "state": {
+                        "features": [
+                            {
+                                "name": "s15_venom_perception",
+                                "requested": False,
+                                "stale": True,
+                            }
+                        ]
+                    }
+                }
+            }
+
+    assert await loop_goals(Domain()) == {}

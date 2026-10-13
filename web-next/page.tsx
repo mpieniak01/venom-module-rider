@@ -13,10 +13,11 @@ import { FaceStudio } from "./components/face";
 import { Measurements, RequestHistory, SensorMetrics } from "./components/measurements";
 import { Button, Empty, Panel, Pill } from "./components/primitives";
 import { Resources } from "./components/resources";
+import { NavigationLoop } from "./components/navigation-loop";
 import { Compute } from "./components/compute";
 import styles from "./rider.module.css";
 
-const tabs = [{ id: "control", Icon: Bot }, { id: "overview", Icon: Activity }, { id: "calibration", Icon: SlidersHorizontal }, { id: "resources", Icon: Boxes }, { id: "face", Icon: Smile }, { id: "compute", Icon: BrainCircuit }] as const;
+const tabs = [{ id: "control", Icon: Bot }, { id: "vision", Icon: BrainCircuit }, { id: "overview", Icon: Activity }, { id: "calibration", Icon: SlidersHorizontal }, { id: "resources", Icon: Boxes }, { id: "face", Icon: Smile }, { id: "compute", Icon: BrainCircuit }] as const;
 export default function RiderPage() {
   const { language } = useLanguage();
   const { theme } = useTheme();
@@ -52,6 +53,7 @@ export default function RiderPage() {
     <div id={`rider-panel-${section}`} role="tabpanel" aria-labelledby={`rider-tab-${section}`}>
       {client.loading && !client.status ? <Panel title={t("device")}><Empty>{t("loading")}</Empty></Panel> : !connection?.configured ? <Panel title={t("device")}><Empty><Bot size={40} />{t("unconfigured")}</Empty></Panel> : <>
         {section === "control" && <div className={styles.stack}><div className={styles.grid}><div className={styles.stack}><Panel title={t("manual")} hint={t("armHint")}><ManualPad client={client} t={t} language={language} /></Panel><Posture client={client} t={t} language={language} /></div><div className={styles.stack}><CameraPanel client={client} t={t} language={language} /><Panel title={t("measurements")} hint={t("measurementsHint")}><SensorMetrics status={client.status} t={t} language={language} /></Panel></div></div><RequestHistory status={client.status} t={t} language={language} /></div>}
+        {section === "vision" && <NavigationLoop key={connection.session} client={client} t={t} language={language} preview={<CameraPanel client={client} t={t} language={language} compact/>}/>}
         {section === "overview" && <Measurements status={client.status} t={t} language={language} />}
         {section === "calibration" && <Calibration key={connection.session} client={client} t={t} language={language} />}
         {section === "resources" && <Resources key={connection.session} client={client} t={t} language={language} />}

@@ -108,7 +108,7 @@ export function useRider(section: Section) {
         if (finite(last)) seqRef.current = Math.max(seqRef.current, last);
         if (configRef.current !== nextConfig) { configRef.current = nextConfig; setConfig(nextConfig); }
         if (!fast && requestedSection === sectionRef.current && ["online", "degraded"].includes(next.connection.status)) {
-          if (requestedSection === "control" && mediaRef.current.camera) {
+          if (["control", "vision"].includes(requestedSection) && mediaRef.current.camera) {
             if (cameraOn(next)) await fetchFrame(`/camera/${mediaRef.current.camera}`, abort.signal, "camera");
             else replaceFrame("camera", null);
           }
@@ -181,7 +181,7 @@ export function useRider(section: Section) {
     catch (error) { hold.cancel(); setNotice({ key: errorCode(error).includes("stale") ? "staleControl" : "requestFailed", code: errorCode(error), tone: "error" }); }
     finally { if (safetyAction) motionBlocked.current = Math.max(0, motionBlocked.current - 1); setBusy(null); }
   }, [hold, poll, sendControl]);
-  const runMutation = useCallback(async (path: string, body: JsonRecord = {}, method = "POST") => {
+  const runMutation = useCallback(async (path: string, body: JsonRecord = {}, method = "POST", throwOnError = false) => {
     setBusy(path);
     try {
       let request = body;
@@ -193,9 +193,9 @@ export function useRider(section: Section) {
           request = makeEnvelope(body, str(safetyOf(statusRef.current).owner));
         }
       }
-      const result = await mutation(path, request, method); await poll(); return result;
+      const result = await mutation(path, request, method, throwOnError); await poll(); return result;
     }
-    catch (error) { const code = errorCode(error); setNotice({ key: code === "pi_operation_timeout" ? "operationUnconfirmed" : "requestFailed", code, tone: "error" }); if (code === "pi_operation_timeout") await poll(); return null; }
+    catch (error) { const code = errorCode(error); setNotice({ key: code === "pi_operation_timeout" ? "operationUnconfirmed" : "requestFailed", code, tone: "error" }); if (code === "pi_operation_timeout") await poll(); if (throwOnError) throw error; return null; }
     finally { setBusy(null); }
   }, [makeEnvelope, mutation, poll]);
   const selectDevice = useCallback(async (device_id: string | null) => {
@@ -214,7 +214,7 @@ export function useRider(section: Section) {
   useEffect(() => {
     sectionRef.current = section; mediaRef.current = { camera: cameraStream, face: showRuntimeFrame };
     hold.release();
-    if (section !== "control" || !cameraStream) replaceFrame("camera", null);
+    if (!["control", "vision"].includes(section) || !cameraStream) replaceFrame("camera", null);
     if (section !== "face" || !showRuntimeFrame) replaceFrame("face", null);
     let alive = true; let timer: ReturnType<typeof setTimeout> | null = null;
     const tick = async () => {
