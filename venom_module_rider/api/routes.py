@@ -17,7 +17,7 @@ from ..compute import ComputeService
 from ..config import IDENTIFIER, configured_devices
 from ..errors import RiderError
 from ..service import RESOURCE_NAMES, RiderService
-from . import compute_routes, conversation_routes
+from . import compute_routes, conversation_routes, vision_routes
 from .routing import RiderRoute
 from .schemas import Command, GoalAction, ResourceAction, Selection, SettingsPatch
 
@@ -42,6 +42,9 @@ async def lifespan(app):
         engines = DemoEngines(app)
     compute = getattr(app.state, "rider_compute", None) or ComputeService(engines)
     app.state.rider_compute = compute
+    from ..vision_loop import VisionLoop
+
+    app.state.rider_vision = VisionLoop()
     default = os.getenv("RIDER_DEFAULT_DEVICE")
     if default and existing is None:
         await service.select(default, service.session)
@@ -51,6 +54,7 @@ async def lifespan(app):
         provider = getattr(app.state, "rider_conversation", None)
         if provider:
             await provider.close()
+        await app.state.rider_vision.close()
         await compute.close()
         await service.close()
 
@@ -126,6 +130,7 @@ router = APIRouter(
 )
 router.include_router(compute_routes.router)
 router.include_router(conversation_routes.router)
+router.include_router(vision_routes.router)
 Session = Annotated[str | None, Header(alias="X-Rider-Session")]
 
 

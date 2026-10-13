@@ -45,6 +45,7 @@ def expected_contract(path: str):
         "/api/logic/catalog": ("rider.catalog", 2),
         "/api/logic/state": ("rider.tasks", 2),
         "/api/services/graph": ("rider.service_graph", 2),
+        "/api/navigation/config": ("rider.navigation_loop", 1),
         "/api/compute/config": ("rider.compute", 1),
         "/api/compute/status": ("rider.compute", 1),
     }

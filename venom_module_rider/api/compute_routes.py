@@ -16,7 +16,7 @@ from ..errors import RiderError
 from .routing import RiderRoute
 
 router = APIRouter(route_class=RiderRoute)
-DEVICE_PATHS = {"capabilities", "sessions", "jobs"}
+DEVICE_PATHS = {"capabilities", "sessions", "jobs", "vision"}
 
 
 def device_path(path: str):
