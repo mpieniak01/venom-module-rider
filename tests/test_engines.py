@@ -615,10 +615,12 @@ def install_vision_transport(monkeypatch, content, received):
 
 
 @pytest.mark.parametrize("format", ["JPEG", "PNG"])
+@pytest.mark.parametrize("provider", ["ollama", "vllm"])
 async def test_vision_uses_active_runtime_and_bounded_scene_contract(
-    adapter, monkeypatch, format
+    adapter, monkeypatch, format, provider
 ):
-    engine, _, _ = adapter
+    engine, _, runtime = adapter
+    runtime.provider = provider
     received = []
     install_vision_transport(
         monkeypatch,
@@ -632,7 +634,10 @@ async def test_vision_uses_active_runtime_and_bounded_scene_contract(
     assert not result.quality["navigation_clearance"]
     assert result.quality["purpose"] == "scene_description"
     request = received[1]
-    assert request["provider_name"] == "ollama"
+    assert request["provider_name"] == provider
+    assert request["payload"].get("reasoning_effort") == (
+        "none" if provider == "ollama" else None
+    )
     assert request["payload"]["model"] == "scene-model"
     assert "tools" not in request["payload"]
     assert request["payload"]["messages"][0]["content"][1]["image_url"][

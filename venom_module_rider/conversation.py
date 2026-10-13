@@ -399,17 +399,15 @@ class RiderConversation:
                 f"{message('battery', context.language)}: {reading}"
             )
         elif call.name == "stop":
-            domain.cancel_pending_motion()
-            result = await domain.transport().json(
-                "/api/stop",
-                method="POST",
-                body={
+            result = await domain.control(
+                {
+                    "action": "stop",
                     "source": "agent",
                     "execution_context": "agent",
                     "channel": context.actor,
                     "request_id": uuid.uuid4().hex,
                 },
-                stop=True,
+                scope.session,
             )
             reply = message("stop", context.language)
         elif call.name == "move":
