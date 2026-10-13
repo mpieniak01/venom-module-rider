@@ -20,13 +20,13 @@ export function ManualPad({ client, t, language, compact = false }: { client: Ri
   const schema = record(record(settings.parameter_schema).direction_fields);
   const speedDescriptor = record(schema.speed) as NumericDescriptor;
   const pointerDown = (direction: Direction, event: React.PointerEvent<HTMLButtonElement>) => {
-    if (!client.canMove || event.button !== 0) return;
+    if (!client.canNavigate || event.button !== 0) return;
     event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); client.hold.start(direction, event.pointerId);
   };
   return <div>
     {!compact && <p className={styles.hint}>{t("manualHint")}</p>}
     <div className={styles.pad}>
-      {arrows.map(({ direction, row, column, Icon }) => <button type="button" key={direction} aria-label={t(direction)} disabled={!client.canMove} data-testid={`rider-${direction}`} className={`${styles.arrow} ${client.activeDirection === direction ? styles.arrowActive : ""}`} style={{ gridRow: row, gridColumn: column }} onPointerDown={event => pointerDown(direction, event)} onPointerUp={event => client.hold.end(event.pointerId)} onPointerCancel={event => client.hold.release(event.pointerId)} onLostPointerCapture={event => client.hold.release(event.pointerId)} onClick={event => { if (event.detail === 0 && client.canMove && !client.activeDirection) { client.hold.start(direction, -2); client.hold.end(-2); } }} onKeyDown={event => { if (["Enter", " "].includes(event.key) && !event.repeat) { event.preventDefault(); client.hold.start(direction, -1); } }} onKeyUp={event => { if (["Enter", " "].includes(event.key)) { event.preventDefault(); client.hold.end(-1); } }} onBlur={() => client.hold.release()}>
+      {arrows.map(({ direction, row, column, Icon }) => <button type="button" key={direction} aria-label={t(direction)} disabled={!client.canNavigate} data-testid={`rider-${direction}`} className={`${styles.arrow} ${client.activeDirection === direction ? styles.arrowActive : ""}`} style={{ gridRow: row, gridColumn: column }} onPointerDown={event => pointerDown(direction, event)} onPointerUp={event => client.hold.end(event.pointerId)} onPointerCancel={event => client.hold.release(event.pointerId)} onLostPointerCapture={event => client.hold.release(event.pointerId)} onClick={event => { if (event.detail === 0 && client.canNavigate && !client.activeDirection) { client.hold.start(direction, -2); client.hold.end(-2); } }} onKeyDown={event => { if (["Enter", " "].includes(event.key) && !event.repeat) { event.preventDefault(); client.hold.start(direction, -1); } }} onKeyUp={event => { if (["Enter", " "].includes(event.key)) { event.preventDefault(); client.hold.end(-1); } }} onBlur={() => client.hold.release()}>
         <Icon size={25} /><span>{t(direction)}</span><span className={styles.small}>{displayValue(record(directions[direction]).speed, speedDescriptor, language)} {speedDescriptor.display_unit ?? ""}</span>
       </button>)}
       <div className={styles.padCenter} style={{ gridRow: 2, gridColumn: 2 }}><Shield size={27} /></div>

@@ -925,3 +925,29 @@ async def test_every_view_has_pi_settings_needed_for_global_arm():
         assert status["settings"]["control_modes"]["version"] == 1
     assert sum(row["path"] == "/api/calibration/controls" for row in pi.trace) == 1
     await service.close()
+
+
+@pytest.mark.asyncio
+async def test_navigation_snapshot_skips_diagnostics_and_refreshes_settings():
+    service, pi = domain()
+    await service.select("demo", service.session)
+    original = service.client.json
+    paths = []
+
+    async def read(path, **kwargs):
+        paths.append(path)
+        assert path in {"/api/control/state", "/api/calibration/controls"}
+        return await original(path, **kwargs)
+
+    service.client.json = read
+    try:
+        first = await service.status("navigation")
+        pi.controls["revision"] += 1
+        second = await service.status("navigation")
+        assert first["connection"]["status"] == "online"
+        assert second["settings"]["revision"] == pi.controls["revision"]
+        assert second["telemetry"] is None and second["history"] is None
+        assert paths.count("/api/control/state") == 2
+        assert paths.count("/api/calibration/controls") == 2
+    finally:
+        await service.close()

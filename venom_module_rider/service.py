@@ -33,6 +33,7 @@ READS = {
     "history": ("/api/motion/queue", 2.0),
 }
 SECTIONS = {
+    "navigation": ("control", "settings"),
     "overview": ("control", "settings", "telemetry", "health", "system"),
     "control": ("control", "settings", "telemetry", "health", "history"),
     "calibration": ("control", "settings", "history"),
@@ -162,7 +163,11 @@ class RiderService:
         session = self.session
         keys = SECTIONS[section]
         calls = [
-            self.read(READS[key][0], READS[key][1], force=key == "control")
+            self.read(
+                READS[key][0],
+                READS[key][1],
+                force=key == "control" or section == "navigation",
+            )
             for key in keys
         ]
         resource_keys = RESOURCE_NAMES if section == "resources" else ()
