@@ -1,9 +1,10 @@
 import { record, safetyOf, str, type JsonRecord, type RiderStatus } from "./model";
 
-export type LoopPhase = "offline" | "unknown" | "stopped" | "starting" | "running";
+export type LoopPhase = "offline" | "unknown" | "stopped" | "starting" | "running" | "fault";
 export function loopPhase(connected: boolean, state: JsonRecord, goals: JsonRecord): LoopPhase {
   if (!connected) return "offline";
   if (goals.observe === false && goals.drive === false) return "stopped";
+  if (state.latched === true && (goals.observe === true || goals.drive === true)) return "fault";
   if (state.stale !== true && state.running === true) return "running";
   if ((goals.observe === true || goals.drive === true) && state.stale !== true) return "starting";
   return "unknown";

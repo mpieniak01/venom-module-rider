@@ -85,6 +85,16 @@ def main():
         action="store_true",
         help="Enable shared host STT/TTS for an explicitly configured device host",
     )
+    parser.add_argument(
+        "--replay-dir",
+        type=Path,
+        help="Private recorded frame directory; hardware-free demo only",
+    )
+    parser.add_argument(
+        "--decision-lease-source",
+        type=Path,
+        help="Local Pi decision_lease.py used by replay",
+    )
     args = parser.parse_args()
     devices, default_device, demo_only = targets(
         args.device_file, args.device_id, args.pi_port
@@ -94,6 +104,10 @@ def main():
         audio_enabled = resolve_audio_enabled(demo_only, args.enable_audio)
     except ValueError as exc:
         parser.error(str(exc))
+    if args.replay_dir and (not demo_only or not args.decision_lease_source):
+        parser.error(
+            "Recorded replay requires demo mode and the Pi decision lease source."
+        )
     core = args.core_root.resolve()
     python = core / ".venv/bin/python"
     web = core / "web-next"
@@ -146,6 +160,7 @@ def main():
         QUEUE_NAMESPACE="rider-dev",
         API_OPTIONAL_MODULES="manifest:" + str(module / "module.json"),
         RIDER_DEMO_ONLY="true" if demo_only else "false",
+        RIDER_REPLAY_API_URL=api_url,
         RIDER_DEFAULT_DEVICE=default_device,
         RIDER_DEVICES_JSON=json.dumps(devices),
         RIDER_ALLOWED_ORIGINS=web_url + f",http://localhost:{args.web_port}",
@@ -188,6 +203,16 @@ def main():
                     "venom_module_rider.demo",
                     "--port",
                     str(args.pi_port),
+                    *(
+                        [
+                            "--replay-dir",
+                            str(args.replay_dir),
+                            "--decision-lease-source",
+                            str(args.decision_lease_source),
+                        ]
+                        if args.replay_dir
+                        else []
+                    ),
                 ],
                 core,
                 api_env,

@@ -110,6 +110,35 @@ The launcher reuses existing Python and Node environments, starts a loopback Pi 
 
 The demo forces RIDER_DEMO_ONLY=true, disables physical IoT and LLM startup, and accepts only loopback fixtures. Simulated values and actuator acknowledgements are marked DEMO. Fixture state is ephemeral. A fixture result is not evidence of physical motion or device rendering.
 
+
+### Recorded camera replay
+
+The control screen combines camera preview, loop Start/Stop, and manual arrows.
+**Take manual control** retains camera ownership, stops loop goals and requests
+manual ARM through the existing Pi control contract. Giving control to Venom
+uses the independently calibrated drive policy and timed navigation ARM.
+
+For a hardware-free replay, keep a recorded `last_frame.jpg` and a
+`manifest.json` containing its `original_mtime` outside Git. Supply the actual,
+hardware-free `apps/compute/decision_lease.py` from the matching Pi checkout:
+
+    make demo ARGS="--replay-dir /path/to/recording --decision-lease-source /path/to/Rider-Pi/apps/compute/decision_lease.py"
+
+Configure the local segmentation model with `RIDER_VISION_MODEL` and
+`RIDER_VISION_SHA256`. Replay uses the real Venom vision endpoint and Pi's
+monotonic decision permit; actuator callbacks only change fixture state.
+The preview labels a replay and retains the original recording timestamp.
+Replay arguments are rejected when a real-device allowlist is supplied.
+Defaults remain observation, disarmed and no running camera or loop.
+
+For cross-repository integration checks, set `RIDER_TEST_PI_LEASE` to that Pi
+source file when running `make check`. The scenarios test correlated frames,
+three clear decisions, obstacle STOP, deadline STOP, no reconnect resume and
+manual takeover with a deterministic detector fixture. These scenarios verify
+control behavior; a saved real image is separately checked through the actual
+segmentation/quality detector. The extra integration test skips when no explicit
+Pi source is provided.
+
 ### Local panel connected to a real Pi
 
 Use a private device allowlist JSON under ignored config/local/. Pass it explicitly:

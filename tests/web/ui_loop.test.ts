@@ -43,3 +43,8 @@ test("transport failures and unknown operation outcome have specific operator gu
  assert.equal(loopFailure({data:{detail:{code:"pi_unreachable"}}}),"loopOffline");
  assert.equal(loopFailure({data:{detail:{code:"pi_operation_timeout"}}}),"operationUnconfirmed");
 });
+
+test("a latched remote stop is a fault and never a starting or running loop",()=>{
+ assert.equal(loopPhase(true,{running:false,stale:false,latched:true},{drive:true,observe:false}),"fault");
+ assert.equal(loopPhase(true,{running:false,stale:false,latched:true},{drive:false,observe:false}),"stopped");
+});

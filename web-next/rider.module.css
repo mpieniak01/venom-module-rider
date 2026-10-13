@@ -1,5 +1,5 @@
 .page { width: 100%; min-width: 0; box-sizing: border-box; container-type: inline-size; container-name: rider; --r-accent: var(--primary, #00ff9d); --r-border: var(--ui-border); --r-muted: var(--text-secondary); color: var(--text-primary); max-width: 1450px; margin: 0 auto; padding: 24px 24px 80px; }
-.header { position: sticky; top: 0; z-index: 40; display: flex; flex-wrap: wrap; min-width: 0; max-width: 100%; align-items: center; justify-content: space-between; gap: 20px; padding: 18px 20px; margin-bottom: 18px; background: var(--bg-panel); border: 1px solid var(--r-border); border-radius: 20px; box-shadow: 0 12px 32px #0002; }
+.header { position: relative; top: 0; z-index: 40; display: flex; flex-wrap: wrap; min-width: 0; max-width: 100%; align-items: center; justify-content: space-between; gap: 20px; padding: 18px 20px; margin-bottom: 18px; background: var(--bg-panel); border: 1px solid var(--r-border); border-radius: 20px; box-shadow: 0 12px 32px #0002; }
 .brand { min-width: 0; flex: 0 1 320px; display: flex; align-items: center; gap: 14px; }
 .brandIcon { flex-shrink: 0; display: grid; place-items: center; width: 48px; height: 48px; color: var(--r-accent); border-radius: 15px; background: var(--primary-dim); }
 .title { font-size: 27px; font-weight: 750; line-height: 1.2; color: var(--text-heading); margin: 0; letter-spacing: -.8px; }
@@ -105,9 +105,27 @@
 .loopActions .button { min-height: 46px; padding: 10px 18px; }
 .loopError { padding: 12px; border: 1px solid var(--tone-danger-border); border-radius: 10px; color: var(--tone-danger-text); background: var(--tone-danger-bg); font-size: 13px; overflow-wrap: anywhere; }
 
-.loopWorkspace { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: 20px; align-items: start; }
-.loopWorkspace > div { min-width: 0; }
 .cameraEmbedded { border: 0; border-radius: 0; padding: 0; background: transparent; }
 .cameraEmbedded .camera { min-height: 180px; max-height: 440px; aspect-ratio: 4/3; }
 .cameraEmbedded .panelTitle { font-size: 14px; }
-@container rider (max-width: 820px) { .loopWorkspace { grid-template-columns: minmax(0, 1fr); gap: 10px; } .cameraEmbedded .camera { max-height: 320px; } }
+
+.driveWorkspace { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(210px, 1fr); gap: 20px; align-items: start; }
+.driveWorkspace > div { min-width: 0; }
+.manualEmbedded { border: 0; padding: 0; background: transparent; border-radius: 0; }
+.manualEmbedded .pad { grid-template-columns: repeat(3, 56px); grid-template-rows: repeat(3, 50px); gap: 6px; margin: 12px 0; }
+.manualEmbedded .panelTitle { font-size: 14px; }
+@container rider (max-width: 560px) { .driveWorkspace { grid-template-columns: minmax(0, 1.4fr) minmax(160px, 1fr); gap: 12px; } .manualEmbedded .pad { grid-template-columns: repeat(3, 46px); grid-template-rows: repeat(3, 46px); gap: 4px; } .cameraEmbedded .camera { min-height: 140px; width: 100%; } }
+@container rider (max-width: 400px) { .driveWorkspace { grid-template-columns: minmax(0, 1fr); } }
+
+.driveWorkspace .camera { width: 100%; height: clamp(180px, 28vh, 320px); max-height: none; aspect-ratio: auto; }
+
+.loopToolbar { display: flex; align-items: end; gap: 16px; flex-wrap: wrap; margin: 16px 0; }
+.loopToolbar .loopActions { margin: 0; }
+.loopModeRow { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; }
+.loopModeRow .field { flex: 0 1 300px; }
+.manualEmbedded .arrow { gap: 3px; }
+
+.loopModeRow { flex: 0 1 440px; }
+
+.driveWorkspace .camera { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+.driveWorkspace .camera img { min-width: 0; min-height: 0; max-height: 100%; }

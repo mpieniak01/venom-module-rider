@@ -51,7 +51,7 @@ def envelope(data, family="rider.safety", version=1, *, status=200, operation=No
 
 
 class DemoPi:
-    def __init__(self):
+    def __init__(self, *, navigation=None):
         from .demo_conversation import attach
 
         attach(self)
@@ -76,20 +76,34 @@ class DemoPi:
         self.ack = None
         self.offline = False
         self.stale = False
+        self.owner = None
+        self.arming_deadline = None
+        self.navigation = navigation
+        if navigation:
+            navigation.attach(self)
 
     def safety(self):
         now = time.time()
+        if (
+            self.arming_deadline is not None
+            and time.monotonic() >= self.arming_deadline
+        ):
+            self.state, self.owner, self.deadline = "DISARMED", None, 0.0
+            self.arming_deadline = None
         moving = self.deadline > time.monotonic()
         if not moving:
             self.deadline = 0.0
         return {
             "contract_version": 1,
+            "remote_decision_deadline_supported": self.navigation is not None,
             "state": self.state,
             "ready": not self.stale,
             "can_move": self.state == "ARMED" and not self.stale,
-            "panel_motion_enabled": self.state == "ARMED" and not self.stale,
+            "panel_motion_enabled": self.state == "ARMED"
+            and not self.stale
+            and self.owner in {None, "manual"},
             "test_motion_enabled": False,
-            "owner": "manual" if self.state == "ARMED" else None,
+            "owner": (self.owner or "manual") if self.state == "ARMED" else None,
             "execution_context": "panel" if self.state == "ARMED" else None,
             "arming_mode": "operator",
             "generation": self.generation,
@@ -127,7 +141,11 @@ class DemoPi:
     def control(self, body):
         action = body.get("action")
         if action in {"stop", "disarm"}:
+            if self.navigation:
+                self.navigation.halt("operator_stop")
             self.state = "DISARMED"
+            self.owner = None
+            self.arming_deadline = None
             self.deadline = 0.0
             self.generation = uuid.uuid4().hex
             self.seq = -1
@@ -153,9 +171,19 @@ class DemoPi:
                     "operator_plan"
                 ):
                     return envelope({"error": "operator_consent_required"}, status=400)
+                if self.navigation:
+                    self.navigation.halt("operator_takeover")
+                    self.generation = uuid.uuid4().hex
+                    self.deadline = 0.0
+                self.owner = body.get("owner", "manual")
+                self.arming_deadline = (
+                    time.monotonic() + min(float(body.get("lease_s", 10)), 10)
+                    if self.owner == "navigation"
+                    else None
+                )
                 self.state = "ARMED"
             elif action in {"move", "height", "balance"}:
-                if self.state != "ARMED":
+                if self.state != "ARMED" or self.owner not in {None, "manual"}:
                     return envelope({"error": "motion_not_armed"}, status=409)
                 if body.get("settings_revision") != self.controls["revision"]:
                     return envelope({"error": "manual_settings_stale"}, status=409)
@@ -363,8 +391,17 @@ class DemoPi:
 
 
 def create_app(pi: DemoPi | None = None):
-    app = FastAPI(title="Rider Pi fixture — no hardware")
+    from contextlib import asynccontextmanager
+
     state = pi or DemoPi()
+
+    @asynccontextmanager
+    async def lifespan(_app):
+        yield
+        if state.navigation:
+            await state.navigation.close()
+
+    app = FastAPI(title="Rider Pi fixture — no hardware", lifespan=lifespan)
     app.state.pi = state
 
     @app.api_route("/{path:path}", methods=["GET", "HEAD", "POST", "DELETE"])
@@ -500,6 +537,8 @@ def create_app(pi: DemoPi | None = None):
                 if name == "lcd":
                     state.lcd_on = on
             return envelope(state.resource(name), "rider.resources")
+        if path.startswith("/camera/") and state.camera_on and state.navigation:
+            return state.navigation.image()
         if path.startswith("/camera/"):
             return (
                 state.image(camera=True)
@@ -519,11 +558,54 @@ def create_app(pi: DemoPi | None = None):
                         for row in CONTRACTS["catalog"]["features"]
                         if row["name"] in state.goals
                     ]
-                    + goal_rows(),
+                    + goal_rows()
+                    + (state.navigation.rows() if state.navigation else []),
                 },
                 "rider.catalog",
                 2,
             )
+        if state.navigation and path in {
+            "/api/navigation/config",
+            "/api/navigation/status",
+        }:
+            nav = state.navigation
+            if path.endswith("status"):
+                return envelope(nav.status, "rider.navigation_loop")
+            if body:
+                try:
+                    return envelope(
+                        {"ok": True, "persisted": False, "config": nav.configure(body)},
+                        "rider.navigation_loop",
+                    )
+                except ValueError as exc:
+                    return envelope(
+                        {"error": str(exc)}, "rider.navigation_loop", status=409
+                    )
+            return envelope(nav.policy, "rider.navigation_loop")
+        if (
+            state.navigation
+            and path.startswith("/api/logic/feature/")
+            and path.split("/")[-1] in state.navigation.state.goals
+            and path.split("/")[-1] in {"s14_venom_navigation", "s15_venom_perception"}
+        ):
+            name = path.split("/")[-1]
+            try:
+                if body.get("enabled") is True:
+                    await state.navigation.start(name)
+                else:
+                    state.navigation.halt("operator_loop_stop")
+                return envelope(
+                    {
+                        "name": name,
+                        "enabled": body.get("enabled"),
+                        "confirmed": True,
+                        "actuation": False,
+                    },
+                    "rider.tasks",
+                    2,
+                )
+            except ValueError as exc:
+                return envelope({"error": str(exc)}, "rider.tasks", 2, status=409)
         if path == "/api/logic/state":
             return envelope(
                 {
@@ -548,7 +630,9 @@ def create_app(pi: DemoPi | None = None):
             state.goals[name] = body["enabled"]
             if name in {"s2_camera_preview", "s12_venom_vision"}:
                 state.camera_on = (
-                    state.goals["s2_camera_preview"] or state.goals["s12_venom_vision"]
+                    state.goals["s2_camera_preview"]
+                    or state.goals["s12_venom_vision"]
+                    or bool(state.navigation and state.navigation.status["running"])
                 )
             return envelope(
                 {"name": name, "enabled": body["enabled"]}, "rider.tasks", 2
@@ -651,8 +735,28 @@ def main():
         description="Loopback-only, hardware-free Pi fixture"
     )
     parser.add_argument("--port", type=int, default=18880)
+    parser.add_argument("--replay-dir", type=Path)
+    parser.add_argument("--decision-lease-source", type=Path)
     args = parser.parse_args()
-    uvicorn.run(create_app(), host="127.0.0.1", port=args.port)
+    navigation = None
+    if args.replay_dir:
+        import os
+
+        from .demo_navigation import ReplayNavigation, load_pi_lease
+
+        if not args.decision_lease_source:
+            parser.error("Replay requires the actual local Pi decision lease source.")
+        manifest = json.loads((args.replay_dir / "manifest.json").read_text())
+        navigation = ReplayNavigation(
+            (args.replay_dir / "last_frame.jpg").read_bytes(),
+            load_pi_lease(args.decision_lease_source),
+            recorded_at=manifest["original_mtime"],
+            model_sha=os.getenv("RIDER_VISION_SHA256", ""),
+            api_url=os.getenv("RIDER_REPLAY_API_URL", "http://127.0.0.1:8800"),
+        )
+    uvicorn.run(
+        create_app(DemoPi(navigation=navigation)), host="127.0.0.1", port=args.port
+    )
 
 
 if __name__ == "__main__":

@@ -1,5 +1,12 @@
 // Module-owned translations. Every key contains PL, EN and DE by construction.
 export const messages = {
+  "frameReplay": ["Zapis kamery Pi · odtwarzanie", "Pi camera recording · replay", "Pi-Kameraaufnahme · Wiedergabe"],
+  "frameRecorded": ["Czas oryginalnej klatki", "Original frame time", "Zeit des Originalbildes"],
+  "takeManual": ["Przejmij ręcznie", "Take manual control", "Manuell übernehmen"],
+  "takeManualHint": ["Zatrzymuje pętlę Venom, uzbraja sterowanie ręczne i zachowuje kamerę.", "Stops the Venom loop, arms manual control and keeps the camera.", "Stoppt die Venom-Schleife, aktiviert manuelle Steuerung und behält die Kamera."],
+  "postureAndTelemetry": ["Postawa, pomiary i historia", "Posture, measurements and history", "Haltung, Messwerte und Verlauf"],
+  "loopPhase.fault": ["Pętla zatrzymana przez zabezpieczenie", "Loop stopped by safety guard", "Schleife durch Sicherheit gestoppt"],
+  "loopFaultHint": ["Brak zgody na dalszy ruch. Stop kończy próbę; kolejny Start wymaga nowego polecenia operatora.", "Further movement is not authorized. Stop ends the run; another Start requires new operator intent.", "Weitere Bewegung nicht erlaubt. Stop beendet den Versuch; neuer Start benötigt neue Operatorabsicht."],
   "loopLegend": ["Legenda analizy", "Analysis legend", "Analyselegende"],
   "vision.reason.vision_image_quality": ["Obraz jest zbyt ciemny lub ma za mało kontrastu.", "Image is too dark or has insufficient contrast.", "Bild ist zu dunkel oder hat zu wenig Kontrast."],
   "vision.reason.vision_low_confidence": ["Model nie potwierdził przejezdnej podłogi.", "The model did not confirm traversable floor.", "Das Modell hat keinen befahrbaren Boden bestätigt."],
@@ -63,7 +70,7 @@ export const messages = {
   loopLoaded: ["Model załadowany", "Model loaded", "Modell geladen"],
   loopRunHint: ["Najpierw uruchom obserwację. Jazda wymaga osobnego ARM navigation i Start. Zgoda wygasa po 10 s; brak automatycznego wznowienia.", "Run observation first. Driving requires separate navigation ARM and Start. Consent expires after 10 s; no automatic resume.", "Zuerst Beobachtung starten. Fahrt benötigt separates navigation ARM und Start. Freigabe endet nach 10 s; kein automatischer Neustart."],
   loopPlan: ["Plan krótkiej próby jazdy", "Short driving trial plan", "Plan eines kurzen Fahrversuchs"],
-  loopArm: ["ARM navigation · 10 s", "ARM navigation · 10 s", "ARM navigation · 10 s"],
+  loopArm: ["Przekaż Venom · 10 s", "Give Venom control · 10 s", "An Venom übergeben · 10 s"],
   loopStart: ["Start wybranego trybu", "Start selected mode", "Ausgewählten Modus starten"],
   loopStop: ["Zatrzymaj pętlę", "Stop loop", "Schleife stoppen"],
 

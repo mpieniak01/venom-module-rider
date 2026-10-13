@@ -17,6 +17,7 @@ IMAGE_HEADERS = {
     "x-rider-contract",
     "x-rider-observed-at",
     "x-rider-file-observed-at",
+    "x-rider-recorded-at",
     "x-rider-source",
     "x-rider-frame-id",
     "x-rider-stream",

@@ -17,7 +17,7 @@ import { NavigationLoop } from "./components/navigation-loop";
 import { Compute } from "./components/compute";
 import styles from "./rider.module.css";
 
-const tabs = [{ id: "control", Icon: Bot }, { id: "vision", Icon: BrainCircuit }, { id: "overview", Icon: Activity }, { id: "calibration", Icon: SlidersHorizontal }, { id: "resources", Icon: Boxes }, { id: "face", Icon: Smile }, { id: "compute", Icon: BrainCircuit }] as const;
+const tabs = [{ id: "control", Icon: Bot }, { id: "overview", Icon: Activity }, { id: "calibration", Icon: SlidersHorizontal }, { id: "resources", Icon: Boxes }, { id: "face", Icon: Smile }, { id: "compute", Icon: BrainCircuit }] as const;
 export default function RiderPage() {
   const { language } = useLanguage();
   const { theme } = useTheme();
@@ -52,8 +52,12 @@ export default function RiderPage() {
     <nav className={styles.tabs} role="tablist" aria-label={t("title")}>{tabs.map(({ id, Icon }) => <button type="button" key={id} role="tab" aria-selected={section === id} aria-controls={`rider-panel-${id}`} id={`rider-tab-${id}`} className={`${styles.tab} ${section === id ? styles.tabActive : ""}`} onClick={() => changeSection(id)}><Icon size={16} />{t(id)}</button>)}</nav>
     <div id={`rider-panel-${section}`} role="tabpanel" aria-labelledby={`rider-tab-${section}`}>
       {client.loading && !client.status ? <Panel title={t("device")}><Empty>{t("loading")}</Empty></Panel> : !connection?.configured ? <Panel title={t("device")}><Empty><Bot size={40} />{t("unconfigured")}</Empty></Panel> : <>
-        {section === "control" && <div className={styles.stack}><div className={styles.grid}><div className={styles.stack}><Panel title={t("manual")} hint={t("armHint")}><ManualPad client={client} t={t} language={language} /></Panel><Posture client={client} t={t} language={language} /></div><div className={styles.stack}><CameraPanel client={client} t={t} language={language} /><Panel title={t("measurements")} hint={t("measurementsHint")}><SensorMetrics status={client.status} t={t} language={language} /></Panel></div></div><RequestHistory status={client.status} t={t} language={language} /></div>}
-        {section === "vision" && <NavigationLoop key={connection.session} client={client} t={t} language={language} preview={<CameraPanel client={client} t={t} language={language} compact/>}/>}
+        {section === "control" && <div className={styles.stack}>
+          <NavigationLoop key={connection.session} client={client} t={t} language={language}
+            preview={<CameraPanel client={client} t={t} language={language} compact/>}
+            manual={<Panel className={styles.manualEmbedded} title={t("manual")} extra={<Button data-testid="takeover-manual" tone="primary" disabled={!client.canArm||!!client.busy} onClick={()=>void client.takeManual(t("manual"))}>{t("takeManual")}</Button>}><p className={styles.hint}>{t("takeManualHint")}</p><ManualPad client={client} t={t} language={language} compact/></Panel>}/>
+          <details className={styles.details}><summary>{t("postureAndTelemetry")}</summary><div className={styles.grid}><Posture client={client} t={t} language={language}/><Panel title={t("measurements")} hint={t("measurementsHint")}><SensorMetrics status={client.status} t={t} language={language}/></Panel></div><RequestHistory status={client.status} t={t} language={language}/></details>
+        </div>}
         {section === "overview" && <Measurements status={client.status} t={t} language={language} />}
         {section === "calibration" && <Calibration key={connection.session} client={client} t={t} language={language} />}
         {section === "resources" && <Resources key={connection.session} client={client} t={t} language={language} />}

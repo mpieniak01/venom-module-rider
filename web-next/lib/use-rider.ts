@@ -9,7 +9,7 @@ import { cameraOn, canRequestArm, commandAccepted, controlIdentity, data, errorC
 
 const BASE = "/api/v1/rider";
 export type Notice = { key: string; code?: string; tone: "error" | "success" | "info" };
-export type Frame = { url: string; stale: boolean; source: string; fileAt: string; id: string; knownFreshness: boolean; visionState: string; visionReason: string; inferenceMs: string; visionPolicy: string };
+export type Frame = { url: string; stale: boolean; source: string; fileAt: string; id: string; knownFreshness: boolean; visionState: string; visionReason: string; inferenceMs: string; visionPolicy: string; recordedAt: string };
 import { controlChanged, freshControl, navigationAvailable, navigationView, observationClock, retainControl, type ControlClock } from "./navigation";
 export function useRider(section: Section) {
   const [config, setConfig] = useState<DeviceConfig | null>(null);
@@ -67,7 +67,7 @@ export function useRider(section: Section) {
     if (stale === "true" || placeholder) { replaceFrame(kind, null); setMediaError("frameStale"); return; }
     const blob = await response.blob();
     if (signal.aborted || !frameRequested(kind, path, sectionRef.current, mediaRef.current)) return;
-    replaceFrame(kind, { url: URL.createObjectURL(blob), stale: false, knownFreshness: stale === "false", source: response.headers.get("X-Rider-Source") || response.headers.get("X-Face-Source") || "", fileAt: response.headers.get("X-Rider-File-Observed-At") || "", id: response.headers.get("X-Rider-Frame-Id") || "", visionState: response.headers.get("X-Rider-Vision-State") || "", visionReason: response.headers.get("X-Rider-Vision-Reason") || "", inferenceMs: response.headers.get("X-Rider-Vision-Inference-Ms") || "", visionPolicy: response.headers.get("X-Rider-Vision-Policy") || "" });
+    replaceFrame(kind, { url: URL.createObjectURL(blob), stale: false, knownFreshness: stale === "false", source: response.headers.get("X-Rider-Source") || response.headers.get("X-Face-Source") || "", fileAt: response.headers.get("X-Rider-File-Observed-At") || "", id: response.headers.get("X-Rider-Frame-Id") || "", visionState: response.headers.get("X-Rider-Vision-State") || "", visionReason: response.headers.get("X-Rider-Vision-Reason") || "", inferenceMs: response.headers.get("X-Rider-Vision-Inference-Ms") || "", visionPolicy: response.headers.get("X-Rider-Vision-Policy") || "", recordedAt: response.headers.get("X-Rider-Recorded-At") || "" });
     setMediaError(null);
   }, [replaceFrame]);
   const poll = useCallback(async (target?: Section, fast = false) => {
@@ -198,6 +198,21 @@ export function useRider(section: Section) {
     catch (error) { const code = errorCode(error); setNotice({ key: code === "pi_operation_timeout" ? "operationUnconfirmed" : "requestFailed", code, tone: "error" }); if (code === "pi_operation_timeout") await poll(); if (throwOnError) throw error; return null; }
     finally { setBusy(null); }
   }, [makeEnvelope, mutation, poll]);
+  const takeManual = useCallback(async (plan: string) => {
+    hold.cancel(); setBusy("takeover");
+    try {
+      // Keep camera ownership before stopping the navigation consumers.
+      await mutation("/goal/s2_camera_preview", { enabled: true }, "POST", true);
+      const goals = featureRows(statusRef.current);
+      for (const name of ["s14_venom_navigation", "s15_venom_perception"]) {
+        if (goals.some(goal => goal.name === name)) await mutation("/goal/" + name, { enabled: false }, "POST", true);
+      }
+      await poll("control", true);
+      await sendControl({ action: "arm", owner: "manual", arming_mode: "operator", operator_consent: true, operator_plan: plan });
+      setCameraStream("raw"); await poll();
+    } catch(error) { setNotice({ key: "requestFailed", code: errorCode(error), tone: "error" }); }
+    finally { setBusy(null); }
+  }, [hold, mutation, poll, sendControl]);
   const selectDevice = useCallback(async (device_id: string | null) => {
     hold.release(); motionBlocked.current += 1; setBusy("/config");
     abortReads();
@@ -238,6 +253,6 @@ export function useRider(section: Section) {
   // ARM always refreshes the fast control endpoint before making its envelope.
   // The latency of a diagnostics view must not prevent that refresh request.
   const canArm = canRequestArm(status);
-  return { config, status, loading, notice, setNotice, busy, activeDirection, canMutate: isConnected(), canArm, canNavigate: canNavigate(), canMove: movementReady(), poll, command, mutate: runMutation, selectDevice, hold, camera, cameraStream, setCameraStream, runtimeFrame, showRuntimeFrame, setShowRuntimeFrame, mediaError };
+  return { config, status, loading, notice, setNotice, busy, activeDirection, canMutate: isConnected(), canArm, canNavigate: canNavigate(), canMove: movementReady(), poll, command, mutate: runMutation, takeManual, selectDevice, hold, camera, cameraStream, setCameraStream, runtimeFrame, showRuntimeFrame, setShowRuntimeFrame, mediaError };
 }
 export type RiderClient = ReturnType<typeof useRider>;
