@@ -19,10 +19,11 @@ export class HoldController {
   private token = 0;
   private inFlight: Promise<void> = Promise.resolve();
   private sending = false;
+  private sendingMode: MovementIntent["mode"] | null = null;
   constructor(private readonly options: {
     timing: () => HoldTiming | null;
     canMove: () => boolean;
-    send: (intent: MovementIntent) => Promise<void>;
+    send: (intent: MovementIntent, current: () => boolean) => Promise<void>;
     onActive: (direction: Direction | null) => void;
     onError: (error: unknown) => void;
     now?: () => number;
@@ -51,7 +52,7 @@ export class HoldController {
   release(pointerId?: number) {
     if (pointerId !== undefined && this.press?.pointerId !== pointerId) return;
     const press = this.press;
-    if (!press) return;
+    if (!press) { if (this.sendingMode === "pulse") ++this.token; return; }
     this.press = null;
     this.clearTimer();
     this.options.onActive(null);
@@ -91,11 +92,12 @@ export class HoldController {
     if (this.sending) await this.inFlight;
     if (!valid()) return;
     this.sending = true;
+    this.sendingMode = intent.mode;
     const sentToken = this.token;
-    this.inFlight = this.options.send(intent).catch(error => {
+    this.inFlight = this.options.send(intent, valid).catch(error => {
       if (this.token === sentToken) this.cancel();
       this.options.onError(error);
-    }).finally(() => { this.sending = false; });
+    }).finally(() => { this.sending = false; this.sendingMode = null; });
     await this.inFlight;
   }
 }

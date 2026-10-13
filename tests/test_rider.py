@@ -338,7 +338,12 @@ async def test_invalid_envelope_does_not_reach_actuator(field, value, code):
     await service.select("demo", service.session)
     with pytest.raises(RiderError, match=code):
         await service.control(command(pi, "arm", **{field: value}), service.session)
-    assert not any(row["method"] == "POST" for row in pi.trace)
+    # Shape errors stop at the gateway; valid-shaped stale requests are
+    # forwarded and rejected by the simulated robot authority.
+    assert any(row["method"] == "POST" for row in pi.trace) == (
+        field in {"generation", "ts"}
+    )
+    assert pi.state == "DISARMED"
     await service.close()
 
 
@@ -401,8 +406,8 @@ async def test_offline_and_stale_state_do_not_enable_motion():
     pi.offline = False
     pi.stale = True
     assert (await service.status("control"))["control"]["safety"]["stale"]
-    with pytest.raises(RiderError, match="motion_not_ready"):
-        await arm(service, pi)
+    await arm(service, pi)
+    assert pi.state == "ARMED"  # Telemetry staleness does not revoke operator consent.
     await service.close()
 
 
@@ -865,8 +870,24 @@ async def test_moving_goal_requires_matching_operator_owner_and_fresh_intent():
     navigation_owner = True
     service.cache.clear()
     body = command(pi, "arm", enabled=True, source="navigation")
+    service.cache["/api/control/state"] = (
+        time.monotonic(),
+        envelope(
+            {
+                "safety": {
+                    "owner": "navigation",
+                    "can_move": True,
+                    "generation": "cached-old-generation",
+                }
+            },
+            "control.state",
+            2,
+        ).body,
+    )
     await service.goal("fixture_move", body, service.session)
     assert forwarded == [body]
+    assert service.sequences[body["generation"]] == body["seq"]
+    assert "cached-old-generation" not in service.sequences
     await service.close()
 
 
@@ -924,4 +945,45 @@ async def test_every_view_has_pi_settings_needed_for_global_arm():
         status = await service.status(section)
         assert status["settings"]["control_modes"]["version"] == 1
     assert sum(row["path"] == "/api/calibration/controls" for row in pi.trace) == 1
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_navigation_snapshot_skips_diagnostics_and_refreshes_settings():
+    service, pi = domain()
+    await service.select("demo", service.session)
+    original = service.client.json
+    paths = []
+
+    async def read(path, **kwargs):
+        paths.append(path)
+        assert path in {"/api/control/state", "/api/calibration/controls"}
+        return await original(path, **kwargs)
+
+    service.client.json = read
+    try:
+        first = await service.status("navigation")
+        pi.controls["revision"] += 1
+        second = await service.status("navigation")
+        assert first["connection"]["status"] == "online"
+        assert second["settings"]["revision"] == pi.controls["revision"]
+        assert second["telemetry"] is None and second["history"] is None
+        assert paths.count("/api/control/state") == 2
+        assert paths.count("/api/calibration/controls") == 2
+    finally:
+        await service.close()
+
+
+async def test_manual_intent_has_no_telemetry_get_dependency():
+    service, pi = domain()
+    await service.select("demo", service.session)
+    await arm(service, pi)
+    pi.stale = True
+    before = len(pi.trace)
+    result = await service.control(
+        command(pi, "move", direction="forward", device_settings=True), service.session
+    )
+    assert result["data"]["confirmed"]
+    assert [row["method"] for row in pi.trace[before:]] == ["POST"]
+    assert pi.state == "ARMED"
     await service.close()

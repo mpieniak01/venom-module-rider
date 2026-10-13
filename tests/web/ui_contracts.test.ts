@@ -99,15 +99,17 @@ test("late frames are discarded after hiding, changing a stream or leaving its v
   assert.equal(frameRequested("face", "/face/runtime/frame", "face", { camera: null, face: false }), false);
   assert.equal(frameRequested("face", "/face/runtime/frame", "control", { camera: "raw", face: true }), false);
 });
-test("slow diagnostic reads can request a fresh ARM check without granting movement", () => {
-  const ready = { connection: { status: "online" }, control: { safety: { state: "DISARMED", ready: true, can_move: false, stale: false, generation: "instance" } } } as unknown as RiderStatus;
+test("ARM is an operator request independent of observation availability", () => {
+  const ready = { connection: { status: "online", configured: true }, control: { safety: { state: "DISARMED", ready: true, can_move: false, stale: false, generation: "instance" } } } as unknown as RiderStatus;
   assert.equal(canRequestArm(ready), true);
-  for (const safety of [{ ready: false }, { stale: true }, { generation: null }]) {
-    assert.equal(canRequestArm({ ...ready, control: { safety: { ...data(ready.control).safety as JsonRecord, ...safety } } }), false);
+  for (const safety of [{ ready: false }, { stale: true }]) {
+    assert.equal(canRequestArm({ ...ready, control: { safety: { ...data(ready.control).safety as JsonRecord, ...safety } } }), true);
   }
-  assert.equal(canRequestArm({ ...ready, connection: { ...ready.connection, status: "offline" } }), false);
+  assert.equal(canRequestArm({ ...ready, control: { safety: { generation: null } } }), false);
+  assert.equal(canRequestArm({ ...ready, connection: { ...ready.connection, status: "offline" } }), true);
   assert.equal(canRequestArm(null), false);
 });
+
 test("pending transport acceptance stays pending and errors stay rejected", () => {
   assert.equal(commandAccepted({ ok: true, meta: {}, data: { pending: true }, operation: { status: "pending" } }), true);
   assert.equal(commandAccepted({ ok: false, meta: {}, data: { error: "rejected" } }), false);

@@ -511,6 +511,10 @@ class VenomEngines:
             "max_tokens": 256,
             "stream": False,
         }
+        # A bounded scene description needs final text, not a token budget
+        # consumed entirely by the model's optional reasoning trace.
+        if runtime.provider == "ollama":
+            payload["reasoning_effort"] = "none"
         async with runtime_request_guard(
             request_kind="rider_scene_description",
             provider=runtime.provider,

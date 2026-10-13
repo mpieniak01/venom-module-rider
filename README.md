@@ -116,7 +116,7 @@ Use a private device allowlist JSON under ignored config/local/. Pass it explici
 
     make demo ARGS="--device-file config/local/devices.json --device-id robot"
 
-Alternatively invoke scripts/run_demo.py with those arguments. Without the file flag the launcher always starts the isolated fixture, even if a real device exists in the inherited environment. File mode starts only the Venom API/UI, preserves the hardware authority on Pi, and never automatically arms or starts a resource. It is an operator panel, not an automated physical-motion test runner.
+Alternatively invoke scripts/run_demo.py with those arguments. Without the file flag the launcher always starts the isolated fixture, even if a real device exists in the inherited environment. File mode starts only the Venom API/UI, preserves the hardware authority on Pi, and never automatically arms or starts a resource. It is an operator panel, not an automated physical-motion test runner. The configured-device host defaults to the `full` LLM runtime profile so the Venom cockpit can select installed models. Use `--runtime-profile light` or `--runtime-profile llm_off` explicitly to restrict the host. The isolated fixture always remains `llm_off`; model warmup and background optional services remain disabled by this launcher.
 
 Service and resource operations have a separate bounded response timeout. Motion
 and STOP retain their fast transport path. `pi_operation_timeout` means the result
@@ -138,3 +138,15 @@ Settings are saved only after **Save**, with the Pi revision included. Unsaved d
 Views poll only required observations, share cached/deduplicated Pi reads, stop when hidden, and maintain no idle background collector. Camera OFF/unknown and stopped Face runtime suppress frame requests. A separate transport lane prioritizes STOP. Accepted/pending SDK requests never mean physically completed motion.
 
 To disable the module, remove its backend manifest entry, set its UI flag to false, regenerate the host module list, and restart/rebuild the host. Pi's emergency panel/CLI remains the hardware path. Removing the module does not erase calibration or profiles on Pi.
+
+For a configured device host, `--enable-audio` enables the shared Venom STT/TTS stack. Audio stays off by default and the isolated demo rejects this option. This does not start Pi media goals or arm the robot.
+
+## Robot-owned motion permission
+
+Rider-Pi's sole UART executor owns operator authorization. Manual commands are
+forwarded without a telemetry GET prerequisite; the robot validates generation,
+sequence, TTL, settings revision and actuator readiness and returns the ACK.
+A missing observation retains the last permission with an explicit warning.
+It never converts ARM to DISARMED or replays a failed gesture. Execution inhibition
+and connectivity are shown separately. Tests require independent permission and
+chat/voice cannot arm the robot. Deploy the Pi authority change before this client.

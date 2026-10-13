@@ -154,6 +154,8 @@ async def test_stop_works_when_option_off_and_uses_stop_lane(rig):
     reply = await rig.registry.handle("/rider stop", context())
     assert "STOP" in reply and rig.pi.state == "DISARMED"
     assert rig.pi.ack["source"] == "agent"
+    assert any(row["path"] == "/api/safety" for row in rig.pi.trace)
+    assert not any(row["path"] == "/api/stop" for row in rig.pi.trace)
 
 
 async def test_target_and_session_changes_reject_old_conversation(rig):

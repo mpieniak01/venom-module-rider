@@ -90,3 +90,34 @@ test("a late release failure does not cancel a newer operator press", async t =>
   assert.equal(intents.at(-1)?.mode, "hold");
   controller.cancel();
 });
+
+
+test("a direction replaced while refreshing state is discarded before sending; newest intent wins", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const sent: MovementIntent[] = []; let refreshed: (() => void) | undefined;
+  const controller = new HoldController({ timing: () => timing, canMove: () => true, onActive: () => undefined, onError: () => undefined,
+    send: async (intent, current) => {
+      if (intent.direction === "forward") await new Promise<void>(resolve => { refreshed = resolve; });
+      if (current()) sent.push(intent);
+    } });
+  controller.start("forward", 1); controller.end(1); await flush();
+  controller.start("right", 2); controller.end(2); await flush(); refreshed?.(); await flush();
+  assert.deepEqual(sent, [{ direction: "right", mode: "pulse" }]);
+});
+test("STOP during a state refresh discards the unsent intent and never replays it", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const sent: MovementIntent[] = []; let refreshed: (() => void) | undefined;
+  const controller = new HoldController({ timing: () => timing, canMove: () => true, onActive: () => undefined, onError: () => undefined,
+    send: async (intent, current) => { await new Promise<void>(resolve => { refreshed = resolve; }); if (current()) sent.push(intent); } });
+  controller.start("forward", 1); controller.end(1); await flush(); controller.cancel(); refreshed?.(); await flush();
+  t.mock.timers.tick(timing.hold_timeout_ms * 2); await flush(); assert.deepEqual(sent, []);
+});
+
+test("blur while a pulse awaits state refresh discards it without cancelling queued braking", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const sent: MovementIntent[] = []; let refreshed: (() => void) | undefined;
+  const controller = new HoldController({ timing: () => timing, canMove: () => true, onActive: () => undefined, onError: () => undefined,
+    send: async (intent, current) => { await new Promise<void>(resolve => { refreshed = resolve; }); if (current()) sent.push(intent); } });
+  controller.start("forward", 1); controller.end(1); await flush(); controller.release(); refreshed?.(); await flush();
+  assert.deepEqual(sent, []);
+});

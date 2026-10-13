@@ -34,7 +34,7 @@ export const settingsOf = (status: RiderStatus | null): JsonRecord => data(statu
 export const faceRunning = (status: RiderStatus | null): boolean => record(data(status?.face.runtime).state).running === true;
 export function canRequestArm(status: RiderStatus | null): boolean {
   const safety = safetyOf(status);
-  return ["online", "degraded"].includes(status?.connection.status ?? "") && safety.stale !== true && !!str(safety.generation) && (safety.state === "ESTOP" || safety.ready === true);
+  return !!status?.connection.configured && !!str(safety.generation) && ["DISARMED", "ESTOP", "ARMED"].includes(str(safety.state));
 }
 export function frameRequested(kind: "camera" | "face", path: string, section: Section, media: { camera: "raw" | "proc" | null; face: boolean }): boolean {
   return kind === "camera" ? section === "control" && media.camera !== null && path === `/camera/${media.camera}` : section === "face" && media.face && path === "/face/runtime/frame";
