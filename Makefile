@@ -9,7 +9,7 @@ check: check-python check-web
 check-python:
 	$(RUFF) check venom_module_rider scripts tests
 	$(RUFF) format --check venom_module_rider scripts tests
-	PYTHONPATH=$(HOST):. $(PYTHON) -m mypy venom_module_rider scripts --no-incremental
+	PYTHONPATH=$(HOST):. $(PYTHON) -m mypy venom_module_rider scripts --no-incremental --cache-dir=/dev/null
 	PYTHONPATH=$(HOST):. $(PYTHON) -m pytest -q --cov=venom_module_rider --cov-fail-under=90 --cov-report=term-missing --cov-report=xml:test-results/coverage.xml
 
 check-web:

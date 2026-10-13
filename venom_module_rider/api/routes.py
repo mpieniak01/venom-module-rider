@@ -181,7 +181,15 @@ async def control(payload: Command, request: Request, session: Session = None):
     if payload.action in {"arm", "clear_estop"} and (
         payload.operator_consent is not True
         or not payload.operator_plan
-        or payload.arming_mode != "operator"
+        or not (
+            payload.arming_mode == "operator"
+            and payload.owner == "manual"
+            or payload.action == "arm"
+            and payload.arming_mode == "timed"
+            and payload.owner == "navigation"
+            and payload.lease_s is not None
+            and 0 < payload.lease_s <= 10
+        )
     ):
         raise RiderError("operator_consent_required", 400)
     return await service(request).control(body, session or payload.session)

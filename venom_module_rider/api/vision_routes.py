@@ -1,7 +1,5 @@
 """Pi-authenticated binary frames; operators configure the authoritative Pi."""
 
-import json
-
 from fastapi import APIRouter, Request
 from pydantic import ValidationError
 
@@ -31,7 +29,7 @@ async def decision(request: Request):
     if len(raw.encode()) > 4096:
         raise RiderError("vision_invalid_frame", 400)
     try:
-        frame = VisionFrame.model_validate(json.loads(raw))
+        frame = VisionFrame.model_validate_json(raw)
     except (ValueError, ValidationError) as exc:
         raise RiderError("vision_invalid_frame", 400) from exc
     body = await bounded_body(request, 512 * 1024)
@@ -42,7 +40,9 @@ async def decision(request: Request):
 async def configuration(request: Request):
     domain = request.app.state.rider
     config = await domain.read("/api/navigation/config", 0.2, force=True)
+    state = await domain.read("/api/navigation/status", 0.2, force=True)
     return {
+        "status": state["data"],
         "config": config["data"],
         "detector": request.app.state.rider_vision.status(),
     }

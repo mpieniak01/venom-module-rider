@@ -26,8 +26,9 @@ class Command(StrictModel):
     settings_revision: StrictInt | None = None
     operator_consent: StrictBool | None = None
     operator_plan: str | None = None
-    owner: Literal["manual"] | None = None
-    arming_mode: Literal["operator"] | None = None
+    owner: Literal["manual", "navigation"] | None = None
+    arming_mode: Literal["operator", "timed"] | None = None
+    lease_s: float | None = None
     direction: Literal["forward", "backward", "left", "right"] | None = None
     mode: Literal["pulse", "hold", "release"] | None = None
     device_settings: StrictBool | None = None

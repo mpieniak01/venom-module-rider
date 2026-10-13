@@ -39,7 +39,7 @@ SECTIONS = {
     "calibration": ("control", "settings", "history"),
     "resources": ("control", "settings", "health", "catalog", "logic"),
     "face": ("control", "settings", "health"),
-    "compute": ("control", "settings", "health"),
+    "compute": ("control", "settings", "health", "catalog", "logic"),
 }
 RESOURCE_NAMES = ("camera", "lcd", "led", "mic", "speaker", "uart")
 

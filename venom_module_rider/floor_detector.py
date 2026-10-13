@@ -71,12 +71,15 @@ class FloorDetector:
                 "floor_fraction": 0.0,
             }
         self._load()
+        session = self.session
+        if session is None:
+            raise ValueError("vision_model_unconfigured")
         pixels = (
             (rgb - np.array([0.485, 0.456, 0.406], dtype=np.float32))
             / np.array([0.229, 0.224, 0.225], dtype=np.float32)
         ).transpose(2, 0, 1)[None]
         logits = np.asarray(
-            self.session.run(None, {self.session.get_inputs()[0].name: pixels})[0]
+            session.run(None, {session.get_inputs()[0].name: pixels})[0]
         )
         return classify_logits(logits, corridor)
 
