@@ -870,8 +870,24 @@ async def test_moving_goal_requires_matching_operator_owner_and_fresh_intent():
     navigation_owner = True
     service.cache.clear()
     body = command(pi, "arm", enabled=True, source="navigation")
+    service.cache["/api/control/state"] = (
+        time.monotonic(),
+        envelope(
+            {
+                "safety": {
+                    "owner": "navigation",
+                    "can_move": True,
+                    "generation": "cached-old-generation",
+                }
+            },
+            "control.state",
+            2,
+        ).body,
+    )
     await service.goal("fixture_move", body, service.session)
     assert forwarded == [body]
+    assert service.sequences[body["generation"]] == body["seq"]
+    assert "cached-old-generation" not in service.sequences
     await service.close()
 
 

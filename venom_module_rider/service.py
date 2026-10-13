@@ -328,14 +328,16 @@ class RiderService:
             raise RiderError("unknown_goal", 404)
         if feature.get("can_move") is True and body.get("enabled") is True:
             owner = feature.get("control_owner") or feature.get("motion_owner")
-            await self.validate_intent(body, session, source=owner)
+            intent = await self.validate_intent(body, session, source=owner)
             safety = (
-                self.data(await self.read("/api/control/state", 0.8)).get("safety")
+                self.data(await self.read("/api/control/state", 0.8, force=True)).get(
+                    "safety"
+                )
                 or {}
             )
             if safety.get("owner") != owner or safety.get("can_move") is not True:
                 raise RiderError("operator_motion_permission_required")
-            self.sequences[safety["generation"]] = body["seq"]
+            self.sequences[intent["generation"]] = body["seq"]
         return await self.mutate("/api/logic/feature/" + name, body, session)
 
     async def camera(self, stream):

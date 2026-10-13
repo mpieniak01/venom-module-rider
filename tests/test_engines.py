@@ -635,9 +635,10 @@ async def test_vision_uses_active_runtime_and_bounded_scene_contract(
     assert result.quality["purpose"] == "scene_description"
     request = received[1]
     assert request["provider_name"] == provider
-    assert request["payload"].get("reasoning_effort") == (
-        "none" if provider == "ollama" else None
-    )
+    if provider == "ollama":
+        assert request["payload"]["reasoning_effort"] == "none"
+    else:
+        assert "reasoning_effort" not in request["payload"]
     assert request["payload"]["model"] == "scene-model"
     assert "tools" not in request["payload"]
     assert request["payload"]["messages"][0]["content"][1]["image_url"][
