@@ -39,9 +39,43 @@ async def decision(request: Request):
 @router.get("/navigation/config")
 async def configuration(request: Request):
     domain = request.app.state.rider
-    config = await domain.read("/api/navigation/config", 0.2, force=True)
+    try:
+        config = await domain.read("/api/navigation/config", 0.2, force=True)
+    except RiderError as exc:
+        if exc.status == 404:
+            raise RiderError("navigation_api_unavailable", 503) from exc
+        raise
     state = await domain.read("/api/navigation/status", 0.2, force=True)
+    catalog = await domain.read("/api/logic/catalog", 1.0, force=True)
+    features = catalog["data"].get("features")
+    rows = features if isinstance(features, list) else []
+    runtime = {
+        key: any(
+            row.get("name") == name
+            and row.get("installed") is True
+            and row.get("start_available") is not False
+            for row in rows
+            if isinstance(row, dict)
+        )
+        for key, name in (
+            ("observe", "s15_venom_perception"),
+            ("drive", "s14_venom_navigation"),
+        )
+    }
+    drive_row = next(
+        (
+            row
+            for row in rows
+            if isinstance(row, dict) and row.get("name") == "s14_venom_navigation"
+        ),
+        {},
+    )
     return {
+        "runtime": {
+            **runtime,
+            "known": isinstance(features, list),
+            "drive_reason": drive_row.get("start_unavailable_reason"),
+        },
         "status": state["data"],
         "config": config["data"],
         "detector": request.app.state.rider_vision.status(),
@@ -54,3 +88,14 @@ async def configure(request: Request):
     return await request.app.state.rider.mutate(
         "/api/navigation/config", body, request.headers.get("X-Rider-Session")
     )
+
+
+@router.get("/navigation/state")
+async def navigation_state(request: Request):
+    state = await request.app.state.rider.read(
+        "/api/navigation/status", 0.2, force=True
+    )
+    return {
+        "status": state["data"],
+        "detector": request.app.state.rider_vision.status(),
+    }

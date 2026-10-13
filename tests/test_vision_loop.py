@@ -353,4 +353,68 @@ async def test_navigation_config_proxies_selected_pi():
     assert (await configure(request))["data"]["revision"] == 2
     assert calls[0] == ("read", "/api/navigation/config", True)
     assert calls[1] == ("read", "/api/navigation/status", True)
-    assert calls[2][1] == "/api/navigation/config"
+    assert calls[2] == ("read", "/api/logic/catalog", True)
+    assert calls[3][1] == "/api/navigation/config"
+
+
+async def test_navigation_configuration_reports_runtime_readiness():
+    from types import SimpleNamespace
+
+    from venom_module_rider.api.vision_routes import configuration, navigation_state
+
+    reason = "navigation_executor_update_required"
+
+    class Domain:
+        async def read(self, path, *args, **kwargs):
+            if path.endswith("catalog"):
+                return {
+                    "data": {
+                        "features": [
+                            {
+                                "name": "s15_venom_perception",
+                                "installed": True,
+                                "start_available": True,
+                            },
+                            {
+                                "name": "s14_venom_navigation",
+                                "installed": True,
+                                "start_available": False,
+                                "start_unavailable_reason": reason,
+                            },
+                        ]
+                    }
+                }
+            if path.endswith("config"):
+                return {"data": {"mode": "observe", "revision": 0}}
+            return {"data": {"running": True, "stale": False}}
+
+    req = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(rider=Domain(), rider_vision=VisionLoop(Detector()))
+        )
+    )
+    row = await configuration(req)
+    assert row["runtime"] == {
+        "observe": True,
+        "drive": False,
+        "known": True,
+        "drive_reason": "navigation_executor_update_required",
+    }
+    assert (await navigation_state(req))["status"]["running"] is True
+
+
+async def test_old_pi_configuration_returns_specific_error():
+    from types import SimpleNamespace
+
+    from venom_module_rider.api.vision_routes import configuration
+
+    class Domain:
+        async def read(self, *args, **kwargs):
+            raise RiderError("not_found", 404)
+
+    req = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(rider=Domain())))
+    with pytest.raises(RiderError) as error:
+        await configuration(req)
+    assert (
+        error.value.code == "navigation_api_unavailable" and error.value.status == 503
+    )
