@@ -1,5 +1,11 @@
 // Module-owned translations. Every key contains PL, EN and DE by construction.
 export const messages = {
+  environment: ["Tryb", "Mode", "Modus"],
+  environmentDemo: ["Demo", "Demo", "Demo"],
+  environmentProd: ["Prod", "Prod", "Prod"],
+  notConfigured: ["brak konfiguracji", "not configured", "nicht konfiguriert"],
+  environmentHint: ["Wybór zapisuje się w Venomie. Zmiana zatrzymuje poprzednie sterowanie.", "Selection is saved in Venom. Switching stops previous control.", "Auswahl wird in Venom gespeichert. Wechsel stoppt die vorherige Steuerung."],
+  previous_device_stop_unconfirmed: ["Tryb zmieniony. Nie udało się potwierdzić zatrzymania poprzedniego Pi; sprawdź jego stan.", "Mode changed. Previous Pi stop could not be confirmed; check its state.", "Modus gewechselt. Stopp des vorherigen Pi nicht bestätigt; Zustand prüfen."],
   "frameReplay": ["Zapis kamery Pi · odtwarzanie", "Pi camera recording · replay", "Pi-Kameraaufnahme · Wiedergabe"],
   "frameRecorded": ["Czas oryginalnej klatki", "Original frame time", "Zeit des Originalbildes"],
   "takeManual": ["Przejmij ręcznie", "Take manual control", "Manuell übernehmen"],

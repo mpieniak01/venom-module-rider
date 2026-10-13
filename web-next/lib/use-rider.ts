@@ -92,7 +92,7 @@ export function useRider(section: Section) {
         const previous = statusRef.current;
         const observed = next;
         next = retainControl(previous, next);
-        if (controlChanged(previous, next)) { hold.cancel(); seqRef.current = 0; replaceFrame("camera", null); replaceFrame("face", null); }
+        if (controlChanged(previous, next)) { hold.cancel(); seqRef.current = 0; replaceFrame("camera", null); replaceFrame("face", null); if (previous?.connection.session !== next.connection.session) { mediaRef.current = { camera: null, face: false }; setCameraStream(null); setShowRuntimeFrame(false); } }
         if (!["online", "degraded"].includes(next.connection.status)) { replaceFrame("camera", null); replaceFrame("face", null); }
         if (next.control && !next.errors.control && !navigationAvailable(next)) hold.cancel();
         if (sessionRef.current && sessionRef.current !== next.connection.session) { hold.cancel(); setNotice({ key: "conflict", tone: "info" }); }
@@ -222,7 +222,8 @@ export function useRider(section: Section) {
       const result = await mutation("/config", { device_id }, "POST", true);
       const next = result as unknown as DeviceConfig;
       configRef.current = next; sessionRef.current = next.session; setConfig(next); statusRef.current = null; clockRef.current = null; setStatus(null); seqRef.current = 0;
-      replaceFrame("camera", null); replaceFrame("face", null); setNotice(null); await poll();
+      mediaRef.current = { camera: null, face: false }; setCameraStream(null); setShowRuntimeFrame(false); setMediaError(null);
+      replaceFrame("camera", null); replaceFrame("face", null); setNotice(next.selection_warning ? { key: next.selection_warning, tone: "info" } : null); await poll();
     } catch (error) { setNotice({ key: "requestFailed", code: errorCode(error), tone: "error" }); }
     finally { motionBlocked.current = Math.max(0, motionBlocked.current - 1); setBusy(null); }
   }, [abortReads, hold, mutation, poll, replaceFrame]);

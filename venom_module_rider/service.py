@@ -8,10 +8,11 @@ import math
 import time
 import uuid
 from contextlib import suppress
+from pathlib import Path
 from typing import Any
 
 from .client import PiClient
-from .config import Device
+from .config import Device, persist_device, restored_device
 from .errors import RiderError
 
 POLLING = {
@@ -55,7 +56,13 @@ RESOURCE_NAMES = ("camera", "lcd", "led", "mic", "speaker", "uart")
 
 
 class RiderService:
-    def __init__(self, devices: tuple[Device, ...], *, client_factory=PiClient):
+    def __init__(
+        self,
+        devices: tuple[Device, ...],
+        *,
+        client_factory=PiClient,
+        selection_file: Path | None = None,
+    ):
         self.devices = {device.id: device for device in devices}
         self.device: Device | None = None
         self.client: PiClient | None = None
@@ -71,6 +78,9 @@ class RiderService:
         self.epoch = 0
         self.sequences: dict[str, int] = {}
         self._selection_lock = asyncio.Lock()
+        self.selection_file = selection_file
+        self.switching = False
+        self.selection_warning: str | None = None
         self.conversation_invalidator = None
         self.conversation_drainer = None
 
@@ -79,35 +89,90 @@ class RiderService:
             "devices": [device.public() for device in self.devices.values()],
             "device_id": self.device.id if self.device else None,
             "session": self.session,
+            "selection_warning": self.selection_warning,
         }
 
     def check_session(self, session):
+        if self.switching:
+            raise RiderError("device_switch_in_progress")
         if session != self.session:
             raise RiderError("stale_device_session")
 
-    async def select(self, device_id, session):
+    async def restore(self, default=None):
+        selected = restored_device(self.selection_file, self.devices, default)
+        await self.select(selected, self.session, persist=False)
+
+    async def select(self, device_id, session, *, persist=True):
         self.check_session(session)
         if device_id is not None and device_id not in self.devices:
             raise RiderError("unknown_device", 404)
         async with self._selection_lock:
             self.check_session(session)
             if (self.device.id if self.device else None) == device_id:
+                if persist:
+                    persist_device(self.selection_file, device_id)
                 return self.config()
-            # No new command can use this epoch. Pi's hold watchdog remains
-            # authoritative; selection never auto-arms the new target.
-            self.epoch += 1
-            if self.conversation_invalidator:
-                self.conversation_invalidator()
-            if self.conversation_drainer:
-                await self.conversation_drainer()
-            await self._close_transport()
-            self.device = self.devices.get(device_id)
-            self.client = self.factory(self.device) if self.device else None
-            self.session = uuid.uuid4().hex
-            self.cache.clear()
-            self.sequences.clear()
-            self.last_seen = None
-            return self.config()
+            self.switching = True
+            try:
+                self.cancel_pending_motion()
+                if self.conversation_drainer:
+                    await self.conversation_drainer()
+                await self._cancel_transport_tasks()
+                warning = await self._stop_previous()
+                if persist:
+                    persist_device(self.selection_file, device_id)
+                await self._close_transport()
+                self.device = self.devices.get(device_id)
+                self.client = self.factory(self.device) if self.device else None
+                self.session = uuid.uuid4().hex
+                self.cache.clear()
+                self.sequences.clear()
+                self.last_seen = None
+                self.selection_warning = warning
+                return self.config()
+            finally:
+                self.switching = False
+
+    async def _stop_previous(self):
+        """Quiesce the previous target without activating the next one."""
+        if self.client is None:
+            return None
+        warning = None
+        client = self.client
+        try:
+            safety = (await client.json("/api/control/state"))["data"]["safety"]
+        except RiderError:
+            safety = {"state": "unknown"}
+        try:
+            if safety.get("state") not in {"DISARMED", "ESTOP"} or safety.get("moving"):
+                await client.json(
+                    "/api/safety", method="POST", body={"action": "stop"}, stop=True
+                )
+            logic = (await client.json("/api/logic/state"))["data"]
+            features = logic.get("state", logic).get("features", {})
+            rows = (
+                features
+                if isinstance(features, list)
+                else [
+                    {"name": name, **row}
+                    for name, row in features.items()
+                    if isinstance(row, dict)
+                ]
+            )
+            for row in rows:
+                if row.get("name") in {
+                    "s14_venom_navigation",
+                    "s15_venom_perception",
+                } and (row.get("requested") is True or row.get("enabled") is True):
+                    await client.json(
+                        "/api/logic/feature/" + row["name"],
+                        method="POST",
+                        body={"enabled": False},
+                        stop=True,
+                    )
+        except RiderError:
+            warning = "previous_device_stop_unconfirmed"
+        return warning
 
     def transport(self):
         if self.closed:
@@ -368,7 +433,7 @@ class RiderService:
             raise RiderError("camera_unknown", 503)
         return await client.image("/camera/" + stream)
 
-    async def _close_transport(self):
+    async def _cancel_transport_tasks(self):
         tasks = (
             list(self.inflight.values()) + list(self.commands) + list(self.operations)
         )
@@ -380,6 +445,9 @@ class RiderService:
         self.commands.clear()
         self.stops.clear()
         self.operations.clear()
+
+    async def _close_transport(self):
+        await self._cancel_transport_tasks()
         if self.client:
             await self.client.close()
         self.client = None

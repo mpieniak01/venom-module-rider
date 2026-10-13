@@ -6,6 +6,7 @@ import hmac
 import os
 import re
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Annotated
 from urllib.parse import urlsplit
 
@@ -27,7 +28,13 @@ UNIT = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9_@.-]{0,95}\.service")
 @asynccontextmanager
 async def lifespan(app):
     existing = getattr(app.state, "rider", None)
-    service = existing or RiderService(configured_devices())
+    selection_file = os.getenv(
+        "RIDER_SELECTION_FILE", "data/modules/rider/panel-selection.json"
+    )
+    service = existing or RiderService(
+        configured_devices(),
+        selection_file=Path(selection_file) if selection_file else None,
+    )
     app.state.rider = service
     from ..engines import VenomEngines
 
@@ -46,8 +53,8 @@ async def lifespan(app):
 
     app.state.rider_vision = VisionLoop()
     default = os.getenv("RIDER_DEFAULT_DEVICE")
-    if default and existing is None:
-        await service.select(default, service.session)
+    if existing is None:
+        await service.restore(default)
     try:
         yield
     finally:

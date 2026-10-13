@@ -18,7 +18,7 @@ from pathlib import Path
 from venom_module_rider.config import configured_devices
 
 
-def targets(device_file, device_id, pi_port):
+def targets(device_file, device_id, pi_port, *, with_demo=False):
     if device_file is None:
         if device_id not in {None, "demo"}:
             raise ValueError("Demo supports only the demo device ID.")
@@ -34,10 +34,25 @@ def targets(device_file, device_id, pi_port):
             "demo",
             True,
         )
-    devices = configured_devices(device_file.read_text())
+    devices = list(configured_devices(device_file.read_text()))
+    if with_demo:
+        if any(device.id == "demo" for device in devices):
+            raise ValueError("The demo ID is reserved for the local fixture.")
+        demo = targets(None, None, pi_port)[0][0]
+        demo.update(
+            compute_token_env="RIDER_DEMO_COMPUTE_TOKEN",
+            agent_token_env="RIDER_DEMO_AGENT_TOKEN",
+        )
+        devices = list(
+            configured_devices(json.dumps([demo, *[asdict(d) for d in devices]]))
+        )
     if device_id and device_id not in {device.id for device in devices}:
         raise ValueError("Selected ID is absent from the private device file.")
-    return ([asdict(device) for device in devices], device_id or "", False)
+    return (
+        [asdict(device) for device in devices],
+        device_id or ("demo" if with_demo else ""),
+        False,
+    )
 
 
 def resolve_runtime_profile(demo_only, requested_profile=None):
@@ -76,6 +91,11 @@ def main():
     )
     parser.add_argument("--device-id", help="Optional default device ID; never arms")
     parser.add_argument(
+        "--with-demo",
+        action="store_true",
+        help="Keep the local demo alongside the private device allowlist",
+    )
+    parser.add_argument(
         "--runtime-profile",
         choices=("full", "light", "llm_off"),
         help="Runtime profile: device host defaults to full; demo uses llm_off",
@@ -97,16 +117,18 @@ def main():
     )
     args = parser.parse_args()
     devices, default_device, demo_only = targets(
-        args.device_file, args.device_id, args.pi_port
+        args.device_file, args.device_id, args.pi_port, with_demo=args.with_demo
     )
+    fixture_enabled = demo_only or args.with_demo
     try:
         runtime_profile = resolve_runtime_profile(demo_only, args.runtime_profile)
         audio_enabled = resolve_audio_enabled(demo_only, args.enable_audio)
     except ValueError as exc:
         parser.error(str(exc))
-    if args.replay_dir and (not demo_only or not args.decision_lease_source):
+    if args.replay_dir and (not fixture_enabled or not args.decision_lease_source):
         parser.error(
-            "Recorded replay requires demo mode and the Pi decision lease source."
+            "Recorded replay requires the local demo fixture "
+            "and Pi decision lease source."
         )
     core = args.core_root.resolve()
     python = core / ".venv/bin/python"
@@ -119,7 +141,7 @@ def main():
         )
     ports = (
         (args.api_port, args.web_port, args.pi_port)
-        if demo_only
+        if fixture_enabled
         else (args.api_port, args.web_port)
     )
     if len(set(ports)) != len(ports) or not all(free_port(port) for port in ports):
@@ -162,6 +184,7 @@ def main():
         RIDER_DEMO_ONLY="true" if demo_only else "false",
         RIDER_REPLAY_API_URL=api_url,
         RIDER_DEFAULT_DEVICE=default_device,
+        RIDER_SELECTION_FILE=str(core / "data/modules/rider/panel-selection.json"),
         RIDER_DEVICES_JSON=json.dumps(devices),
         RIDER_ALLOWED_ORIGINS=web_url + f",http://localhost:{args.web_port}",
         PYTHONPATH=str(core) + ":" + str(module),
@@ -172,6 +195,10 @@ def main():
         api_env.pop("RIDER_ACCESS_TOKEN", None)
         api_env["RIDER_COMPUTE_TOKEN"] = "rider-demo-only-token"
         api_env["RIDER_AGENT_TOKEN"] = "rider-demo-only-agent-token"
+    if args.with_demo:
+        api_env["RIDER_DEMO_COMPUTE_TOKEN"] = "rider-demo-only-token"
+        api_env["RIDER_DEMO_AGENT_TOKEN"] = "rider-demo-only-agent-token"
+    fixture_env = {**api_env, "RIDER_AGENT_TOKEN": "rider-demo-only-agent-token"}
     web_env = {
         **api_env,
         "API_PROXY_TARGET": api_url,
@@ -215,7 +242,7 @@ def main():
                     ),
                 ],
                 core,
-                api_env,
+                fixture_env,
             ),
             (
                 "api",
@@ -248,7 +275,7 @@ def main():
                 web_env,
             ),
         ]
-        if not demo_only:
+        if not fixture_enabled:
             specifications = [row for row in specifications if row[0] != "pi"]
         for name, command, cwd, env in specifications:
             log = (logs / f"r1-demo-{name}.log").open("w")
@@ -282,7 +309,7 @@ def main():
                         pass
                     with urllib.request.urlopen(web_url + "/rider", timeout=2):
                         pass
-                    if demo_only:
+                    if fixture_enabled:
                         with urllib.request.urlopen(
                             f"http://127.0.0.1:{args.pi_port}/healthz", timeout=1
                         ):

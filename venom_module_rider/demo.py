@@ -753,6 +753,7 @@ def main():
             recorded_at=manifest["original_mtime"],
             model_sha=os.getenv("RIDER_VISION_SHA256", ""),
             api_url=os.getenv("RIDER_REPLAY_API_URL", "http://127.0.0.1:8800"),
+            token=os.getenv("RIDER_DEMO_COMPUTE_TOKEN", "rider-demo-only-token"),
         )
     uvicorn.run(
         create_app(DemoPi(navigation=navigation)), host="127.0.0.1", port=args.port

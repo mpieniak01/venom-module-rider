@@ -129,3 +129,6 @@
 
 .driveWorkspace .camera { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
 .driveWorkspace .camera img { min-width: 0; min-height: 0; max-height: 100%; }
+
+.environmentSelect { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--r-muted); }
+.environmentSelect select { width: 160px; }

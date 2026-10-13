@@ -95,7 +95,21 @@ Configure devices on the **server**, using private environment configuration:
 
     RIDER_DEVICES_JSON=[{"id":"robot","label":"Rider-Pi","url":"https://rider.local","mode":"device"}]
 
-The default list is empty. A browser can select only configured IDs; it cannot provide a destination URL. Selection creates a new session and drops old observations/commands. RIDER_DEFAULT_DEVICE can select an explicitly configured ID at startup; it never arms or starts hardware.
+The default list is empty. The permanent **Demo / Prod** selector uses this single
+device list; there is no second environment setting. A browser can select only
+configured IDs and cannot supply a destination URL. Unconfigured modes remain
+visible and disabled. Selection stops previous active motion and navigation,
+creates a new session, and clears observations, pending commands and preview
+subscriptions. An unreachable previous Pi produces an explicit unconfirmed-stop
+notice; its own watchdog still owns braking.
+
+Venom saves the chosen ID in `data/modules/rider/panel-selection.json`
+(`RIDER_SELECTION_FILE` can override the private path). It survives page and host
+restarts and is shared by panel clients. Only the choice is stored here;
+calibration and loop configuration remain on each Pi. First startup can use an
+explicitly allowlisted `RIDER_DEFAULT_DEVICE`. Restore never arms, starts capture,
+or resumes a loop. Invalid/removed saved IDs select an available demo or no device,
+never a production fallback.
 
 RIDER_ALLOWED_ORIGINS is a comma-separated exact allowlist when UI and API origins differ. Mutations obey Venom's environment policy. STOP and disarm remain available in read-only environments. RIDER_ACCESS_TOKEN optionally requires a Bearer token on all module requests; supply it through a trusted server proxy or emergency CLI, never through a public frontend environment variable. Use the host's access controls when exposing it beyond a trusted local environment.
 
@@ -128,7 +142,8 @@ Configure the local segmentation model with `RIDER_VISION_MODEL` and
 `RIDER_VISION_SHA256`. Replay uses the real Venom vision endpoint and Pi's
 monotonic decision permit; actuator callbacks only change fixture state.
 The preview labels a replay and retains the original recording timestamp.
-Replay arguments are rejected when a real-device allowlist is supplied.
+Replay requires the local fixture; it can coexist with a production allowlist
+when `--with-demo` is explicitly enabled. It always targets the demo ID.
 Defaults remain observation, disarmed and no running camera or loop.
 
 For cross-repository integration checks, set `RIDER_TEST_PI_LEASE` to that Pi
@@ -146,6 +161,18 @@ Use a private device allowlist JSON under ignored config/local/. Pass it explici
     make demo ARGS="--device-file config/local/devices.json --device-id robot"
 
 Alternatively invoke scripts/run_demo.py with those arguments. Without the file flag the launcher always starts the isolated fixture, even if a real device exists in the inherited environment. File mode starts only the Venom API/UI, preserves the hardware authority on Pi, and never automatically arms or starts a resource. It is an operator panel, not an automated physical-motion test runner. The configured-device host defaults to the `full` LLM runtime profile so the Venom cockpit can select installed models. Use `--runtime-profile light` or `--runtime-profile llm_off` explicitly to restrict the host. The isolated fixture always remains `llm_off`; model warmup and background optional services remain disabled by this launcher.
+
+To keep both modes available in one local panel, configure the private production
+allowlist once and add the local fixture:
+
+    make demo ARGS="--device-file /private/devices.json --with-demo"
+
+The initial selection is **Demo**, unless a saved operator choice exists.
+Switch Demo/Prod in the panel without changing files or restarting services.
+The fixture and production target have separate credential references; built-in
+demo tokens are never used for production. Recorded replay flags apply only to
+the local fixture. Automated switching checks use two fixtures; registering a
+production target does not constitute a physical-device test.
 
 Service and resource operations have a separate bounded response timeout. Motion
 and STOP retain their fast transport path. `pi_operation_timeout` means the result

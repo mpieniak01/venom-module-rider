@@ -2,7 +2,7 @@ export type JsonRecord = Record<string, unknown>;
 export type Section = "control" | "vision" | "overview" | "calibration" | "resources" | "face" | "compute";
 export type Direction = "forward" | "backward" | "left" | "right";
 export const DIRECTIONS: Direction[] = ["forward", "backward", "left", "right"];
-export type DeviceConfig = { devices: { id: string; label: string; mode: "demo" | "device" }[]; device_id: string | null; session: string };
+export type DeviceConfig = { devices: { id: string; label: string; mode: "demo" | "device" }[]; device_id: string | null; session: string; selection_warning?: string | null };
 export type RiderStatus = {
   connection: { status: "unconfigured" | "offline" | "online" | "degraded"; configured: boolean; device_id: string | null; label?: string; session: string; mode: "demo" | "device"; error?: string | null; last_seen?: number | null };
   polling: Record<string, number>;
