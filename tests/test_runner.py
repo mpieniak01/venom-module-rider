@@ -69,3 +69,11 @@ def test_configured_host_uses_operator_runtime_profile(requested, expected):
 def test_invalid_runtime_profile_is_rejected():
     with pytest.raises(ValueError, match="Unsupported runtime profile"):
         runner.resolve_runtime_profile(False, "unknown")
+
+
+def test_audio_is_opt_in_for_configured_host():
+    assert runner.resolve_audio_enabled(False) is False
+    assert runner.resolve_audio_enabled(False, True) is True
+    assert runner.resolve_audio_enabled(True) is False
+    with pytest.raises(ValueError, match="explicitly configured device host"):
+        runner.resolve_audio_enabled(True, True)

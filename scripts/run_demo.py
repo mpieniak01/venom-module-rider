@@ -56,6 +56,12 @@ def free_port(port):
         return connection.connect_ex(("127.0.0.1", port)) != 0
 
 
+def resolve_audio_enabled(demo_only: bool, requested: bool = False) -> bool:
+    if demo_only and requested:
+        raise ValueError("Audio requires an explicitly configured device host.")
+    return requested and not demo_only
+
+
 def main():
     module = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description=__doc__)
@@ -74,12 +80,18 @@ def main():
         choices=("full", "light", "llm_off"),
         help="Runtime profile: device host defaults to full; demo uses llm_off",
     )
+    parser.add_argument(
+        "--enable-audio",
+        action="store_true",
+        help="Enable shared host STT/TTS for an explicitly configured device host",
+    )
     args = parser.parse_args()
     devices, default_device, demo_only = targets(
         args.device_file, args.device_id, args.pi_port
     )
     try:
         runtime_profile = resolve_runtime_profile(demo_only, args.runtime_profile)
+        audio_enabled = resolve_audio_enabled(demo_only, args.enable_audio)
     except ValueError as exc:
         parser.error(str(exc))
     core = args.core_root.resolve()
@@ -127,6 +139,7 @@ def main():
     }
     flags.update(
         VENOM_RUNTIME_PROFILE=runtime_profile,
+        ENABLE_AUDIO_INTERFACE="true" if audio_enabled else "false",
         ENVIRONMENT_ROLE="dev",
         STORAGE_PREFIX="rider-dev",
         CACHE_NAMESPACE="rider-dev",
