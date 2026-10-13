@@ -56,3 +56,18 @@ API:
 
 No device movement, deployment, energy benefit or calibrated stopping distance
 is claimed by fixture tests. Physical acceptance is separate from software CI.
+
+## Processed operator preview
+
+The camera panel offers raw frames, **Venom vision** and legacy Pi processing
+as separate views. GET /api/v1/rider/camera/venom produces a JPEG overlay:
+green is confident floor, red another class, amber uncertain classification,
+and a white rectangle identifies the analysed corridor. Headers report the
+classification and inference time. The overlay is diagnostic and always
+observation-only: it cannot arm, start the camera or submit motion.
+
+Fresh cached decision overlays are reused to avoid duplicate inference during
+a running loop. Expired or failed inference cannot display the old mask.
+If an older Pi returns 404 for the new policy API, the preview explicitly uses
+a default diagnostic corridor; this fallback cannot authorize driving and
+does not persist a second configuration.

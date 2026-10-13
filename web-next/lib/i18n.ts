@@ -1,5 +1,15 @@
 // Module-owned translations. Every key contains PL, EN and DE by construction.
 export const messages = {
+  visionCameraOff: ["Kamera jest wyłączona. Włącz ją na Pi przed podglądem.", "Camera is off. Enable it on Pi before previewing.", "Kamera ist ausgeschaltet. Vor der Vorschau auf Pi einschalten."],
+  visionBusy: ["Model przetwarza klatkę. Podgląd ponowi odczyt.", "Model is processing a frame. Preview will retry.", "Modell verarbeitet ein Bild. Vorschau versucht es erneut."],
+  visionPreviewUnavailable: ["Brak wyniku analizy obrazu. Sprawdź kamerę, konfigurację modelu i budżet czasu.", "No image analysis result. Check camera, model configuration and time budget.", "Kein Bildanalyseergebnis. Kamera, Modellkonfiguration und Zeitbudget prüfen."],
+  visionVenom: ["Wizja Venom", "Venom vision", "Venom-Bildverarbeitung"],
+  visionPi: ["Przetwarzanie na Pi", "Pi processing", "Pi-Bildverarbeitung"],
+  visionLegend: ["Zielony: podłoga. Czerwony: inna klasa. Żółty: niepewne. Biała ramka: obszar analizy. Podgląd nie uruchamia ruchu.", "Green: floor. Red: other class. Yellow: uncertain. White rectangle: analysis zone. Preview never starts motion.", "Grün: Boden. Rot: andere Klasse. Gelb: unsicher. Weißer Rahmen: Analysebereich. Vorschau startet keine Bewegung."],
+  visionDefaultZone: ["Domyślna strefa podglądu; Pi nie ma jeszcze nowego API konfiguracji", "Default preview zone; Pi does not yet expose the new configuration API", "Standard-Vorschaubereich; Pi bietet die neue Konfigurations-API noch nicht"],
+  "vision.clear": ["Podłoga w strefie", "Floor in zone", "Boden im Bereich"],
+  "vision.obstacle": ["Inna klasa w strefie", "Other class in zone", "Andere Klasse im Bereich"],
+  "vision.unknown": ["Niepewny wynik", "Uncertain result", "Unsicheres Ergebnis"],
   loopTitle: ["Wizja i pętla ruchu", "Vision and motion loop", "Bildverarbeitung und Bewegung"],
   loopHint: ["Pi wysyła obraz; Venom decyduje. Brak świeżej decyzji zatrzymuje Pi.", "Pi sends frames; Venom decides. Missing fresh decisions stop Pi.", "Pi sendet Bilder; Venom entscheidet. Fehlende aktuelle Entscheidungen stoppen Pi."],
   loopLoad: ["Odczytaj konfigurację Pi", "Read Pi configuration", "Pi-Konfiguration lesen"],

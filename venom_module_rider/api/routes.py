@@ -204,6 +204,10 @@ async def settings(payload: SettingsPatch, request: Request, session: Session = 
 
 @router.get("/camera/{stream}")
 async def camera(stream: str, request: Request):
+    if stream == "venom":
+        from .vision_preview import processed_camera
+
+        return await processed_camera(request)
     return image_response(await service(request).camera(stream))
 
 

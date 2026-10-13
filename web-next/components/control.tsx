@@ -57,8 +57,10 @@ export function Posture({ client, t, language }: { client: RiderClient; t: Trans
 export function CameraPanel({ client, t, language }: { client: RiderClient; t: Translator; language: string }) {
   const selected = client.cameraStream ?? "raw";
   return <Panel title={t("camera")} hint={t("cameraHint")} extra={<Button onClick={() => client.setCameraStream(client.cameraStream ? null : "raw")} disabled={!client.canMutate}><Camera size={15} />{t(client.cameraStream ? "hidePreview" : "showPreview")}</Button>}>
-    <div className={styles.flex} style={{ marginBottom: 14 }}>{(["raw", "proc"] as const).map(stream => <Button key={stream} tone={selected === stream ? "primary" : undefined} aria-pressed={selected === stream} onClick={() => client.setCameraStream(stream)} disabled={!client.canMutate}>{t(stream)}</Button>)}</div>
+    <div className={styles.flex} style={{ marginBottom: 14 }}>{(["raw", "venom", "proc"] as const).map(stream => <Button key={stream} tone={selected === stream ? "primary" : undefined} aria-pressed={selected === stream} onClick={() => client.setCameraStream(stream)} disabled={!client.canMutate}>{t(stream === "venom" ? "visionVenom" : stream === "proc" ? "visionPi" : stream)}</Button>)}</div>
     <div className={styles.camera}>{client.camera ? <img src={client.camera.url} alt={t("cameraAlt")} /> : <Empty><Camera size={32} />{t(client.mediaError ?? (client.cameraStream ? "frameMissing" : "showPreview"))}</Empty>}</div>
+    {selected === "venom" && <p className={styles.hint}>{t("visionLegend")}</p>}
+    {client.camera?.visionState && <p className={styles.hint}>{t("state")}: {t("vision." + client.camera.visionState)} · {client.camera.inferenceMs} ms · <code>{client.camera.visionReason}</code>{client.camera.visionPolicy === "diagnostic_default" && <> · {t("visionDefaultZone")}</>}</p>}
     {client.camera && <div className={styles.meta}><Pill>{t(client.camera.knownFreshness ? "frameFresh" : "frameTimeUnknown")}</Pill>{client.camera.fileAt && <span>{t("frameAt")}: {formatTime(Number(client.camera.fileAt), language)}</span>}{client.camera.source && <span>{t("source")}: {client.camera.source}</span>}</div>}
   </Panel>;
 }

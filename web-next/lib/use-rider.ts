@@ -9,7 +9,7 @@ import { cameraOn, canRequestArm, commandAccepted, controlIdentity, data, errorC
 
 const BASE = "/api/v1/rider";
 export type Notice = { key: string; code?: string; tone: "error" | "success" | "info" };
-export type Frame = { url: string; stale: boolean; source: string; fileAt: string; id: string; knownFreshness: boolean };
+export type Frame = { url: string; stale: boolean; source: string; fileAt: string; id: string; knownFreshness: boolean; visionState: string; visionReason: string; inferenceMs: string; visionPolicy: string };
 import { controlChanged, freshControl, navigationAvailable, navigationView, observationClock, retainControl, type ControlClock } from "./navigation";
 export function useRider(section: Section) {
   const [config, setConfig] = useState<DeviceConfig | null>(null);
@@ -21,7 +21,7 @@ export function useRider(section: Section) {
   const [camera, setCamera] = useState<Frame | null>(null);
   const [runtimeFrame, setRuntimeFrame] = useState<Frame | null>(null);
   const [mediaError, setMediaError] = useState<string | null>(null);
-  const [cameraStream, setCameraStream] = useState<"raw" | "proc" | null>(null);
+  const [cameraStream, setCameraStream] = useState<"raw" | "proc" | "venom" | null>(null);
   const [showRuntimeFrame, setShowRuntimeFrame] = useState(false);
   const statusRef = useRef<RiderStatus | null>(null);
   const configRef = useRef<DeviceConfig | null>(null);
@@ -30,7 +30,7 @@ export function useRider(section: Section) {
   const motionBlocked = useRef(0);
   const sessionRef = useRef("");
   const sectionRef = useRef(section);
-  const mediaRef = useRef<{ camera: "raw" | "proc" | null; face: boolean }>({ camera: null, face: false });
+  const mediaRef = useRef<{ camera: "raw" | "proc" | "venom" | null; face: boolean }>({ camera: null, face: false });
   const pollPromise = useRef<Promise<void> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const controlPollPromise = useRef<Promise<void> | null>(null);
@@ -55,13 +55,19 @@ export function useRider(section: Section) {
   const fetchFrame = useCallback(async (path: string, signal: AbortSignal, kind: "camera" | "face") => {
     const response = await fetch(`${getApiBaseUrl()}${BASE}${path}`, { cache: "no-store", signal });
     if (signal.aborted || !frameRequested(kind, path, sectionRef.current, mediaRef.current)) return;
-    if (!response.ok || !response.headers.get("Content-Type")?.startsWith("image/")) { replaceFrame(kind, null); setMediaError("frameMissing"); return; }
+    if (!response.ok || !response.headers.get("Content-Type")?.startsWith("image/")) {
+      let code = "";
+      try { code = String(record(record(await response.json()).detail).code ?? ""); } catch { /* Non-JSON frame failure. */ }
+      replaceFrame(kind, null);
+      setMediaError(code === "camera_off" ? "visionCameraOff" : code === "vision_busy" ? "visionBusy" : path === "/camera/venom" ? "visionPreviewUnavailable" : "frameMissing");
+      return;
+    }
     const stale = response.headers.get("X-Rider-Stale");
     const placeholder = response.headers.get("X-Rider-Placeholder") === "true";
     if (stale === "true" || placeholder) { replaceFrame(kind, null); setMediaError("frameStale"); return; }
     const blob = await response.blob();
     if (signal.aborted || !frameRequested(kind, path, sectionRef.current, mediaRef.current)) return;
-    replaceFrame(kind, { url: URL.createObjectURL(blob), stale: false, knownFreshness: stale === "false", source: response.headers.get("X-Rider-Source") || response.headers.get("X-Face-Source") || "", fileAt: response.headers.get("X-Rider-File-Observed-At") || "", id: response.headers.get("X-Rider-Frame-Id") || "" });
+    replaceFrame(kind, { url: URL.createObjectURL(blob), stale: false, knownFreshness: stale === "false", source: response.headers.get("X-Rider-Source") || response.headers.get("X-Face-Source") || "", fileAt: response.headers.get("X-Rider-File-Observed-At") || "", id: response.headers.get("X-Rider-Frame-Id") || "", visionState: response.headers.get("X-Rider-Vision-State") || "", visionReason: response.headers.get("X-Rider-Vision-Reason") || "", inferenceMs: response.headers.get("X-Rider-Vision-Inference-Ms") || "", visionPolicy: response.headers.get("X-Rider-Vision-Policy") || "" });
     setMediaError(null);
   }, [replaceFrame]);
   const poll = useCallback(async (target?: Section, fast = false) => {

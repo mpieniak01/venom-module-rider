@@ -45,7 +45,7 @@ class FloorDetector:
             raise ValueError("vision_model_format")
         self.session, self.digest = session, digest
 
-    def detect(self, payload, corridor):
+    def detect(self, payload, corridor, *, preview=True):
         import numpy as np
         from PIL import Image
 
@@ -65,11 +65,16 @@ class FloorDetector:
             )
         # Darkness or flat/unusable capture must not become clearance.
         if rgb.mean() < 0.04 or rgb.std() < 0.01:
-            return {
+            result = {
                 "state": "unknown",
                 "reason": "vision_image_quality",
                 "floor_fraction": 0.0,
             }
+            if preview:
+                result["_preview"] = render_preview(
+                    rgb, np.zeros((1, 150, 4, 4)), corridor
+                )
+            return result
         self._load()
         session = self.session
         if session is None:
@@ -81,7 +86,10 @@ class FloorDetector:
         logits = np.asarray(
             session.run(None, {session.get_inputs()[0].name: pixels})[0]
         )
-        return classify_logits(logits, corridor)
+        result = classify_logits(logits, corridor)
+        if preview:
+            result["_preview"] = render_preview(rgb, logits, corridor)
+        return result
 
 
 def classify_logits(logits, corridor):
@@ -118,3 +126,28 @@ def classify_logits(logits, corridor):
     else:
         state, reason = "clear", "floor_candidate"
     return {"state": state, "reason": reason, "floor_fraction": fraction}
+
+
+def render_preview(rgb, logits, corridor):
+    """Diagnostic mask: confident floor green, other labels red, uncertainty amber."""
+    import numpy as np
+    from PIL import Image, ImageDraw
+
+    labels = logits[0].argmax(axis=0)
+    values = logits[0] - logits[0].max(axis=0)
+    probabilities = np.exp(values)
+    confidence = probabilities.max(axis=0) / probabilities.sum(axis=0)
+    colors = np.full((*labels.shape, 3), (255, 185, 35), dtype=np.uint8)
+    colors[(confidence >= 0.8) & (labels == 3)] = (35, 210, 100)
+    colors[(confidence >= 0.8) & (labels != 3)] = (240, 60, 65)
+    overlay = Image.fromarray(colors).resize((512, 512), Image.Resampling.NEAREST)
+    image = Image.blend(Image.fromarray((rgb * 255).astype(np.uint8)), overlay, 0.4)
+    x0, y0, x1, y1 = corridor
+    ImageDraw.Draw(image).rectangle(
+        (int(x0 * 511), int(y0 * 511), int(x1 * 511), int(y1 * 511)),
+        outline="white",
+        width=3,
+    )
+    stream = io.BytesIO()
+    image.save(stream, format="JPEG", quality=85)
+    return stream.getvalue()

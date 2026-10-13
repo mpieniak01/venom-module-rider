@@ -92,6 +92,10 @@ test("face activity comes from the canonical nested Pi runtime state", () => {
 });
 test("late frames are discarded after hiding, changing a stream or leaving its view", () => {
   assert.equal(frameRequested("camera", "/camera/raw", "control", { camera: "raw", face: false }), true);
+  assert.equal(frameRequested("camera", "/camera/venom", "control", { camera: "venom", face: false }), true);
+  assert.equal(frameRequested("camera", "/camera/proc", "control", { camera: "venom", face: false }), false);
+  assert.equal(frameRequested("camera", "/camera/venom", "control", { camera: null, face: false }), false);
+  assert.equal(frameRequested("camera", "/camera/venom", "compute", { camera: "venom", face: false }), false);
   assert.equal(frameRequested("camera", "/camera/raw", "control", { camera: null, face: false }), false);
   assert.equal(frameRequested("camera", "/camera/raw", "control", { camera: "proc", face: false }), false);
   assert.equal(frameRequested("camera", "/camera/raw", "face", { camera: "raw", face: true }), false);

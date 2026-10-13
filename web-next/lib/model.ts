@@ -36,7 +36,7 @@ export function canRequestArm(status: RiderStatus | null): boolean {
   const safety = safetyOf(status);
   return !!status?.connection.configured && !!str(safety.generation) && ["DISARMED", "ESTOP", "ARMED"].includes(str(safety.state));
 }
-export function frameRequested(kind: "camera" | "face", path: string, section: Section, media: { camera: "raw" | "proc" | null; face: boolean }): boolean {
+export function frameRequested(kind: "camera" | "face", path: string, section: Section, media: { camera: "raw" | "proc" | "venom" | null; face: boolean }): boolean {
   return kind === "camera" ? section === "control" && media.camera !== null && path === `/camera/${media.camera}` : section === "face" && media.face && path === "/face/runtime/frame";
 }
 export const timestampMs = (value: unknown): number | null => { if (finite(value)) return value < 1e12 ? value * 1000 : value; if (typeof value === "string") { const at = Date.parse(value); return Number.isFinite(at) ? at : null; } return null; };

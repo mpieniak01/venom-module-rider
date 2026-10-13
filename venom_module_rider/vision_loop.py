@@ -15,6 +15,7 @@ class VisionLoop:
         self.busy = None
         self.runs = OrderedDict()
         self.closed = False
+        self.previews = OrderedDict()
 
     def status(self):
         return {
@@ -27,7 +28,7 @@ class VisionLoop:
             "physical_clearance": "unverified",
         }
 
-    async def decide(self, device_id, frame, payload):
+    async def decide(self, device_id, frame, payload, *, with_preview=False):
         if self.closed:
             raise RiderError("module_closed", 503)
         if not frame.valid_corridor() or frame.age_ms >= frame.deadline_ms:
@@ -105,8 +106,28 @@ class VisionLoop:
         action = (
             "go" if permitted and count >= 3 and result["state"] == "clear" else "stop"
         )
+        image = result.pop("_preview", None)
+        if image is not None:
+            self.previews[device_id] = (
+                now - frame.age_ms / 1000,
+                image,
+                {
+                    **result,
+                    "frame_id": frame.frame_id,
+                    "corridor": frame.corridor,
+                    "config_revision": frame.config_revision,
+                    "observed_at": time.time() - (frame.age_ms + elapsed) / 1000,
+                },
+                round(elapsed, 2),
+            )
+            self.previews.move_to_end(device_id)
+            while len(self.previews) > 16:
+                self.previews.popitem(last=False)
+        else:
+            self.previews.pop(device_id, None)
         return {
             **result,
+            **({"_preview": image} if with_preview and image is not None else {}),
             "action": action,
             "protocol_version": 1,
             "run_id": frame.run_id,
@@ -122,6 +143,10 @@ class VisionLoop:
             "physical_clearance": "unverified",
         }
 
+    def preview(self, device_id):
+        row = self.previews.get(device_id)
+        return row if row is not None and self.clock() - row[0] <= 0.5 else None
+
     def _drain(self, task):
         if not task.cancelled():
             task.exception()
@@ -131,5 +156,6 @@ class VisionLoop:
     async def close(self):
         self.closed = True
         self.runs.clear()
+        self.previews.clear()
         if self.busy is not None:
             await asyncio.gather(self.busy, return_exceptions=True)
