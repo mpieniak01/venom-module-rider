@@ -98,9 +98,10 @@ export function motionPermission(state:JsonRecord, goals:JsonRecord, policy:Json
   let reason="permissionUnknown", allowed=false;
   if(known){
     if(!ready)reason="permissionExecutorBlocked";
+    else if(view.current&&view.vision!=="go")reason="permissionDecisionStop";
+    else if(goals.drive!==true||state.mode!=="drive")reason="permissionObservation";
     else if(safety.state!=="ARMED"||safety.can_move!==true)reason="permissionDisarmed";
     else if(safety.owner!=="navigation")reason="permissionManualOwner";
-    else if(goals.drive!==true||state.mode!=="drive")reason="permissionObservation";
     else if(!calibrationMatches(policy,detector))reason="permissionParameters";
     else if(!view.current)reason="permissionNoDecision";
     else if(view.reply!=="go"||view.vision!=="go")reason="permissionDecisionStop";

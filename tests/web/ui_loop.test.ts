@@ -123,7 +123,7 @@ const permissionStatus=(owner="navigation")=>({
 } as unknown as RiderStatus);
 test("manual ARM is explicit manual permission, never Venom permission",()=>{
  const result=motionPermission({...permissionLoop,mode:"observe"},{observe:true,drive:false},permissionPolicy,permissionDetector,permissionStatus("manual"));
- assert.equal(result.manual,true);assert.equal(result.venom,false);assert.equal(result.reason,"permissionManualOwner");
+ assert.equal(result.manual,true);assert.equal(result.venom,false);assert.equal(result.reason,"permissionObservation");
 });
 test("Venom permission requires navigation ARM, a drive goal and a current valid GO",()=>{
  const check=(state=permissionLoop,goals={drive:true},status=permissionStatus(),policy=permissionPolicy)=>motionPermission(state,goals,policy,permissionDetector,status);
@@ -144,4 +144,18 @@ test("unconfirmed control is explicit unknown; executor inhibition blocks both r
  const inhibited=permissionStatus("manual");Object.assign(inhibited.control!.safety as object,{execution:{inhibit:"fixture"}});
  const result=motionPermission(permissionLoop,{drive:true},permissionPolicy,permissionDetector,inhibited);
  assert.equal(result.manual,false);assert.equal(result.venom,false);assert.equal(result.reason,"permissionExecutorBlocked");
+});
+
+test("image STOP is explained before manual ownership or observation mode",()=>{
+ const result=motionPermission({...permissionLoop,mode:"observe",decision:{...permissionLoop.decision,state:"unknown",vision_action:"stop",action:"stop",clear_count:0}},{observe:true,drive:false},permissionPolicy,permissionDetector,permissionStatus("manual"));
+ assert.equal(result.manual,true);assert.equal(result.venom,false);assert.equal(result.reason,"permissionDecisionStop");
+});
+
+test("fresh image GO in observation is independent of DISARMED executor",()=>{
+ const state={...permissionLoop,mode:"observe",decision:{...permissionLoop.decision,action:"stop",motion_reason:"observe_only"}};
+ const status=permissionStatus();Object.assign(status.control!.safety as object,{state:"DISARMED",owner:null,can_move:false});
+ assert.equal(decisionView(state,permissionDetector).vision,"go");
+ assert.equal(decisionView(state,permissionDetector).reply,"stop");
+ const permission=motionPermission(state,{observe:true,drive:false},permissionPolicy,permissionDetector,status);
+ assert.equal(permission.venom,false);assert.equal(permission.manual,false);
 });

@@ -22,6 +22,7 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
   const [error,setError]=useState("");
   const [readError,setReadError]=useState("");
   const [trialResult,setTrialResult]=useState("");
+  const [selectedMode,setSelectedMode]=useState<"observe"|"drive">("observe");
   const [refresh,setRefresh]=useState(0);
   const startTask=useRef<Promise<unknown>|null>(null);
   const stopping=useRef(false);
@@ -49,7 +50,7 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
         const row=await apiFetch<JsonRecord>("/api/v1/rider/navigation/"+(first?"config":"state"),{signal:abort.signal});
         if(abort.signal.aborted)return;
         apply(row);
-        if(first){setPolicy(record(row.config));setDraft(record(row.config));setRuntime(record(row.runtime));configured=true;}
+        if(first){setPolicy(record(row.config));setDraft(record(row.config));setRuntime(record(row.runtime));setSelectedMode(record(row.goals).drive===true?"drive":"observe");configured=true;}
         setReadError("");
       } catch(err) {
         if(abort.signal.aborted)return;
@@ -184,6 +185,8 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
   const trialUnavailable=trialBlock(policy,runtime,detector,connected,dirty,client.status);
   const decision=record(loopState.decision);
   const permission=motionPermission(loopState,goals,policy,detector,client.status);
+  const imageDecision=decisionView(loopState,detector);
+  const executorDisarmed=permission.venom!==null&&record(client.status?.control?.safety).state==="DISARMED";
   return <Panel title={t("loopTitle")} extra={<Button aria-label={t("loopLoad")} disabled={loading||!!operation||!connected} onClick={()=>setRefresh(v=>v+1)}><RefreshCw size={14}/>{t("refresh")}</Button>}>
     <div className={styles.loopStatus} role="status" data-testid="loop-state">
       <Pill tone={phase==="running"?"good":phase==="offline"||phase==="unknown"||phase==="fault"?"warning":undefined}>{t(operation==="stop"?"loopStopping":operation==="check"?"trialChecking":operation==="start"?"loopStarting":"loopPhase."+phase)}</Pill>
@@ -191,24 +194,26 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
     </div>
     <div className={styles.loopToolbar}>
     <div className={styles.permissionSummary} role="status" data-testid="motion-permission">
-      <strong data-testid="venom-permission" className={permission.venom===true?styles.verdictGo:styles.verdictStop}>{t(permission.venom===null?"permissionVenomUnknown":permission.venom?"permissionVenomYes":"permissionVenomNo")}</strong>
-      <span>{t(permission.reason)}</span>
+      <strong data-testid="image-permission" className={imageDecision.vision==="go"?styles.verdictGo:styles.verdictStop}>{t(imageDecision.vision==="go"?"imageAllowsMotion":imageDecision.vision==="none"?"imageAssessmentUnknown":"imageBlocksMotion")}</strong>
+      <strong data-testid="venom-permission" className={permission.venom===true?styles.verdictGo:styles.verdictStop}>{t(executorDisarmed?"permissionPiDisarmed":permission.venom===null?"permissionVenomUnknown":permission.venom?"permissionVenomYes":"permissionVenomNo")}</strong>
+      <span>{t(executorDisarmed?"permissionDisarmed":permission.reason)}</span>
       <span data-testid="manual-permission">{t(permission.manual===null?"permissionManualUnknown":permission.manual?"permissionManualYes":"permissionManualNo")}</span>
     </div>
     <div className={styles.loopActions}>
-      <Button data-testid="loop-preview" disabled={!connected||!!operation||loading||!!observeBlock} onClick={()=>void observePreview()}>{t("trialAnalyse")}</Button>
-      <Button tone="primary" data-testid="loop-start" disabled={!!trialUnavailable||!!operation||!!client.busy||loading||phase==="running"&&goals.drive===true} onClick={()=>void runTrial()}><Play size={18}/>{t("trialRun")}</Button>
+      <Field label={t("loopMode")}><select className={styles.select} data-testid="loop-mode" aria-label={t("loopMode")} value={selectedMode} disabled={!connected||!!operation||loading} onChange={event=>setSelectedMode(event.target.value as "observe"|"drive")}><option value="observe">{t("modeObserveChoice")}</option><option value="drive">{t("modeDriveChoice")}</option></select></Field>
+      {selectedMode==="observe"?<Button data-testid="loop-preview" disabled={!connected||!!operation||loading||!!observeBlock} onClick={()=>void observePreview()}><Play size={18}/>{t("startObservation")}</Button>:<Button tone="primary" data-testid="loop-start" disabled={!!trialUnavailable||!!operation||!!client.busy||loading||phase==="running"&&goals.drive===true} onClick={()=>void runTrial()}><Play size={18}/>{t("trialRun")}</Button>}
       <Button tone="danger" data-testid="loop-stop" disabled={!connected||operation==="stop"||operation==="save"} onClick={()=>void stop()}><Square size={18}/>{t(operation==="stop"?"loopStopping":"loopStop")}</Button>
     </div>
     </div>
     {!!trialUnavailable&&<p className={styles.hint} data-testid="loop-block">{t(trialUnavailable)}</p>}
     {!!trialResult&&<p className={styles.hint} role="status" data-testid="trial-result">{t(phase==="fault"?"trialEnded":trialResult==="trialStarted"&&phase==="stopped"?"trialStopped":trialResult)}</p>}
+    <p className={styles.hint} data-testid="mode-help">{t(selectedMode==="drive"?"modeDriveHelp":"modeObserveHelp")}</p>
     <p className={styles.hint}>{t("trialPlan")} · {String(policy?.speed??"—")} SDK · ≤ {String(policy?.max_motion_ms??"—")} ms</p>
     {phase==="fault"&&<p role="alert" className={styles.loopError}>{t("loopFaultHint")} · {String(loopState.stop_reason??"")}</p>}
 
     {(error||readError)&&<p className={styles.loopError} role="alert">{error||readError}</p>}
     <div ref={workspaceRef} className={styles.driveWorkspace}>
-      <div className={styles.loopCamera}><CameraPanel client={client} t={t} language={language} compact/></div>
+      <div className={styles.loopCamera}><CameraPanel client={client} t={t} language={language} compact analysisCurrent={imageDecision.current&&decision.reason!=="vision_observation_transport_retry"}/></div>
       <div className={styles.loopSidebar}>
         {manual}
         <LoopDecision state={loopState} detector={detector} policy={policy} status={client.status} t={t} language={language}/>

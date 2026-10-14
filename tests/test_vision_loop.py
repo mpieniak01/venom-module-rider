@@ -513,3 +513,15 @@ def test_low_confidence_floor_label_is_not_current_clearance():
     assert result["floor_fraction"] == 0
     assert result["dominant_class_id"] == 3
     assert result["confidence_fraction"] == 0
+
+
+def test_tiny_uncertain_region_is_not_silently_promoted_to_clearance():
+    # A small uncertain region can be the only evidence of an obstacle.
+    # Do not promote it to floor without validating the perception change.
+    logits = np.zeros((1, 150, 20, 20), dtype=np.float32)
+    logits[:, 3] = 20
+    logits[:, :, 0, 0] = 0
+    result = classify_logits(logits, (0, 0, 1, 1))
+    assert result["confidence_fraction"] > 0.99
+    assert result["floor_fraction"] > 0.99
+    assert result["state"] != "clear"
