@@ -18,6 +18,7 @@ async (page) => {
   if(req.method()!=="GET"){
    const body=req.postDataJSON();calls.push({path,body});
    if(path==="/navigation/config"){check(body.revision===policy.revision,"revision conflict");policy={...policy,...body.values,revision:policy.revision+1};return json({meta:{},ok:true,data:{ok:true,config:policy}});}
+   if(path==="/goal/s2_camera_preview")return json({ok:true,data:{ok:true}});
    if(path==="/goal/s15_venom_perception"){observing=body.enabled;return json({ok:true,data:{ok:true}});}
    if(path==="/goal/s14_venom_navigation"){if(body.enabled)check(armed&&owner==="navigation"&&body.source==="navigation"&&body.generation===generation&&Number.isInteger(body.seq),"navigation goal envelope missing");driving=body.enabled;return json({ok:true,data:{ok:true}});}
    if(path==="/control"){
@@ -61,6 +62,10 @@ async (page) => {
  const disarm=calls.findIndex(c=>c.path==="/control"&&c.body.action==="disarm"),arm=calls.findIndex(c=>c.path==="/control"&&c.body.action==="arm");
  check(disarm>=0&&arm>disarm,"manual ARM must be released before navigation ARM");
  check(calls.some(c=>c.path==="/control"&&c.body.action==="arm"&&c.body.lease_s===10),"timed ARM missing");
+ const preview=calls.findIndex(c=>c.path==="/goal/s2_camera_preview"&&c.body.enabled);
+ const observeOff=calls.findIndex((c,i)=>i>preview&&c.path==="/goal/s15_venom_perception"&&c.body.enabled===false);
+ check(preview>=0&&observeOff>preview&&arm>observeOff,"capture and frame feed must remain owned during analysis-to-driving transfer");
+
  await page.getByTestId("loop-stop").click();
  const stopUntil=Date.now()+5000;
  while((driving||armed)&&Date.now()<stopUntil)await new Promise(r=>setTimeout(r,10));

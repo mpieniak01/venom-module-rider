@@ -987,3 +987,46 @@ async def test_manual_intent_has_no_telemetry_get_dependency():
     assert [row["method"] for row in pi.trace[before:]] == ["POST"]
     assert pi.state == "ARMED"
     await service.close()
+
+
+@pytest.mark.parametrize("fresh", [True, False])
+async def test_navigation_start_failure_keeps_only_current_run_diagnostics(
+    monkeypatch, fresh, caplog
+):
+    service, _ = domain()
+
+    async def read(path, *_args, **_kwargs):
+        if path == "/api/logic/catalog":
+            return {
+                "meta": {},
+                "data": {
+                    "features": [{"name": "s14_venom_navigation", "can_move": False}]
+                },
+            }
+        return {
+            "meta": {},
+            "data": {
+                "observed_at": time.time() if fresh else time.time() - 60,
+                "run_id": "failed-run",
+                "stop_reason": "motion_submission_failed",
+                "motion_failure": {"http_status": 409, "reason": "stale_generation"},
+            },
+        }
+
+    async def mutate(*_args, **_kwargs):
+        raise RiderError("start_failed", 503, {"original": True})
+
+    monkeypatch.setattr(service, "read", read)
+    monkeypatch.setattr(service, "mutate", mutate)
+    with pytest.raises(RiderError) as caught:
+        await service.goal("s14_venom_navigation", {"enabled": True}, service.session)
+    assert caught.value.details["original"] is True
+    if fresh:
+        assert (
+            caught.value.details["navigation"]["motion_failure"]["reason"]
+            == "stale_generation"
+        )
+        assert "stale_generation" in caplog.text
+    else:
+        assert "navigation" not in caught.value.details
+    await service.close()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import logging
 import math
 import time
 import uuid
@@ -413,7 +414,44 @@ class RiderService:
             if safety.get("owner") != owner or safety.get("can_move") is not True:
                 raise RiderError("operator_motion_permission_required")
             self.sequences[intent["generation"]] = body["seq"]
-        return await self.mutate("/api/logic/feature/" + name, body, session)
+        started = time.time()
+        try:
+            return await self.mutate("/api/logic/feature/" + name, body, session)
+        except RiderError as exc:
+            if (
+                name == "s14_venom_navigation"
+                and body.get("enabled") is True
+                and exc.code == "start_failed"
+            ):
+                # Collect the failing run before another poll or retry replaces it.
+                with suppress(RiderError):
+                    state = self.data(
+                        await self.read("/api/navigation/status", 0, force=True)
+                    )
+                    if (
+                        isinstance(state.get("observed_at"), (int, float))
+                        and state["observed_at"] >= started
+                    ):
+                        diagnostic = {
+                            key: state.get(key)
+                            for key in (
+                                "run_id",
+                                "observed_at",
+                                "stop_reason",
+                                "motion_failure",
+                                "request_roundtrip_ms",
+                                "response_age_ms",
+                            )
+                        }
+                        details = (
+                            dict(exc.details) if isinstance(exc.details, dict) else {}
+                        )
+                        details["navigation"] = diagnostic
+                        exc.details = details
+                        logging.getLogger(__name__).warning(
+                            "rider navigation start_failed diagnostic=%s", diagnostic
+                        )
+            raise
 
     async def camera(self, stream):
         if stream not in {"raw", "proc"}:

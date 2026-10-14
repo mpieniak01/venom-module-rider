@@ -81,7 +81,12 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
     const row=await apiFetch<JsonRecord>("/api/v1/rider/navigation/state");
     setLoopState(record(row.status));setGoals(record(row.goals));setDetector(record(row.detector));
   };
-  const failure=(err:unknown)=>setError(t(loopFailure(err))+" · "+errorCode(err));
+  const failure=(err:unknown)=>{
+    const diagnostic=record(record(record(record(err).data).detail).details).navigation;
+    const row=record(diagnostic), cause=String(record(row.motion_failure).reason??row.stop_reason??"");
+    const key="vision.reason."+cause, translated=t(key);
+    setError(t(loopFailure(err))+" · "+errorCode(err)+(cause?" · "+(translated===key?cause:translated):""));
+  };
   const stop=async()=>{
     if(stopping.current)return;
     stopping.current=true;setOperation("stop");setError("");
@@ -180,6 +185,8 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
       const selected=record(loaded.config);
       if(!calibrationMatches(selected,record(loaded.detector))||selected.revision!==record(record(row.status).decision).config_revision||calibrationScope(selected,record(loaded.detector))!==calibrationScope(policy,record(loaded.detector)))throw Object.assign(new Error("navigation_configuration_changed"),{data:{error:"navigation_configuration_changed"}});
       setOperation("start");setTrialResult("trialStarting");
+      // Retain both capture and frame feed while replacing the analysis goal.
+      await client.mutate("/goal/s2_camera_preview",{enabled:true},"POST",true);ensureOperation(origin);
       await stopGoals(origin);ensureOperation(origin);
       const values=loopSettingsValues(selected,{...selected,mode:"drive"});
       const result=selected.mode==="drive"?{config:selected}:await client.mutate("/navigation/config",{revision:selected.revision,values},"POST",true);ensureOperation(origin);

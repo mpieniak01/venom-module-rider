@@ -40,6 +40,7 @@ export const messages = {
   "vision.reason.floor_candidate": ["Widoczna podłoga; fizyczne bezpieczeństwo przejazdu wymaga weryfikacji.", "Visible floor; physical clearance requires validation.", "Boden sichtbar; tatsächliche Durchfahrt muss geprüft werden."],
   "vision.reason.vision_inference_unavailable": ["Analiza jest niedostępna.", "Analysis is unavailable.", "Analyse nicht verfügbar."],
   "vision.reason.vision_decision_expired": ["Decyzja przekroczyła limit czasu.", "Decision deadline exceeded.", "Entscheidungsfrist überschritten."],
+  "vision.reason.stale_generation": ["Pi odrzuciło komendę, ponieważ poprzednia zgoda na ruch została unieważniona.", "Pi rejected the command because the previous motion permission was invalidated.", "Pi hat den Befehl abgelehnt, weil die bisherige Bewegungsfreigabe ungültig wurde."],
   "vision.reason.default": ["Brak potwierdzonej decyzji o ruchu.", "No confirmed motion decision.", "Keine bestätigte Bewegungsentscheidung."],
   "vision": ["Wizja i ruch", "Vision and motion", "Bild und Bewegung"],
   "loopStartObserve": ["Uruchom kamerę i analizę", "Start camera and analysis", "Kamera und Analyse starten"],
