@@ -8,7 +8,7 @@ import { translate } from "./lib/i18n";
 import { formatTime, safetyOf, str, type Section } from "./lib/model";
 import { useRider } from "./lib/use-rider";
 import { Calibration } from "./components/calibration";
-import { CameraPanel, ManualPad, Posture } from "./components/control";
+import { ManualPad, Posture } from "./components/control";
 import { FaceStudio } from "./components/face";
 import { Measurements, RequestHistory, SensorMetrics } from "./components/measurements";
 import { Button, Empty, Panel, Pill } from "./components/primitives";
@@ -60,7 +60,7 @@ export default function RiderPage() {
       {client.loading && !client.status ? <Panel title={t("device")}><Empty>{t("loading")}</Empty></Panel> : !connection?.configured ? <Panel title={t("device")}><Empty><Bot size={40} />{t("unconfigured")}</Empty></Panel> : <>
         {section === "control" && <div className={styles.stack}>
           <NavigationLoop key={connection.session} client={client} t={t} language={language}
-            preview={<CameraPanel client={client} t={t} language={language} compact/>}
+            onManualSettings={()=>changeSection("calibration")}
             manual={<Panel className={styles.manualEmbedded} title={t("manual")} extra={<Button data-testid="takeover-manual" tone="primary" disabled={!client.canArm||!!client.busy} onClick={()=>void client.takeManual(t("manual"))}>{t("takeManual")}</Button>}><p className={styles.hint}>{t("takeManualHint")}</p><ManualPad client={client} t={t} language={language} compact/></Panel>}/>
           <details className={styles.details}><summary>{t("postureAndTelemetry")}</summary><div className={styles.grid}><Posture client={client} t={t} language={language}/><Panel title={t("measurements")} hint={t("measurementsHint")}><SensorMetrics status={client.status} t={t} language={language}/></Panel></div><RequestHistory status={client.status} t={t} language={language}/></details>
         </div>}

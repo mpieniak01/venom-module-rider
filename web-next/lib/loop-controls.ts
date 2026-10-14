@@ -1,4 +1,4 @@
-import { record, safetyOf, str, type JsonRecord, type RiderStatus } from "./model";
+import { record, safetyOf, str, timestampMs, type JsonRecord, type RiderStatus } from "./model";
 
 export type LoopPhase = "offline" | "unknown" | "stopped" | "starting" | "running" | "fault";
 export function loopPhase(connected: boolean, state: JsonRecord, goals: JsonRecord): LoopPhase {
@@ -17,7 +17,7 @@ export function loopBlock(policy: JsonRecord | null, runtime: JsonRecord, detect
   if (runtime[mode] !== true) return runtime.drive_reason === "navigation_executor_update_required" && mode === "drive" ? "loopExecutorUpdate" : "loopRuntimeMissing";
   if (detector.configured !== true) return "loopNoModel";
   if (mode === "drive") {
-    if (policy.verified !== true || policy.model_sha256 !== detector.sha256) return "loopUnverified";
+    if (!calibrationMatches(policy, detector)) return "loopUnverified";
     const safety = safetyOf(status);
     if (safety.state !== "ARMED" || safety.owner !== "navigation" || safety.stale === true || status?.errors?.control) return "loopNeedsArm";
   }
@@ -30,4 +30,29 @@ export function loopFailure(error: unknown): string {
   if (code === "navigation_api_unavailable") return "loopApiMissing";
   if (code === "pi_operation_timeout") return "operationUnconfirmed";
   return "requestFailed";
+}
+
+// The saved Pi policy remains authoritative. These helpers only guide the operator.
+export function calibrationMatches(policy: JsonRecord | null, detector: JsonRecord): boolean {
+  return !!policy && policy.verified === true && !!str(policy.calibration_id).trim()
+    && /^[a-f0-9]{64}$/.test(str(detector.sha256)) && policy.model_sha256 === detector.sha256;
+}
+export function calibrationScope(policy: JsonRecord | null, detector: JsonRecord): string {
+  return JSON.stringify([policy?.speed, policy?.max_motion_ms, policy?.decision_budget_ms, policy?.corridor, detector.sha256]);
+}
+export function loopSettingsValues(policy: JsonRecord, draft: JsonRecord): JsonRecord {
+  const {revision: ignoredRevision, protocol_version: ignoredProtocol, ...values} = draft;
+  void ignoredRevision; void ignoredProtocol;
+  return calibrationScope(policy, {}) === calibrationScope(draft, {}) ? values
+    : {...values, verified: false, calibration_id: "", model_sha256: ""};
+}
+export function calibrationAcceptance(policy: JsonRecord, detector: JsonRecord, id: string): JsonRecord {
+  if (!/^[a-f0-9]{64}$/.test(str(detector.sha256)) || !id.trim()) throw new Error("calibration_model_unavailable");
+  return {...loopSettingsValues(policy, policy), verified: true, calibration_id: id, model_sha256: detector.sha256};
+}
+export function freshAnalysisFrame(frame: {stale: boolean; knownFreshness: boolean; fileAt: string; id: string; visionState: string; visionPolicy: string} | null, stream: string | null, now = Date.now()): boolean {
+  const at = timestampMs(frame?.fileAt && Number.isFinite(Number(frame.fileAt)) ? Number(frame.fileAt) : frame?.fileAt);
+  return !!frame && stream === "venom" && !frame.stale && frame.knownFreshness && !!frame.id
+    && !!frame.visionState && !!frame.visionPolicy && frame.visionPolicy !== "diagnostic_default"
+    && at !== null && now >= at - 1000 && now - at <= 3000;
 }

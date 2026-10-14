@@ -132,3 +132,22 @@
 
 .environmentSelect { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--r-muted); }
 .environmentSelect select { width: 160px; }
+
+.loopSidebar { display: grid; gap: 18px; }
+.loopCalibration { padding-top: 16px; border-top: 1px solid var(--r-border); }
+.loopCalibration h3 { margin: 0; font-size: 14px; }
+.loopCalibration .check { margin: 14px 0; align-items: start; line-height: 1.5; }
+.loopCalibration .check input { flex-shrink: 0; margin-top: 4px; }
+.loopCalibration .button { margin-top: 6px; }
+.calibrationSteps { padding-left: 22px; margin: 16px 0; font-size: 12px; line-height: 1.5; }
+.calibrationSteps li { margin-bottom: 14px; padding-left: 4px; }
+.calibrationSteps p { margin: 5px 0; color: var(--ui-muted); }
+@container rider (min-width: 760px) {
+  .driveWorkspace { grid-template-columns: minmax(0, 1.6fr) minmax(300px, 1fr); }
+  .loopCamera { position: sticky; top: 16px; }
+  .driveWorkspace .camera { height: clamp(280px, 42vh, 500px); }
+}
+@container rider (max-width: 759px) {
+  .driveWorkspace { grid-template-columns: minmax(0, 1fr); }
+  .loopCamera { position: static; }
+}
