@@ -132,11 +132,15 @@ class DepthDetector:
             image = opened.convert("RGB")
         rgb = np.asarray(image, dtype=np.float32) / 255
         if rgb.mean() < 0.04 or rgb.std() < 0.01:
+            # Publish the actual rejected capture, never retain a previous green mask.
+            stream = io.BytesIO()
+            image.save(stream, format="JPEG", quality=85)
             return {
                 "state": "unknown",
                 "reason": "vision_image_quality",
                 "drive_supported": False,
                 "distance_measurement": False,
+                "_preview": stream.getvalue(),
             }
         self._load()
         processor, model = self.processor, self.model

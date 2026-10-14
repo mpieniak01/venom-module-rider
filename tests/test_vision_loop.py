@@ -764,3 +764,17 @@ async def test_real_pi_has_priority_over_same_engine_demo_admission():
     now[0] = 0.6
     assert (await loop.decide("demo", frame(), b"x"))["state"] == "clear"
     await loop.close()
+
+
+def test_rejected_dark_capture_replaces_previous_preview_without_model_load():
+    from venom_module_rider.depth_detector import DepthDetector, PerceptionSettings
+
+    detector = DepthDetector()
+    payload = io.BytesIO()
+    Image.new("RGB", (64, 64), (0, 0, 0)).save(payload, format="JPEG")
+    result = detector.detect(
+        payload.getvalue(), (0, 0, 1, 1), PerceptionSettings(engine="depth_plane")
+    )
+    assert result["state"] == "unknown"
+    assert detector.model is None
+    assert np.asarray(Image.open(io.BytesIO(result["_preview"]))).max() == 0
