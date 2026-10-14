@@ -191,6 +191,38 @@ This runs Ruff, formatting, mypy, targeted Python tests with a 90% coverage floo
 
 Local session reports, screenshots and operator/device settings stay under ignored docs_dev/, output/ and local environment files. The host integration also requires make pr-fast.
 
+## Vision loop calibration acceptance
+
+The control workspace combines camera preview, manual takeover and loop controls.
+Floor segmentation is not a distance or braking-distance measurement. Calibration
+is an explicit operator acceptance of the model, camera mounting and loop parameters.
+
+1. Use **Start camera and analysis**. This starts observation without arming or
+   moving the robot; from Driving it first saves Observe mode. Compare RAW with
+   Venom vision. The white rectangle is the analysis zone; green means floor,
+   red another class and yellow uncertainty.
+2. Check empty floor and an obstacle in the zone. To adjust the zone, speed or
+   deadlines, stop the loop, edit **Zone and motion parameters**, save on Pi and
+   restart observation.
+3. Open **Manual control settings** and set the forward trial speed and pulse
+   to the values displayed in the acceptance guide. Perform the physical braking
+   trial with explicit manual ARM and verify stopping within the visible zone.
+   The panel does not perform this trial automatically.
+4. Confirm the image assessment while a fresh processed frame is visible, then
+   confirm the completed manual trial. **Save calibration acceptance on Pi**
+   ends observation and fills the model hash and acceptance ID automatically.
+   The Pi revision protects against concurrent updates. Acceptance does not ARM
+   or start driving; it records the operator's assessment.
+5. Select Driving and save, enter a trial plan, **Give Venom control for 10 s**,
+   then **Start driving**. Manual ARM only permits the arrows. Navigation still
+   requires consecutive clear frames; uncertain, stale or missing decisions
+   produce STOP.
+
+Changing the zone, speed or decision/motion limits through the panel revokes the
+saved acceptance. A different model blocks driving. After changing the camera
+mounting or operating conditions, stop the loop and use **Revoke acceptance**,
+then repeat the assessment. Demo acceptance stays on the selected demo device.
+
 ## Operation and removal
 
 Settings are saved only after **Save**, with the Pi revision included. Unsaved drafts are labelled, and a concurrent change blocks stale saves until the draft is discarded. Profiles are stored and applied by Pi; no second calibration database exists in Venom.

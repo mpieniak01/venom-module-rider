@@ -144,10 +144,12 @@
 .calibrationSteps p { margin: 5px 0; color: var(--ui-muted); }
 @container rider (min-width: 760px) {
   .driveWorkspace { grid-template-columns: minmax(0, 1.6fr) minmax(300px, 1fr); }
-  .loopCamera { position: sticky; top: 16px; }
+  .loopCamera { position: sticky; top: 180px; }
   .driveWorkspace .camera { height: clamp(280px, 42vh, 500px); }
 }
 @container rider (max-width: 759px) {
   .driveWorkspace { grid-template-columns: minmax(0, 1fr); }
   .loopCamera { position: static; }
 }
+
+.calibrationSteps .trialParameters { color: var(--r-text); font-weight: 600; }

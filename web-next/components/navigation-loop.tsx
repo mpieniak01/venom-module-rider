@@ -128,6 +128,12 @@ export function NavigationLoop({client,t,language,manual,onManualSettings}:{clie
       await persist(values);await readState();
     }catch(err){failure(err);}finally{setOperation(null);}
   };
+  const revokeCalibration=async()=>{
+    if(!policy||active||operation||dirty)return;
+    setOperation("save");setError("");
+    try{await persist({...loopSettingsValues(policy,policy),verified:false,calibration_id:"",model_sha256:""});}
+    catch(err){failure(err);}finally{setOperation(null);}
+  };
   const openSettings=()=>{if(settingsRef.current){settingsRef.current.open=true;settingsRef.current.scrollIntoView({behavior:"smooth",block:"center"});}};
   const observeBlock=policy?loopBlock({...policy,mode:"observe"},runtime,detector,connected,dirty,client.status):"loopLoadFailed";
   const driveBlock=loopBlock(policy?{...policy,mode:"drive"}:null,runtime,detector,connected,dirty,client.status);
@@ -145,7 +151,7 @@ export function NavigationLoop({client,t,language,manual,onManualSettings}:{clie
     <div className={styles.loopToolbar}>
     {draft&&<div className={styles.loopModeRow}><Field label={t("loopMode")}><select className={styles.select} disabled={active||!!operation} value={String(draft.mode)} onChange={e=>setDraft({...draft,mode:e.target.value})}><option value="observe">{t("loopObserve")}</option><option value="drive">{t("loopDrive")}</option></select></Field><Button disabled={!connected||!!operation||active||!dirty} onClick={()=>void save()}>{t("loopSave")}</Button>{dirty&&<Button disabled={!!operation} onClick={()=>setDraft(policy)}>{t("loopDiscard")}</Button>}</div>}
     <div className={styles.loopActions}>
-      <Button data-testid="loop-preview" disabled={!connected||!!operation||loading||(!active&&!!observeBlock)} onClick={()=>void observePreview()}>{t(active?"showPreview":"loopPreparePreview")}</Button>
+      {(mode==="drive"&&!active||active&&!client.cameraStream)&&<Button data-testid="loop-preview" disabled={!connected||!!operation||loading||(!active&&!!observeBlock)} onClick={()=>void observePreview()}>{t(active?"showPreview":"loopPreparePreview")}</Button>}
       <Button tone="primary" data-testid="loop-start" disabled={!!block||!!operation||!!client.busy||loading||active||phase==="unknown"} onClick={()=>void start()}><Play size={18}/>{t(operation==="start"?"loopStarting":mode==="drive"?"loopStartDrive":"loopStartObserve")}</Button>
       <Button tone="danger" data-testid="loop-stop" disabled={!connected||operation==="stop"||operation==="save"} onClick={()=>void stop()}><Square size={18}/>{t(operation==="stop"?"loopStopping":"loopStop")}</Button>
     </div>
@@ -159,7 +165,7 @@ export function NavigationLoop({client,t,language,manual,onManualSettings}:{clie
       <div className={styles.loopCamera}><CameraPanel client={client} t={t} language={language} compact onObservation={()=>void observePreview()} observationDisabled={!connected||!!operation||loading||(!active&&!!observeBlock)}/></div>
       <div className={styles.loopSidebar}>
         {manual}
-        <LoopCalibration client={client} t={t} policy={policy} detector={detector} dirty={dirty} busy={!!operation||!!client.busy} driving={goals.drive===true} onAccept={acceptCalibration} onSettings={openSettings} onManualSettings={onManualSettings}/>
+        <LoopCalibration client={client} t={t} policy={policy} detector={detector} dirty={dirty} busy={!!operation||!!client.busy} driving={goals.drive===true} active={active} onAccept={acceptCalibration} onRevoke={revokeCalibration} onSettings={openSettings} onManualSettings={onManualSettings}/>
         {mode==="drive"&&<section className={styles.loopCalibration}>
           <h3>{t("loopDrivePermission")}</h3>
           <p className={styles.hint}>{t("loopDriveSequence")}</p>
