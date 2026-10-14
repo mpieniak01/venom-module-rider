@@ -182,3 +182,9 @@ test("operator sees manual ARM and observation as separate from image rejection"
  const view=decisionView({running:true,stale:false,mode:"observe",decision:{state:"unknown",reason:"vision_low_confidence",motion_reason:"observe_only"}},{});
  assert.equal(view.imageReason,"vision_low_confidence");
 });
+
+
+test("expired previous assessment is not described as waiting for the first result",()=>{
+ assert.equal(decisionView({running:false,stale:true,decision:{state:"clear",vision_action:"go"}},{}).imageReason,"analysis_not_current");
+ assert.equal(decisionView({running:false,stale:true},{}).imageReason,"waiting_for_decision");
+});

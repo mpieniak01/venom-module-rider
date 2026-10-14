@@ -69,7 +69,7 @@ export function decisionView(state: JsonRecord, detector: JsonRecord) {
   const vision=decision.state==="clear"&&count>=required&&decision.vision_action!=="stop" ? "go":"stop";
   return {
     current, required, count,
-    imageReason:!current?"waiting_for_decision":decision.state!=="clear"?String(decision.reason??"waiting_for_decision"):count<required?"clear_frames_pending":"clear_frames_ready",
+    imageReason:!current?(decision.state?"analysis_not_current":"waiting_for_decision"):decision.state!=="clear"?String(decision.reason??"waiting_for_decision"):count<required?"clear_frames_pending":"clear_frames_ready",
     vision:current?vision:"none",
     reply:current&&["go","stop"].includes(String(decision.action))?String(decision.action):"none",
     reason:current?String(decision.motion_reason??(decision.state!=="clear"?decision.reason:count<required?"clear_frames_pending":state.mode==="observe"?"observe_only":decision.reason)??"waiting_for_decision"):String(state.stop_reason??"waiting_for_decision"),

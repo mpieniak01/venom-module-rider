@@ -201,19 +201,20 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
       <strong data-testid="image-permission" className={imageDecision.vision==="go"?styles.verdictGo:styles.verdictStop}>{t(imageDecision.vision==="go"?"imageAllowsMotion":imageDecision.vision==="none"?"imageAssessmentUnknown":"imageBlocksMotion")}</strong>
       {imageDecision.vision!=="go"&&<span data-testid="image-stop-reason">{imageReason}{imageDecision.floor!==null&&" · "+t("confidentFloorCoverage",{value:formatNumber(imageDecision.floor*100,language,2)})}</span>}
       <strong data-testid="venom-permission" className={permission.venom===true?styles.verdictGo:styles.verdictStop}>{t(executionHeadline(loopState,goals,client.status,permission))}</strong>
-      <span>{t(executorDisarmed?"permissionDisarmed":permission.reason)}</span>
+      <span>{t(detector.drive_supported===false?"loopDepthObservation":executorDisarmed?"permissionDisarmed":permission.reason)}</span>
       <span data-testid="manual-permission">{t(permission.manual===null?"permissionManualUnknown":permission.manual?"permissionManualYes":"permissionManualNo")}</span>
     </div>
     <div className={styles.loopActions}>
       <Field label={t("loopMode")}><select className={styles.select} data-testid="loop-mode" aria-label={t("loopMode")} value={selectedMode} disabled={!connected||!!operation||loading} onChange={event=>setSelectedMode(event.target.value as "observe"|"drive")}><option value="observe">{t("modeObserveChoice")}</option><option value="drive">{t("modeDriveChoice")}</option></select></Field>
-      {selectedMode==="observe"?<Button data-testid="loop-preview" disabled={!connected||!!operation||loading||!!observeBlock} onClick={()=>void observePreview()}><Play size={18}/>{t("startObservation")}</Button>:<Button tone="primary" data-testid="loop-start" disabled={!!trialUnavailable||!!operation||!!client.busy||loading||phase==="running"&&goals.drive===true} onClick={()=>void runTrial()}><Play size={18}/>{t("trialRun")}</Button>}
+      <Button data-testid="loop-preview" disabled={!connected||!!operation||loading||!!observeBlock||active&&loopState.running===true} onClick={()=>void observePreview()}><Play size={18}/>{t(active&&loopState.running===true?"analysisRunning":"startObservation")}</Button>
+      {selectedMode==="drive"&&<Button tone="primary" data-testid="loop-start" aria-describedby="rider-trial-block" disabled={!!trialUnavailable||!!operation||!!client.busy||loading||phase==="running"&&goals.drive===true} onClick={()=>void runTrial()}><Play size={18}/>{t("trialRun")}</Button>}
       <Button tone="danger" data-testid="loop-stop" disabled={!connected||operation==="stop"||operation==="save"} onClick={()=>void stop()}><Square size={18}/>{t(operation==="stop"?"loopStopping":"loopStop")}</Button>
     </div>
     </div>
-    {!!trialUnavailable&&<p className={styles.hint} data-testid="loop-block">{t(trialUnavailable)}</p>}
+    {selectedMode==="drive"&&!!trialUnavailable&&<p id="rider-trial-block" className={styles.loopError} role="status" data-testid="loop-block">{t(trialUnavailable)}</p>}
     {!!trialResult&&<p className={styles.hint} role="status" data-testid="trial-result">{t(phase==="fault"?"trialEnded":trialResult==="trialStarted"&&phase==="stopped"?"trialStopped":trialResult)}</p>}
-    <p className={styles.hint} data-testid="mode-help">{t(selectedMode==="drive"?"modeDriveHelp":"modeObserveHelp")}</p>
-    <p className={styles.hint}>{t("trialPlan")} · {String(policy?.speed??"—")} SDK · ≤ {String(policy?.max_motion_ms??"—")} ms</p>
+    <p className={styles.hint} data-testid="mode-help">{t(selectedMode==="drive"&&detector.drive_supported===false?"modeDriveUnavailableHelp":selectedMode==="drive"?"modeDriveHelp":"modeObserveHelp")}</p>
+    {selectedMode==="drive"&&detector.drive_supported!==false&&<p className={styles.hint}>{t("trialPlan")} · {String(policy?.speed??"—")} SDK · ≤ {String(policy?.max_motion_ms??"—")} ms</p>}
     {phase==="fault"&&<p role="alert" className={styles.loopError}>{t("loopFaultHint")} · {String(loopState.stop_reason??"")}</p>}
 
     {(error||readError)&&<p className={styles.loopError} role="alert">{error||readError}</p>}
