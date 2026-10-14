@@ -26,7 +26,6 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
   const startTask=useRef<Promise<unknown>|null>(null);
   const stopping=useRef(false);
   const settingsRef=useRef<HTMLDetailsElement>(null);
-  const workspaceRef=useRef<HTMLDivElement>(null);
   const displayedRun=useRef("");
   const mounted=useRef(true);
   const trialArmed=useRef(false);
@@ -136,7 +135,6 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
   };
   const observePreview=async()=>{
     if(!policy||dirty||operation||loading||observeBlock)return;
-    requestAnimationFrame(()=>workspaceRef.current?.scrollIntoView({behavior:"instant",block:"start"}));
     setOperation("start");setError("");setTrialResult("");
     const origin=client.currentSession();operationEpoch.current=client.currentMotionEpoch();operationGeneration.current=client.currentGeneration();
     const task=ensureAnalysis(origin);startTask.current=task;
@@ -163,7 +161,6 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
   };
   const runTrial=async()=>{
     if(!policy||trialUnavailable||operation||loading||phase==="running"&&goals.drive===true)return;
-    requestAnimationFrame(()=>workspaceRef.current?.scrollIntoView({behavior:"instant",block:"start"}));
     setOperation("check");setError("");setTrialResult("trialChecking");trialArmed.current=false;
     const origin=client.currentSession();operationEpoch.current=client.currentMotionEpoch();operationGeneration.current=client.currentGeneration();
     const task=(async()=>{
@@ -230,7 +227,7 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
     {phase==="fault"&&<p role="alert" className={styles.loopError}>{t("loopFaultHint")} · {String(loopState.stop_reason??"")}</p>}
 
     {(error||readError)&&<p className={styles.loopError} role="alert">{error||readError}</p>}
-    <div ref={workspaceRef} className={styles.driveWorkspace}>
+    <div className={styles.driveWorkspace}>
       <div className={styles.loopCamera}><CameraPanel client={client} t={t} language={language} compact analysisRunning={active&&loopState.running===true} analysisCurrent={imageDecision.current&&decision.reason!=="vision_observation_transport_retry"}/></div>
       <div className={styles.loopSidebar}>
         {manual}
