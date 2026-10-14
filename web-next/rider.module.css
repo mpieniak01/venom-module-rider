@@ -190,3 +190,6 @@
 .cameraPaused { position: absolute; top: 8px; left: 8px; right: 8px; z-index: 1; padding: 8px 10px; border: 1px solid var(--danger); border-radius: 8px; background: rgba(12, 15, 20, .9); color: #ffc65c; font-size: 12px; font-weight: 700; text-align: center; }
 
 .padStop:disabled { opacity: .4; cursor: not-allowed; }
+
+/* Keep the complete camera image beside the decision and manual controls. */
+.loopCamera .cameraEmbedded .camera { height: clamp(240px, 30vh, 340px); max-height: 340px; aspect-ratio: auto; }
