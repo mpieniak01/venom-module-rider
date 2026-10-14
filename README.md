@@ -129,8 +129,9 @@ The demo forces RIDER_DEMO_ONLY=true, disables physical IoT and LLM startup, and
 
 The control screen combines camera preview, loop Start/Stop, and manual arrows.
 While a Pi loop is active, the processed preview reuses its fresh, matching
-analysis. It waits for a result instead of starting a competing inference that
-could reject a Pi decision. Stale images remain unavailable.
+analysis. It briefly waits for the next fresh Pi result instead of starting a competing
+inference that could reject a Pi decision. The response wait is bounded to
+500 ms; stale images remain unavailable.
 **Take manual control** retains camera ownership, stops loop goals and requests
 manual ARM through the existing Pi control contract. Giving control to Venom
 uses the independently calibrated drive policy and timed navigation ARM.

@@ -215,3 +215,84 @@ async def test_expired_preview_cannot_interrupt_next_pi_decision():
         "pi", frame.model_copy(update={"sequence": 2, "frame_id": "next"}), b"raw"
     )
     assert result["frame_id"] == "next" and result["action"] == "stop"
+
+
+async def test_preview_waits_for_inflight_pi_result_without_another_inference():
+    import asyncio
+    import threading
+
+    from venom_module_rider.vision_contract import VisionFrame
+
+    release = threading.Event()
+
+    class Inflight(Detector):
+        calls = 0
+
+        def detect(self, *args, **kwargs):
+            self.calls += 1
+            release.wait(1)
+            return super().detect(*args, **kwargs)
+
+    detector = Inflight()
+    loop, domain = VisionLoop(detector), Domain()
+    domain.features["s15_venom_perception"]["requested"] = True
+    frame = VisionFrame(
+        protocol_version=1,
+        run_id="run",
+        frame_id="incoming",
+        corridor=(0.3, 0.6, 0.7, 0.9),
+        sequence=1,
+        config_revision=4,
+        age_ms=0.0,
+        deadline_ms=300,
+        mode="observe",
+    )
+    decision = asyncio.create_task(loop.decide("pi", frame, b"raw"))
+    preview = asyncio.create_task(processed_camera(request(domain, loop)))
+    await asyncio.sleep(0.01)
+    assert not preview.done()
+    release.set()
+    await decision
+    response = await preview
+    assert response.headers["x-rider-frame-id"] == "incoming"
+    assert detector.calls == 1 and len(loop.runs) == 1
+
+
+async def test_preview_wait_requires_fresh_matching_policy_and_is_bounded():
+    from venom_module_rider.vision_contract import VisionFrame
+
+    loop = VisionLoop(Detector())
+    frame = VisionFrame(
+        protocol_version=1,
+        run_id="run",
+        frame_id="cached",
+        corridor=(0.3, 0.6, 0.7, 0.9),
+        sequence=1,
+        config_revision=4,
+        age_ms=0.0,
+        deadline_ms=300,
+        mode="observe",
+    )
+    await loop.decide("pi", frame, b"raw")
+    assert loop.preview("pi", corridor=(0.1, 0.2, 0.8, 0.9)) is None
+    assert loop.preview("pi", revision=5) is None
+    assert (
+        await loop.wait_for_preview(
+            "pi", corridor=frame.corridor, revision=5, timeout=0.01
+        )
+        is None
+    )
+    cached = await loop.wait_for_preview("pi", corridor=frame.corridor, revision=4)
+    assert cached is not None and cached[2]["frame_id"] == "cached"
+
+
+async def test_module_close_releases_preview_waiters():
+    import asyncio
+
+    loop = VisionLoop(Detector())
+    waiter = asyncio.create_task(
+        loop.wait_for_preview("pi", corridor=(0.3, 0.6, 0.7, 0.9), revision=4)
+    )
+    await asyncio.sleep(0)
+    await loop.close()
+    assert await waiter is None

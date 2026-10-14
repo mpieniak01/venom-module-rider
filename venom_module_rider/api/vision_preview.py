@@ -45,12 +45,18 @@ async def processed_camera(request: Request):
         corridor=corridor,
     )
     loop = request.app.state.rider_vision
-    cached = loop.preview(client.device.id)
-    if (
-        cached is not None
-        and cached[2]["corridor"] == corridor
-        and cached[2]["config_revision"] == revision
-    ):
+    cached = loop.preview(client.device.id, corridor=corridor, revision=revision)
+    if cached is None and source == "device_policy":
+        # Pi permits own the detector. Wait only for their next fresh result.
+        goals = await loop_goals(domain, force=False)
+        if any(goals.get(mode) is not False for mode in ("observe", "drive")):
+            if any(goals.get(mode) is True for mode in ("observe", "drive")):
+                cached = await loop.wait_for_preview(
+                    client.device.id, corridor=corridor, revision=revision
+                )
+            if cached is None:
+                raise RiderError("vision_busy", 429)
+    if cached is not None:
         _, image, result, elapsed = cached
         result = {**result, "_preview": image, "inference_ms": elapsed}
         headers = {
@@ -59,12 +65,6 @@ async def processed_camera(request: Request):
             "x-rider-file-observed-at": str(result["observed_at"]),
         }
     else:
-        # Pi permits own the detector while its loop is active or unconfirmed.
-        # A preview may then display only an already fresh, matching decision.
-        if source == "device_policy":
-            goals = await loop_goals(domain, force=False)
-            if any(goals.get(mode) is not False for mode in ("observe", "drive")):
-                raise RiderError("vision_busy", 429)
         result = await loop.decide(client.device.id, frame, payload, with_preview=True)
     image = result.pop("_preview", None)
     if image is None:

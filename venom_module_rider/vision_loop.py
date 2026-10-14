@@ -16,6 +16,7 @@ class VisionLoop:
         self.runs = OrderedDict()
         self.closed = False
         self.previews = OrderedDict()
+        self.preview_changed = asyncio.Event()
 
     def status(self):
         return {
@@ -125,6 +126,8 @@ class VisionLoop:
                 self.previews.popitem(last=False)
         else:
             self.previews.pop(device_id, None)
+        changed, self.preview_changed = self.preview_changed, asyncio.Event()
+        changed.set()
         return {
             **result,
             **({"_preview": image} if with_preview and image is not None else {}),
@@ -143,9 +146,31 @@ class VisionLoop:
             "physical_clearance": "unverified",
         }
 
-    def preview(self, device_id):
+    def preview(self, device_id, *, corridor=None, revision=None):
         row = self.previews.get(device_id)
-        return row if row is not None and self.clock() - row[0] <= 0.5 else None
+        if row is None or self.clock() - row[0] > 0.5:
+            return None
+        if corridor is not None and row[2]["corridor"] != corridor:
+            return None
+        if revision is not None and row[2]["config_revision"] != revision:
+            return None
+        return row
+
+    async def wait_for_preview(self, device_id, *, corridor, revision, timeout=0.5):
+        deadline = asyncio.get_running_loop().time() + timeout
+        while not self.closed:
+            changed = self.preview_changed
+            row = self.preview(device_id, corridor=corridor, revision=revision)
+            if row is not None:
+                return row
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                return None
+            try:
+                await asyncio.wait_for(changed.wait(), remaining)
+            except TimeoutError:
+                return None
+        return None
 
     def _drain(self, task):
         if not task.cancelled():
@@ -157,5 +182,6 @@ class VisionLoop:
         self.closed = True
         self.runs.clear()
         self.previews.clear()
+        self.preview_changed.set()
         if self.busy is not None:
             await asyncio.gather(self.busy, return_exceptions=True)
