@@ -125,7 +125,12 @@ def classify_logits(logits, corridor):
         state, reason = "obstacle", "corridor_not_floor"
     else:
         state, reason = "clear", "floor_candidate"
-    return {"state": state, "reason": reason, "floor_fraction": fraction}
+    return {
+        "state": state,
+        "reason": reason,
+        "floor_fraction": fraction,
+        "confidence_fraction": float(confident.mean()),
+    }
 
 
 def render_preview(rgb, logits, corridor):

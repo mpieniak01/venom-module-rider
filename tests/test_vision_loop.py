@@ -464,3 +464,27 @@ async def test_stale_or_missing_goal_observation_is_never_a_confirmed_stop():
             }
 
     assert await loop_goals(Domain()) == {}
+
+
+async def test_observation_separates_image_go_from_motion_stop():
+    loop = VisionLoop(Detector())
+    for seq in range(1, 4):
+        f = frame(seq).model_copy(update={"mode": "observe"})
+        result = await loop.decide("pi", f, b"x")
+    assert result["vision_action"] == "go"
+    assert result["action"] == "stop"
+    assert result["motion_reason"] == "observe_only"
+
+
+async def test_motion_diagnostic_reason_is_not_just_the_model_reason():
+    loop = VisionLoop(Detector())
+    first = await loop.decide("pi", frame(), b"x")
+    assert first["vision_action"] == "stop"
+    assert first["motion_reason"] == "clear_frames_pending"
+    for seq in range(2, 4):
+        result = await loop.decide("pi", frame(seq), b"x")
+    assert result["motion_reason"] == "clear_frames_ready"
+    loop.detector.state = "unknown"
+    result = await loop.decide("pi", frame(4), b"x")
+    assert result["vision_action"] == result["action"] == "stop"
+    assert result["motion_reason"] == "unknown"

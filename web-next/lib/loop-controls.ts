@@ -56,3 +56,32 @@ export function freshAnalysisFrame(frame: {decoded?: boolean; stale: boolean; kn
     && !!frame.visionState && !!frame.visionPolicy && frame.visionPolicy !== "diagnostic_default"
     && at !== null && now >= at - 1000 && now - at <= 3000;
 }
+
+export function decisionView(state: JsonRecord, detector: JsonRecord) {
+  const decision=record(state.decision), required=Number(detector.clear_frames_required)||3;
+  const current=state.running===true&&state.stale!==true&&state.latched!==true;
+  const count=typeof decision.clear_count==="number"?decision.clear_count:0;
+  const vision=decision.vision_action==="go" || decision.state==="clear"&&count>=required ? "go":"stop";
+  return {
+    current, required, count,
+    vision:current?vision:"none",
+    reply:current&&["go","stop"].includes(String(decision.action))?String(decision.action):"none",
+    reason:current?String(decision.motion_reason??(decision.state!=="clear"?decision.reason:count<required?"clear_frames_pending":state.mode==="observe"?"observe_only":decision.reason)??"waiting_for_decision"):String(state.stop_reason??"waiting_for_decision"),
+    floor:typeof decision.floor_fraction==="number"?decision.floor_fraction:null,
+    confidence:typeof decision.confidence_fraction==="number"?decision.confidence_fraction:null,
+  };
+}
+export function trialBlock(policy: JsonRecord|null, runtime:JsonRecord, detector:JsonRecord, connected:boolean, dirty:boolean, status:RiderStatus|null):string {
+  const base=loopBlock(policy?{...policy,mode:"observe"}:null,runtime,detector,connected,dirty,status);
+  if(base)return base;
+  if(runtime.drive!==true)return runtime.drive_reason==="navigation_executor_update_required"?"loopExecutorUpdate":"loopRuntimeMissing";
+  if(!calibrationMatches(policy,detector))return "loopUnverified";
+  const safety=safetyOf(status);
+  if(safety.state==="ESTOP")return "trialEstop";
+  if(safety.stale===true||status?.errors?.control)return "trialControlStale";
+  if(!str(safety.generation)||!["DISARMED","ARMED"].includes(str(safety.state)))return "trialControlStale";
+  if(record(safety.capabilities).move&&record(record(safety.capabilities).move).available!==true)return "trialExecutorUnavailable";
+  if(safety.remote_decision_deadline_supported!==true)return "loopExecutorUpdate";
+  if(record(safety.execution).inhibit)return "trialExecutionInhibited";
+  return "";
+}

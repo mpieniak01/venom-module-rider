@@ -5,6 +5,7 @@ import { data, errorCode, formatTime, record, type JsonRecord } from "../lib/mod
 import { calibrationAcceptance, calibrationMatches, loopBlock, loopFailure, loopPhase, loopSettingsValues } from "../lib/loop-controls";
 import type { RiderClient } from "../lib/use-rider";
 import type { Translator } from "../lib/i18n";
+import { LoopDecision } from "./loop-decision";
 import { CameraPanel } from "./control";
 import { LoopCalibration } from "./loop-calibration";
 import { Button, Field, Panel, Pill } from "./primitives";
@@ -161,6 +162,7 @@ export function NavigationLoop({client,t,language,manual,onManualSettings}:{clie
     <p className={styles.hint}>{t(mode==="observe"?"loopObservationHint":"loopRunHint")}</p>
     {!!decision.state&&<p className={styles.hint}>{t("loopDecision")}: <strong>{t("vision."+String(decision.state))}</strong> · {formatTime(loopState.observed_at,language)}<br/>{reasonLabel}</p>}
     {(error||readError)&&<p className={styles.loopError} role="alert">{error||readError}</p>}
+    <LoopDecision state={loopState} detector={detector} policy={policy} status={client.status} t={t} language={language}/>
     <div className={styles.driveWorkspace}>
       <div className={styles.loopCamera}><CameraPanel client={client} t={t} language={language} compact onObservation={()=>void observePreview()} observationDisabled={!connected||!!operation||loading||(!active&&!!observeBlock)}/></div>
       <div className={styles.loopSidebar}>

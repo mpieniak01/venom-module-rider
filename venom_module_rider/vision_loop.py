@@ -107,6 +107,17 @@ class VisionLoop:
         action = (
             "go" if permitted and count >= 3 and result["state"] == "clear" else "stop"
         )
+        vision_action = "go" if count >= 3 and result["state"] == "clear" else "stop"
+        if result["state"] != "clear":
+            motion_reason = result["reason"]
+        elif count < 3:
+            motion_reason = "clear_frames_pending"
+        elif frame.mode != "drive":
+            motion_reason = "observe_only"
+        elif not permitted:
+            motion_reason = "calibration_not_validated"
+        else:
+            motion_reason = "clear_frames_ready"
         image = result.pop("_preview", None)
         if image is not None:
             self.previews[device_id] = (
@@ -132,6 +143,8 @@ class VisionLoop:
             **result,
             **({"_preview": image} if with_preview and image is not None else {}),
             "action": action,
+            "vision_action": vision_action,
+            "motion_reason": motion_reason,
             "protocol_version": 1,
             "run_id": frame.run_id,
             "frame_id": frame.frame_id,
