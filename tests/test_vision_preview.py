@@ -45,6 +45,10 @@ class Domain:
         self.client = SimpleNamespace(device=SimpleNamespace(id="pi"))
         self.calls = []
         self.legacy, self.stale = legacy, stale
+        self.features = {
+            "s15_venom_perception": {"requested": False},
+            "s14_venom_navigation": {"requested": False},
+        }
 
     def transport(self):
         return self.client
@@ -61,8 +65,10 @@ class Domain:
             },
         )
 
-    async def read(self, path, ttl):
+    async def read(self, path, ttl, force=False):
         self.calls.append(("read", path))
+        if path == "/api/logic/state":
+            return {"data": {"state": {"features": self.features}}}
         if self.legacy:
             raise RiderError("frame_unavailable", 404)
         return {"data": {"corridor": [0.3, 0.6, 0.7, 0.9], "revision": 4}}
@@ -152,3 +158,60 @@ async def test_failed_inference_clears_cached_mask():
     assert loop.preview("pi") is None
     with pytest.raises(RiderError):
         await processed_camera(request(Domain(), loop))
+
+
+@pytest.mark.parametrize("goal", ["s15_venom_perception", "s14_venom_navigation"])
+async def test_active_pi_loop_never_admits_independent_preview_inference(goal):
+    domain = Domain()
+    domain.features[goal]["requested"] = True
+
+    class DecisionOnly(Detector):
+        def detect(self, *args, **kwargs):
+            raise AssertionError("Preview must not occupy the Pi decision slot")
+
+    loop = VisionLoop(DecisionOnly())
+    with pytest.raises(RiderError) as error:
+        await processed_camera(request(domain, loop))
+    assert error.value.code == "vision_busy"
+    assert not loop.runs and loop.busy is None
+
+
+async def test_unknown_pi_loop_state_does_not_compete_for_detector():
+    domain, loop = Domain(), VisionLoop(Detector())
+    domain.features = {}
+    with pytest.raises(RiderError) as error:
+        await processed_camera(request(domain, loop))
+    assert error.value.code == "vision_busy"
+    assert not loop.runs
+
+
+async def test_expired_preview_cannot_interrupt_next_pi_decision():
+    from venom_module_rider.vision_contract import VisionFrame
+
+    clock = [0.0]
+    loop = VisionLoop(Detector(), clock=lambda: clock[0])
+    domain = Domain()
+    domain.features["s15_venom_perception"]["requested"] = True
+    frame = VisionFrame(
+        protocol_version=1,
+        run_id="run",
+        frame_id="captured",
+        corridor=(0.3, 0.6, 0.7, 0.9),
+        sequence=1,
+        config_revision=4,
+        age_ms=0.0,
+        deadline_ms=300,
+        mode="observe",
+    )
+    await loop.decide("pi", frame, b"raw")
+    cached = await processed_camera(request(domain, loop))
+    assert cached.headers["x-rider-frame-id"] == "captured"
+    clock[0] = 0.6
+    with pytest.raises(RiderError) as error:
+        await processed_camera(request(domain, loop))
+    assert error.value.code == "vision_busy"
+    assert loop.busy is None and len(loop.runs) == 1
+    result = await loop.decide(
+        "pi", frame.model_copy(update={"sequence": 2, "frame_id": "next"}), b"raw"
+    )
+    assert result["frame_id"] == "next" and result["action"] == "stop"

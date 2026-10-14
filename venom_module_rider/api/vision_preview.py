@@ -6,6 +6,7 @@ from fastapi import Request, Response
 
 from ..errors import RiderError
 from ..vision_contract import VisionFrame
+from .vision_routes import loop_goals
 
 
 async def processed_camera(request: Request):
@@ -58,6 +59,12 @@ async def processed_camera(request: Request):
             "x-rider-file-observed-at": str(result["observed_at"]),
         }
     else:
+        # Pi permits own the detector while its loop is active or unconfirmed.
+        # A preview may then display only an already fresh, matching decision.
+        if source == "device_policy":
+            goals = await loop_goals(domain, force=False)
+            if any(goals.get(mode) is not False for mode in ("observe", "drive")):
+                raise RiderError("vision_busy", 429)
         result = await loop.decide(client.device.id, frame, payload, with_preview=True)
     image = result.pop("_preview", None)
     if image is None:

@@ -104,8 +104,8 @@ async def navigation_state(request: Request):
     }
 
 
-async def loop_goals(domain):
-    response = await domain.read("/api/logic/state", 0.2, force=True)
+async def loop_goals(domain, *, force=True):
+    response = await domain.read("/api/logic/state", 0.2, force=force)
     state = response["data"]
     state = state.get("state", state)
     features = state.get("features", {}) if isinstance(state, dict) else {}
