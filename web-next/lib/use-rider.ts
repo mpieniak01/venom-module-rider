@@ -196,18 +196,34 @@ export function useRider(section: Section) {
     return command({ action: "move", device_settings: true, direction: "forward", mode: "release" });
   }, [canNavigate, command, hold]);
   const armNavigation = useCallback(async (plan: string, expectedSession: string, expectedGeneration: string, expectedEpoch: number) => {
-    if (sessionRef.current !== expectedSession) throw new Error("session_changed");
+    let epoch = expectedEpoch;
+    let generation = expectedGeneration;
+    const cancelled = () => Object.assign(new Error("navigation_trial_cancelled"), {data:{error:"navigation_trial_cancelled"}});
+    const assertCurrent = () => {
+      if (sessionRef.current !== expectedSession || motionEpoch.current !== epoch || safetyOf(statusRef.current).generation !== generation) throw cancelled();
+      if (safetyOf(statusRef.current).state === "ESTOP") throw Object.assign(new Error("navigation_estop"), {data:{error:"navigation_estop"}});
+    };
     await poll("control", true);
-    if (sessionRef.current !== expectedSession) throw new Error("session_changed");
-    if (motionEpoch.current !== expectedEpoch || safetyOf(statusRef.current).generation !== expectedGeneration) throw Object.assign(new Error("navigation_trial_cancelled"),{data:{error:"navigation_trial_cancelled"}});
-    if (safetyOf(statusRef.current).state === "ESTOP") throw Object.assign(new Error("navigation_estop"),{data:{error:"navigation_estop"}});
+    assertCurrent();
+    // The trial click includes takeover. Pi requires releasing the old ARM first.
+    if (safetyOf(statusRef.current).state === "ARMED") {
+      const previousOwner = safetyOf(statusRef.current).owner;
+      await command({action:"disarm", owner:previousOwner}, true);
+      epoch += 1; // Only this deliberate disarm may advance the trial's intent.
+      if (sessionRef.current !== expectedSession || motionEpoch.current !== epoch) throw cancelled();
+      await poll("control", true);
+      const released = safetyOf(statusRef.current);
+      if (released.state !== "DISARMED" || released.stale === true || statusRef.current?.errors.control) throw Object.assign(new Error("navigation_authority_unconfirmed"), {data:{error:"navigation_authority_unconfirmed"}});
+      generation = str(released.generation);
+      assertCurrent();
+    }
     await command({ action: "arm", owner: "navigation", arming_mode: "timed", lease_s: 10, operator_consent: true, operator_plan: plan }, true);
-    // A view read started before ARM must not count as its confirmation.
+    // Confirm a new read after ARM, never a cached pre-ARM observation.
     await poll("control", true);
     const safety = safetyOf(statusRef.current);
-    if (motionEpoch.current !== expectedEpoch) throw Object.assign(new Error("navigation_trial_cancelled"),{data:{error:"navigation_trial_cancelled"}});
-    if (sessionRef.current !== expectedSession || safety.state !== "ARMED" || safety.owner !== "navigation" || safety.stale === true || statusRef.current?.errors.control || safety.can_move !== true) throw Object.assign(new Error("navigation_authority_unconfirmed"),{data:{error:"navigation_authority_unconfirmed"}});
-    return safety.generation;
+    if (motionEpoch.current !== epoch || sessionRef.current !== expectedSession) throw cancelled();
+    if (safety.state !== "ARMED" || safety.owner !== "navigation" || safety.stale === true || statusRef.current?.errors.control || safety.can_move !== true) throw Object.assign(new Error("navigation_authority_unconfirmed"),{data:{error:"navigation_authority_unconfirmed"}});
+    return {generation:str(safety.generation), epoch};
   }, [command, poll]);
   const currentSession = useCallback(() => sessionRef.current, []);
   const currentMotionEpoch = useCallback(() => motionEpoch.current, []);

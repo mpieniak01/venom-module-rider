@@ -101,7 +101,7 @@ export function motionPermission(state:JsonRecord, goals:JsonRecord, policy:Json
   if(known){
     if(!ready)reason="permissionExecutorBlocked";
     else if(view.current&&view.vision!=="go")reason="permissionDecisionStop";
-    else if(goals.drive!==true||state.mode!=="drive")reason="permissionObservation";
+    else if(goals.drive!==true||state.mode!=="drive")reason=goals.observe===true?"permissionObservation":"permissionIdle";
     else if(safety.state!=="ARMED"||safety.can_move!==true)reason="permissionDisarmed";
     else if(safety.owner!=="navigation")reason="permissionManualOwner";
     else if(!calibrationMatches(policy,detector))reason="permissionParameters";
@@ -117,8 +117,8 @@ export function executionHeadline(state:JsonRecord,goals:JsonRecord,status:Rider
   if(permission.venom===null)return "permissionVenomUnknown";
   if(permission.venom)return "permissionVenomYes";
   const safety=safetyOf(status);
+  if(goals.drive!==true||state.mode!=="drive")return goals.observe===true?"permissionVenomObserve":"permissionVenomIdle";
   if(safety.state==="DISARMED")return "permissionPiDisarmed";
-  if(goals.drive!==true||state.mode!=="drive")return "permissionVenomObserve";
   if(safety.state==="ARMED"&&safety.owner==="manual")return "permissionVenomManual";
   return "permissionVenomNo";
 }
