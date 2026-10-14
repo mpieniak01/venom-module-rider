@@ -137,7 +137,7 @@ export function NavigationLoop({client,t,language,manual,onManualSettings}:{clie
   };
   const observePreview=async()=>{
     if(!policy||dirty||operation||loading||observeBlock)return;
-    workspaceRef.current?.scrollIntoView({behavior:"smooth",block:"start"});
+    requestAnimationFrame(()=>workspaceRef.current?.scrollIntoView({behavior:"instant",block:"start"}));
     setOperation("start");setError("");setTrialResult("");
     const origin=client.currentSession();operationEpoch.current=client.currentMotionEpoch();operationGeneration.current=client.currentGeneration();
     const task=ensureAnalysis(origin);startTask.current=task;
@@ -147,7 +147,7 @@ export function NavigationLoop({client,t,language,manual,onManualSettings}:{clie
   };
   const runTrial=async()=>{
     if(!policy||trialUnavailable||operation||loading||phase==="running"&&goals.drive===true)return;
-    workspaceRef.current?.scrollIntoView({behavior:"smooth",block:"start"});
+    requestAnimationFrame(()=>workspaceRef.current?.scrollIntoView({behavior:"instant",block:"start"}));
     setOperation("check");setError("");setTrialResult("trialChecking");trialArmed.current=false;
     const origin=client.currentSession();operationEpoch.current=client.currentMotionEpoch();operationGeneration.current=client.currentGeneration();
     const task=(async()=>{
