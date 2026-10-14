@@ -296,3 +296,15 @@ async def test_module_close_releases_preview_waiters():
     await asyncio.sleep(0)
     await loop.close()
     assert await waiter is None
+
+
+@pytest.mark.parametrize("label", [6, 11, 28])
+def test_unsupported_ground_is_blue_not_an_obstacle_red_or_go_green(label):
+    rgb = np.full((512, 512, 3), 0.3, dtype=np.float32)
+    logits = np.zeros((1, 150, 8, 8), dtype=np.float32)
+    logits[:, label] = 20
+    image = Image.open(
+        io.BytesIO(render_preview(rgb, logits, (0.35, 0.65, 0.65, 0.95)))
+    )
+    red, green, blue = image.getpixel((256, 256))
+    assert blue > green > red

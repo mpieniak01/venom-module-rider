@@ -1,3 +1,4 @@
+import { navigationAvailable } from "./navigation";
 import { record, safetyOf, str, timestampMs, type JsonRecord, type RiderStatus } from "./model";
 
 export type LoopPhase = "offline" | "unknown" | "stopped" | "starting" | "running" | "fault";
@@ -87,4 +88,24 @@ export function trialBlock(policy: JsonRecord|null, runtime:JsonRecord, detector
   if(safety.remote_decision_deadline_supported!==true)return "loopExecutorUpdate";
   if(record(safety.execution).inhibit)return "trialExecutionInhibited";
   return "";
+}
+
+export function motionPermission(state:JsonRecord, goals:JsonRecord, policy:JsonRecord|null, detector:JsonRecord, status:RiderStatus|null) {
+  const safety=safetyOf(status), view=decisionView(state,detector);
+  const known=!!status?.connection.configured&&["online","degraded"].includes(status.connection.status)&&!status.errors.control&&safety.stale!==true&&!!str(safety.generation)&&["ARMED","DISARMED","ESTOP"].includes(str(safety.state));
+  const ready=safety.ready!==false&&record(record(safety.capabilities).move).available===true&&!record(safety.execution).inhibit;
+  const manual=known?navigationAvailable(status)&&safety.can_move===true&&ready:null;
+  let reason="permissionUnknown", allowed=false;
+  if(known){
+    if(!ready)reason="permissionExecutorBlocked";
+    else if(safety.state!=="ARMED"||safety.can_move!==true)reason="permissionDisarmed";
+    else if(safety.owner!=="navigation")reason="permissionManualOwner";
+    else if(goals.drive!==true||state.mode!=="drive")reason="permissionObservation";
+    else if(!calibrationMatches(policy,detector))reason="permissionParameters";
+    else if(!view.current)reason="permissionNoDecision";
+    else if(view.reply!=="go"||view.vision!=="go")reason="permissionDecisionStop";
+    else if(safety.remote_decision_deadline_supported!==true||!Number.isFinite(record(state.decision).valid_for_ms)||Number(record(state.decision).valid_for_ms)<50)reason="permissionPermitShort";
+    else {allowed=true;reason="permissionGo";}
+  }
+  return {venom:known?allowed:null,manual,reason};
 }

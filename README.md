@@ -217,18 +217,19 @@ bounded by the smaller of the saved pulse limit and remaining decision permit.
 An accepted request or reported movement is not a travelled-distance measurement.
 Stale and latched records never appear as current GO permission.
 
-Calibration remains a single acceptance saved on Pi, shown in collapsed details
-once recorded. It is not repeated at every test. Before the first acceptance,
-compare empty floor and an obstacle in the white analysis zone, then perform a
-manual braking trial using the displayed speed and pulse. The panel requires a
-fresh decoded processed preview for the image assessment, fills the model hash
-and acceptance ID automatically, and ends observation before saving. Acceptance
-does not ARM or start driving.
+The operator workspace has no calibration checklist or repeated acceptance
+form. The existing Pi-owned policy is used directly. Its matching model and
+parameters remain requirements for a driving trial. Changing critical parameters
+revokes that saved policy; the panel reports the exact block instead of displaying
+a form. No diagnostic or page entry arms or manufactures physical calibration.
 
-Changing the zone, speed or decision/motion limits revokes saved acceptance.
-A different model blocks driving. After changing camera mounting or operating
-conditions, stop the loop and revoke acceptance, then repeat the assessment.
-Demo calibration and motion requests stay on the selected demo device.
+A single execution summary says whether Venom can send movement, with manual
+permission shown separately. Manual ARM cannot authorise the autonomous loop.
+The preview explains semantic classes: green is confident floor, blue is a
+ground-like class outside the current GO rule (road, sidewalk, rug), red is
+another class and yellow is uncertain. Blue or red pixels are model outputs,
+not measured obstacles. Dominant ROI class/fraction exposes classification
+mistakes, without relaxing the GO rule or decision deadlines.
 
 ## Operation and removal
 

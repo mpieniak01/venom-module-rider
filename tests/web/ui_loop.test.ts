@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { calibrationAcceptance, calibrationMatches, calibrationScope, decisionView, freshAnalysisFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, trialBlock } from "../../web-next/lib/loop-controls";
+import { calibrationAcceptance, calibrationMatches, calibrationScope, decisionView, freshAnalysisFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, motionPermission, trialBlock } from "../../web-next/lib/loop-controls";
 import { featureRows, frameRequested, type RiderStatus } from "../../web-next/lib/model";
 
 test("confirmed stopped goals stay stopped when the last loop file has aged",()=>{
@@ -112,4 +112,36 @@ test("trial preparation does not demand prior manual or navigation ARM",()=>{
  assert.equal(trialBlock(policy,runtime,detector,true,false,stale),"trialControlStale");
  const unsupported=status("DISARMED",null);Object.assign(unsupported.control!.safety as object,{remote_decision_deadline_supported:false});
  assert.equal(trialBlock(policy,runtime,detector,true,false,unsupported),"loopExecutorUpdate");
+});
+
+const permissionPolicy={verified:true,calibration_id:"fixture",model_sha256:"a".repeat(64)};
+const permissionDetector={sha256:"a".repeat(64)};
+const permissionLoop={running:true,stale:false,mode:"drive",decision:{state:"clear",clear_count:3,action:"go",vision_action:"go",valid_for_ms:150}};
+const permissionStatus=(owner="navigation")=>({
+ connection:{configured:true,status:"online"},errors:{},settings:{revision:1},
+ control:{safety:{generation:"one",state:"ARMED",owner,can_move:true,panel_motion_enabled:true,stale:false,ready:true,capabilities:{move:{available:true}},remote_decision_deadline_supported:true,execution:{}}}
+} as unknown as RiderStatus);
+test("manual ARM is explicit manual permission, never Venom permission",()=>{
+ const result=motionPermission({...permissionLoop,mode:"observe"},{observe:true,drive:false},permissionPolicy,permissionDetector,permissionStatus("manual"));
+ assert.equal(result.manual,true);assert.equal(result.venom,false);assert.equal(result.reason,"permissionManualOwner");
+});
+test("Venom permission requires navigation ARM, a drive goal and a current valid GO",()=>{
+ const check=(state=permissionLoop,goals={drive:true},status=permissionStatus(),policy=permissionPolicy)=>motionPermission(state,goals,policy,permissionDetector,status);
+ assert.equal(check().venom,true);assert.equal(check().manual,false);
+ assert.equal(check(permissionLoop,{drive:false}).venom,false);
+ assert.equal(check({...permissionLoop,mode:"observe"}).venom,false);
+ for(const decision of [{...permissionLoop.decision,action:"stop"},{...permissionLoop.decision,clear_count:2},{...permissionLoop.decision,valid_for_ms:49},{...permissionLoop.decision,valid_for_ms:undefined}]){
+  assert.equal(check({...permissionLoop,decision} as typeof permissionLoop).venom,false);
+ }
+ assert.equal(check({...permissionLoop,latched:true} as typeof permissionLoop).venom,false);
+ assert.equal(check({...permissionLoop,stale:true}).venom,false);
+ assert.equal(check(permissionLoop,{drive:true},permissionStatus(),{...permissionPolicy,verified:false}).venom,false);
+});
+test("unconfirmed control is explicit unknown; executor inhibition blocks both routes",()=>{
+ const stale=permissionStatus();Object.assign(stale.control!.safety as object,{stale:true});
+ assert.equal(motionPermission(permissionLoop,{drive:true},permissionPolicy,permissionDetector,stale).venom,null);
+ assert.equal(motionPermission(permissionLoop,{drive:true},permissionPolicy,permissionDetector,stale).manual,null);
+ const inhibited=permissionStatus("manual");Object.assign(inhibited.control!.safety as object,{execution:{inhibit:"fixture"}});
+ const result=motionPermission(permissionLoop,{drive:true},permissionPolicy,permissionDetector,inhibited);
+ assert.equal(result.manual,false);assert.equal(result.venom,false);assert.equal(result.reason,"permissionExecutorBlocked");
 });

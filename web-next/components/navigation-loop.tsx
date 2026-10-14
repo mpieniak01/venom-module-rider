@@ -2,16 +2,15 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Play, Square, RefreshCw } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 import { data, errorCode, formatTime, record, type JsonRecord } from "../lib/model";
-import { calibrationAcceptance, calibrationMatches, calibrationRecorded, calibrationScope, decisionView, freshAnalysisFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, trialBlock } from "../lib/loop-controls";
+import { calibrationMatches, calibrationScope, decisionView, freshAnalysisFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, motionPermission, trialBlock } from "../lib/loop-controls";
 import type { RiderClient } from "../lib/use-rider";
 import type { Translator } from "../lib/i18n";
 import { LoopDecision } from "./loop-decision";
 import { CameraPanel } from "./control";
-import { LoopCalibration } from "./loop-calibration";
 import { Button, Field, Panel, Pill } from "./primitives";
 import styles from "../rider.module.css";
 
-export function NavigationLoop({client,t,language,manual,onManualSettings}:{client:RiderClient;t:Translator;language:string;manual:ReactNode;onManualSettings:()=>void}) {
+export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:Translator;language:string;manual:ReactNode}) {
   const [policy,setPolicy]=useState<JsonRecord|null>(null);
   const [draft,setDraft]=useState<JsonRecord|null>(null);
   const [detector,setDetector]=useState<JsonRecord>({});
@@ -181,35 +180,21 @@ export function NavigationLoop({client,t,language,manual,onManualSettings}:{clie
     catch(err){if(!stopping.current){failure(err);setTrialResult("trialFailed");}}
     finally{startTask.current=null;if(!stopping.current)setOperation(null);}
   };
-  const acceptCalibration=async()=>{
-    if(!policy||dirty||operation||goals.drive===true)return;
-    const values=calibrationAcceptance(policy,detector,"operator-"+crypto.randomUUID());
-    setOperation("save");setError("");
-    try{
-      // Explicit acceptance ends observation before saving; it never arms or drives.
-      if(goals.observe===true)await client.mutate("/goal/s15_venom_perception",{enabled:false},"POST",true);
-      await persist(values);await readState();
-    }catch(err){failure(err);}finally{setOperation(null);}
-  };
-  const revokeCalibration=async()=>{
-    if(!policy||active||operation||dirty)return;
-    setOperation("save");setError("");
-    try{await persist({...loopSettingsValues(policy,policy),verified:false,calibration_id:"",model_sha256:""});}
-    catch(err){failure(err);}finally{setOperation(null);}
-  };
-  const openSettings=()=>{if(settingsRef.current){settingsRef.current.open=true;settingsRef.current.scrollIntoView({behavior:"smooth",block:"center"});}};
   const observeBlock=policy?loopBlock({...policy,mode:"observe"},runtime,detector,connected,dirty,client.status):"loopLoadFailed";
-  const calibrated=calibrationRecorded(policy);
   const trialUnavailable=trialBlock(policy,runtime,detector,connected,dirty,client.status);
   const decision=record(loopState.decision);
+  const permission=motionPermission(loopState,goals,policy,detector,client.status);
   return <Panel title={t("loopTitle")} extra={<Button aria-label={t("loopLoad")} disabled={loading||!!operation||!connected} onClick={()=>setRefresh(v=>v+1)}><RefreshCw size={14}/>{t("refresh")}</Button>}>
     <div className={styles.loopStatus} role="status" data-testid="loop-state">
       <Pill tone={phase==="running"?"good":phase==="offline"||phase==="unknown"||phase==="fault"?"warning":undefined}>{t(operation==="stop"?"loopStopping":operation==="check"?"trialChecking":operation==="start"?"loopStarting":"loopPhase."+phase)}</Pill>
       <strong>{t(goals.drive===true?"trialActiveMode":"trialAnalysisMode")}</strong>
-      <Pill tone={observeBlock?"warning":"good"}>{t(observeBlock?"loopObservationBlocked":"loopObservationAvailable")}</Pill>
-      <Pill tone={trialUnavailable?"warning":"good"}>{t(trialUnavailable?"trialPreparationBlocked":"trialPreparationReady")}</Pill>
     </div>
     <div className={styles.loopToolbar}>
+    <div className={styles.permissionSummary} role="status" data-testid="motion-permission">
+      <strong data-testid="venom-permission" className={permission.venom===true?styles.verdictGo:styles.verdictStop}>{t(permission.venom===null?"permissionVenomUnknown":permission.venom?"permissionVenomYes":"permissionVenomNo")}</strong>
+      <span>{t(permission.reason)}</span>
+      <span data-testid="manual-permission">{t(permission.manual===null?"permissionManualUnknown":permission.manual?"permissionManualYes":"permissionManualNo")}</span>
+    </div>
     <div className={styles.loopActions}>
       <Button data-testid="loop-preview" disabled={!connected||!!operation||loading||!!observeBlock} onClick={()=>void observePreview()}>{t("trialAnalyse")}</Button>
       <Button tone="primary" data-testid="loop-start" disabled={!!trialUnavailable||!!operation||!!client.busy||loading||phase==="running"&&goals.drive===true} onClick={()=>void runTrial()}><Play size={18}/>{t("trialRun")}</Button>
@@ -223,13 +208,10 @@ export function NavigationLoop({client,t,language,manual,onManualSettings}:{clie
 
     {(error||readError)&&<p className={styles.loopError} role="alert">{error||readError}</p>}
     <div ref={workspaceRef} className={styles.driveWorkspace}>
-      <div className={styles.loopCamera}><CameraPanel client={client} t={t} language={language} compact onObservation={()=>void observePreview()} observationDisabled={!connected||!!operation||loading||(!active&&!!observeBlock)}/></div>
+      <div className={styles.loopCamera}><CameraPanel client={client} t={t} language={language} compact/></div>
       <div className={styles.loopSidebar}>
         {manual}
         <LoopDecision state={loopState} detector={detector} policy={policy} status={client.status} t={t} language={language}/>
-        <details className={styles.details} open={!calibrated&&!!policy}><summary>{t(calibrated?"trialCalibrationSaved":"trialCalibrationNeeded")}</summary>
-          <LoopCalibration client={client} t={t} policy={policy} detector={detector} dirty={dirty} busy={!!operation||!!client.busy} driving={goals.drive===true} active={active} onAccept={acceptCalibration} onRevoke={revokeCalibration} onSettings={openSettings} onManualSettings={onManualSettings}/>
-        </details>
       </div>
     </div>
     <details ref={settingsRef} className={styles.details}><summary>{t("loopSettings")}{dirty?" · "+t("unsaved"):""}</summary>
@@ -247,11 +229,9 @@ export function NavigationLoop({client,t,language,manual,onManualSettings}:{clie
           <Field label={t("loopCorridor")}><input className={styles.input} disabled={active||!!operation} value={Array.isArray(draft.corridor)?draft.corridor.join(","):""} onChange={e=>setDraft({...draft,corridor:e.target.value.split(",").map(Number)})}/></Field>
         </div>
         <p className={styles.hint}>{t("loopCalibrationSettingsHelp")}</p>
-        <Field label={t("loopCalibration")}><input className={styles.input} readOnly value={String(draft.calibration_id??"")}/></Field>
-        <Field label={t("loopHash")}><input className={styles.input} readOnly value={String(draft.model_sha256??"")}/></Field>
         <div className={styles.loopModeRow}><Button disabled={!connected||!!operation||active||!dirty} onClick={()=>void save()}>{t("loopSave")}</Button>{dirty&&<Button disabled={!!operation} onClick={()=>setDraft(policy)}>{t("loopDiscard")}</Button>}</div>
 
-        <p className={styles.hint}>{t("loopModel")}: {t(detector.configured===true?"yes":"no")} · {t("computeRevision")}: {String(policy?.revision??"—")}</p><code className={styles.small}>{String(detector.sha256??"")}</code>
+        <p className={styles.hint}>{t("loopModel")}: {t(detector.configured===true?"yes":"no")} · {t("computeRevision")}: {String(policy?.revision??"—")}</p>
       </div>:<p>{t(loading?"loading":"loopLoadFailed")}</p>}
     </details>
   </Panel>;

@@ -488,3 +488,28 @@ async def test_motion_diagnostic_reason_is_not_just_the_model_reason():
     result = await loop.decide("pi", frame(4), b"x")
     assert result["vision_action"] == result["action"] == "stop"
     assert result["motion_reason"] == "unknown"
+
+
+@pytest.mark.parametrize("label", [6, 11, 28])
+def test_ground_like_classes_are_reported_but_never_silently_allow_go(label):
+    logits = np.zeros((1, 150, 8, 8), dtype=np.float32)
+    logits[:, label] = 20
+    result = classify_logits(logits, (0, 0, 1, 1))
+    assert result["state"] == "obstacle"
+    assert result["floor_fraction"] == result["floor_candidate_fraction"] == 0
+    assert result["dominant_class_id"] == label
+    assert (
+        result["dominant_class_fraction"] == result["unsupported_ground_fraction"] == 1
+    )
+    assert result["dominant_class_confidence"] > 0.99
+
+
+def test_low_confidence_floor_label_is_not_current_clearance():
+    logits = np.zeros((1, 150, 8, 8), dtype=np.float32)
+    logits[:, 3] = 1
+    result = classify_logits(logits, (0, 0, 1, 1))
+    assert result["state"] == "unknown"
+    assert result["floor_candidate_fraction"] == 1
+    assert result["floor_fraction"] == 0
+    assert result["dominant_class_id"] == 3
+    assert result["confidence_fraction"] == 0

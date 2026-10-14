@@ -177,3 +177,8 @@
 }
 
 @container rider (max-width: 759px) { .driveWorkspace { scroll-margin-top: 180px; } }
+
+.permissionSummary { display: grid; gap: 4px; flex: 1 1 100%; font-size: 12px; color: var(--ui-muted); }
+.permissionSummary > strong { font-size: 16px; }
+.modelClass { padding: 10px 12px; margin: 0; border-left: 3px solid #4182f5; font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+@container rider (min-width: 760px) { .loopCamera { top: 340px; } .driveWorkspace { scroll-margin-top: 340px; } }

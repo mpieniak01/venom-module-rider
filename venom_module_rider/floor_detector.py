@@ -5,6 +5,10 @@ import io
 import os
 from pathlib import Path
 
+FLOOR_LABEL = 3
+# ADE20k ground-like classes are diagnostics, never additional GO classes.
+UNSUPPORTED_GROUND_LABELS = (6, 11, 28)
+
 
 class FloorDetector:
     def __init__(self):
@@ -117,8 +121,10 @@ def classify_logits(logits, corridor):
     labels = roi.argmax(axis=0)
     confident = probabilities.max(axis=0) >= 0.8
     # ADE20k floor is label 3. Every other label is an obstruction candidate.
-    floor = (labels == 3) & confident
+    floor = (labels == FLOOR_LABEL) & confident
     fraction = float(floor.mean())
+    counts = np.bincount(labels.ravel(), minlength=150)
+    dominant = int(counts.argmax())
     if float(confident.mean()) < 0.99:
         state, reason = "unknown", "vision_low_confidence"
     elif fraction < 1.0:
@@ -130,11 +136,20 @@ def classify_logits(logits, corridor):
         "reason": reason,
         "floor_fraction": fraction,
         "confidence_fraction": float(confident.mean()),
+        "dominant_class_id": dominant,
+        "dominant_class_fraction": float(counts[dominant] / labels.size),
+        "dominant_class_confidence": float(
+            probabilities.max(axis=0)[labels == dominant].mean()
+        ),
+        "floor_candidate_fraction": float((labels == FLOOR_LABEL).mean()),
+        "unsupported_ground_fraction": float(
+            np.isin(labels, UNSUPPORTED_GROUND_LABELS).mean()
+        ),
     }
 
 
 def render_preview(rgb, logits, corridor):
-    """Diagnostic mask: confident floor green, other labels red, uncertainty amber."""
+    """Diagnostic mask distinguishes floor, unsupported ground and uncertainty."""
     import numpy as np
     from PIL import Image, ImageDraw
 
@@ -143,8 +158,13 @@ def render_preview(rgb, logits, corridor):
     probabilities = np.exp(values)
     confidence = probabilities.max(axis=0) / probabilities.sum(axis=0)
     colors = np.full((*labels.shape, 3), (255, 185, 35), dtype=np.uint8)
-    colors[(confidence >= 0.8) & (labels == 3)] = (35, 210, 100)
-    colors[(confidence >= 0.8) & (labels != 3)] = (240, 60, 65)
+    colors[(confidence >= 0.8) & (labels == FLOOR_LABEL)] = (35, 210, 100)
+    colors[(confidence >= 0.8) & (labels != FLOOR_LABEL)] = (240, 60, 65)
+    colors[(confidence >= 0.8) & np.isin(labels, UNSUPPORTED_GROUND_LABELS)] = (
+        65,
+        130,
+        245,
+    )
     overlay = Image.fromarray(colors).resize((512, 512), Image.Resampling.NEAREST)
     image = Image.blend(Image.fromarray((rgb * 255).astype(np.uint8)), overlay, 0.4)
     x0, y0, x1, y1 = corridor
