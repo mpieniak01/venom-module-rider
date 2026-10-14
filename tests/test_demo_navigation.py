@@ -383,3 +383,94 @@ async def test_observation_retries_busy_model_without_arming(replay, transport_t
     assert pi.safety()["state"] == "DISARMED"
     assert not pi.safety()["moving"]
     await nav.close()
+
+
+async def test_recorded_depth_model_reaches_simulated_drive_then_stops(monkeypatch):
+    from venom_module_rider.depth_detector import DepthDetector, PerceptionSettings
+
+    source = os.getenv("RIDER_TEST_PI_LEASE")
+    scene = os.getenv("RIDER_TEST_DEPTH_SCENE")
+    if not source or not scene:
+        pytest.skip("Explicit local model and recorded scene required")
+    root = Path(scene)
+    clear = (root / "clear-after-box-8.jpg").read_bytes()
+    blocked = (root / "box-20cm-1.jpg").read_bytes()
+    model = DepthDetector()
+    settings = PerceptionSettings(engine="depth_plane")
+    roi = (0.35, 0.65, 0.65, 0.95)
+    assert model.detect(clear, roi, settings)["state"] == "clear"
+    assert model.detect(blocked, roi, settings)["state"] in {"obstacle", "unknown"}
+    loop = VisionLoop()
+    loop.depth_detector = model
+    monkeypatch.setenv("RIDER_COMPUTE_TOKEN", "isolated-recording-fixture")
+    app = FastAPI()
+    app.state.rider = RiderService(
+        (Device("demo", "Replay", "http://127.0.0.1:18880", "demo"),)
+    )
+    app.state.rider_vision = loop
+    app.include_router(router)
+    nav = ReplayNavigation(
+        clear,
+        load_pi_lease(Path(source)),
+        model_sha=model.digest,
+        token="isolated-recording-fixture",
+    )
+    pi = DemoPi(navigation=nav)
+    await nav.http.aclose()
+    nav.http = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1:8800"
+    )
+    nav.configure(
+        {
+            "revision": 0,
+            "values": {
+                "mode": "drive",
+                "verified": True,
+                "calibration_id": "recording-simulation-only",
+                "model_sha256": model.digest,
+                "perception": settings.model_dump(),
+            },
+        }
+    )
+    reply = pi.control(
+        {
+            "action": "arm",
+            "owner": "navigation",
+            "generation": pi.generation,
+            "seq": pi.seq + 1,
+            "ts": __import__("time").time(),
+            "ttl_ms": 500,
+            "operator_consent": True,
+            "operator_plan": "recording-simulation-only",
+            "lease_s": 10,
+        }
+    )
+    assert reply.status_code == 200
+
+    async def until(predicate):
+        async with asyncio.timeout(3):
+            while not predicate():
+                await asyncio.sleep(0.005)
+
+    try:
+        await nav.start("s14_venom_navigation")
+        await until(
+            lambda: (
+                any(e["action"] == "go" for e in nav.events)
+                or nav.status.get("latched")
+            )
+        )
+        assert any(e["action"] == "go" for e in nav.events), nav.status
+        assert pi.safety()["moving"]
+        assert nav.status["decision"]["model_sha256"] == model.digest
+        nav.payload = blocked
+        await until(lambda: nav.status.get("latched"))
+        assert nav.status["decision"]["action"] == "stop"
+        assert nav.status["decision"]["state"] in {"obstacle", "unknown"}
+        assert not pi.safety()["moving"]
+        nav.payload = clear
+        await asyncio.sleep(0.1)
+        assert not nav.status["running"]
+    finally:
+        await nav.close()
+        await loop.close()

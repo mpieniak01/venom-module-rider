@@ -1,4 +1,4 @@
-"""Relative ground geometry on Venom; supervised forward trials with Pi-owned acceptance."""
+"""Relative ground geometry for accepted, supervised forward trials."""
 
 import hashlib
 import io
