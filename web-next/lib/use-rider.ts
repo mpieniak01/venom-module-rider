@@ -162,7 +162,7 @@ export function useRider(section: Section) {
     }
     return envelope;
   }, [hasFreshControl, isConnected]);
-  const sendControl = useCallback(async (body: JsonRecord, current: () => boolean = () => true): Promise<JsonRecord> => {
+  const sendControl = useCallback(async (body: JsonRecord, current: () => boolean = () => true, announce = true): Promise<JsonRecord> => {
     if (!current()) return {};
     const action = str(body.action);
     const stopping = ["stop", "disarm"].includes(action);
@@ -176,16 +176,16 @@ export function useRider(section: Section) {
     if (!stopping && (origin !== controlIdentity(statusRef.current) || revision !== settingsOf(statusRef.current).revision)) throw Object.assign(new Error("stale_control"), { data: { error: "stale_control" } });
     const envelope = makeEnvelope(body);
     const response = await mutation("/control", envelope, "POST", true);
-    setNotice({ key: response.pending === true || record(response.operation).status === "pending" ? "commandPending" : "commandAccepted", tone: "info" });
+    if (announce) setNotice({ key: response.pending === true || record(response.operation).status === "pending" ? "commandPending" : "commandAccepted", tone: "info" });
     return response;
   }, [hasFreshControl, makeEnvelope, mutation, poll]);
   useEffect(() => { commandRef.current = sendControl; }, [sendControl]);
-  const command = useCallback(async (body: JsonRecord, throwOnError = false) => {
+  const command = useCallback(async (body: JsonRecord, throwOnError = false, quiet = false) => {
     const key = str(body.action); if (key !== "move") hold.cancel();
     const safetyAction = ["arm", "clear_estop", "stop", "disarm"].includes(key);
     if (safetyAction) motionBlocked.current += 1;
     setBusy(key);
-    try { if ((key === "arm" || key === "clear_estop") && !clockRef.current) await poll("control", true); const response = await sendControl(body); if (key !== "move") await poll(); return response; }
+    try { if ((key === "arm" || key === "clear_estop") && !clockRef.current) await poll("control", true); const response = await sendControl(body, () => true, !quiet); if (key !== "move") await poll(); return response; }
     catch (error) { hold.cancel(); setNotice({ key: errorCode(error).includes("stale") ? "staleControl" : "requestFailed", code: errorCode(error), tone: "error" }); if (throwOnError) throw error; return null; }
     finally { if (safetyAction) motionBlocked.current = Math.max(0, motionBlocked.current - 1); setBusy(null); }
   }, [hold, poll, sendControl]);
@@ -208,7 +208,7 @@ export function useRider(section: Section) {
     // The trial click includes takeover. Pi requires releasing the old ARM first.
     if (safetyOf(statusRef.current).state === "ARMED") {
       const previousOwner = safetyOf(statusRef.current).owner;
-      await command({action:"disarm", owner:previousOwner}, true);
+      await command({action:"disarm", owner:previousOwner}, true, true);
       epoch += 1; // Only this deliberate disarm may advance the trial's intent.
       if (sessionRef.current !== expectedSession || motionEpoch.current !== epoch) throw cancelled();
       await poll("control", true);
@@ -217,7 +217,7 @@ export function useRider(section: Section) {
       generation = str(released.generation);
       assertCurrent();
     }
-    await command({ action: "arm", owner: "navigation", arming_mode: "timed", lease_s: 10, operator_consent: true, operator_plan: plan }, true);
+    await command({ action: "arm", owner: "navigation", arming_mode: "timed", lease_s: 10, operator_consent: true, operator_plan: plan }, true, true);
     // Confirm a new read after ARM, never a cached pre-ARM observation.
     await poll("control", true);
     const safety = safetyOf(statusRef.current);
@@ -247,21 +247,41 @@ export function useRider(section: Section) {
     finally { setBusy(null); }
   }, [makeEnvelope, mutation, poll]);
   const takeManual = useCallback(async (plan: string) => {
-    motionEpoch.current += 1;
+    let epoch = ++motionEpoch.current;
+    const origin = sessionRef.current;
+    const assertCurrent = () => {
+      if (sessionRef.current !== origin || motionEpoch.current !== epoch || document.hidden) throw Object.assign(new Error("navigation_trial_cancelled"), {data:{error:"navigation_trial_cancelled"}});
+    };
     hold.cancel(); setBusy("takeover");
     try {
-      // Keep camera ownership before stopping the navigation consumers.
+      // Keep the preview when handing motor authority back to the operator.
+      assertCurrent();
       await mutation("/goal/s2_camera_preview", { enabled: true }, "POST", true);
       const goals = featureRows(statusRef.current);
       for (const name of ["s14_venom_navigation", "s15_venom_perception"]) {
+        assertCurrent();
         if (goals.some(goal => goal.name === name)) await mutation("/goal/" + name, { enabled: false }, "POST", true);
       }
       await poll("control", true);
-      await sendControl({ action: "arm", owner: "manual", arming_mode: "operator", operator_consent: true, operator_plan: plan });
+      assertCurrent();
+      let safety = safetyOf(statusRef.current);
+      if (safety.state === "ARMED" && safety.owner !== "manual") {
+        await command({action:"disarm", owner:safety.owner}, true, true);
+        epoch += 1;
+        await poll("control", true);
+        assertCurrent();
+        safety = safetyOf(statusRef.current);
+      }
+      if (!(safety.state === "ARMED" && safety.owner === "manual")) {
+        assertCurrent();
+        await command({ action: "arm", owner: "manual", arming_mode: "operator", operator_consent: true, operator_plan: plan }, true, true);
+        epoch += 1;
+        assertCurrent();
+      }
       setCameraStream("raw"); await poll();
     } catch(error) { setNotice({ key: "requestFailed", code: errorCode(error), tone: "error" }); }
     finally { setBusy(null); }
-  }, [hold, mutation, poll, sendControl]);
+  }, [hold, mutation, poll, command]);
   const selectDevice = useCallback(async (device_id: string | null) => {
     motionEpoch.current += 1;
     hold.release(); motionBlocked.current += 1; setBusy("/config");

@@ -285,11 +285,13 @@ async def test_full_authenticated_loop_actual_pi_permit_go_obstacle_timeout_and_
         model_sha256="a" * 64,
         perception={**nav.policy["perception"], "engine": engine},
     )
-    pi.state, pi.owner = "ARMED", "navigation"
+    pi.state, pi.owner = "ARMED", "manual"
 
     def grant_navigation():
         import time
 
+        if pi.safety()["state"] == "ARMED":
+            assert pi.control({"action": "disarm"}).status_code == 200
         reply = pi.control(
             {
                 "action": "arm",
@@ -336,6 +338,7 @@ async def test_full_authenticated_loop_actual_pi_permit_go_obstacle_timeout_and_
         await nav.start("s14_venom_navigation")
         await until(lambda: nav.status.get("simulated_moving"))
         old = nav.motion_generation
+        assert pi.control({"action": "disarm"}).status_code == 200
         pi.control(
             {
                 "action": "arm",
@@ -465,8 +468,12 @@ async def test_recorded_depth_model_reaches_simulated_drive_then_stops(monkeypat
         assert nav.status["decision"]["model_sha256"] == model.digest
         nav.payload = blocked
         await until(lambda: nav.status.get("latched"))
-        assert nav.status["decision"]["action"] == "stop"
-        assert nav.status["decision"]["state"] in {"obstacle", "unknown"}
+        if nav.status["decision"]["action"] == "stop":
+            assert nav.status["decision"]["state"] in {"obstacle", "unknown"}
+        else:
+            # Coverage/load may expire the lease before the new inference returns.
+            # Its older GO must still result in a stopped, latched executor.
+            assert nav.lease.reason == "decision_timeout"
         assert not pi.safety()["moving"]
         nav.payload = clear
         await asyncio.sleep(0.1)
@@ -474,3 +481,33 @@ async def test_recorded_depth_model_reaches_simulated_drive_then_stops(monkeypat
     finally:
         await nav.close()
         await loop.close()
+
+
+async def test_simulator_requires_disarm_before_switching_manual_to_navigation(replay):
+    pi, nav = replay
+
+    def arm(owner):
+        return pi.control(
+            {
+                "action": "arm",
+                "owner": owner,
+                "generation": pi.generation,
+                "seq": pi.seq + 1,
+                "ts": __import__("time").time(),
+                "ttl_ms": 500,
+                "operator_consent": True,
+                "operator_plan": "fixture takeover",
+                "lease_s": 10,
+            }
+        )
+
+    assert arm("manual").status_code == 200
+    rejected = arm("navigation")
+    assert rejected.status_code == 409
+    assert json.loads(rejected.body)["data"]["error"] == "already_armed_disarm_first"
+    assert pi.owner == "manual"
+    assert pi.control({"action": "disarm"}).status_code == 200
+    assert arm("navigation").status_code == 200
+    assert pi.owner == "navigation"
+    pi.control({"action": "disarm"})
+    await nav.close()

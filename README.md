@@ -261,9 +261,13 @@ policies migrate in memory to semantic defaults without rewriting the file.
 Depth-plane geometry uses the pinned Depth Anything V2 Indoor Small model on
 Venom, checks inverse-depth plane agreement in the corridor, and exposes relative
 deviation thresholds. It does not report centimetres or calibrated stopping
-distance. Geometry can produce image GO in observation; its actuator reply is
-always STOP, including with a matching receipt. Actual driving remains disabled
-for this experimental method. Existing semantic driving is unchanged.
+distance. Geometry can produce image GO in observation, where its actuator reply stays
+STOP. The forward trial uses the same Pi-owned acceptance, three fresh CLEAR
+frames, model hash and bounded decision lease as semantic driving. The trial
+button releases existing manual ARM, confirms disarming, then obtains navigation
+authority for up to 10 seconds. STOP during transfer cancels subsequent ARM.
+Manual takeover stops navigation and returns authority to the arrow controls.
+Neither image GO nor saving trial conditions starts physical movement.
 
 Install the module's `vision_depth` extra in the host virtualenv, then provision
 explicitly; startup and requests never download weights:
@@ -275,3 +279,22 @@ PYTHONPATH=../..:. python scripts/replay_depth.py --dataset /path/to/recordings 
 
 Replay uses synthetic frame identities and cannot validate physical movement,
 capture freshness or braking. Model files, recordings and reports stay ignored.
+
+
+### Forward-trial panel regression
+
+The panel keeps analysis, forward trial and loop stop on the camera/manual-control
+screen. Detailed geometry diagnostics are collapsed; stale image results are not
+shown as current movement permission. Manual ARM does not require a separate
+operator disarm before clicking the trial.
+
+The self-contained browser regression intercepts every Rider API request and
+covers manual-to-navigation transfer and STOP during transfer. It contacts no
+physical robot. With the local panel running, use Playwright CLI:
+
+    playwright-cli -s=rider-regression open http://localhost:3300/rider
+    playwright-cli -s=rider-regression run-code --filename=tests/browser/navigation-takeover.js
+    playwright-cli -s=rider-regression close
+
+Run from the module checkout. Browser launch settings are environment-specific;
+the Node syntax check is included in the check-web target.

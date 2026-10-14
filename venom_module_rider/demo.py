@@ -167,6 +167,10 @@ class DemoPi:
                 self.generation = uuid.uuid4().hex
                 self.deadline = 0.0
             elif action == "arm":
+                if self.state == "ARMED":
+                    return envelope({"error": "already_armed_disarm_first"}, status=409)
+                if self.state == "ESTOP":
+                    return envelope({"error": "estop_active"}, status=409)
                 if body.get("operator_consent") is not True or not body.get(
                     "operator_plan"
                 ):

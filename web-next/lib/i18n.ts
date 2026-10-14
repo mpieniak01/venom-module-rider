@@ -1,6 +1,6 @@
 // Module-owned translations. Every key contains PL, EN and DE by construction.
 export const messages = {
-  permissionVenomObserve: ["VENOM: analiza bez jazdy — pętla ruchu nie jest uruchomiona", "VENOM: analysis without driving — motion loop is not started", "VENOM: Analyse ohne Fahrt — Bewegungsschleife nicht gestartet"],
+  permissionVenomObserve: ["Analiza aktywna · bez jazdy", "Analysis active · no driving", "Analyse aktiv · ohne Fahrt"],
   permissionVenomManual: ["VENOM: brak sterowania — Pi uzbrojone dla strzałek ręcznych", "VENOM: no control — Pi armed for manual arrows", "VENOM: keine Steuerung — Pi für manuelle Pfeile aktiviert"],
   previewDelayedNotice: ["OCZEKIWANIE NA ŚWIEŻĄ ANALIZĘ — wyświetlony ostatni obraz", "WAITING FOR FRESH ANALYSIS — showing the last image", "WARTEN AUF AKTUELLE ANALYSE — letztes Bild angezeigt"],
   "vision.reason.vision_floor_uncertainty": ["Podłoże rozpoznane, ale część pikseli pozostaje niepewna; wymaganie całej strefy nie jest spełnione.", "Ground identified, but some pixels remain uncertain; full-zone requirement is not met.", "Boden erkannt, aber einige Pixel bleiben unsicher; Anforderung des gesamten Bereichs nicht erfüllt."],
@@ -215,6 +215,7 @@ export const messages = {
   modeDriveChoice: ["Jazda prosto — test 10 s", "Forward driving — 10 s trial", "Geradeausfahrt — 10-s-Test"],
   permissionVenomIdle: ["Pętla jazdy zatrzymana", "Driving loop stopped", "Fahrschleife gestoppt"],
   permissionIdle: ["Uruchom analizę lub test jazdy z tego ekranu.", "Start analysis or a driving trial from this screen.", "Analyse oder Fahrversuch auf diesem Bildschirm starten."],
+  trialPlanShort: ["Jazda prosto · maks. 10 s", "Forward driving · max. 10 s", "Geradeausfahrt · max. 10 s"],
   trialSimpleHelp: ["Test sprawdza świeży obraz i przejmuje sterowanie ze strzałek. Podczas próby STOP kończy ruch; przejęcie ręczne oddaje sterowanie operatorowi.", "The trial checks a fresh image and takes over from the arrows. During the trial STOP ends movement; manual takeover returns control to the operator.", "Der Versuch prüft ein aktuelles Bild und übernimmt die Pfeilsteuerung. STOP beendet die Bewegung; manuelle Übernahme gibt die Steuerung an den Bediener zurück."],
   trialAccept: ["Potwierdzam strefę i hamowanie", "I confirm the zone and braking", "Ich bestätige Bereich und Bremsen"],
   trialAcceptanceHelp: ["Po obejrzeniu świeżej analizy podłogi i przeszkody oraz ręcznej próbie hamowania potwierdź warunki dla obecnej kamery, strefy i prędkości. Zapis nie uruchamia ruchu. Następnie Test jazdy prosto uruchomi próbę do 10 s.", "After viewing fresh floor and obstacle analysis and manually checking braking, confirm conditions for the current camera, zone and speed. Saving does not start movement. The forward driving trial then starts a trial up to 10 s.", "Nach aktueller Boden- und Hindernisanalyse sowie manueller Bremsprüfung Bedingungen für Kamera, Bereich und Geschwindigkeit bestätigen. Speichern startet keine Bewegung. Der Vorwärts-Fahrversuch startet danach einen Versuch bis 10 s."],

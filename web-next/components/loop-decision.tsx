@@ -15,14 +15,13 @@ export function LoopDecision({state,detector,policy,status,t,language}:{state:Js
   const moving=safety.moving===true;
   const observed=typeof safety.moving==="boolean"&&safety.stale!==true&&!status?.errors.control;
   return <section className={styles.decisionArea} aria-label={t("decisionTitle")} data-testid="loop-decision">
-    {geometry&&<p className={styles.hint} data-testid="geometry-verdict">{t("perceptionGeometryHint")} · {t("perceptionDeviation")}: {formatNumber(Number(decision.outlier_fraction)*100,language,2)}% / {formatNumber(Number(decision.outlier_limit)*100,language,2)}%</p>}
     {classId!==null&&<p className={styles.modelClass} data-testid="vision-class">{t("visionClassInZone",{name:className,fraction:formatNumber(Number(decision.dominant_class_fraction)*100,language,1)})}{[6,11,28].includes(classId)&&<> {t("visionUnsupportedGround")}</>}</p>}
     <div className={styles.decisionGrid}>
       <div className={styles.decisionCard}><span>{t("decisionVision")}</span><strong data-testid="vision-verdict" className={view.vision==="go"?styles.verdictGo:styles.verdictStop}>{t("decision."+view.vision)}</strong><p data-testid="decision-reason">{view.vision==="go"?t("imageGoHint"):reason}</p>{view.current&&view.floor!==null&&<p>{t("confidentFloorCoverage",{value:formatNumber(view.floor*100,language,2)})}</p>}</div>
       <div className={styles.decisionCard}><span>{t("decisionReply")}</span><strong data-testid="pi-reply">{view.reply==="none"?"—":view.reply.toUpperCase()}</strong><p>{view.reply==="go"?t("decisionForward")+" · "+String(policy?.speed??"—")+" SDK · ≤ "+String(policy?.max_motion_ms??"—")+" ms":view.current?replyReason:t("decisionNoReply")}</p></div>
       <div className={styles.decisionCard}><span>{t("decisionExecutor")}</span><strong data-testid="pi-motion">{t(observed?moving?"decisionMoving":"decisionStopped":"unknown")}</strong><p>{t("owner")}: {String(safety.owner??"—")}</p><p>{t("decisionReportedMotion")}</p></div>
     </div>
-    <details className={styles.details}><summary>{t("visionDiagnostics")}</summary><div className={styles.decisionMetrics}>
+    <details className={styles.details}><summary>{t("visionDiagnostics")}</summary>{geometry&&<p className={styles.hint} data-testid="geometry-verdict">{t("perceptionGeometryHint")} · {t("perceptionDeviation")}: {formatNumber(Number(decision.outlier_fraction)*100,language,2)}% / {formatNumber(Number(decision.outlier_limit)*100,language,2)}%</p>}<div className={styles.decisionMetrics}>
       {!geometry&&<><span>{t("decisionFloor")}: <b>{view.floor===null?"—":formatNumber(view.floor*100,language,1)+"%"}</b> / 100%</span>
       <span>{t("decisionConfidence")}: <b>{view.confidence===null?"—":formatNumber(view.confidence*100,language,1)+"%"}</b> / 99%</span></>}
       {geometry&&<><span>{t("perceptionResidual")}: <b>{formatNumber(Number(decision.plane_residual_p99),language,3)}</b> / {String(decision.residual_limit??"—")}</span><span>{t("perceptionSlope")}: <b>{formatNumber(Number(decision.plane_slope),language,2)}</b> / {String(decision.slope_min??"—")}</span></>}
