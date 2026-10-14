@@ -269,6 +269,11 @@ authority for up to 10 seconds. STOP during transfer cancels subsequent ARM.
 Manual takeover stops navigation and returns authority to the arrow controls.
 Neither image GO nor saving trial conditions starts physical movement.
 
+Pulse duration and decision validity are separate limits. Every SDK pulse remains
+bounded by the saved motion limit; a fresh GO may renew the run after a pulse
+ends while the previous decision is still valid. Expired decisions still latch
+STOP and cannot revive the run.
+
 Install the module's `vision_depth` extra in the host virtualenv, then provision
 explicitly; startup and requests never download weights:
 
