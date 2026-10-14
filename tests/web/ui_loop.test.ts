@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { calibrationAcceptance, calibrationMatches, calibrationScope, decisionView, freshAnalysisFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, motionPermission, trialBlock } from "../../web-next/lib/loop-controls";
+import { calibrationAcceptance, calibrationMatches, executionHeadline, previewNotice, calibrationScope, decisionView, freshAnalysisFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, motionPermission, trialBlock } from "../../web-next/lib/loop-controls";
 import { featureRows, frameRequested, type RiderStatus } from "../../web-next/lib/model";
 
 test("confirmed stopped goals stay stopped when the last loop file has aged",()=>{
@@ -167,4 +167,18 @@ test("experimental geometry never enables a physical trial and changing threshol
  const changed={...policy,perception:{...policy.perception,residual_limit:.08}};
  assert.notEqual(calibrationScope(policy,{}),calibrationScope(changed,{}));
  assert.equal(loopSettingsValues(policy,changed).verified,false);
+});
+
+test("running observation with a delayed assessment never claims preview stopped",()=>{
+ assert.equal(previewNotice(false,"venom",false,true),"previewDelayedNotice");
+ assert.equal(previewNotice(true,"venom",false,true),"previewDelayedNotice");
+ assert.equal(previewNotice(true,"venom",false,false),"previewPausedNotice");
+ assert.equal(previewNotice(false,"venom",true,true),null);
+});
+test("operator sees manual ARM and observation as separate from image rejection",()=>{
+ const status={control:{safety:{state:"ARMED",owner:"manual"}}} as unknown as RiderStatus;
+ assert.equal(executionHeadline({mode:"observe"},{observe:true,drive:false},status,{venom:false}),"permissionVenomObserve");
+ assert.equal(executionHeadline({mode:"drive"},{drive:true},status,{venom:false}),"permissionVenomManual");
+ const view=decisionView({running:true,stale:false,mode:"observe",decision:{state:"unknown",reason:"vision_low_confidence",motion_reason:"observe_only"}},{});
+ assert.equal(view.imageReason,"vision_low_confidence");
 });

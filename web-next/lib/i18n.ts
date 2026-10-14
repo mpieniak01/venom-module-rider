@@ -1,5 +1,10 @@
 // Module-owned translations. Every key contains PL, EN and DE by construction.
 export const messages = {
+  permissionVenomObserve: ["VENOM: analiza bez jazdy — pętla ruchu nie jest uruchomiona", "VENOM: analysis without driving — motion loop is not started", "VENOM: Analyse ohne Fahrt — Bewegungsschleife nicht gestartet"],
+  permissionVenomManual: ["VENOM: brak sterowania — Pi uzbrojone dla strzałek ręcznych", "VENOM: no control — Pi armed for manual arrows", "VENOM: keine Steuerung — Pi für manuelle Pfeile aktiviert"],
+  previewDelayedNotice: ["OCZEKIWANIE NA ŚWIEŻĄ ANALIZĘ — wyświetlony ostatni obraz", "WAITING FOR FRESH ANALYSIS — showing the last image", "WARTEN AUF AKTUELLE ANALYSE — letztes Bild angezeigt"],
+  "vision.reason.vision_floor_uncertainty": ["Podłoże rozpoznane, ale część pikseli pozostaje niepewna; wymaganie całej strefy nie jest spełnione.", "Ground identified, but some pixels remain uncertain; full-zone requirement is not met.", "Boden erkannt, aber einige Pixel bleiben unsicher; Anforderung des gesamten Bereichs nicht erfüllt."],
+
   perceptionMethod: ["Ocena drogi", "Path assessment", "Wegbewertung"],
   perceptionSemantic: ["Klasy powierzchni · dotychczasowa", "Surface classes · existing", "Oberflächenklassen · bisher"],
   perceptionGeometry: ["Geometria głębi · obserwacja", "Depth geometry · observation", "Tiefengeometrie · Beobachtung"],
@@ -254,7 +259,7 @@ export const messages = {
   demo: ["DEMO — symulowane urządzenie. Polecenia i pomiary są fikcyjne.", "DEMO — simulated device. Commands and measurements are fictional.", "DEMO — simuliertes Gerät. Befehle und Messwerte sind fiktiv."],
   offlineHint: ["Ostatni znany stan. Nowe polecenie sprawdzi połączenie; stare polecenia nie są ponawiane.", "Last known state. A new command checks the connection; old commands are not retried.", "Letzter bekannter Status. Ein neuer Befehl prüft die Verbindung; alte Befehle werden nicht wiederholt."],
   demoTag: ["Demo", "Demo", "Demo"],
-  arm: ["ARM · zezwól na ruch", "ARM · allow movement", "ARM · Bewegung erlauben"],
+  arm: ["ARM · sterowanie ręczne", "ARM · manual control", "ARM · manuelle Steuerung"],
   disarm: ["ARM · wyłącz zgodę", "ARM · revoke permission", "ARM · Freigabe aufheben"],
   armHint: ["Kliknięcie ARM oznacza Twoją zgodę na ręczne sterowanie. Sprawdź wolną przestrzeń wokół robota.", "Clicking ARM gives your consent to manual control. Check the space around the robot.", "Mit ARM stimmst du der manuellen Steuerung zu. Prüfe den freien Raum um den Roboter."],
   stop: ["STOP", "STOP", "STOP"],

@@ -721,3 +721,46 @@ def test_depth_ground_deviation_threshold_and_corridor_bounds():
     assert result["outlier_fraction"] > result["outlier_limit"]
     with pytest.raises(ValueError):
         assess_depth(depth, (0, 0, 0.001, 0.001), PerceptionSettings())
+
+
+async def test_geometry_observation_cannot_take_segmentation_slot():
+    from venom_module_rider.depth_detector import PerceptionSettings
+
+    loop = VisionLoop(Detector())
+    loop.depth_busy = asyncio.create_task(asyncio.sleep(0.05))
+    result = await loop.decide("prod", frame(), b"x")
+    assert result["state"] == "clear"
+    assert loop.status()["busy"] is False
+    assert loop.status({"engine": "depth_plane"})["busy"] is True
+    with pytest.raises(RiderError):
+        await loop.decide(
+            "demo",
+            frame().model_copy(
+                update={"perception": PerceptionSettings(engine="depth_plane")}
+            ),
+            b"x",
+        )
+    await loop.close()
+
+
+def test_uncertain_floor_is_not_reported_as_a_different_object_class():
+    logits = np.zeros((1, 150, 20, 20), dtype=np.float32)
+    logits[:, 3] = 20
+    logits[:, :, 0, 0] = 0
+    result = classify_logits(logits, (0, 0, 1, 1))
+    assert result["state"] == "unknown"
+    assert result["reason"] == "vision_floor_uncertainty"
+    assert result["uncertain_pixels"] == 1
+    assert result["non_floor_pixels"] == 0
+    assert result["corridor_pixels"] == 400
+
+
+async def test_real_pi_has_priority_over_same_engine_demo_admission():
+    now = [0.0]
+    loop = VisionLoop(Detector(), clock=lambda: now[0])
+    await loop.decide("prod", frame(), b"x")
+    with pytest.raises(RiderError, match="vision_production_priority"):
+        await loop.decide("demo", frame(), b"x")
+    now[0] = 0.6
+    assert (await loop.decide("demo", frame(), b"x"))["state"] == "clear"
+    await loop.close()

@@ -15,6 +15,7 @@ class VisionLoop:
         self.depth_detector = DepthDetector()
         self.clock = clock
         self.busy = None
+        self.depth_busy = None
         self.runs = OrderedDict()
         self.closed = False
         self.previews = OrderedDict()
@@ -28,7 +29,8 @@ class VisionLoop:
         )
         return {
             **selected.status(),
-            "busy": self.busy is not None,
+            "busy": (self.depth_busy if selected is self.depth_detector else self.busy)
+            is not None,
             "protocol_version": 1,
             "max_frame_bytes": 512 * 1024,
             "max_deadline_ms": 500,
@@ -41,7 +43,16 @@ class VisionLoop:
             raise RiderError("module_closed", 503)
         if not frame.valid_corridor() or frame.age_ms >= frame.deadline_ms:
             raise RiderError("vision_frame_expired", 409)
-        if self.busy is not None:
+        depth_mode = frame.perception.engine == "depth_plane"
+        # The built-in simulator cannot reserve an engine recently used by Pi.
+        if device_id == "demo" and any(
+            identity[0] != "demo"
+            and row.get("engine") == frame.perception.engine
+            and self.clock() - row["at"] <= 0.5
+            for identity, row in self.runs.items()
+        ):
+            raise RiderError("vision_production_priority", 429)
+        if (self.depth_busy if depth_mode else self.busy) is not None:
             raise RiderError("vision_busy", 429)
         identity = (device_id, frame.run_id)
         previous = self.runs.get(identity)
@@ -69,12 +80,12 @@ class VisionLoop:
             "signature": signature,
             "count": 0,
             "at": now,
+            "engine": frame.perception.engine,
         }
         self.runs[identity] = state
         self.runs.move_to_end(identity)
         while len(self.runs) > 32:
             self.runs.popitem(last=False)
-        depth_mode = frame.perception.engine == "depth_plane"
         selected = self.depth_detector if depth_mode else self.detector
         if depth_mode:
             task = asyncio.create_task(
@@ -89,7 +100,10 @@ class VisionLoop:
             task = asyncio.create_task(
                 asyncio.to_thread(self.detector.detect, payload, frame.corridor)
             )
-        self.busy = task
+        if depth_mode:
+            self.depth_busy = task
+        else:
+            self.busy = task
         try:
             result = await asyncio.wait_for(
                 asyncio.shield(task), (frame.deadline_ms - frame.age_ms) / 1000
@@ -102,7 +116,7 @@ class VisionLoop:
             }
         finally:
             if task.done():
-                self.busy = None
+                self._drain(task)
             else:
                 task.add_done_callback(self._drain)
         elapsed = (self.clock() - now) * 1000
@@ -215,11 +229,14 @@ class VisionLoop:
             task.exception()
         if self.busy is task:
             self.busy = None
+        if self.depth_busy is task:
+            self.depth_busy = None
 
     async def close(self):
         self.closed = True
         self.runs.clear()
         self.previews.clear()
         self.preview_changed.set()
-        if self.busy is not None:
-            await asyncio.gather(self.busy, return_exceptions=True)
+        pending = [task for task in (self.busy, self.depth_busy) if task is not None]
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)

@@ -5,7 +5,7 @@ import styles from "../rider.module.css";
 
 export function LoopDecision({state,detector,policy,status,t,language}:{state:JsonRecord;detector:JsonRecord;policy:JsonRecord|null;status:RiderStatus|null;t:Translator;language:string}) {
   const view=decisionView(state,detector), safety=safetyOf(status);
-  const decision=record(state.decision), key="vision.reason."+view.reason;
+  const decision=record(state.decision), key="vision.reason."+view.imageReason;
   const reason=t(key)===key?t("vision.reason.default"):t(key);
   const stoppedByFault=state.latched===true;
   const classId=typeof decision.dominant_class_id==="number"?decision.dominant_class_id:null;
@@ -17,7 +17,7 @@ export function LoopDecision({state,detector,policy,status,t,language}:{state:Js
     {geometry&&<p className={styles.hint} data-testid="geometry-verdict">{t("perceptionGeometryHint")} · {t("perceptionDeviation")}: {formatNumber(Number(decision.outlier_fraction)*100,language,2)}% / {formatNumber(Number(decision.outlier_limit)*100,language,2)}%</p>}
     {classId!==null&&<p className={styles.modelClass} data-testid="vision-class">{t("visionClassInZone",{name:className,fraction:formatNumber(Number(decision.dominant_class_fraction)*100,language,1)})}{[6,11,28].includes(classId)&&<> {t("visionUnsupportedGround")}</>}</p>}
     <div className={styles.decisionGrid}>
-      <div className={styles.decisionCard}><span>{t("decisionVision")}</span><strong data-testid="vision-verdict" className={view.vision==="go"?styles.verdictGo:styles.verdictStop}>{t("decision."+(stoppedByFault?"stop":view.vision))}</strong><p data-testid="decision-reason">{view.vision==="go"?t("imageGoHint"):reason}</p>{view.current&&view.floor!==null&&<p>{t("confidentFloorCoverage",{value:formatNumber(view.floor*100,language,1)})}</p>}</div>
+      <div className={styles.decisionCard}><span>{t("decisionVision")}</span><strong data-testid="vision-verdict" className={view.vision==="go"?styles.verdictGo:styles.verdictStop}>{t("decision."+(stoppedByFault?"stop":view.vision))}</strong><p data-testid="decision-reason">{view.vision==="go"?t("imageGoHint"):reason}</p>{view.current&&view.floor!==null&&<p>{t("confidentFloorCoverage",{value:formatNumber(view.floor*100,language,2)})}</p>}</div>
       <div className={styles.decisionCard}><span>{t("decisionReply")}</span><strong data-testid="pi-reply">{view.reply==="none"?"—":view.reply.toUpperCase()}</strong><p>{view.reply==="go"?t("decisionForward")+" · "+String(policy?.speed??"—")+" SDK · ≤ "+String(policy?.max_motion_ms??"—")+" ms":view.current?reason:t("decisionNoReply")}</p></div>
       <div className={styles.decisionCard}><span>{t("decisionExecutor")}</span><strong data-testid="pi-motion">{t(observed?moving?"decisionMoving":"decisionStopped":"unknown")}</strong><p>{t("owner")}: {String(safety.owner??"—")}</p><p>{t("decisionReportedMotion")}</p></div>
     </div>

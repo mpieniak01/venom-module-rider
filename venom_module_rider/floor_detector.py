@@ -127,14 +127,19 @@ def classify_logits(logits, corridor):
     dominant = int(counts.argmax())
     if float(confident.mean()) < 0.99:
         state, reason = "unknown", "vision_low_confidence"
-    elif fraction < 1.0:
+    elif ((labels != FLOOR_LABEL) & confident).any():
         state, reason = "obstacle", "corridor_not_floor"
+    elif fraction < 1.0:
+        state, reason = "unknown", "vision_floor_uncertainty"
     else:
         state, reason = "clear", "floor_candidate"
     return {
         "state": state,
         "reason": reason,
         "floor_fraction": fraction,
+        "corridor_pixels": int(labels.size),
+        "uncertain_pixels": int((~confident).sum()),
+        "non_floor_pixels": int(((labels != FLOOR_LABEL) & confident).sum()),
         "confidence_fraction": float(confident.mean()),
         "dominant_class_id": dominant,
         "dominant_class_fraction": float(counts[dominant] / labels.size),

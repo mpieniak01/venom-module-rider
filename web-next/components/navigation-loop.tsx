@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Play, Square, RefreshCw } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
-import { data, errorCode, formatTime, record, type JsonRecord } from "../lib/model";
-import { calibrationMatches, calibrationScope, decisionView, freshAnalysisFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, motionPermission, trialBlock } from "../lib/loop-controls";
+import { data, errorCode, formatNumber, formatTime, record, type JsonRecord } from "../lib/model";
+import { calibrationMatches, calibrationScope, decisionView, executionHeadline, freshAnalysisFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, motionPermission, trialBlock } from "../lib/loop-controls";
 import type { RiderClient } from "../lib/use-rider";
 import type { Translator } from "../lib/i18n";
 import { LoopDecision } from "./loop-decision";
@@ -187,16 +187,20 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
   const perception=record(draft?.perception);
   const permission=motionPermission(loopState,goals,policy,detector,client.status);
   const imageDecision=decisionView(loopState,detector);
+  const imageReasonKey="vision.reason."+imageDecision.imageReason;
+  const imageReason=t(imageReasonKey)===imageReasonKey?t("vision.reason.default"):t(imageReasonKey);
   const executorDisarmed=permission.venom!==null&&record(client.status?.control?.safety).state==="DISARMED";
   return <Panel title={t("loopTitle")} extra={<Button aria-label={t("loopLoad")} disabled={loading||!!operation||!connected} onClick={()=>setRefresh(v=>v+1)}><RefreshCw size={14}/>{t("refresh")}</Button>}>
     <div className={styles.loopStatus} role="status" data-testid="loop-state">
       <Pill tone={phase==="running"?"good":phase==="offline"||phase==="unknown"||phase==="fault"?"warning":undefined}>{t(operation==="stop"?"loopStopping":operation==="check"?"trialChecking":operation==="start"?"loopStarting":"loopPhase."+phase)}</Pill>
       <strong>{t(goals.drive===true?"trialActiveMode":"trialAnalysisMode")}</strong>
     </div>
+    <p className={styles.hint} data-testid="active-perception-method">{t("perceptionMethod")}: {t(detector.purpose==="relative_ground_geometry"?"perceptionGeometry":"perceptionSemantic")}</p>
     <div className={styles.loopToolbar}>
     <div className={styles.permissionSummary} role="status" data-testid="motion-permission">
       <strong data-testid="image-permission" className={imageDecision.vision==="go"?styles.verdictGo:styles.verdictStop}>{t(imageDecision.vision==="go"?"imageAllowsMotion":imageDecision.vision==="none"?"imageAssessmentUnknown":"imageBlocksMotion")}</strong>
-      <strong data-testid="venom-permission" className={permission.venom===true?styles.verdictGo:styles.verdictStop}>{t(executorDisarmed?"permissionPiDisarmed":permission.venom===null?"permissionVenomUnknown":permission.venom?"permissionVenomYes":"permissionVenomNo")}</strong>
+      {imageDecision.vision!=="go"&&<span data-testid="image-stop-reason">{imageReason}{imageDecision.floor!==null&&" · "+t("confidentFloorCoverage",{value:formatNumber(imageDecision.floor*100,language,2)})}</span>}
+      <strong data-testid="venom-permission" className={permission.venom===true?styles.verdictGo:styles.verdictStop}>{t(executionHeadline(loopState,goals,client.status,permission))}</strong>
       <span>{t(executorDisarmed?"permissionDisarmed":permission.reason)}</span>
       <span data-testid="manual-permission">{t(permission.manual===null?"permissionManualUnknown":permission.manual?"permissionManualYes":"permissionManualNo")}</span>
     </div>
@@ -214,7 +218,7 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
 
     {(error||readError)&&<p className={styles.loopError} role="alert">{error||readError}</p>}
     <div ref={workspaceRef} className={styles.driveWorkspace}>
-      <div className={styles.loopCamera}><CameraPanel client={client} t={t} language={language} compact analysisCurrent={imageDecision.current&&decision.reason!=="vision_observation_transport_retry"}/></div>
+      <div className={styles.loopCamera}><CameraPanel client={client} t={t} language={language} compact analysisRunning={active&&loopState.running===true} analysisCurrent={imageDecision.current&&decision.reason!=="vision_observation_transport_retry"}/></div>
       <div className={styles.loopSidebar}>
         {manual}
         <LoopDecision state={loopState} detector={detector} policy={policy} status={client.status} t={t} language={language}/>

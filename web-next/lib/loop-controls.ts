@@ -69,6 +69,7 @@ export function decisionView(state: JsonRecord, detector: JsonRecord) {
   const vision=decision.state==="clear"&&count>=required&&decision.vision_action!=="stop" ? "go":"stop";
   return {
     current, required, count,
+    imageReason:!current?"waiting_for_decision":decision.state!=="clear"?String(decision.reason??"waiting_for_decision"):count<required?"clear_frames_pending":"clear_frames_ready",
     vision:current?vision:"none",
     reply:current&&["go","stop"].includes(String(decision.action))?String(decision.action):"none",
     reason:current?String(decision.motion_reason??(decision.state!=="clear"?decision.reason:count<required?"clear_frames_pending":state.mode==="observe"?"observe_only":decision.reason)??"waiting_for_decision"):String(state.stop_reason??"waiting_for_decision"),
@@ -111,4 +112,19 @@ export function motionPermission(state:JsonRecord, goals:JsonRecord, policy:Json
     else {allowed=true;reason="permissionGo";}
   }
   return {venom:known?allowed:null,manual,reason};
+}
+
+export function executionHeadline(state:JsonRecord,goals:JsonRecord,status:RiderStatus|null,permission:{venom:boolean|null}):string {
+  if(permission.venom===null)return "permissionVenomUnknown";
+  if(permission.venom)return "permissionVenomYes";
+  const safety=safetyOf(status);
+  if(safety.state==="DISARMED")return "permissionPiDisarmed";
+  if(goals.drive!==true||state.mode!=="drive")return "permissionVenomObserve";
+  if(safety.state==="ARMED"&&safety.owner==="manual")return "permissionVenomManual";
+  return "permissionVenomNo";
+}
+
+export function previewNotice(stale:boolean,selected:string,current:boolean|undefined,running:boolean|undefined):string|null {
+  if(!stale&&!(selected==="venom"&&current===false))return null;
+  return selected==="venom"&&running===false?"previewPausedNotice":"previewDelayedNotice";
 }
