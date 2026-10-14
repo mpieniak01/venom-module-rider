@@ -1,4 +1,4 @@
-"""Relative ground geometry on Venom; experimental observation only."""
+"""Relative ground geometry on Venom; supervised forward trials with Pi-owned acceptance."""
 
 import hashlib
 import io
@@ -57,7 +57,7 @@ def assess_depth(depth, corridor, settings):
         "residual_limit": settings.residual_limit,
         "outlier_limit": settings.outlier_limit,
         "slope_min": settings.slope_min,
-        "drive_supported": False,
+        "drive_supported": True,
         "distance_measurement": False,
         "_errors": error_map,
     }
@@ -85,7 +85,7 @@ class DepthDetector:
             "sha256": self.digest,
             "purpose": "relative_ground_geometry",
             "distance_measurement": False,
-            "drive_supported": False,
+            "drive_supported": True,
         }
 
     def _load(self):
@@ -138,7 +138,7 @@ class DepthDetector:
             return {
                 "state": "unknown",
                 "reason": "vision_image_quality",
-                "drive_supported": False,
+                "drive_supported": True,
                 "distance_measurement": False,
                 "_preview": stream.getvalue(),
             }

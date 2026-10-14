@@ -162,8 +162,8 @@ test("fresh image GO in observation is independent of DISARMED executor",()=>{
 
 test("experimental geometry never enables a physical trial and changing thresholds changes receipt scope",()=>{
  const policy={mode:"observe",perception:{engine:"depth_plane",residual_limit:.06}};
- assert.equal(trialBlock(policy,{}, {},true,false,null),"loopDepthObservation");
- assert.equal(loopBlock({...policy,mode:"drive"},{drive:true},{configured:true},true,false,null),"loopDepthObservation");
+ assert.equal(trialBlock(policy,{observe:true,drive:true}, {configured:true,drive_supported:true},true,false,null),"loopUnverified");
+ assert.equal(loopBlock({...policy,mode:"drive"},{drive:true},{configured:true},true,false,null),"loopUnverified");
  const changed={...policy,perception:{...policy.perception,residual_limit:.08}};
  assert.notEqual(calibrationScope(policy,{}),calibrationScope(changed,{}));
  assert.equal(loopSettingsValues(policy,changed).verified,false);
@@ -187,4 +187,12 @@ test("operator sees manual ARM and observation as separate from image rejection"
 test("expired previous assessment is not described as waiting for the first result",()=>{
  assert.equal(decisionView({running:false,stale:true,decision:{state:"clear",vision_action:"go"}},{}).imageReason,"analysis_not_current");
  assert.equal(decisionView({running:false,stale:true},{}).imageReason,"waiting_for_decision");
+});
+
+
+test("accepted depth trial is available while unsupported runtime still blocks execution",()=>{
+ const policy={...permissionPolicy,mode:"observe",perception:{engine:"depth_plane"}};
+ const detector={...permissionDetector,configured:true,loaded:true,drive_supported:true};
+ assert.equal(trialBlock(policy,{observe:true,drive:true},detector,true,false,permissionStatus("manual")),"");
+ assert.equal(trialBlock(policy,{observe:true,drive:true},{...detector,drive_supported:false},true,false,permissionStatus("manual")),"loopDepthObservation");
 });

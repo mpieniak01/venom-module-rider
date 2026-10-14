@@ -537,7 +537,7 @@ def test_depth_geometry_free_plane_box_and_invalid_output():
     depth[78:114, 56:104] = 0.3
     result = assess_depth(depth, (0.35, 0.65, 0.65, 0.95), settings)
     assert result["state"] == "unknown"
-    assert result["drive_supported"] is False
+    assert result["drive_supported"] is True
     depth[85:95, 65:80] = 0.1
     assert assess_depth(depth, (0.35, 0.65, 0.65, 0.95), settings)["state"] != "clear"
     for bad in (np.zeros((40, 40)), np.ones((8, 8)), np.full((40, 40), np.nan)):
@@ -547,7 +547,7 @@ def test_depth_geometry_free_plane_box_and_invalid_output():
         assess_depth(depth, (1, 0, 0, 1), settings)
 
 
-async def test_depth_image_go_can_never_be_a_drive_permit_even_with_matching_receipt():
+async def test_depth_drive_permit_requires_three_frames_and_matching_receipt():
     from venom_module_rider.depth_detector import PerceptionSettings
 
     class Geometry(Detector):
@@ -555,7 +555,7 @@ async def test_depth_image_go_can_never_be_a_drive_permit_even_with_matching_rec
             return {
                 "state": "clear",
                 "reason": "depth_plane_candidate",
-                "drive_supported": False,
+                "drive_supported": True,
             }
 
     loop = VisionLoop(Detector())
@@ -566,9 +566,9 @@ async def test_depth_image_go_can_never_be_a_drive_permit_even_with_matching_rec
         )
         result = await loop.decide("pi", f, b"x")
     assert result["vision_action"] == "go"
-    assert result["action"] == "stop"
-    assert result["motion_reason"] == "depth_observation_only"
-    assert result["drive_supported"] is False
+    assert result["action"] == "go"
+    assert result["motion_reason"] == "clear_frames_ready"
+    assert result["drive_supported"] is True
 
 
 async def test_perception_changes_reset_run_admission():
@@ -778,3 +778,32 @@ def test_rejected_dark_capture_replaces_previous_preview_without_model_load():
     assert result["state"] == "unknown"
     assert detector.model is None
     assert np.asarray(Image.open(io.BytesIO(result["_preview"]))).max() == 0
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("verified", False),
+        ("mode", "observe"),
+        ("model_sha256", "b" * 64),
+        ("calibration_id", ""),
+    ],
+)
+async def test_depth_denies_execution_without_matching_operator_acceptance(
+    field, value
+):
+    from venom_module_rider.depth_detector import PerceptionSettings
+
+    loop = VisionLoop(Detector())
+    loop.depth_detector = Detector()
+    for seq in range(1, 4):
+        f = frame(seq).model_copy(
+            update={
+                "perception": PerceptionSettings(engine="depth_plane"),
+                field: value,
+            }
+        )
+        result = await loop.decide("pi", f, b"x")
+    assert result["vision_action"] == "go"
+    assert result["action"] == "stop"
+    await loop.close()

@@ -18,7 +18,6 @@ export function loopBlock(policy: JsonRecord | null, runtime: JsonRecord, detect
   if (runtime[mode] !== true) return runtime.drive_reason === "navigation_executor_update_required" && mode === "drive" ? "loopExecutorUpdate" : "loopRuntimeMissing";
   if (detector.configured !== true) return "loopNoModel";
   if (mode === "drive") {
-    if (record(policy.perception).engine === "depth_plane") return "loopDepthObservation";
     if (!calibrationMatches(policy, detector)) return "loopUnverified";
     const safety = safetyOf(status);
     if (safety.state !== "ARMED" || safety.owner !== "navigation" || safety.stale === true || status?.errors?.control) return "loopNeedsArm";
@@ -78,9 +77,9 @@ export function decisionView(state: JsonRecord, detector: JsonRecord) {
   };
 }
 export function trialBlock(policy: JsonRecord|null, runtime:JsonRecord, detector:JsonRecord, connected:boolean, dirty:boolean, status:RiderStatus|null):string {
-  if(record(policy?.perception).engine==="depth_plane")return "loopDepthObservation";
   const base=loopBlock(policy?{...policy,mode:"observe"}:null,runtime,detector,connected,dirty,status);
   if(base)return base;
+  if(detector.drive_supported===false)return "loopDepthObservation";
   if(runtime.drive!==true)return runtime.drive_reason==="navigation_executor_update_required"?"loopExecutorUpdate":"loopRuntimeMissing";
   if(!calibrationRecorded(policy)||detector.loaded===true&&!calibrationMatches(policy,detector))return "loopUnverified";
   const safety=safetyOf(status);

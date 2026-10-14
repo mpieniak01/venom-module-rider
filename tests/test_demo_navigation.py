@@ -233,8 +233,10 @@ async def test_timed_navigation_arm_and_manual_takeover_are_fixture_only(replay)
     await nav.close()
 
 
+@pytest.mark.parametrize("engine", ["segformer", "depth_plane"])
 async def test_full_authenticated_loop_actual_pi_permit_go_obstacle_timeout_and_manual(
     monkeypatch,
+    engine,
 ):
     source = os.getenv("RIDER_TEST_PI_LEASE")
     if not source:
@@ -257,6 +259,7 @@ async def test_full_authenticated_loop_actual_pi_permit_go_obstacle_timeout_and_
 
     detector = Detector()
     loop = VisionLoop(detector)
+    loop.depth_detector = detector
     monkeypatch.setenv("RIDER_COMPUTE_TOKEN", "replay-fixture-token")
     app = FastAPI()
     app.state.rider = RiderService(
@@ -280,6 +283,7 @@ async def test_full_authenticated_loop_actual_pi_permit_go_obstacle_timeout_and_
         verified=True,
         calibration_id="simulation-only",
         model_sha256="a" * 64,
+        perception={**nav.policy["perception"], "engine": engine},
     )
     pi.state, pi.owner = "ARMED", "navigation"
 

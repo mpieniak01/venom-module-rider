@@ -146,11 +146,6 @@ class ReplayNavigation:
             and 50 <= candidate["max_motion_ms"] <= 200
         ):
             raise ValueError("navigation_invalid_configuration")
-        if (
-            candidate["mode"] == "drive"
-            and candidate["perception"]["engine"] == "depth_plane"
-        ):
-            raise ValueError("navigation_depth_observation_only")
         self.policy = {**candidate, "revision": self.policy["revision"] + 1}
         return self.policy
 
@@ -249,8 +244,6 @@ class ReplayNavigation:
     async def start(self, name):
         mode = LOOP_GOALS[name]
         if mode == "drive":
-            if self.policy["perception"]["engine"] == "depth_plane":
-                raise ValueError("navigation_depth_observation_only")
             safety = self.state.safety()
             if safety["owner"] != "navigation" or safety["state"] != "ARMED":
                 raise ValueError("navigation_authority_lost")

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Play, Square, RefreshCw } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 import { data, errorCode, formatNumber, formatTime, record, type JsonRecord } from "../lib/model";
-import { calibrationMatches, calibrationScope, decisionView, executionHeadline, freshAnalysisFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, motionPermission, trialBlock } from "../lib/loop-controls";
+import { calibrationAcceptance, calibrationMatches, calibrationScope, decisionView, executionHeadline, freshAnalysisFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, motionPermission, trialBlock } from "../lib/loop-controls";
 import type { RiderClient } from "../lib/use-rider";
 import type { Translator } from "../lib/i18n";
 import { LoopDecision } from "./loop-decision";
@@ -145,6 +145,23 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
     catch(err){if(!stopping.current)failure(err);}
     finally{startTask.current=null;if(!stopping.current)setOperation(null);}
   };
+  const acceptTrial=async()=>{
+    const camera=client.currentCamera();
+    if(!policy||dirty||operation||loading||goals.drive===true||imageDecision.vision!=="go"||!freshAnalysisFrame(camera.frame,camera.stream))return;
+    setOperation("save");setError("");setTrialResult("");
+    const origin=client.currentSession();operationEpoch.current=client.currentMotionEpoch();operationGeneration.current=client.currentGeneration();
+    const task=(async()=>{
+      const loaded=await apiFetch<JsonRecord>("/api/v1/rider/navigation/config");ensureOperation(origin);
+      const current=record(loaded.config),model=record(loaded.detector);
+      if(current.revision!==policy.revision||calibrationScope(current,model)!==calibrationScope(policy,detector)||decisionView(record(loaded.status),model).vision!=="go")throw Object.assign(new Error("navigation_configuration_changed"),{data:{error:"navigation_configuration_changed"}});
+      await stopGoals(origin);ensureOperation(origin);
+      await persist(calibrationAcceptance(current,model,"operator-"+crypto.randomUUID()));ensureOperation(origin);
+      setTrialResult("trialAcceptanceSaved");
+      await ensureAnalysis(origin);
+    })();startTask.current=task;
+    try{await task;}catch(err){if(!stopping.current)failure(err);}
+    finally{startTask.current=null;if(!stopping.current)setOperation(null);}
+  };
   const runTrial=async()=>{
     if(!policy||trialUnavailable||operation||loading||phase==="running"&&goals.drive===true)return;
     requestAnimationFrame(()=>workspaceRef.current?.scrollIntoView({behavior:"instant",block:"start"}));
@@ -211,6 +228,10 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
       <Button tone="danger" data-testid="loop-stop" disabled={!connected||operation==="stop"||operation==="save"} onClick={()=>void stop()}><Square size={18}/>{t(operation==="stop"?"loopStopping":"loopStop")}</Button>
     </div>
     </div>
+    {selectedMode==="drive"&&policy&&!calibrationMatches(policy,detector)&&detector.drive_supported!==false&&<div className={styles.stack} data-testid="trial-acceptance">
+      <p className={styles.hint}>{t("trialAcceptanceHelp")}</p>
+      <Button data-testid="trial-accept" disabled={!connected||!!operation||loading||dirty||goals.drive===true||imageDecision.vision!=="go"||!freshAnalysisFrame(client.camera,client.cameraStream)} onClick={()=>void acceptTrial()}>{t("trialAccept")}</Button>
+    </div>}
     {selectedMode==="drive"&&!!trialUnavailable&&<p id="rider-trial-block" className={styles.loopError} role="status" data-testid="loop-block">{t(trialUnavailable)}</p>}
     {!!trialResult&&<p className={styles.hint} role="status" data-testid="trial-result">{t(phase==="fault"?"trialEnded":trialResult==="trialStarted"&&phase==="stopped"?"trialStopped":trialResult)}</p>}
     <p className={styles.hint} data-testid="mode-help">{t(selectedMode==="drive"&&detector.drive_supported===false?"modeDriveUnavailableHelp":selectedMode==="drive"?"modeDriveHelp":"modeObserveHelp")}</p>

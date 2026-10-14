@@ -132,8 +132,7 @@ class VisionLoop:
             raise RiderError("module_closed", 503)
         model = selected.status().get("sha256", "")
         permitted = (
-            not depth_mode
-            and frame.mode == "drive"
+            frame.mode == "drive"
             and frame.verified
             and bool(frame.calibration_id)
             and model == frame.model_sha256
@@ -147,8 +146,6 @@ class VisionLoop:
             motion_reason = result["reason"]
         elif count < 3:
             motion_reason = "clear_frames_pending"
-        elif depth_mode and frame.mode == "drive":
-            motion_reason = "depth_observation_only"
         elif frame.mode != "drive":
             motion_reason = "observe_only"
         elif not permitted:
@@ -195,7 +192,7 @@ class VisionLoop:
             "clear_count": count,
             "physical_clearance": "unverified",
             "perception_engine": frame.perception.engine,
-            "drive_supported": not depth_mode,
+            "drive_supported": True,
         }
 
     def preview(self, device_id, *, corridor=None, revision=None):
