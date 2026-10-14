@@ -61,7 +61,7 @@ export default function RiderPage() {
         {section === "control" && <div className={styles.stack}>
           <NavigationLoop key={connection.session} client={client} t={t} language={language}
             onManualSettings={()=>changeSection("calibration")}
-            manual={<Panel className={styles.manualEmbedded} title={t("manual")} extra={<Button data-testid="takeover-manual" tone="primary" disabled={!client.canArm||!!client.busy} onClick={()=>void client.takeManual(t("manual"))}>{t("takeManual")}</Button>}><p className={styles.hint}>{t("takeManualHint")}</p><ManualPad client={client} t={t} language={language} compact/></Panel>}/>
+            manual={<Panel className={styles.manualEmbedded} title={t("manual")} extra={<Button data-testid="takeover-manual" tone="primary" disabled={!client.canArm||!!client.busy} onClick={()=>void client.takeManual(t("manual"))}>{t("takeManual")}</Button>}><p className={styles.hint}>{t("takeManualHint")}</p>{armed&&safety.owner==="manual"&&<ManualPad client={client} t={t} language={language} compact/>}</Panel>}/>
           <details className={styles.details}><summary>{t("postureAndTelemetry")}</summary><div className={styles.grid}><Posture client={client} t={t} language={language}/><Panel title={t("measurements")} hint={t("measurementsHint")}><SensorMetrics status={client.status} t={t} language={language}/></Panel></div><RequestHistory status={client.status} t={t} language={language}/></details>
         </div>}
         {section === "overview" && <Measurements status={client.status} t={t} language={language} />}

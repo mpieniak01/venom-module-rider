@@ -29,13 +29,16 @@ export function loopFailure(error: unknown): string {
   if (["offline", "pi_unreachable"].includes(code)) return "loopOffline";
   if (code === "navigation_api_unavailable") return "loopApiMissing";
   if (code === "pi_operation_timeout") return "operationUnconfirmed";
+  if (["navigation_trial_cancelled","navigation_configuration_changed","navigation_authority_unconfirmed","navigation_estop"].includes(code)) return "trial.error."+code;
   return "requestFailed";
 }
 
 // The saved Pi policy remains authoritative. These helpers only guide the operator.
+export function calibrationRecorded(policy: JsonRecord | null): boolean {
+  return !!policy && policy.verified === true && !!str(policy.calibration_id).trim() && /^[a-f0-9]{64}$/.test(str(policy.model_sha256));
+}
 export function calibrationMatches(policy: JsonRecord | null, detector: JsonRecord): boolean {
-  return !!policy && policy.verified === true && !!str(policy.calibration_id).trim()
-    && /^[a-f0-9]{64}$/.test(str(detector.sha256)) && policy.model_sha256 === detector.sha256;
+  return calibrationRecorded(policy) && /^[a-f0-9]{64}$/.test(str(detector.sha256)) && policy?.model_sha256 === detector.sha256;
 }
 export function calibrationScope(policy: JsonRecord | null, detector: JsonRecord): string {
   return JSON.stringify([policy?.speed, policy?.max_motion_ms, policy?.decision_budget_ms, policy?.corridor, detector.sha256]);
@@ -61,7 +64,7 @@ export function decisionView(state: JsonRecord, detector: JsonRecord) {
   const decision=record(state.decision), required=Number(detector.clear_frames_required)||3;
   const current=state.running===true&&state.stale!==true&&state.latched!==true;
   const count=typeof decision.clear_count==="number"?decision.clear_count:0;
-  const vision=decision.vision_action==="go" || decision.state==="clear"&&count>=required ? "go":"stop";
+  const vision=decision.state==="clear"&&count>=required&&decision.vision_action!=="stop" ? "go":"stop";
   return {
     current, required, count,
     vision:current?vision:"none",
@@ -75,12 +78,12 @@ export function trialBlock(policy: JsonRecord|null, runtime:JsonRecord, detector
   const base=loopBlock(policy?{...policy,mode:"observe"}:null,runtime,detector,connected,dirty,status);
   if(base)return base;
   if(runtime.drive!==true)return runtime.drive_reason==="navigation_executor_update_required"?"loopExecutorUpdate":"loopRuntimeMissing";
-  if(!calibrationMatches(policy,detector))return "loopUnverified";
+  if(!calibrationRecorded(policy)||detector.loaded===true&&!calibrationMatches(policy,detector))return "loopUnverified";
   const safety=safetyOf(status);
   if(safety.state==="ESTOP")return "trialEstop";
   if(safety.stale===true||status?.errors?.control)return "trialControlStale";
   if(!str(safety.generation)||!["DISARMED","ARMED"].includes(str(safety.state)))return "trialControlStale";
-  if(record(safety.capabilities).move&&record(record(safety.capabilities).move).available!==true)return "trialExecutorUnavailable";
+  if(safety.ready===false||record(record(safety.capabilities).move).available!==true)return "trialExecutorUnavailable";
   if(safety.remote_decision_deadline_supported!==true)return "loopExecutorUpdate";
   if(record(safety.execution).inhibit)return "trialExecutionInhibited";
   return "";

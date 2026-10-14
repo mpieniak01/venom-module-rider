@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { calibrationAcceptance, calibrationMatches, calibrationScope, freshAnalysisFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues } from "../../web-next/lib/loop-controls";
+import { calibrationAcceptance, calibrationMatches, calibrationScope, decisionView, freshAnalysisFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, trialBlock } from "../../web-next/lib/loop-controls";
 import { featureRows, frameRequested, type RiderStatus } from "../../web-next/lib/model";
 
 test("confirmed stopped goals stay stopped when the last loop file has aged",()=>{
@@ -83,4 +83,33 @@ test("zone acceptance requires a visible fresh processed image, never RAW, stale
  for(const patch of [{decoded:false},{decoded:undefined},{stale:true},{knownFreshness:false},{visionPolicy:"diagnostic_default"},{id:""},{fileAt:""},{visionState:""}]){
   assert.equal(freshAnalysisFrame({...frame,...patch},"venom",100500),false);
  }
+});
+
+
+test("image GO remains distinct from observation STOP and from stale records",()=>{
+ const state={running:true,stale:false,mode:"observe",decision:{state:"clear",clear_count:3,vision_action:"go",action:"stop",motion_reason:"observe_only",floor_fraction:1,confidence_fraction:1}};
+ const view=decisionView(state,{clear_frames_required:3});
+ assert.equal(view.vision,"go");assert.equal(view.reply,"stop");assert.equal(view.reason,"observe_only");
+ assert.equal(view.floor,1);assert.equal(view.confidence,1);
+ assert.equal(decisionView({...state,stale:true},{}).vision,"none");
+ assert.equal(decisionView({...state,latched:true},{}).reply,"none");
+});
+test("warmup, uncertainty and missing replies cannot appear as image GO",()=>{
+ const state={running:true,stale:false,mode:"observe"};
+ assert.equal(decisionView({...state,decision:{state:"clear",clear_count:2,action:"stop"}},{}).reason,"clear_frames_pending");
+ assert.equal(decisionView({...state,decision:{state:"unknown",clear_count:5,vision_action:"go"}},{}).vision,"stop");
+ assert.equal(decisionView(state,{}).reply,"none");
+});
+test("trial preparation does not demand prior manual or navigation ARM",()=>{
+ const policy={mode:"observe",verified:true,calibration_id:"test",model_sha256:"a".repeat(64)};
+ const runtime={observe:true,drive:true},detector={configured:true,loaded:true,sha256:"a".repeat(64)};
+ const status=(state:string,owner:string|null)=>({connection:{configured:true},errors:{},control:{safety:{state,owner,generation:"one",stale:false,capabilities:{move:{available:true}},remote_decision_deadline_supported:true}}} as unknown as RiderStatus);
+ assert.equal(trialBlock(policy,runtime,detector,true,false,status("DISARMED",null)),"");
+ assert.equal(trialBlock(policy,runtime,detector,true,false,status("ARMED","manual")),"");
+ assert.equal(trialBlock(policy,runtime,detector,true,false,status("ESTOP",null)),"trialEstop");
+ assert.equal(trialBlock(policy,runtime,{configured:true,loaded:false,sha256:""},true,false,status("DISARMED",null)),"");
+ const stale=status("DISARMED",null);Object.assign(stale.control!.safety as object,{stale:true});
+ assert.equal(trialBlock(policy,runtime,detector,true,false,stale),"trialControlStale");
+ const unsupported=status("DISARMED",null);Object.assign(unsupported.control!.safety as object,{remote_decision_deadline_supported:false});
+ assert.equal(trialBlock(policy,runtime,detector,true,false,unsupported),"loopExecutorUpdate");
 });

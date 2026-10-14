@@ -191,37 +191,44 @@ This runs Ruff, formatting, mypy, targeted Python tests with a 90% coverage floo
 
 Local session reports, screenshots and operator/device settings stay under ignored docs_dev/, output/ and local environment files. The host integration also requires make pr-fast.
 
-## Vision loop calibration acceptance
+## Camera, decisions and a forward trial
 
-The control workspace combines camera preview, manual takeover and loop controls.
-Floor segmentation is not a distance or braking-distance measurement. Calibration
-is an explicit operator acceptance of the model, camera mounting and loop parameters.
+The control workspace keeps the processed camera view, manual takeover and
+navigation decisions together. This loop chooses a short forward pulse or STOP;
+it does not plan a route, estimate distances or steer around obstacles.
 
-1. Use **Start camera and analysis**. This starts observation without arming or
-   moving the robot; from Driving it first saves Observe mode. Compare RAW with
-   Venom vision. The white rectangle is the analysis zone; green means floor,
-   red another class and yellow uncertainty.
-2. Check empty floor and an obstacle in the zone. To adjust the zone, speed or
-   deadlines, stop the loop, edit **Zone and motion parameters**, save on Pi and
-   restart observation.
-3. Open **Manual control settings** and set the forward trial speed and pulse
-   to the values displayed in the acceptance guide. Perform the physical braking
-   trial with explicit manual ARM and verify stopping within the visible zone.
-   The panel does not perform this trial automatically.
-4. Confirm the image assessment while a fresh processed frame is visible, then
-   confirm the completed manual trial. **Save calibration acceptance on Pi**
-   ends observation and fills the model hash and acceptance ID automatically.
-   The Pi revision protects against concurrent updates. Acceptance does not ARM
-   or start driving; it records the operator's assessment.
-5. Select Driving and save, enter a trial plan, **Give Venom control for 10 s**,
-   then **Start driving**. Manual ARM only permits the arrows. Navigation still
-   requires consecutive clear frames; uncertain, stale or missing decisions
-   produce STOP.
+- **Analyse image** starts observation and displays the processed camera.
+  Image GO means the zone passed analysis; the reply to Pi remains STOP.
+- **Forward driving test · 10 s** first starts or reuses observation and waits
+  for a fresh decoded preview and three clear decisions. Unknown or blocked
+  image returns STOP before navigation ARM. With a matching saved calibration,
+  available Pi executor and unchanged settings, the same explicit click saves
+  Drive mode, requests timed navigation ARM and starts the loop only after Pi
+  confirms authority. There is no additional per-trial confirmation dialog.
+- **Stop loop** cancels a pending trial, stops motion before disabling the drive
+  goal, and retains the last image labelled as paused. Global STOP and manual
+  takeover also cancel a pending trial; neither permits automatic resumption.
 
-Changing the zone, speed or decision/motion limits through the panel revokes the
-saved acceptance. A different model blocks driving. After changing the camera
-mounting or operating conditions, stop the loop and use **Revoke acceptance**,
-then repeat the assessment. Demo acceptance stays on the selected demo device.
+The decision cards separate the image verdict, the actual Venom-to-Pi reply and
+the executor's reported motion. Floor/confidence percentages, consecutive clear
+frames, inference time, request roundtrip and response age explain GO or STOP.
+A GO reply requests forward motion at the saved SDK command magnitude, yaw zero,
+bounded by the smaller of the saved pulse limit and remaining decision permit.
+An accepted request or reported movement is not a travelled-distance measurement.
+Stale and latched records never appear as current GO permission.
+
+Calibration remains a single acceptance saved on Pi, shown in collapsed details
+once recorded. It is not repeated at every test. Before the first acceptance,
+compare empty floor and an obstacle in the white analysis zone, then perform a
+manual braking trial using the displayed speed and pulse. The panel requires a
+fresh decoded processed preview for the image assessment, fills the model hash
+and acceptance ID automatically, and ends observation before saving. Acceptance
+does not ARM or start driving.
+
+Changing the zone, speed or decision/motion limits revokes saved acceptance.
+A different model blocks driving. After changing camera mounting or operating
+conditions, stop the loop and revoke acceptance, then repeat the assessment.
+Demo calibration and motion requests stay on the selected demo device.
 
 ## Operation and removal
 
