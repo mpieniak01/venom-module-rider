@@ -21,7 +21,7 @@ const tabs = [{ id: "control", Icon: Bot }, { id: "overview", Icon: Activity }, 
 export default function RiderPage() {
   const { language } = useLanguage();
   const { theme } = useTheme();
-  const t = useCallback((key: string) => translate(language, key), [language]);
+  const t = useCallback((key: string, replacements?: Record<string, string | number>) => translate(language, key, replacements), [language]);
   const [section, setSection] = useState<Section>("control");
   const client = useRider(section);
   const safety = safetyOf(client.status);
