@@ -115,7 +115,10 @@ export function useRider(section: Section) {
         if (configRef.current !== nextConfig) { configRef.current = nextConfig; setConfig(nextConfig); }
         if (!fast && requestedSection === sectionRef.current && ["online", "degraded"].includes(next.connection.status)) {
           if (["control", "vision"].includes(requestedSection) && mediaRef.current.camera) {
-            if (cameraOn(next)) await fetchFrame(`/camera/${mediaRef.current.camera}`, abort.signal, "camera");
+            if (cameraOn(next)) {
+              try { await fetchFrame(`/camera/${mediaRef.current.camera}`, abort.signal, "camera"); }
+              catch { if (!abort.signal.aborted) { replaceFrame("camera", null, true); setMediaError("frameMissing"); } }
+            }
             else replaceFrame("camera", null, true);
           }
           if (requestedSection === "face" && mediaRef.current.face) {

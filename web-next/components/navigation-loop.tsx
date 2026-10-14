@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Play, Square, RefreshCw } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 import { data, errorCode, formatTime, record, type JsonRecord } from "../lib/model";
@@ -22,6 +22,8 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
   const [error,setError]=useState("");
   const [readError,setReadError]=useState("");
   const [trialResult,setTrialResult]=useState("");
+  const [trialStopReason,setTrialStopReason]=useState("");
+  const trialSession=useRef("");
   const [refresh,setRefresh]=useState(0);
   const startTask=useRef<Promise<unknown>|null>(null);
   const stopping=useRef(false);
@@ -81,12 +83,12 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
     const row=await apiFetch<JsonRecord>("/api/v1/rider/navigation/state");
     setLoopState(record(row.status));setGoals(record(row.goals));setDetector(record(row.detector));
   };
-  const failure=(err:unknown)=>{
+  const failure=useCallback((err:unknown)=>{
     const diagnostic=record(record(record(record(err).data).detail).details).navigation;
     const row=record(diagnostic), cause=String(record(row.motion_failure).reason??row.stop_reason??"");
     const key="vision.reason."+cause, translated=t(key);
     setError(t(loopFailure(err))+" · "+errorCode(err)+(cause?" · "+(translated===key?cause:translated):""));
-  };
+  },[t]);
   const stop=async()=>{
     if(stopping.current)return;
     stopping.current=true;setOperation("stop");setError("");
@@ -166,8 +168,9 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
   };
   const runTrial=async()=>{
     if(!policy||trialUnavailable||operation||loading||phase==="running"&&goals.drive===true)return;
-    setOperation("check");setError("");setTrialResult("trialChecking");trialArmed.current=false;
+    setOperation("check");setError("");setTrialResult("trialChecking");setTrialStopReason("");trialArmed.current=false;
     const origin=client.currentSession();operationEpoch.current=client.currentMotionEpoch();operationGeneration.current=client.currentGeneration();
+    trialSession.current=origin;
     const task=(async()=>{
       await ensureAnalysis(origin);ensureOperation(origin);
       const deadline=Date.now()+8000;
@@ -201,6 +204,25 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
     catch(err){if(!stopping.current){failure(err);setTrialResult("trialFailed");}}
     finally{startTask.current=null;if(!stopping.current)setOperation(null);}
   };
+  useEffect(()=>{
+    // Only recover a trial initiated in this panel; never replay an old ARM.
+    if(!trialArmed.current||operation||client.busy||!connected||stopping.current||trialSession.current!==client.currentSession()
+      ||loopState.mode!=="drive"||loopState.running!==false||loopState.latched!==true)return;
+    const reason=String(loopState.stop_reason??"");
+    if(["navigation_stopped","operator_stop","process_signal"].includes(reason))return;
+    trialArmed.current=false;setError("");setTrialStopReason(reason);setTrialResult("trialEnded");setOperation("start");
+    const origin=client.currentSession();
+    const task=(async()=>{
+      if(stopping.current||client.currentSession()!==origin)return;
+      // Pi has stopped this run. Resume observation only, with no motor authority.
+      await client.mutate("/goal/s15_venom_perception",{enabled:true},"POST",true);
+      if(mounted.current&&client.currentSession()===origin)await readState();
+    })();startTask.current=task;
+    void task.catch(err=>{if(!stopping.current)failure(err);}).finally(()=>{
+      if(startTask.current===task)startTask.current=null;
+      if(mounted.current&&!stopping.current)setOperation(null);
+    });
+  },[client,connected,failure,loopState,operation]);
   const observeBlock=policy?loopBlock({...policy,mode:"observe"},runtime,detector,connected,dirty,client.status):"loopLoadFailed";
   const trialUnavailable=trialBlock(policy,runtime,detector,connected,dirty,client.status);
   const decision=record(loopState.decision);
@@ -209,7 +231,7 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
   const imageDecision=decisionView(loopState,detector);
   return <Panel title={t("loopTitle")} extra={<Button aria-label={t("loopLoad")} disabled={loading||!!operation||!connected} onClick={()=>setRefresh(v=>v+1)}><RefreshCw size={14}/>{t("refresh")}</Button>}>
     <div className={styles.loopStatus} role="status" data-testid="loop-state">
-      <Pill tone={phase==="running"?"good":phase==="offline"||phase==="unknown"||phase==="fault"?"warning":undefined}>{t(operation==="stop"?"loopStopping":operation==="check"?"trialChecking":operation==="start"?"loopStarting":"loopPhase."+phase)}</Pill>
+      <Pill tone={phase==="running"?"good":phase==="offline"||phase==="unknown"||phase==="fault"?"warning":undefined}>{t(operation==="stop"?"loopStopping":phase==="fault"?"loopPhase.fault":operation==="check"?"trialChecking":operation==="start"?"loopStarting":"loopPhase."+phase)}</Pill>
       <strong>{t(goals.drive===true?"trialActiveMode":"trialAnalysisMode")}</strong>
       <span className={styles.small} data-testid="active-perception-method">{t("perceptionMethod")}: {t(detector.purpose==="relative_ground_geometry"?"perceptionGeometry":"perceptionSemantic")}</span>
       <strong data-testid="venom-permission" className={permission.venom===true?styles.verdictGo:undefined}>{t(executionHeadline(loopState,goals,client.status,permission))}</strong>
@@ -227,8 +249,9 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
       <Button data-testid="trial-accept" disabled={!connected||!!operation||loading||dirty||goals.drive===true||imageDecision.vision!=="go"||!freshAnalysisFrame(client.camera,client.cameraStream)} onClick={()=>void acceptTrial()}>{t("trialAccept")}</Button>
     </div>}
     {!!trialUnavailable&&<p id="rider-trial-block" className={styles.loopError} role="status" data-testid="loop-block">{t(trialUnavailable)}</p>}
-    {!!trialResult&&!(trialResult==="trialStarted"&&phase==="running")&&<p className={styles.hint} role="status" data-testid="trial-result">{t(phase==="fault"?"trialEnded":trialResult==="trialStarted"&&phase==="stopped"?"trialStopped":trialResult)}</p>}
-    {phase==="fault"&&<p role="alert" className={styles.loopError}>{t("loopFaultHint")} · {String(loopState.stop_reason??"")}</p>}
+    {!!trialResult&&!trialStopReason&&!(trialResult==="trialStarted"&&phase==="running")&&<p className={styles.hint} role="status" data-testid="trial-result">{t(phase==="fault"?"trialEnded":trialResult==="trialStarted"&&phase==="stopped"?"trialStopped":trialResult)}</p>}
+    {!!trialStopReason&&<p role="status" className={styles.loopError} data-testid="trial-stop-reason">{t("trialEnded")} · {t("vision.reason."+trialStopReason)}</p>}
+    {phase==="fault"&&!trialStopReason&&<p role="alert" className={styles.loopError}>{t("loopFaultHint")} · {String(loopState.stop_reason??"")}</p>}
 
     {(error||readError)&&<p className={styles.loopError} role="alert">{error||readError}</p>}
     <div className={styles.driveWorkspace}>

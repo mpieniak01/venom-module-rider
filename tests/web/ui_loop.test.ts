@@ -196,3 +196,8 @@ test("accepted depth trial is available while unsupported runtime still blocks e
  assert.equal(trialBlock(policy,{observe:true,drive:true},detector,true,false,permissionStatus("manual")),"");
  assert.equal(trialBlock(policy,{observe:true,drive:true},{...detector,drive_supported:false},true,false,permissionStatus("manual")),"loopDepthObservation");
 });
+
+test("latched driving STOP remains a fault after goals are rolled back",()=>{
+ assert.equal(loopPhase(true,{mode:"drive",running:false,stale:true,latched:true},{drive:false,observe:false}),"fault");
+ assert.equal(loopPhase(true,{mode:"observe",running:true,stale:false,latched:false},{drive:false,observe:true}),"running");
+});

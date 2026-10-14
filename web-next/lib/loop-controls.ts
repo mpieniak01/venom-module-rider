@@ -4,6 +4,7 @@ import { record, safetyOf, str, timestampMs, type JsonRecord, type RiderStatus }
 export type LoopPhase = "offline" | "unknown" | "stopped" | "starting" | "running" | "fault";
 export function loopPhase(connected: boolean, state: JsonRecord, goals: JsonRecord): LoopPhase {
   if (!connected) return "offline";
+  if (state.latched === true && state.mode === "drive" && state.running === false) return "fault";
   if (goals.observe === false && goals.drive === false) return "stopped";
   if (state.latched === true && (goals.observe === true || goals.drive === true)) return "fault";
   if (state.stale !== true && state.running === true) return "running";
