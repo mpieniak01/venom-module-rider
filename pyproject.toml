@@ -40,3 +40,8 @@ ignore_missing_imports = true
 
 [tool.setuptools.package-data]
 venom_module_rider = ["fixtures/*.json"]
+
+# Check module code without walking the full optional ML dependency source trees.
+[[tool.mypy.overrides]]
+module = ["torch.*", "transformers.*"]
+follow_imports = "skip"

@@ -250,3 +250,28 @@ A missing observation retains the last permission with an explicit warning.
 It never converts ARM to DISARMED or replays a failed gesture. Execution inhibition
 and connectivity are shown separately. Tests require independent permission and
 chat/voice cannot arm the robot. Deploy the Pi authority change before this client.
+
+### Experimental ground geometry
+
+The panel can select semantic surface classes or relative depth-plane geometry
+when the selected Pi exposes the `perception` policy. Pi owns the saved method,
+ROI and thresholds; changing them resets the run and prior acceptance. Legacy
+policies migrate in memory to semantic defaults without rewriting the file.
+
+Depth-plane geometry uses the pinned Depth Anything V2 Indoor Small model on
+Venom, checks inverse-depth plane agreement in the corridor, and exposes relative
+deviation thresholds. It does not report centimetres or calibrated stopping
+distance. Geometry can produce image GO in observation; its actuator reply is
+always STOP, including with a matching receipt. Actual driving remains disabled
+for this experimental method. Existing semantic driving is unchanged.
+
+Install the module's `vision_depth` extra in the host virtualenv, then provision
+explicitly; startup and requests never download weights:
+
+```bash
+python scripts/provision_depth_model.py --output data/depth-small --revision 8078d68a9c75a972131914f6afd0c1723be0da7f
+PYTHONPATH=../..:. python scripts/replay_depth.py --dataset /path/to/recordings --output output/depth-replay
+```
+
+Replay uses synthetic frame identities and cannot validate physical movement,
+capture freshness or braking. Model files, recordings and reports stay ignored.

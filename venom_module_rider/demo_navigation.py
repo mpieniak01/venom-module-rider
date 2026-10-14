@@ -28,6 +28,12 @@ DEFAULT_POLICY: dict[str, Any] = {
     "corridor": [0.35, 0.65, 0.65, 0.95],
     "calibration_id": "",
     "model_sha256": "",
+    "perception": {
+        "engine": "segformer",
+        "residual_limit": 0.06,
+        "outlier_limit": 0.005,
+        "slope_min": 2.0,
+    },
     "verified": False,
 }
 
@@ -127,6 +133,7 @@ class ReplayNavigation:
                             "verified",
                             "calibration_id",
                             "model_sha256",
+                            "perception",
                         )
                     },
                 }
@@ -139,6 +146,11 @@ class ReplayNavigation:
             and 50 <= candidate["max_motion_ms"] <= 200
         ):
             raise ValueError("navigation_invalid_configuration")
+        if (
+            candidate["mode"] == "drive"
+            and candidate["perception"]["engine"] == "depth_plane"
+        ):
+            raise ValueError("navigation_depth_observation_only")
         self.policy = {**candidate, "revision": self.policy["revision"] + 1}
         return self.policy
 
@@ -195,7 +207,9 @@ class ReplayNavigation:
                 "Authorization": "Bearer " + self.token,
                 "X-Rider-Vision": json.dumps(meta),
             },
-            timeout=self.policy["decision_budget_ms"] / 1000,
+            timeout=max(1.0, self.policy["decision_budget_ms"] / 1000)
+            if meta.get("mode") == "observe"
+            else self.policy["decision_budget_ms"] / 1000,
         )
         response.raise_for_status()
         return response.json()
@@ -235,6 +249,8 @@ class ReplayNavigation:
     async def start(self, name):
         mode = LOOP_GOALS[name]
         if mode == "drive":
+            if self.policy["perception"]["engine"] == "depth_plane":
+                raise ValueError("navigation_depth_observation_only")
             safety = self.state.safety()
             if safety["owner"] != "navigation" or safety["state"] != "ARMED":
                 raise ValueError("navigation_authority_lost")
@@ -309,6 +325,7 @@ class ReplayNavigation:
                                     "verified",
                                     "calibration_id",
                                     "model_sha256",
+                                    "perception",
                                 )
                             },
                         }
@@ -317,7 +334,27 @@ class ReplayNavigation:
                 if self.drop_link:
                     await asyncio.sleep(policy["decision_budget_ms"] / 1000)
                     raise TimeoutError("replay_link_dropped")
-                decision = await self.request(frame.model_dump(), self.payload)
+                try:
+                    decision = await self.request(frame.model_dump(), self.payload)
+                except (httpx.HTTPStatusError, httpx.TransportError) as exc:
+                    retryable = not isinstance(
+                        exc, httpx.HTTPStatusError
+                    ) or exc.response.status_code in {408, 429, 500, 502, 503, 504}
+                    if policy["mode"] != "observe" or not retryable:
+                        raise
+                    self.status.update(
+                        decision={
+                            "state": "unknown",
+                            "action": "stop",
+                            "vision_action": "stop",
+                            "reason": "vision_inference_unavailable",
+                            "clear_count": 0,
+                        },
+                        observed_at=time.time(),
+                        simulated_moving=False,
+                    )
+                    await asyncio.sleep(0.2)
+                    continue
                 accepted = (
                     self.lease.accept(decision, frame_id, sequence, capture)
                     if policy["mode"] == "drive"

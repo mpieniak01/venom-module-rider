@@ -18,6 +18,7 @@ export function loopBlock(policy: JsonRecord | null, runtime: JsonRecord, detect
   if (runtime[mode] !== true) return runtime.drive_reason === "navigation_executor_update_required" && mode === "drive" ? "loopExecutorUpdate" : "loopRuntimeMissing";
   if (detector.configured !== true) return "loopNoModel";
   if (mode === "drive") {
+    if (record(policy.perception).engine === "depth_plane") return "loopDepthObservation";
     if (!calibrationMatches(policy, detector)) return "loopUnverified";
     const safety = safetyOf(status);
     if (safety.state !== "ARMED" || safety.owner !== "navigation" || safety.stale === true || status?.errors?.control) return "loopNeedsArm";
@@ -42,7 +43,7 @@ export function calibrationMatches(policy: JsonRecord | null, detector: JsonReco
   return calibrationRecorded(policy) && /^[a-f0-9]{64}$/.test(str(detector.sha256)) && policy?.model_sha256 === detector.sha256;
 }
 export function calibrationScope(policy: JsonRecord | null, detector: JsonRecord): string {
-  return JSON.stringify([policy?.speed, policy?.max_motion_ms, policy?.decision_budget_ms, policy?.corridor, detector.sha256]);
+  return JSON.stringify([policy?.speed, policy?.max_motion_ms, policy?.decision_budget_ms, policy?.corridor, policy?.perception, detector.sha256]);
 }
 export function loopSettingsValues(policy: JsonRecord, draft: JsonRecord): JsonRecord {
   const {revision: ignoredRevision, protocol_version: ignoredProtocol, ...values} = draft;
@@ -76,6 +77,7 @@ export function decisionView(state: JsonRecord, detector: JsonRecord) {
   };
 }
 export function trialBlock(policy: JsonRecord|null, runtime:JsonRecord, detector:JsonRecord, connected:boolean, dirty:boolean, status:RiderStatus|null):string {
+  if(record(policy?.perception).engine==="depth_plane")return "loopDepthObservation";
   const base=loopBlock(policy?{...policy,mode:"observe"}:null,runtime,detector,connected,dirty,status);
   if(base)return base;
   if(runtime.drive!==true)return runtime.drive_reason==="navigation_executor_update_required"?"loopExecutorUpdate":"loopRuntimeMissing";

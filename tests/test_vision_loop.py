@@ -597,3 +597,127 @@ def test_depth_settings_reject_unknown_engine_nan_and_unsafe_thresholds():
     ):
         with pytest.raises(ValidationError):
             PerceptionSettings(**patch)
+
+
+def test_depth_detector_local_manifest_lazy_load_preview_and_bounds(
+    tmp_path, monkeypatch
+):
+    import hashlib
+    import json
+    import sys
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    from venom_module_rider.depth_detector import DepthDetector, PerceptionSettings
+
+    files = {}
+    for name in ("config.json", "preprocessor_config.json", "model.safetensors"):
+        (tmp_path / name).write_bytes(b"fixture")
+        files[name] = hashlib.sha256(b"fixture").hexdigest()
+    (tmp_path / "manifest.json").write_text(json.dumps({"files": files}))
+    detector = DepthDetector()
+    detector.path = tmp_path
+    assert detector.status()["configured"] and not detector.status()["loaded"]
+    y, x = np.mgrid[0:64, 0:64]
+    depth = 1 / np.maximum(0.05, 0.2 + 3 * (y / 64 - 0.55))
+
+    class Tensor:
+        def float(self):
+            return self
+
+        def cpu(self):
+            return self
+
+        def numpy(self):
+            return depth
+
+    class Inputs(dict):
+        def to(self, device):
+            return self
+
+    class Processor:
+        @classmethod
+        def from_pretrained(cls, path, local_files_only):
+            assert local_files_only
+            return cls()
+
+        def __call__(self, **kwargs):
+            return Inputs()
+
+        def post_process_depth_estimation(self, *args, **kwargs):
+            return [{"predicted_depth": Tensor()}]
+
+    class Model:
+        @classmethod
+        def from_pretrained(cls, path, local_files_only):
+            assert local_files_only
+            return cls()
+
+        def eval(self):
+            return self
+
+        def to(self, device):
+            return self
+
+        def __call__(self, **kwargs):
+            return object()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        SimpleNamespace(
+            cuda=SimpleNamespace(is_available=lambda: False), inference_mode=nullcontext
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "transformers",
+        SimpleNamespace(
+            AutoImageProcessor=Processor, AutoModelForDepthEstimation=Model
+        ),
+    )
+    detector._load()
+    detector._load()
+    assert detector.status()["loaded"] and len(detector.digest) == 64
+    image = io.BytesIO()
+    Image.fromarray(
+        np.random.default_rng(42).integers(30, 220, (64, 64, 3), dtype=np.uint8)
+    ).save(image, format="PNG")
+    result = detector.detect(
+        image.getvalue(), (0.35, 0.65, 0.65, 0.95), PerceptionSettings()
+    )
+    assert result["state"] == "clear" and result["_preview"].startswith(b"\xff\xd8")
+    dark = io.BytesIO()
+    Image.new("RGB", (64, 64)).save(dark, format="PNG")
+    assert (
+        detector.detect(dark.getvalue(), (0, 0, 1, 1), PerceptionSettings())["state"]
+        == "unknown"
+    )
+    for payload in (b"", b"x" * (512 * 1024 + 1)):
+        with pytest.raises(ValueError):
+            detector.detect(payload, (0, 0, 1, 1), PerceptionSettings())
+    tiny = io.BytesIO()
+    Image.new("RGB", (8, 8)).save(tiny, format="PNG")
+    with pytest.raises(ValueError):
+        detector.detect(tiny.getvalue(), (0, 0, 1, 1), PerceptionSettings())
+    broken = DepthDetector()
+    broken.path = tmp_path
+    (tmp_path / "model.safetensors").write_bytes(b"wrong")
+    with pytest.raises(ValueError, match="hash_mismatch"):
+        broken._load()
+    (tmp_path / "manifest.json").write_text(json.dumps({"files": {}}))
+    with pytest.raises(ValueError, match="manifest"):
+        broken._load()
+
+
+def test_depth_ground_deviation_threshold_and_corridor_bounds():
+    from venom_module_rider.depth_detector import PerceptionSettings, assess_depth
+
+    y, x = np.mgrid[0:120, 0:160]
+    depth = 1 / np.maximum(0.05, 0.2 + 3 * (y / 120 - 0.55))
+    depth[90:94, 70:74] = 0.1
+    result = assess_depth(depth, (0.35, 0.65, 0.65, 0.95), PerceptionSettings())
+    assert result["state"] == "obstacle"
+    assert result["outlier_fraction"] > result["outlier_limit"]
+    with pytest.raises(ValueError):
+        assess_depth(depth, (0, 0, 0.001, 0.001), PerceptionSettings())

@@ -159,3 +159,12 @@ test("fresh image GO in observation is independent of DISARMED executor",()=>{
  const permission=motionPermission(state,{observe:true,drive:false},permissionPolicy,permissionDetector,status);
  assert.equal(permission.venom,false);assert.equal(permission.manual,false);
 });
+
+test("experimental geometry never enables a physical trial and changing thresholds changes receipt scope",()=>{
+ const policy={mode:"observe",perception:{engine:"depth_plane",residual_limit:.06}};
+ assert.equal(trialBlock(policy,{}, {},true,false,null),"loopDepthObservation");
+ assert.equal(loopBlock({...policy,mode:"drive"},{drive:true},{configured:true},true,false,null),"loopDepthObservation");
+ const changed={...policy,perception:{...policy.perception,residual_limit:.08}};
+ assert.notEqual(calibrationScope(policy,{}),calibrationScope(changed,{}));
+ assert.equal(loopSettingsValues(policy,changed).verified,false);
+});

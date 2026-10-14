@@ -106,8 +106,6 @@ class DepthDetector:
             json.dumps(manifest["files"], sort_keys=True).encode()
         ).hexdigest()
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        if self.device == "cpu":
-            torch.set_num_threads(2)
         self.processor = AutoImageProcessor.from_pretrained(
             self.path, local_files_only=True
         )
@@ -141,11 +139,14 @@ class DepthDetector:
                 "distance_measurement": False,
             }
         self._load()
-        inputs = self.processor(images=image, return_tensors="pt").to(self.device)
+        processor, model = self.processor, self.model
+        if processor is None or model is None:
+            raise ValueError("vision_model_unconfigured")
+        inputs = processor(images=image, return_tensors="pt").to(self.device)
         with torch.inference_mode():
-            result = self.model(**inputs)
+            result = model(**inputs)
         depth = (
-            self.processor.post_process_depth_estimation(
+            processor.post_process_depth_estimation(
                 result, target_sizes=[(image.height, image.width)]
             )[0]["predicted_depth"]
             .float()
@@ -161,6 +162,8 @@ class DepthDetector:
             100,
         )
         colors[np.isfinite(errors) & (errors > settings.residual_limit)] = (240, 60, 65)
+        if assessment["reason"] == "depth_ground_orientation":
+            colors[np.isfinite(errors)] = (255, 185, 35)
         preview = Image.blend(image, Image.fromarray(colors), 0.4)
         x0, y0, x1, y1 = corridor
         ImageDraw.Draw(preview).rectangle(

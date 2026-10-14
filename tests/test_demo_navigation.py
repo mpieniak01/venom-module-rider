@@ -352,3 +352,30 @@ async def test_full_authenticated_loop_actual_pi_permit_go_obstacle_timeout_and_
     finally:
         await nav.close()
         await loop.close()
+
+
+@pytest.mark.parametrize("transport_timeout", [False, True])
+async def test_observation_retries_busy_model_without_arming(replay, transport_timeout):
+    pi, nav = replay
+    original = nav.request
+    calls = [0]
+
+    async def request(meta, payload):
+        calls[0] += 1
+        if calls[0] == 1:
+            if transport_timeout:
+                raise httpx.ReadTimeout("fixture cold start")
+            req = httpx.Request("POST", "http://127.0.0.1/fixture")
+            response = httpx.Response(429, request=req)
+            raise httpx.HTTPStatusError("busy", request=req, response=response)
+        return await original(meta, payload)
+
+    nav.request = request
+    await nav.start("s15_venom_perception")
+    async with asyncio.timeout(1):
+        while calls[0] < 2:
+            await asyncio.sleep(0.01)
+    assert nav.status["running"] is True
+    assert pi.safety()["state"] == "DISARMED"
+    assert not pi.safety()["moving"]
+    await nav.close()

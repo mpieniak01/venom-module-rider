@@ -4,6 +4,7 @@ import uuid
 
 from fastapi import Request, Response
 
+from ..depth_detector import PerceptionSettings
 from ..errors import RiderError
 from ..vision_contract import VisionFrame
 from .vision_routes import loop_goals
@@ -45,7 +46,7 @@ async def processed_camera(request: Request):
         deadline_ms=500,
         mode="observe",
         corridor=corridor,
-        perception=perception,
+        perception=PerceptionSettings.model_validate(perception),
     )
     loop = request.app.state.rider_vision
     cached = loop.preview(client.device.id, corridor=corridor, revision=revision)

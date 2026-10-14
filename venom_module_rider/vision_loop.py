@@ -76,12 +76,19 @@ class VisionLoop:
             self.runs.popitem(last=False)
         depth_mode = frame.perception.engine == "depth_plane"
         selected = self.depth_detector if depth_mode else self.detector
-        arguments = (
-            (payload, frame.corridor, frame.perception)
-            if depth_mode
-            else (payload, frame.corridor)
-        )
-        task = asyncio.create_task(asyncio.to_thread(selected.detect, *arguments))
+        if depth_mode:
+            task = asyncio.create_task(
+                asyncio.to_thread(
+                    self.depth_detector.detect,
+                    payload,
+                    frame.corridor,
+                    frame.perception,
+                )
+            )
+        else:
+            task = asyncio.create_task(
+                asyncio.to_thread(self.detector.detect, payload, frame.corridor)
+            )
         self.busy = task
         try:
             result = await asyncio.wait_for(
