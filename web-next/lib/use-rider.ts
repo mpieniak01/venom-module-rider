@@ -240,7 +240,7 @@ export function useRider(section: Section) {
         const name = decodeURIComponent(path.slice("/goal/".length));
         const goal = featureRows(statusRef.current).find(item => item.name === name);
         if (goal?.can_move === true) {
-          await poll("control");
+          await poll("control",true);
           request = makeEnvelope(body, str(safetyOf(statusRef.current).owner));
         }
       }

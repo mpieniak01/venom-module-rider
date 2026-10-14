@@ -405,12 +405,28 @@ class RiderService:
         if feature.get("can_move") is True and body.get("enabled") is True:
             owner = feature.get("control_owner") or feature.get("motion_owner")
             intent = await self.validate_intent(body, session, source=owner)
-            safety = (
-                self.data(await self.read("/api/control/state", 0.8, force=True)).get(
-                    "safety"
+            cached = self.cache.get("/api/control/state")
+            safety: dict[str, Any] = {}
+            if (
+                cached
+                and isinstance(cached[1], dict)
+                and 0 <= time.monotonic() - cached[0] < 0.4
+            ):
+                safety = self.data(cached[1]).get("safety") or {}
+            if (
+                safety.get("generation") != intent["generation"]
+                or safety.get("owner") != owner
+                or safety.get("can_move") is not True
+                or safety.get("stale") is True
+            ):
+                safety = (
+                    self.data(
+                        await self.read("/api/control/state", 0.4, force=True)
+                    ).get("safety")
+                    or {}
                 )
-                or {}
-            )
+            # Never redate an intent. Pi performs final admission under its lock;
+            # a just-confirmed matching ARM does not need another network trip.
             if safety.get("owner") != owner or safety.get("can_move") is not True:
                 raise RiderError("operator_motion_permission_required")
             self.sequences[intent["generation"]] = body["seq"]

@@ -31,7 +31,7 @@ export function loopFailure(error: unknown): string {
   if (["offline", "pi_unreachable"].includes(code)) return "loopOffline";
   if (code === "navigation_api_unavailable") return "loopApiMissing";
   if (code === "pi_operation_timeout") return "operationUnconfirmed";
-  if (["navigation_trial_cancelled","navigation_configuration_changed","navigation_authority_unconfirmed","navigation_estop"].includes(code)) return "trial.error."+code;
+  if (["navigation_trial_cancelled","navigation_configuration_changed","navigation_authority_unconfirmed","navigation_estop","stale_or_invalid_operator_intent"].includes(code)) return "trial.error."+code;
   return "requestFailed";
 }
 

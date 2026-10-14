@@ -41,6 +41,7 @@ export const messages = {
   "vision.reason.vision_inference_unavailable": ["Analiza jest niedostępna.", "Analysis is unavailable.", "Analyse nicht verfügbar."],
   "vision.reason.vision_decision_expired": ["Decyzja przekroczyła limit czasu.", "Decision deadline exceeded.", "Entscheidungsfrist überschritten."],
   "vision.reason.stale_generation": ["Pi odrzuciło komendę, ponieważ poprzednia zgoda na ruch została unieważniona.", "Pi rejected the command because the previous motion permission was invalidated.", "Pi hat den Befehl abgelehnt, weil die bisherige Bewegungsfreigabe ungültig wurde."],
+  "trial.error.stale_or_invalid_operator_intent": ["Pi odrzuciło start: polecenie wygasło lub zgoda na ruch jest nieaktualna. Jazda nie rozpoczęła się.", "Pi rejected the start: the request expired or motion permission is outdated. Driving did not start.", "Pi hat den Start abgelehnt: Die Anfrage ist abgelaufen oder die Bewegungsfreigabe ist veraltet. Die Fahrt wurde nicht gestartet."],
   "vision.reason.default": ["Brak potwierdzonej decyzji o ruchu.", "No confirmed motion decision.", "Keine bestätigte Bewegungsentscheidung."],
   "vision": ["Wizja i ruch", "Vision and motion", "Bild und Bewegung"],
   "loopStartObserve": ["Uruchom kamerę i analizę", "Start camera and analysis", "Kamera und Analyse starten"],

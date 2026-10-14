@@ -1030,3 +1030,65 @@ async def test_navigation_start_failure_keeps_only_current_run_diagnostics(
     else:
         assert "navigation" not in caught.value.details
     await service.close()
+
+
+@pytest.mark.parametrize(
+    "age,cache_generation,expected_reads",
+    [
+        (0.1, "matching", 0),
+        (1.0, "matching", 1),
+        (0.1, "old", 1),
+    ],
+)
+async def test_goal_uses_just_confirmed_authority_without_redating_intent(
+    monkeypatch,
+    age,
+    cache_generation,
+    expected_reads,
+):
+    service, _ = domain()
+    safety = {"owner": "navigation", "can_move": True, "generation": "matching"}
+    service.cache["/api/control/state"] = (
+        time.monotonic() - age,
+        {"meta": {}, "data": {"safety": {**safety, "generation": cache_generation}}},
+    )
+    body = {
+        "enabled": True,
+        "generation": "matching",
+        "source": "navigation",
+        "execution_context": "panel",
+        "seq": 7,
+        "ts": time.time(),
+        "ttl_ms": 500,
+    }
+    reads = []
+    forwarded = []
+
+    async def read(path, *_args, **kwargs):
+        if path == "/api/logic/catalog":
+            return {
+                "meta": {},
+                "data": {
+                    "features": [
+                        {
+                            "name": "fixture_move",
+                            "can_move": True,
+                            "control_owner": "navigation",
+                        }
+                    ]
+                },
+            }
+        reads.append(path)
+        assert kwargs["force"] is True
+        return {"meta": {}, "data": {"safety": safety}}
+
+    async def mutate(_path, payload, _session):
+        forwarded.append(dict(payload))
+        return {"ok": True}
+
+    monkeypatch.setattr(service, "read", read)
+    monkeypatch.setattr(service, "mutate", mutate)
+    await service.goal("fixture_move", body, service.session)
+    assert len(reads) == expected_reads
+    assert forwarded == [body]
+    await service.close()
