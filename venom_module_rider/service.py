@@ -387,7 +387,13 @@ class RiderService:
             self.operations.discard(task)
             # A timed-out operation may have completed on Pi; never reuse its old state.
             if session == self.session:
+                catalog = self.cache.get("/api/logic/catalog")
                 self.cache.clear()
+                # Definitions remain TTL-bounded; Pi revalidates availability.
+                # Re-reading all unit definitions between ARM and Start wastes
+                # the original operator intent's short validity window.
+                if catalog:
+                    self.cache["/api/logic/catalog"] = catalog
 
     async def settings(self, body, session):
         result = await self.mutate("/api/calibration/controls", body, session)

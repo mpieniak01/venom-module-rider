@@ -1092,3 +1092,26 @@ async def test_goal_uses_just_confirmed_authority_without_redating_intent(
     assert len(reads) == expected_reads
     assert forwarded == [body]
     await service.close()
+
+
+@pytest.mark.asyncio
+async def test_goal_mutation_keeps_catalog_ttl_but_invalidates_runtime_cache(
+    monkeypatch,
+):
+    service, _ = domain()
+    await service.select("demo", service.session)
+    stamp = time.monotonic() - 3
+    catalog = (stamp, {"meta": {}, "data": {"features": []}})
+    service.cache["/api/logic/catalog"] = catalog
+    service.cache["/api/control/state"] = (stamp, {"meta": {}, "data": {}})
+
+    async def request(*args, **kwargs):
+        return {"ok": True}
+
+    monkeypatch.setattr(service.client, "json", request)
+    await service.mutate(
+        "/api/logic/feature/s15_venom_perception", {"enabled": False}, service.session
+    )
+    assert service.cache == {"/api/logic/catalog": catalog}
+    assert service.cache["/api/logic/catalog"][0] == stamp
+    await service.close()
