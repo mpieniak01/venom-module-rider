@@ -50,9 +50,9 @@ export function calibrationAcceptance(policy: JsonRecord, detector: JsonRecord, 
   if (!/^[a-f0-9]{64}$/.test(str(detector.sha256)) || !id.trim()) throw new Error("calibration_model_unavailable");
   return {...loopSettingsValues(policy, policy), verified: true, calibration_id: id, model_sha256: detector.sha256};
 }
-export function freshAnalysisFrame(frame: {stale: boolean; knownFreshness: boolean; fileAt: string; id: string; visionState: string; visionPolicy: string} | null, stream: string | null, now = Date.now()): boolean {
+export function freshAnalysisFrame(frame: {decoded?: boolean; stale: boolean; knownFreshness: boolean; fileAt: string; id: string; visionState: string; visionPolicy: string} | null, stream: string | null, now = Date.now()): boolean {
   const at = timestampMs(frame?.fileAt && Number.isFinite(Number(frame.fileAt)) ? Number(frame.fileAt) : frame?.fileAt);
-  return !!frame && stream === "venom" && !frame.stale && frame.knownFreshness && !!frame.id
+  return !!frame && frame.decoded === true && stream === "venom" && !frame.stale && frame.knownFreshness && !!frame.id
     && !!frame.visionState && !!frame.visionPolicy && frame.visionPolicy !== "diagnostic_default"
     && at !== null && now >= at - 1000 && now - at <= 3000;
 }

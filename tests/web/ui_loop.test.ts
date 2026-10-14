@@ -75,12 +75,12 @@ test("changing the stopping zone, speed or deadlines revokes prior acceptance; m
  assert.notEqual(calibrationScope(policy,{sha256:"a"}),calibrationScope(policy,{sha256:"b"}));
 });
 test("zone acceptance requires a visible fresh processed image, never RAW, stale or diagnostic defaults",()=>{
- const frame={stale:false,knownFreshness:true,fileAt:"100",id:"frame",visionState:"clear",visionPolicy:"pi_config"};
+ const frame={decoded:true,stale:false,knownFreshness:true,fileAt:"100",id:"frame",visionState:"clear",visionPolicy:"pi_config"};
  assert.equal(freshAnalysisFrame(frame,"venom",100500),true);
  assert.equal(freshAnalysisFrame(frame,"raw",100500),false);
  assert.equal(freshAnalysisFrame(null,"venom",100500),false);
  assert.equal(freshAnalysisFrame(frame,"venom",104000),false);
- for(const patch of [{stale:true},{knownFreshness:false},{visionPolicy:"diagnostic_default"},{id:""},{fileAt:""},{visionState:""}]){
+ for(const patch of [{decoded:false},{decoded:undefined},{stale:true},{knownFreshness:false},{visionPolicy:"diagnostic_default"},{id:""},{fileAt:""},{visionState:""}]){
   assert.equal(freshAnalysisFrame({...frame,...patch},"venom",100500),false);
  }
 });

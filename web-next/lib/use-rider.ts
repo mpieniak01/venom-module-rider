@@ -9,7 +9,7 @@ import { cameraOn, canRequestArm, commandAccepted, controlIdentity, data, errorC
 
 const BASE = "/api/v1/rider";
 export type Notice = { key: string; code?: string; tone: "error" | "success" | "info" };
-export type Frame = { url: string; stale: boolean; source: string; fileAt: string; id: string; knownFreshness: boolean; visionState: string; visionReason: string; inferenceMs: string; visionPolicy: string; recordedAt: string };
+export type Frame = { decoded?: boolean; url: string; stale: boolean; source: string; fileAt: string; id: string; knownFreshness: boolean; visionState: string; visionReason: string; inferenceMs: string; visionPolicy: string; recordedAt: string };
 import { controlChanged, freshControl, navigationAvailable, navigationView, observationClock, retainControl, type ControlClock } from "./navigation";
 export function useRider(section: Section) {
   const [config, setConfig] = useState<DeviceConfig | null>(null);
@@ -52,6 +52,9 @@ export function useRider(section: Section) {
     const setter = kind === "camera" ? setCamera : setRuntimeFrame;
     setter(previous => { if (previous) URL.revokeObjectURL(previous.url); return next; });
   }, []);
+  const markCameraDecoded = useCallback((url: string, decoded: boolean) => {
+    setCamera(previous => previous?.url === url && previous.decoded !== decoded ? { ...previous, decoded } : previous);
+  }, []);
   const fetchFrame = useCallback(async (path: string, signal: AbortSignal, kind: "camera" | "face") => {
     const response = await fetch(`${getApiBaseUrl()}${BASE}${path}`, { cache: "no-store", signal });
     if (signal.aborted || !frameRequested(kind, path, sectionRef.current, mediaRef.current)) return;
@@ -67,7 +70,7 @@ export function useRider(section: Section) {
     if (stale === "true" || placeholder) { replaceFrame(kind, null); setMediaError("frameStale"); return; }
     const blob = await response.blob();
     if (signal.aborted || !frameRequested(kind, path, sectionRef.current, mediaRef.current)) return;
-    replaceFrame(kind, { url: URL.createObjectURL(blob), stale: false, knownFreshness: stale === "false", source: response.headers.get("X-Rider-Source") || response.headers.get("X-Face-Source") || "", fileAt: response.headers.get("X-Rider-File-Observed-At") || "", id: response.headers.get("X-Rider-Frame-Id") || "", visionState: response.headers.get("X-Rider-Vision-State") || "", visionReason: response.headers.get("X-Rider-Vision-Reason") || "", inferenceMs: response.headers.get("X-Rider-Vision-Inference-Ms") || "", visionPolicy: response.headers.get("X-Rider-Vision-Policy") || "", recordedAt: response.headers.get("X-Rider-Recorded-At") || "" });
+    replaceFrame(kind, { decoded: false, url: URL.createObjectURL(blob), stale: false, knownFreshness: stale === "false", source: response.headers.get("X-Rider-Source") || response.headers.get("X-Face-Source") || "", fileAt: response.headers.get("X-Rider-File-Observed-At") || "", id: response.headers.get("X-Rider-Frame-Id") || "", visionState: response.headers.get("X-Rider-Vision-State") || "", visionReason: response.headers.get("X-Rider-Vision-Reason") || "", inferenceMs: response.headers.get("X-Rider-Vision-Inference-Ms") || "", visionPolicy: response.headers.get("X-Rider-Vision-Policy") || "", recordedAt: response.headers.get("X-Rider-Recorded-At") || "" });
     setMediaError(null);
   }, [replaceFrame]);
   const poll = useCallback(async (target?: Section, fast = false) => {
@@ -254,6 +257,6 @@ export function useRider(section: Section) {
   // ARM always refreshes the fast control endpoint before making its envelope.
   // The latency of a diagnostics view must not prevent that refresh request.
   const canArm = canRequestArm(status);
-  return { config, status, loading, notice, setNotice, busy, activeDirection, canMutate: isConnected(), canArm, canNavigate: canNavigate(), canMove: movementReady(), poll, command, mutate: runMutation, takeManual, selectDevice, hold, camera, cameraStream, setCameraStream, runtimeFrame, showRuntimeFrame, setShowRuntimeFrame, mediaError };
+  return { config, status, loading, notice, setNotice, busy, activeDirection, canMutate: isConnected(), canArm, canNavigate: canNavigate(), canMove: movementReady(), poll, command, mutate: runMutation, takeManual, selectDevice, hold, camera, cameraStream, setCameraStream, markCameraDecoded, runtimeFrame, showRuntimeFrame, setShowRuntimeFrame, mediaError };
 }
 export type RiderClient = ReturnType<typeof useRider>;
