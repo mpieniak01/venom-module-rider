@@ -525,3 +525,75 @@ def test_tiny_uncertain_region_is_not_silently_promoted_to_clearance():
     assert result["confidence_fraction"] > 0.99
     assert result["floor_fraction"] > 0.99
     assert result["state"] != "clear"
+
+
+def test_depth_geometry_free_plane_box_and_invalid_output():
+    from venom_module_rider.depth_detector import PerceptionSettings, assess_depth
+
+    settings = PerceptionSettings()
+    y, x = np.mgrid[0:120, 0:160]
+    depth = 1.0 / np.maximum(0.05, 0.2 + 3 * (y / 120 - 0.55))
+    assert assess_depth(depth, (0.35, 0.65, 0.65, 0.95), settings)["state"] == "clear"
+    depth[78:114, 56:104] = 0.3
+    result = assess_depth(depth, (0.35, 0.65, 0.65, 0.95), settings)
+    assert result["state"] == "unknown"
+    assert result["drive_supported"] is False
+    depth[85:95, 65:80] = 0.1
+    assert assess_depth(depth, (0.35, 0.65, 0.65, 0.95), settings)["state"] != "clear"
+    for bad in (np.zeros((40, 40)), np.ones((8, 8)), np.full((40, 40), np.nan)):
+        with pytest.raises(ValueError):
+            assess_depth(bad, (0, 0, 1, 1), settings)
+    with pytest.raises(ValueError):
+        assess_depth(depth, (1, 0, 0, 1), settings)
+
+
+async def test_depth_image_go_can_never_be_a_drive_permit_even_with_matching_receipt():
+    from venom_module_rider.depth_detector import PerceptionSettings
+
+    class Geometry(Detector):
+        def detect(self, *args):
+            return {
+                "state": "clear",
+                "reason": "depth_plane_candidate",
+                "drive_supported": False,
+            }
+
+    loop = VisionLoop(Detector())
+    loop.depth_detector = Geometry()
+    for seq in range(1, 4):
+        f = frame(seq).model_copy(
+            update={"perception": PerceptionSettings(engine="depth_plane")}
+        )
+        result = await loop.decide("pi", f, b"x")
+    assert result["vision_action"] == "go"
+    assert result["action"] == "stop"
+    assert result["motion_reason"] == "depth_observation_only"
+    assert result["drive_supported"] is False
+
+
+async def test_perception_changes_reset_run_admission():
+    from venom_module_rider.depth_detector import PerceptionSettings
+
+    loop = VisionLoop(Detector())
+    await loop.decide("pi", frame(), b"x")
+    changed = frame(2).model_copy(
+        update={"perception": PerceptionSettings(residual_limit=0.08)}
+    )
+    with pytest.raises(RiderError):
+        await loop.decide("pi", changed, b"x")
+
+
+def test_depth_settings_reject_unknown_engine_nan_and_unsafe_thresholds():
+    from pydantic import ValidationError
+
+    from venom_module_rider.depth_detector import PerceptionSettings
+
+    for patch in (
+        {"engine": "llm"},
+        {"residual_limit": float("nan")},
+        {"outlier_limit": 0.5},
+        {"slope_min": True},
+        {"unexpected": 1},
+    ):
+        with pytest.raises(ValidationError):
+            PerceptionSettings(**patch)

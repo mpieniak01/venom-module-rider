@@ -25,10 +25,12 @@ async def processed_camera(request: Request):
     corridor = (0.35, 0.65, 0.65, 0.95)
     revision = 0
     source = "diagnostic_default"
+    perception = {}
     try:
         policy = (await domain.read("/api/navigation/config", 0.2))["data"]
         corridor = tuple(policy["corridor"])
         revision = policy["revision"]
+        perception = policy.get("perception", {})
         source = "device_policy"
     except RiderError as exc:
         if exc.status != 404:
@@ -43,6 +45,7 @@ async def processed_camera(request: Request):
         deadline_ms=500,
         mode="observe",
         corridor=corridor,
+        perception=perception,
     )
     loop = request.app.state.rider_vision
     cached = loop.preview(client.device.id, corridor=corridor, revision=revision)

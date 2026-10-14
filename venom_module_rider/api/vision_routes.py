@@ -80,7 +80,9 @@ async def configuration(request: Request):
         "goals": goals,
         "status": state["data"],
         "config": config["data"],
-        "detector": request.app.state.rider_vision.status(),
+        "detector": request.app.state.rider_vision.status(
+            config["data"].get("perception")
+        ),
     }
 
 
@@ -97,10 +99,13 @@ async def navigation_state(request: Request):
     state = await request.app.state.rider.read(
         "/api/navigation/status", 0.2, force=True
     )
+    config = await request.app.state.rider.read("/api/navigation/config", 0.2)
     return {
         "goals": await loop_goals(request.app.state.rider),
         "status": state["data"],
-        "detector": request.app.state.rider_vision.status(),
+        "detector": request.app.state.rider_vision.status(
+            config["data"].get("perception")
+        ),
     }
 
 

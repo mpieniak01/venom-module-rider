@@ -4,6 +4,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt
 
+from .depth_detector import PerceptionSettings
+
 
 class VisionFrame(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
@@ -19,6 +21,8 @@ class VisionFrame(BaseModel):
     verified: StrictBool = False
     calibration_id: Annotated[str, Field(max_length=64)] = ""
     model_sha256: Annotated[str, Field(pattern=r"^$|^[a-f0-9]{64}$")] = ""
+
+    perception: PerceptionSettings = Field(default_factory=PerceptionSettings)
 
     def valid_corridor(self):
         x0, y0, x1, y1 = self.corridor

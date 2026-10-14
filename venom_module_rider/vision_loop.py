@@ -4,6 +4,7 @@ import asyncio
 import time
 from collections import OrderedDict
 
+from .depth_detector import DepthDetector
 from .errors import RiderError
 from .floor_detector import FloorDetector
 
@@ -11,6 +12,7 @@ from .floor_detector import FloorDetector
 class VisionLoop:
     def __init__(self, detector=None, clock=time.monotonic):
         self.detector = detector or FloorDetector()
+        self.depth_detector = DepthDetector()
         self.clock = clock
         self.busy = None
         self.runs = OrderedDict()
@@ -18,9 +20,14 @@ class VisionLoop:
         self.previews = OrderedDict()
         self.preview_changed = asyncio.Event()
 
-    def status(self):
+    def status(self, perception=None):
+        selected = (
+            self.depth_detector
+            if perception and perception.get("engine") == "depth_plane"
+            else self.detector
+        )
         return {
-            **self.detector.status(),
+            **selected.status(),
             "busy": self.busy is not None,
             "protocol_version": 1,
             "max_frame_bytes": 512 * 1024,
@@ -45,6 +52,7 @@ class VisionLoop:
             frame.verified,
             frame.calibration_id,
             frame.model_sha256,
+            frame.perception.model_dump_json(),
         )
         if previous and (
             frame.sequence <= previous["sequence"]
@@ -66,9 +74,14 @@ class VisionLoop:
         self.runs.move_to_end(identity)
         while len(self.runs) > 32:
             self.runs.popitem(last=False)
-        task = asyncio.create_task(
-            asyncio.to_thread(self.detector.detect, payload, frame.corridor)
+        depth_mode = frame.perception.engine == "depth_plane"
+        selected = self.depth_detector if depth_mode else self.detector
+        arguments = (
+            (payload, frame.corridor, frame.perception)
+            if depth_mode
+            else (payload, frame.corridor)
         )
+        task = asyncio.create_task(asyncio.to_thread(selected.detect, *arguments))
         self.busy = task
         try:
             result = await asyncio.wait_for(
@@ -96,9 +109,10 @@ class VisionLoop:
         state["count"] = count
         if self.closed:
             raise RiderError("module_closed", 503)
-        model = self.detector.status().get("sha256", "")
+        model = selected.status().get("sha256", "")
         permitted = (
-            frame.mode == "drive"
+            not depth_mode
+            and frame.mode == "drive"
             and frame.verified
             and bool(frame.calibration_id)
             and model == frame.model_sha256
@@ -112,6 +126,8 @@ class VisionLoop:
             motion_reason = result["reason"]
         elif count < 3:
             motion_reason = "clear_frames_pending"
+        elif depth_mode and frame.mode == "drive":
+            motion_reason = "depth_observation_only"
         elif frame.mode != "drive":
             motion_reason = "observe_only"
         elif not permitted:
@@ -157,6 +173,8 @@ class VisionLoop:
             "inference_ms": round(elapsed, 2),
             "clear_count": count,
             "physical_clearance": "unverified",
+            "perception_engine": frame.perception.engine,
+            "drive_supported": not depth_mode,
         }
 
     def preview(self, device_id, *, corridor=None, revision=None):
