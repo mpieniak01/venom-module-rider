@@ -78,7 +78,7 @@ async def test_single_post_preserves_original_intent_and_pi_response(monkeypatch
         assert response.json()["data"] == expected
         assert len(calls) == 1 and calls[0].url.path == "/api/navigation/trial"
         assert json.loads(calls[0].content) == original
-        assert calls[0].extensions["timeout"]["read"] == 6.0
+        assert calls[0].extensions["timeout"]["read"] == 18.0
     finally:
         await client.aclose()
         await service.close()
@@ -163,7 +163,7 @@ async def test_pi_cancellation_reason_is_returned_without_retry_or_rearm(monkeyp
 
 def test_trial_uses_existing_navigation_contract_and_bounded_timeout():
     assert expected_contract("/api/navigation/trial") == ("rider.navigation_loop", 1)
-    assert json_timeout("/api/navigation/trial", "POST", False).read == 6.0
+    assert json_timeout("/api/navigation/trial", "POST", False).read == 18.0
     assert json_timeout("/api/safety", "POST", True).read == 1.5
 
 

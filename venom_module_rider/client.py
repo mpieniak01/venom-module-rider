@@ -110,7 +110,9 @@ def json_timeout(path: str, method: str, stop: bool) -> httpx.Timeout:
         ):
             duration = 20.0
         elif method == "POST" and path == "/api/navigation/trial":
-            duration = 6.0
+            # Pi bounds service preparation to 15 s, including at most 5 s
+            # for the final start after ARM. Do not time out before its result.
+            duration = 18.0
         elif method == "GET" and path.startswith("/api/services/"):
             duration = 10.0
     return httpx.Timeout(duration, connect=0.5, pool=0.5)
