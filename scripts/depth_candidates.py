@@ -177,22 +177,42 @@ class Candidate:
                     .numpy()
                 )
             else:
-                batch, _, _ = self.processor(
-                    [image],
-                    process_res=self.resolution,
-                    process_res_method="upper_bound_resize",
-                    num_workers=1,
-                    sequential=True,
-                    print_progress=False,
-                )
-                images = batch.unsqueeze(0).to(self.device)
-                self.metadata["processed_shape"] = list(images.shape)
-                # Match official forward's GPU autocast; CPU stays fp32.
-                enabled = self.device == "cuda" and torch.cuda.is_bf16_supported()
-                with torch.autocast("cuda", dtype=torch.bfloat16, enabled=enabled):
-                    result = self.model(images, infer_gs=False, use_ray_pose=False)
-                raw = result["depth"]
-                if raw.ndim != 4 or raw.shape[:2] != (1, 1):
-                    raise ValueError("unexpected_sdk_output")
-                depth = resize_depth(raw[0, 0].float().cpu().numpy(), image.size)
+                return self.infer_window([image])
             return validate_depth(depth)
+
+    def infer_window(self, images):
+        """Causal multi-view window, newest last; no recurrent/streaming cache."""
+        import torch
+
+        if not 1 <= len(images) <= 5:
+            raise ValueError("window_bounds")
+        if self.name == "da2" and len(images) == 1:
+            return self.infer(images[0])
+        if len(images) > 1 and self.name not in {"da3-small", "da3-base"}:
+            raise ValueError("backend_has_no_joint_view_attention")
+        if len({image.size for image in images}) != 1:
+            raise ValueError("window_image_size_changed")
+        assert self.processor is not None
+        with torch.inference_mode():
+            batch, _, _ = self.processor(
+                images,
+                process_res=self.resolution,
+                process_res_method="upper_bound_resize",
+                num_workers=1,
+                sequential=True,
+                print_progress=False,
+            )
+            inputs = batch.unsqueeze(0).to(self.device)
+            self.metadata["processed_shape"] = list(inputs.shape)
+            enabled = self.device == "cuda" and torch.cuda.is_bf16_supported()
+            with torch.autocast("cuda", dtype=torch.bfloat16, enabled=enabled):
+                result = self.model(
+                    inputs,
+                    infer_gs=False,
+                    use_ray_pose=False,
+                    ref_view_strategy="first",
+                )
+            raw = result["depth"]
+            if raw.ndim != 4 or raw.shape[:2] != (1, len(images)):
+                raise ValueError("unexpected_sdk_output")
+            return resize_depth(raw[0, -1].float().cpu().numpy(), images[-1].size)
