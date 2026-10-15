@@ -522,3 +522,19 @@ test("recovery brackets preview polling and late processed GETs cannot publish o
  assert.ok(client.includes('if (!cameraStream || !["control", "vision"].includes(section) || processedTransition) return;'));
  assert.ok(client.includes("stale: true, knownFreshness: false"));
 });
+
+
+test("v2 turn is shown as a maneuver while the forward image remains STOP",()=>{
+  for(const side of ["left","right"]){
+    const state={...permissionLoop,decision:{...permissionLoop.decision,protocol_version:2,action:"turn_"+side,state:"obstacle",vision_action:"stop",sectors:{[side]:{state:"clear",coverage_complete:true}}}};
+    const policy={...permissionPolicy,avoidance:{enabled:true,sweep_verified:true}};
+    const result=motionPermission(state,{drive:true},policy,permissionDetector,permissionStatus());
+    assert.equal(result.venom,true);
+    assert.equal(result.reason,side==="left"?"permissionTurnLeft":"permissionTurnRight");
+    assert.equal(decisionView(state,permissionDetector).reply,"turn_"+side);
+    assert.equal(decisionView(state,permissionDetector).vision,"stop");
+    assert.equal(executionHeadline(state,{drive:true},permissionStatus(),result),side==="left"?"permissionVenomTurnLeft":"permissionVenomTurnRight");
+    assert.equal(motionPermission({...state,stale:true},{drive:true},policy,permissionDetector,permissionStatus()).venom,false);
+    assert.equal(motionPermission(state,{drive:true},permissionPolicy,permissionDetector,permissionStatus()).venom,false);
+  }
+});

@@ -340,3 +340,10 @@ The companion Pi implementation is required; see Rider-Pi PR275.
 Base / Metric Large selection for recorded-scene tests.
 [Measured results](docs/DA3_RESULTS.md) retain DA2 as the production baseline.
 The research lane does not change the live panel, Pi policy or movement permissions.
+
+
+### Editable zones and directional trials
+
+See [directional vision](docs/DIRECTIONAL_VISION.md) for the camera-zone editor,
+shared left/center/right assessment and optional paired protocol v2 trials.
+Avoidance is off by default and requires physical acceptance on the actual mount.

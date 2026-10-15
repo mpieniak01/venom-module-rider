@@ -1,5 +1,6 @@
 // Every Rider request is intercepted. No request can reach a physical robot.
 async (page) => {
+  await page.setViewportSize({width:1600,height:1400});
   const check=(ok,message)=>{if(!ok)throw new Error(message);};
   const wait=async(fn,message)=>{const end=Date.now()+6000;while(!await fn()){if(Date.now()>end)throw new Error(message);await new Promise(r=>setTimeout(r,30));}};
   const run=async(mode)=>{
@@ -66,6 +67,25 @@ async (page) => {
     await page.goto("http://localhost:3300/rider");await page.bringToFront();
     await page.getByTestId("loop-start").waitFor();
     await wait(async()=>!await page.getByTestId("loop-start").isDisabled(),"start button unavailable");
+    if(mode==="editor"){
+      const original=JSON.stringify(policy.corridor),revision=policy.revision;
+      await page.getByTestId("zone-edit").click();
+      const overlay=page.getByTestId("corridor-editor");
+      await overlay.waitFor();
+      await overlay.scrollIntoViewIfNeeded();
+      const box=await overlay.locator('rect[data-handle="move"]').boundingBox();
+      check(box&&box.width>0&&box.height>0,"editor image coordinates unavailable");
+      await page.mouse.move(box.x+box.width/2,box.y+box.height/2);
+      await page.mouse.down();
+      await page.mouse.move(box.x+box.width/2+20,box.y+box.height/2-10,{steps:5});
+      await page.mouse.up();
+      check(JSON.stringify(policy.corridor)===original,"draft mutated Pi before Save");
+      await page.getByTestId("zone-save").click();
+      await wait(()=>policy.revision>revision&&observing,"editor save did not resume analysis");
+      check(JSON.stringify(policy.corridor)!==original,"drag was not persisted");
+      check(armCount===0&&!armed&&!driving,"editor save actuated");
+      return {mode,result:"PASS",revision:policy.revision};
+    }
     if(mode==="remote"){
       // Another panel changes the Pi-owned policy; this card must follow it.
       policy={...policy,revision:policy.revision+1,corridor:[.35,.8,.65,.95],verified:false,calibration_id:"",model_sha256:""};
@@ -124,5 +144,5 @@ async (page) => {
     check(!calls.some(c=>c.path==="/control"&&c.body.action!=="stop"),"browser issued actuators directly");
     return {mode,result:"PASS",trialRequests:calls.filter(c=>c.path==="/navigation/trial").length,armCount};
   };
-  return {result:"PASS",scenarios:[await run("remote"),await run("zone"),await run("positive"),await run("cancel"),await run("terminal")]};
+  return {result:"PASS",scenarios:[await run("editor"),await run("remote"),await run("zone"),await run("positive"),await run("cancel"),await run("terminal")]};
 }

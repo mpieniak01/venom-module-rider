@@ -5,9 +5,11 @@ import time
 from collections import OrderedDict
 
 from . import depth_trace
+from .avoidance import plan
 from .depth_detector import DepthDetector
 from .errors import RiderError
 from .floor_detector import FloorDetector
+from .sector_trend import update as sector_trend
 
 
 class VisionLoop:
@@ -32,6 +34,7 @@ class VisionLoop:
             **selected.status(),
             "busy": (self.depth_busy if selected is self.depth_detector else self.busy)
             is not None,
+            "supported_protocol_versions": [1, 2],
             "protocol_version": 1,
             "max_frame_bytes": 512 * 1024,
             "max_deadline_ms": 500,
@@ -65,6 +68,8 @@ class VisionLoop:
             frame.calibration_id,
             frame.model_sha256,
             frame.perception.model_dump_json(),
+            frame.protocol_version,
+            frame.avoidance.model_dump_json(),
         )
         if previous and (
             frame.sequence <= previous["sequence"]
@@ -184,6 +189,38 @@ class VisionLoop:
             motion_reason = "calibration_not_validated"
         else:
             motion_reason = "clear_frames_ready"
+        if depth_mode and "sectors" in result:
+            history = (
+                previous.get("sector_history")
+                if previous and now - previous["at"] <= 0.5
+                else None
+            )
+            if frame.motion_phase != "ready":
+                history = None
+            result["sectors"], state["sector_history"] = sector_trend(
+                result["sectors"], history
+            )
+        if frame.protocol_version == 2:
+            if frame.avoidance.enabled and depth_mode:
+                prior = dict(previous.get("avoidance") or {}) if previous else {}
+                if previous and now - previous["at"] > 0.5:
+                    prior.update(counts={"left": 0, "right": 0}, front=0, paused=False)
+                action, motion_reason, planner, sectors = plan(
+                    result,
+                    prior,
+                    frame.avoidance,
+                    frame.motion_phase,
+                    permitted,
+                )
+                state["avoidance"] = planner
+                result.update(
+                    sectors=sectors,
+                    maneuver_clear_count=3 if action.startswith("turn_") else 0,
+                    maneuver_phase=motion_reason,
+                    turn_count=planner["turns"],
+                )
+            else:
+                action, motion_reason = "stop", "avoidance_not_enabled"
         image = result.pop("_preview", None)
         if image is not None:
             self.previews[device_id] = (
@@ -221,7 +258,7 @@ class VisionLoop:
             "action": action,
             "vision_action": vision_action,
             "motion_reason": motion_reason,
-            "protocol_version": 1,
+            "protocol_version": frame.protocol_version,
             "run_id": frame.run_id,
             "frame_id": frame.frame_id,
             "sequence": frame.sequence,

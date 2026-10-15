@@ -31,6 +31,8 @@ def assess_sectors(depth, corridor, coefficients, scale, settings, oriented):
             continue
         design = np.column_stack((x[mask] / w, y[mask] / h, np.ones(pixels)))
         errors = (1 / depth[mask] - design @ coefficients) / scale
+        outliers = abs(errors) > settings.residual_limit
+        points_x, points_y = x[mask][outliers], y[mask][outliers]
         near = int((errors > settings.residual_limit).sum())
         far = int((errors < -settings.residual_limit).sum())
         allowed = math.floor(settings.outlier_limit * pixels)
@@ -41,5 +43,20 @@ def assess_sectors(depth, corridor, coefficients, scale, settings, oriented):
             "farther_outlier_pixels": far,
             "outlier_fraction": (near + far) / pixels,
             "allowed_outlier_pixels": allowed,
+            "outlier_centroid_image": (
+                [float(points_x.mean() / w), float(points_y.mean() / h)]
+                if near + far
+                else None
+            ),
+            "outlier_bounds_image": (
+                [
+                    float(points_x.min() / w),
+                    float(points_y.min() / h),
+                    float((points_x.max() + 1) / w),
+                    float((points_y.max() + 1) / h),
+                ]
+                if near + far
+                else None
+            ),
         }
     return result
