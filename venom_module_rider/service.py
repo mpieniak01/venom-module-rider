@@ -475,6 +475,36 @@ class RiderService:
                         )
             raise
 
+    async def stop_camera(self, body, session):
+        """Retire preview ownership, then stop capture and the unused feed on Pi."""
+        external = False
+        try:
+            await self.goal("s2_camera_preview", {"enabled": False}, session)
+        except RiderError as exc:
+            if exc.code != "external_services_running":
+                raise
+            external = True
+        camera = await self.mutate(
+            "/api/resource/camera",
+            {
+                **body,
+                "units": body.get("units")
+                or [
+                    "camera-capture@raw.service",
+                    "camera-capture@edge.service",
+                    "camera-capture@ssd.service",
+                ],
+            },
+            session,
+        )
+        # Pi's service manager independently refuses other task owners.
+        feed = await self.mutate(
+            "/svc/frame-distributor.service", {"action": "stop"}, session
+        )
+        if external:
+            await self.goal("s2_camera_preview", {"enabled": False}, session)
+        return {"camera": camera, "feed": feed}
+
     async def camera(self, stream):
         if stream not in {"raw", "proc"}:
             raise RiderError("unknown_stream", 404)

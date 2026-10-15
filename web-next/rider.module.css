@@ -193,3 +193,5 @@
 
 /* Keep the complete camera image beside the decision and manual controls. */
 .loopCamera .cameraEmbedded .camera { height: clamp(240px, 30vh, 340px); max-height: 340px; aspect-ratio: auto; }
+
+.cameraTransition { border-color: var(--r-border); color: var(--ui-muted); }

@@ -69,6 +69,9 @@ class Domain:
         self.calls.append(("read", path))
         if path == "/api/logic/state":
             return {"data": {"state": {"features": self.features}}}
+        if path == "/api/navigation/status":
+            active = any(row.get("requested") is True for row in self.features.values())
+            return {"data": {"running": active, "stale": False, "run_id": "run"}}
         if self.legacy:
             raise RiderError("frame_unavailable", 404)
         return {"data": {"corridor": [0.3, 0.6, 0.7, 0.9], "revision": 4}}
@@ -122,7 +125,9 @@ async def test_fresh_cached_mask_does_not_compete_with_decisions():
     )
     result = await loop.decide("pi", frame, b"raw")
     assert "_preview" not in result
-    response = await processed_camera(request(Domain(), loop))
+    domain = Domain()
+    domain.features["s15_venom_perception"]["requested"] = True
+    response = await processed_camera(request(domain, loop))
     assert response.headers["x-rider-frame-id"] == "captured"
     assert len(loop.runs) == 1
     clock[0] = 0.6

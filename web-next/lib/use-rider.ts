@@ -3,13 +3,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api-client";
 import { getApiBaseUrl } from "@/lib/env";
+import { readAnalysis } from "./vision-frame";
+import { decodePreview, nextPreviewDelay, previewLifetime, previewRequestCurrent } from "./preview-media";
 import { configForConnection } from "./device-session";
 import { HoldController, readHoldTiming, type MovementIntent } from "./hold-controller";
-import { cameraOn, canRequestArm, commandAccepted, controlIdentity, data, errorCode, faceRunning, featureRows, finite, frameRequested, record, safetyOf, settingsOf, str, type DeviceConfig, type Direction, type JsonRecord, type RiderStatus, type Section } from "./model";
+import { canRequestArm, commandAccepted, controlIdentity, data, errorCode, faceRunning, featureRows, finite, frameRequested, record, safetyOf, settingsOf, str, type DeviceConfig, type Direction, type JsonRecord, type RiderStatus, type Section } from "./model";
 
 const BASE = "/api/v1/rider";
 export type Notice = { key: string; code?: string; tone: "error" | "success" | "info" };
-export type Frame = { decoded?: boolean; url: string; stale: boolean; source: string; fileAt: string; id: string; knownFreshness: boolean; visionState: string; visionReason: string; inferenceMs: string; visionPolicy: string; recordedAt: string };
+export type Frame = { analysis?: JsonRecord; ageMs?: number; receivedAt?: number; ageSource?: string; decoded?: boolean; url: string; stale: boolean; source: string; fileAt: string; id: string; knownFreshness: boolean; visionState: string; visionReason: string; inferenceMs: string; visionPolicy: string; recordedAt: string };
 import { controlChanged, freshControl, navigationAvailable, navigationView, observationClock, retainControl, type ControlClock } from "./navigation";
 export function useRider(section: Section) {
   const [config, setConfig] = useState<DeviceConfig | null>(null);
@@ -22,6 +24,9 @@ export function useRider(section: Section) {
   const [runtimeFrame, setRuntimeFrame] = useState<Frame | null>(null);
   const [mediaError, setMediaError] = useState<string | null>(null);
   const [cameraStream, setCameraStream] = useState<"raw" | "proc" | "venom" | null>(null);
+  const [cameraTransition, setCameraTransitionState] = useState(false);
+  const cameraTransitionRef = useRef(false);
+  const cameraTransitionEpoch = useRef(0);
   const [showRuntimeFrame, setShowRuntimeFrame] = useState(false);
   const statusRef = useRef<RiderStatus | null>(null);
   const cameraRef = useRef<Frame | null>(null);
@@ -55,26 +60,48 @@ export function useRider(section: Section) {
     const setter = kind === "camera" ? setCamera : setRuntimeFrame;
     setter(previous => { if (retain && kind === "camera" && !next && previous) return previous.stale ? previous : { ...previous, stale: true, knownFreshness: false }; if (previous) URL.revokeObjectURL(previous.url); return next; });
   }, []);
+  const setCameraTransition = useCallback((transitioning: boolean) => {
+    if (cameraTransitionRef.current !== transitioning) cameraTransitionEpoch.current += 1;
+    cameraTransitionRef.current = transitioning; setCameraTransitionState(transitioning);
+    if (transitioning && mediaRef.current.camera === "venom") replaceFrame("camera", null, true);
+  }, [replaceFrame]);
   const markCameraDecoded = useCallback((url: string, decoded: boolean) => {
     setCamera(previous => previous?.url === url && previous.decoded !== decoded ? { ...previous, decoded } : previous);
   }, []);
   const fetchFrame = useCallback(async (path: string, signal: AbortSignal, kind: "camera" | "face") => {
+    const epoch = cameraTransitionEpoch.current;
+    const currentPreview = () => previewRequestCurrent(kind, path, cameraTransitionRef.current, epoch, cameraTransitionEpoch.current);
+    if (!currentPreview()) return;
     const response = await fetch(`${getApiBaseUrl()}${BASE}${path}`, { cache: "no-store", signal });
-    if (signal.aborted || !frameRequested(kind, path, sectionRef.current, mediaRef.current)) return;
+    if (signal.aborted || !currentPreview() || !frameRequested(kind, path, sectionRef.current, mediaRef.current)) return;
     if (!response.ok || !response.headers.get("Content-Type")?.startsWith("image/")) {
       let code = "";
       try { code = String(record(record(await response.json()).detail).code ?? ""); } catch { /* Non-JSON frame failure. */ }
+      if (signal.aborted || !currentPreview() || !frameRequested(kind, path, sectionRef.current, mediaRef.current)) return;
       replaceFrame(kind, null, kind === "camera");
       setMediaError(code === "camera_off" ? "visionCameraOff" : code === "vision_busy" ? "visionBusy" : path === "/camera/venom" ? "visionPreviewUnavailable" : "frameMissing");
       return;
     }
+    const receivedAt = performance.now();
+    const ageMs = response.headers.has("X-Rider-Frame-Age-Ms") ? Number(response.headers.get("X-Rider-Frame-Age-Ms")) : undefined;
     const stale = response.headers.get("X-Rider-Stale");
     const placeholder = response.headers.get("X-Rider-Placeholder") === "true";
     if (stale === "true" || placeholder) { replaceFrame(kind, null, kind === "camera"); setMediaError("frameStale"); return; }
     const blob = await response.blob();
-    if (signal.aborted || !frameRequested(kind, path, sectionRef.current, mediaRef.current)) return;
-    replaceFrame(kind, { decoded: false, url: URL.createObjectURL(blob), stale: false, knownFreshness: stale === "false", source: response.headers.get("X-Rider-Source") || response.headers.get("X-Face-Source") || "", fileAt: response.headers.get("X-Rider-File-Observed-At") || "", id: response.headers.get("X-Rider-Frame-Id") || "", visionState: response.headers.get("X-Rider-Vision-State") || "", visionReason: response.headers.get("X-Rider-Vision-Reason") || "", inferenceMs: response.headers.get("X-Rider-Vision-Inference-Ms") || "", visionPolicy: response.headers.get("X-Rider-Vision-Policy") || "", recordedAt: response.headers.get("X-Rider-Recorded-At") || "" });
-    setMediaError(null);
+    if (signal.aborted || !currentPreview() || !frameRequested(kind, path, sectionRef.current, mediaRef.current)) return;
+    const url = URL.createObjectURL(blob);
+    try {
+      if (kind === "camera") await decodePreview(url, signal);
+      if (signal.aborted || !currentPreview() || !frameRequested(kind, path, sectionRef.current, mediaRef.current)) {
+        URL.revokeObjectURL(url); return;
+      }
+      const expired = kind === "camera" && path === "/camera/venom" && previewLifetime({ageMs,receivedAt}) === 0;
+      replaceFrame(kind, { analysis: readAnalysis(response.headers.get("X-Rider-Analysis-Json")), ageMs, receivedAt, ageSource: response.headers.get("X-Rider-Frame-Age-Source") ?? undefined, decoded: kind === "camera", url, stale: expired, knownFreshness: stale === "false" && !expired, source: response.headers.get("X-Rider-Source") || response.headers.get("X-Face-Source") || "", fileAt: response.headers.get("X-Rider-File-Observed-At") || "", id: response.headers.get("X-Rider-Frame-Id") || "", visionState: response.headers.get("X-Rider-Vision-State") || "", visionReason: response.headers.get("X-Rider-Vision-Reason") || "", inferenceMs: response.headers.get("X-Rider-Vision-Inference-Ms") || "", visionPolicy: response.headers.get("X-Rider-Vision-Policy") || "", recordedAt: response.headers.get("X-Rider-Recorded-At") || "" });
+      setMediaError(null);
+    } catch (error) {
+      URL.revokeObjectURL(url);
+      throw error;
+    }
   }, [replaceFrame]);
   const poll = useCallback(async (target?: Section, fast = false) => {
     const pending = fast ? controlPollPromise : pollPromise;
@@ -114,13 +141,6 @@ export function useRider(section: Section) {
         if (finite(last)) seqRef.current = Math.max(seqRef.current, last);
         if (configRef.current !== nextConfig) { configRef.current = nextConfig; setConfig(nextConfig); }
         if (!fast && requestedSection === sectionRef.current && ["online", "degraded"].includes(next.connection.status)) {
-          if (["control", "vision"].includes(requestedSection) && mediaRef.current.camera) {
-            if (cameraOn(next)) {
-              try { await fetchFrame(`/camera/${mediaRef.current.camera}`, abort.signal, "camera"); }
-              catch { if (!abort.signal.aborted) { replaceFrame("camera", null, true); setMediaError("frameMissing"); } }
-            }
-            else replaceFrame("camera", null, true);
-          }
           if (requestedSection === "face" && mediaRef.current.face) {
             if (faceRunning(next)) await fetchFrame("/face/runtime/frame", abort.signal, "face");
             else replaceFrame("face", null);
@@ -198,36 +218,21 @@ export function useRider(section: Section) {
     hold.cancel();
     return command({ action: "move", device_settings: true, direction: "forward", mode: "release" });
   }, [canNavigate, command, hold]);
-  const armNavigation = useCallback(async (plan: string, expectedSession: string, expectedGeneration: string, expectedEpoch: number) => {
-    let epoch = expectedEpoch;
-    let generation = expectedGeneration;
-    const cancelled = () => Object.assign(new Error("navigation_trial_cancelled"), {data:{error:"navigation_trial_cancelled"}});
-    const assertCurrent = () => {
-      if (sessionRef.current !== expectedSession || motionEpoch.current !== epoch || safetyOf(statusRef.current).generation !== generation) throw cancelled();
-      if (safetyOf(statusRef.current).state === "ESTOP") throw Object.assign(new Error("navigation_estop"), {data:{error:"navigation_estop"}});
-    };
-    await poll("control", true);
-    assertCurrent();
-    // The trial click includes takeover. Pi requires releasing the old ARM first.
-    if (safetyOf(statusRef.current).state === "ARMED") {
-      const previousOwner = safetyOf(statusRef.current).owner;
-      await command({action:"disarm", owner:previousOwner}, true, true);
-      epoch += 1; // Only this deliberate disarm may advance the trial's intent.
-      if (sessionRef.current !== expectedSession || motionEpoch.current !== epoch) throw cancelled();
+  const startNavigationTrial = useCallback(async (plan: string, revision: number) => {
+    const origin = sessionRef.current, epoch = motionEpoch.current;
+    hold.cancel(); motionBlocked.current += 1; setBusy("trial");
+    try {
       await poll("control", true);
-      const released = safetyOf(statusRef.current);
-      if (released.state !== "DISARMED" || released.stale === true || statusRef.current?.errors.control) throw Object.assign(new Error("navigation_authority_unconfirmed"), {data:{error:"navigation_authority_unconfirmed"}});
-      generation = str(released.generation);
-      assertCurrent();
-    }
-    await command({ action: "arm", owner: "navigation", arming_mode: "timed", lease_s: 10, operator_consent: true, operator_plan: plan }, true, true);
-    // Confirm a new read after ARM, never a cached pre-ARM observation.
-    await poll("control", true);
-    const safety = safetyOf(statusRef.current);
-    if (motionEpoch.current !== epoch || sessionRef.current !== expectedSession) throw cancelled();
-    if (safety.state !== "ARMED" || safety.owner !== "navigation" || safety.stale === true || statusRef.current?.errors.control || safety.can_move !== true) throw Object.assign(new Error("navigation_authority_unconfirmed"),{data:{error:"navigation_authority_unconfirmed"}});
-    return {generation:str(safety.generation), epoch};
-  }, [command, poll]);
+      if (sessionRef.current !== origin || motionEpoch.current !== epoch || document.hidden) throw new Error("navigation_trial_cancelled");
+      const envelope = makeEnvelope({action:"arm"});
+      const {seq: _seq, action: _action, ...intent} = envelope;
+      void _seq; void _action;
+      const result = await mutation("/navigation/trial", {...intent, config_revision:revision, operator_consent:true, operator_plan:plan}, "POST", true);
+      if (sessionRef.current !== origin || motionEpoch.current !== epoch) throw new Error("navigation_trial_cancelled");
+      await poll("control", true);
+      return result;
+    } finally { motionBlocked.current = Math.max(0, motionBlocked.current - 1); setBusy(null); }
+  }, [hold, poll, makeEnvelope, mutation]);
   const currentSession = useCallback(() => sessionRef.current, []);
   const currentMotionEpoch = useCallback(() => motionEpoch.current, []);
   const currentGeneration = useCallback(() => str(safetyOf(statusRef.current).generation), []);
@@ -323,10 +328,36 @@ export function useRider(section: Section) {
     void tick();
     return () => { alive = false; if (timer) clearTimeout(timer); document.removeEventListener("visibilitychange", visibility); window.removeEventListener("blur", blur); hold.release(); abortReads(); };
   }, [abortReads, cameraStream, hold, poll, replaceFrame, section, showRuntimeFrame]);
+  const mediaSession = status?.connection.session;
+  const processedTransition = cameraStream === "venom" && cameraTransition;
+  useEffect(() => {
+    if (!cameraStream || !["control", "vision"].includes(section) || processedTransition) return;
+    let alive = true, cycle = 0, timer: ReturnType<typeof setTimeout> | undefined, abort: AbortController | undefined;
+    const tick = async () => {
+      if (!alive || document.hidden) return;
+      const current = ++cycle, started = performance.now(), epoch = cameraTransitionEpoch.current; abort = new AbortController();
+      try { await fetchFrame("/camera/" + cameraStream, abort.signal, "camera"); }
+      catch { if (!abort.signal.aborted && alive && previewRequestCurrent("camera", "/camera/" + cameraStream, cameraTransitionRef.current, epoch, cameraTransitionEpoch.current)) { replaceFrame("camera", null, true); setMediaError("frameMissing"); } }
+      if (alive && current === cycle && !document.hidden) timer = setTimeout(() => void tick(), nextPreviewDelay(started, performance.now()));
+    };
+    const visibility = () => { cycle++; clearTimeout(timer); abort?.abort(); if (!document.hidden) void tick(); };
+    document.addEventListener("visibilitychange", visibility); void tick();
+    return () => { alive=false; cycle++; clearTimeout(timer); abort?.abort(); document.removeEventListener("visibilitychange", visibility); };
+  }, [cameraStream, section, mediaSession, fetchFrame, replaceFrame, processedTransition]);
+  useEffect(() => {
+    if (cameraStream !== "venom" || !camera || camera.stale) return;
+    const remaining = previewLifetime(camera);
+    if (remaining === null) return;
+    const url = camera.url;
+    const timer = setTimeout(() => {
+      setCamera(previous => previous?.url === url ? { ...previous, stale: true, knownFreshness: false } : previous);
+    }, remaining);
+    return () => clearTimeout(timer);
+  }, [camera, cameraStream]);
   useEffect(() => () => { hold.release(); abortReads(); }, [abortReads, hold]);
   // ARM always refreshes the fast control endpoint before making its envelope.
   // The latency of a diagnostics view must not prevent that refresh request.
   const canArm = canRequestArm(status);
-  return { config, status, loading, notice, setNotice, busy, activeDirection, canMutate: isConnected(), canArm, canNavigate: canNavigate(), canMove: movementReady(), poll, command, stopManual, armNavigation, currentSession, currentMotionEpoch, currentGeneration, currentCamera, mutate: runMutation, takeManual, selectDevice, hold, camera, cameraStream, setCameraStream, markCameraDecoded, runtimeFrame, showRuntimeFrame, setShowRuntimeFrame, mediaError };
+  return { config, status, loading, notice, setNotice, busy, activeDirection, canMutate: isConnected(), canArm, canNavigate: canNavigate(), canMove: movementReady(), poll, command, stopManual, startNavigationTrial, currentSession, currentMotionEpoch, currentGeneration, currentCamera, mutate: runMutation, takeManual, selectDevice, hold, camera, cameraStream, setCameraStream, cameraTransition, setCameraTransition, markCameraDecoded, runtimeFrame, showRuntimeFrame, setShowRuntimeFrame, mediaError };
 }
 export type RiderClient = ReturnType<typeof useRider>;

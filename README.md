@@ -197,17 +197,21 @@ The control workspace keeps the processed camera view, manual takeover and
 navigation decisions together. This loop chooses a short forward pulse or STOP;
 it does not plan a route, estimate distances or steer around obstacles.
 
-- **Analyse image** starts observation and displays the processed camera.
-  Image GO means the zone passed analysis; the reply to Pi remains STOP.
-- **Forward driving test · 10 s** first starts or reuses observation and waits
-  for a fresh decoded preview and three clear decisions. Unknown or blocked
-  image returns STOP before navigation ARM. With a matching saved calibration,
-  available Pi executor and unchanged settings, the same explicit click saves
-  Drive mode, requests timed navigation ARM and starts the loop only after Pi
-  confirms authority. There is no additional per-trial confirmation dialog.
-- **Stop loop** cancels a pending trial, stops motion before disabling the drive
-  goal, and retains the last image labelled as paused. Global STOP and manual
-  takeover also cancel a pending trial; neither permits automatic resumption.
+- **Drive forward · 10 s** is one explicit operator action. Pi prepares the
+  camera and producer, validates the saved calibration and executor, and obtains
+  one timed navigation ARM. Motion requires three fresh CLEAR decisions; a
+  blocked or unknown image never grants GO. The original ARM window includes
+  startup time, so this is an upper bound rather than ten seconds of movement.
+- **Preview without driving** is optional and starts passive observation.
+  It is not a prerequisite to clicking Drive forward. Image GO during observation
+  still means an execution reply of STOP. There is no per-trial confirmation dialog.
+- **Stop loop and camera** cancels a pending trial, stops motion before disabling
+  drive and observation, closes the preview, and releases the camera reservation.
+  Pi confirms hardware capture and the unused frame distributor have stopped.
+  Another task's camera ownership is reported rather than forcibly released.
+  A new explicit observation or drive start prepares the camera again.
+  Global STOP and manual takeover remain separate actions; neither permits
+  automatic resumption.
 
 The decision cards separate the image verdict, the actual Venom-to-Pi reply and
 the executor's reported motion. Floor/confidence percentages, consecutive clear
@@ -303,3 +307,28 @@ physical robot. With the local panel running, use Playwright CLI:
 
 Run from the module checkout. Browser launch settings are environment-specific;
 the Node syntax check is included in the check-web target.
+
+
+### Bounded vision trial
+
+The operator starts a trial with one POST to /api/v1/rider/navigation/trial. The request identifies the current Pi generation, configuration and manual-settings revisions, a unique request_id, a fresh Pi-clock timestamp/TTL, and explicit operator consent/plan. The live executor must advertise scoped_stop_generation_supported and remote_decision_deadline_supported. Pi prepares its existing camera/goal/configuration services and grants one navigation ARM for at most 10 seconds. Requests are not replayed on refresh or reconnect.
+
+During that original trial, fresh visual STOP sends an immediate zero goal while analysis continues. Three new CLEAR observations may resume the existing small forward pulses. Operator STOP, manual takeover, loss of current decisions/communication, invalid contracts, executor errors and ARM expiry end the trial; no automatic ARM or restart follows. Legacy lease adapters without scoped pause retain terminal STOP.
+
+Active processed previews consume the existing inference result instead of fetching another Pi RAW. X-Rider-Run-Id, X-Rider-Sequence, X-Rider-Frame-Id and X-Rider-Config-Revision identify the image; X-Rider-Analysis-Json contains its corresponding assessment. Relative preview age uses host monotonic elapsed time plus Pi-reported input age, and does not measure the uplink. Pi remains authoritative for end-to-end decision freshness. A diagnostic host-received age is a lower bound, not proof of source-capture freshness.
+
+Depth-plane geometry remains experimental. The recorded floor-seam false STOP is retained as a regression; geometry diagnostics now distinguish nearer and farther deviations. No threshold, speed, pulse, ramp or freshness limit is loosened by this change.
+
+
+### Accepted scene and release scope
+
+On 2026-10-15 the operator confirmed that the forward GO/STOP process is stable
+in the currently calibrated floor scene on the physical Rider-Pi. This accepts
+that scene and the current low-speed setup, not arbitrary floors, lighting,
+camera mounts or measured stopping distances.
+
+A still-fresh decision with less than 50 ms left for a useful pulse causes ZERO
+and a bounded wait for another fresh decision, not an immediate trial failure.
+It cannot extend old GO, renew ARM or exceed the saved speed and pulse limits.
+Loss of feedback, invalid identities and executor faults remain terminal STOP.
+The companion Pi implementation is required; see Rider-Pi PR275.

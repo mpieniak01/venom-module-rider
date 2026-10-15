@@ -17,7 +17,7 @@ class VisionFrame(BaseModel):
     age_ms: Annotated[float, Field(ge=0, le=500)]
     deadline_ms: Annotated[StrictInt, Field(ge=50, le=500)]
     mode: Literal["observe", "drive"] = "observe"
-    corridor: tuple[float, float, float, float] = (0.35, 0.65, 0.65, 0.95)
+    corridor: tuple[float, float, float, float] = (0.35, 0.80, 0.65, 0.95)
     verified: StrictBool = False
     calibration_id: Annotated[str, Field(max_length=64)] = ""
     model_sha256: Annotated[str, Field(pattern=r"^$|^[a-f0-9]{64}$")] = ""

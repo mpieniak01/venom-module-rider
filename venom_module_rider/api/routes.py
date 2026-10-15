@@ -227,11 +227,10 @@ async def resource(
 ):
     if name not in RESOURCE_NAMES:
         raise RiderError("unknown_resource", 404)
-    return await service(request).mutate(
-        "/api/resource/" + name,
-        payload.model_dump(exclude_none=True),
-        session,
-    )
+    body = payload.model_dump(exclude_none=True)
+    if name == "camera" and payload.action == "stop":
+        return await service(request).stop_camera(body, session)
+    return await service(request).mutate("/api/resource/" + name, body, session)
 
 
 @router.post("/goal/{name}")

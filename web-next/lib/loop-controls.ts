@@ -1,9 +1,12 @@
+import { messages } from "./i18n";
+import { frameAge } from "./vision-frame";
 import { navigationAvailable } from "./navigation";
 import { record, safetyOf, str, timestampMs, type JsonRecord, type RiderStatus } from "./model";
 
 export type LoopPhase = "offline" | "unknown" | "stopped" | "starting" | "running" | "fault";
 export function loopPhase(connected: boolean, state: JsonRecord, goals: JsonRecord): LoopPhase {
   if (!connected) return "offline";
+  if (state.mode === "drive" && state.running === false && state.stop_reason === "trial_completed") return "stopped";
   if (state.latched === true && state.mode === "drive" && state.running === false) return "fault";
   if (goals.observe === false && goals.drive === false) return "stopped";
   if (state.latched === true && (goals.observe === true || goals.drive === true)) return "fault";
@@ -31,7 +34,7 @@ export function loopFailure(error: unknown): string {
   if (["offline", "pi_unreachable"].includes(code)) return "loopOffline";
   if (code === "navigation_api_unavailable") return "loopApiMissing";
   if (code === "pi_operation_timeout") return "operationUnconfirmed";
-  if (["navigation_trial_cancelled","navigation_configuration_changed","navigation_authority_unconfirmed","navigation_estop","stale_or_invalid_operator_intent"].includes(code)) return "trial.error."+code;
+  if (["navigation_trial_cancelled","navigation_configuration_changed","navigation_authority_unconfirmed","navigation_estop","stale_or_invalid_operator_intent","navigation_trial_prepare_timeout","navigation_trial_authority_changed","navigation_trial_replay","navigation_trial_journal_unavailable","navigation_trial_stopped","navigation_trial_arm_unconfirmed","navigation_trial_authority_unknown"].includes(code)) return "trial.error."+code;
   return "requestFailed";
 }
 
@@ -51,15 +54,48 @@ export function loopSettingsValues(policy: JsonRecord, draft: JsonRecord): JsonR
   return calibrationScope(policy, {}) === calibrationScope(draft, {}) ? values
     : {...values, verified: false, calibration_id: "", model_sha256: ""};
 }
+/** UI extents write the existing Pi corridor; they are not distance presets. */
+export function stoppingZone(policy: JsonRecord | null): "near" | "far" | "custom" {
+  const roi=policy?.corridor;
+  if(!Array.isArray(roi)||roi.length!==4)return "custom";
+  const height=Number(roi[3])-Number(roi[1]);
+  return Math.abs(height-.15)<1e-6?"near":Math.abs(height-.30)<1e-6?"far":"custom";
+}
+export function stoppingZoneValues(policy: JsonRecord, zone: "near" | "far"): JsonRecord | null {
+  const roi=policy.corridor, height=zone==="near"?.15:.30;
+  if(!Array.isArray(roi)||roi.length!==4||roi.some(v=>typeof v!=="number"||!Number.isFinite(v)))return null;
+  const [x0,,x1,y1]=roi as number[];
+  if(!(0<=x0&&x0<x1&&x1<=1&&height<=y1&&y1<=1))return null;
+  if(typeof policy.speed!=="number"||!Number.isFinite(policy.speed)||policy.speed<=0
+    ||typeof policy.max_motion_ms!=="number"||!Number.isFinite(policy.max_motion_ms)||policy.max_motion_ms<=0)return null;
+  const next:JsonRecord={...policy,mode:"observe",corridor:[x0,Number((y1-height).toFixed(6)),x1,y1]};
+  // Selecting the close trial extent never raises motion settings.
+  if(zone==="near"){
+    next.speed=Math.min(Number(policy.speed),.1);
+    next.max_motion_ms=Math.min(Number(policy.max_motion_ms),150);
+  }
+  return loopSettingsValues(policy,next);
+}
 export function calibrationAcceptance(policy: JsonRecord, detector: JsonRecord, id: string): JsonRecord {
   if (!/^[a-f0-9]{64}$/.test(str(detector.sha256)) || !id.trim()) throw new Error("calibration_model_unavailable");
   return {...loopSettingsValues(policy, policy), verified: true, calibration_id: id, model_sha256: detector.sha256};
 }
-export function freshAnalysisFrame(frame: {decoded?: boolean; stale: boolean; knownFreshness: boolean; fileAt: string; id: string; visionState: string; visionPolicy: string} | null, stream: string | null, now = Date.now()): boolean {
+export function freshAnalysisFrame(frame: {ageMs?: number; receivedAt?: number; ageSource?: string; decoded?: boolean; stale: boolean; knownFreshness: boolean; fileAt: string; id: string; visionState: string; visionPolicy: string} | null, stream: string | null, now = Date.now()): boolean {
+  const age = frameAge(frame);
+  if (age !== null) return !!frame && frame.decoded === true && stream === "venom" && !frame.stale
+    && frame.knownFreshness && !!frame.id && frame.ageSource === "pi-reported-plus-host-elapsed" && age <= 3000;
   const at = timestampMs(frame?.fileAt && Number.isFinite(Number(frame.fileAt)) ? Number(frame.fileAt) : frame?.fileAt);
   return !!frame && frame.decoded === true && stream === "venom" && !frame.stale && frame.knownFreshness && !!frame.id
     && !!frame.visionState && !!frame.visionPolicy && frame.visionPolicy !== "diagnostic_default"
     && at !== null && now >= at - 1000 && now - at <= 3000;
+}
+
+/** A new zone cannot be accepted from the previous zone's still-fresh JPEG. */
+export function freshPolicyFrame(frame: (Parameters<typeof freshAnalysisFrame>[0] & {analysis?:JsonRecord})|null, stream:string|null, state:JsonRecord, policy:JsonRecord|null):boolean {
+  const analysis=record(frame?.analysis);
+  return freshAnalysisFrame(frame,stream)&&!!state.run_id&&analysis.run_id===state.run_id
+    &&typeof policy?.revision==="number"&&analysis.config_revision===policy.revision
+    &&analysis.state==="clear"&&analysis.vision_action==="go";
 }
 
 export function decisionView(state: JsonRecord, detector: JsonRecord) {
@@ -78,17 +114,19 @@ export function decisionView(state: JsonRecord, detector: JsonRecord) {
   };
 }
 export function trialBlock(policy: JsonRecord|null, runtime:JsonRecord, detector:JsonRecord, connected:boolean, dirty:boolean, status:RiderStatus|null):string {
-  const base=loopBlock(policy?{...policy,mode:"observe"}:null,runtime,detector,connected,dirty,status);
-  if(base)return base;
-  if(detector.drive_supported===false)return "loopDepthObservation";
+  if(!connected)return "loopOffline";
+  if(!policy)return "loopLoadFailed";
+  if(dirty)return "loopUnsaved";
   if(runtime.drive!==true)return runtime.drive_reason==="navigation_executor_update_required"?"loopExecutorUpdate":"loopRuntimeMissing";
+  if(detector.configured!==true)return "loopNoModel";
+  if(detector.drive_supported===false)return "loopDepthObservation";
   if(!calibrationRecorded(policy)||detector.loaded===true&&!calibrationMatches(policy,detector))return "loopUnverified";
   const safety=safetyOf(status);
   if(safety.state==="ESTOP")return "trialEstop";
   if(safety.stale===true||status?.errors?.control)return "trialControlStale";
   if(!str(safety.generation)||!["DISARMED","ARMED"].includes(str(safety.state)))return "trialControlStale";
   if(safety.ready===false||record(record(safety.capabilities).move).available!==true)return "trialExecutorUnavailable";
-  if(safety.remote_decision_deadline_supported!==true)return "loopExecutorUpdate";
+  if(safety.remote_decision_deadline_supported!==true||safety.scoped_stop_generation_supported!==true)return "loopExecutorUpdate";
   if(record(safety.execution).inhibit)return "trialExecutionInhibited";
   return "";
 }
@@ -108,13 +146,14 @@ export function motionPermission(state:JsonRecord, goals:JsonRecord, policy:Json
     else if(!calibrationMatches(policy,detector))reason="permissionParameters";
     else if(!view.current)reason="permissionNoDecision";
     else if(view.reply!=="go"||view.vision!=="go")reason="permissionDecisionStop";
-    else if(safety.remote_decision_deadline_supported!==true||!Number.isFinite(record(state.decision).valid_for_ms)||Number(record(state.decision).valid_for_ms)<50)reason="permissionPermitShort";
+    else if(safety.remote_decision_deadline_supported!==true||!Number.isFinite(state.permit_remaining_ms??record(state.decision).valid_for_ms)||Number(state.permit_remaining_ms??record(state.decision).valid_for_ms)<50)reason="permissionPermitShort";
     else {allowed=true;reason="permissionGo";}
   }
   return {venom:known?allowed:null,manual,reason};
 }
 
 export function executionHeadline(state:JsonRecord,goals:JsonRecord,status:RiderStatus|null,permission:{venom:boolean|null}):string {
+  if(state.mode==="drive"&&goals.drive===true&&state.paused===true&&state.running===true&&state.stale!==true&&safetyOf(status).state==="ARMED"&&safetyOf(status).owner==="navigation")return "trialVisualPause";
   if(permission.venom===null)return "permissionVenomUnknown";
   if(permission.venom)return "permissionVenomYes";
   const safety=safetyOf(status);
@@ -124,7 +163,8 @@ export function executionHeadline(state:JsonRecord,goals:JsonRecord,status:Rider
   return "permissionVenomNo";
 }
 
-export function previewNotice(stale:boolean,selected:string,current:boolean|undefined,running:boolean|undefined):string|null {
+export function previewNotice(stale:boolean,selected:string,current:boolean|undefined,running:boolean|undefined,transitioning=false):string|null {
+  if(selected==="venom"&&transitioning)return "visionPreviewRestarting";
   if(!stale&&!(selected==="venom"&&current===false))return null;
   return selected==="venom"&&running===false?"previewPausedNotice":"previewDelayedNotice";
 }
@@ -136,4 +176,93 @@ export function completedTrial(state: JsonRecord): JsonRecord | null {
   const row=record(state.last_trial);
   return row.mode==="drive"&&row.running===false&&!!str(row.run_id)
     &&timestampMs(row.observed_at)!==null&&!!str(row.stop_reason)?row:null;
+}
+
+
+export type TrialPreparation = {
+  requestId: string;
+  operatorRequestId: string;
+  phase: string;
+  state: "preparing" | "failed" | "completed";
+  elapsedMs: number | null;
+  observedAt: number;
+  error: string;
+  fresh: boolean;
+  source: "pi" | "request";
+};
+const preparationPhases = new Set([
+  "admission", "camera_reservation", "stop_old_producer", "configure",
+  "authority_handoff", "arm_ack", "start_navigation", "first_status", "ready",
+]);
+function preparationRecord(value: unknown, source: "pi" | "request"): TrialPreparation | null {
+  const row = record(value), state = row.state, observedAt = timestampMs(row.observed_at);
+  if (!["preparing", "failed", "completed"].includes(str(state)) || !str(row.request_id) || observedAt === null) return null;
+  return {
+    requestId: str(row.request_id),
+    operatorRequestId: /^trial-[0-9a-f]{32}-start$/.test(str(row.operator_request_id)) ? str(row.operator_request_id) : "",
+    phase: preparationPhases.has(str(row.phase)) ? str(row.phase) : "unknown",
+    state: state as TrialPreparation["state"],
+    elapsedMs: typeof row.elapsed_ms === "number" && Number.isFinite(row.elapsed_ms) && row.elapsed_ms >= 0 ? row.elapsed_ms : null,
+    observedAt,
+    error: str(row.error) || str(record(row.error).code),
+    fresh: row.fresh === true,
+    source,
+  };
+}
+/** Pi preparation is shared across tabs; it never grants movement permission. */
+export function trialPreparation(state: JsonRecord, error: unknown = null): TrialPreparation | null {
+  const pi = preparationRecord(state.preparation, "pi");
+  const details = record(record(record(record(error).data).detail).details);
+  const request = preparationRecord(details.preparation, "request");
+  // Both timestamps originate on Pi. A just-returned newer failure can precede
+  // the next status poll; a fresh newer Pi record replaces older per-tab errors.
+  if (pi?.fresh && (!request || pi.observedAt >= request.observedAt)) return pi;
+  return request ?? pi;
+}
+
+export function trialPreparationTitle(value: TrialPreparation): string {
+  return value.fresh ? "trialPreparation.state." + value.state : "trialPreparationHistorical";
+}
+export function trialPreparationErrorKey(value: TrialPreparation): string {
+  const key = "trial.error." + value.error;
+  return Object.prototype.hasOwnProperty.call(messages, key) ? key : "requestFailed";
+}
+
+
+/** One stopped-run outcome may supersede a delayed preparation failure. */
+export function trialDiagnostics(state: JsonRecord, error: unknown = null) {
+  const preparation = trialPreparation(state, error);
+  const details = record(record(record(record(error).data).detail).details);
+  const responseStatus = record(details.status);
+  const terminal = (value: JsonRecord) => completedTrial({last_trial:value});
+  const candidates = [terminal(state), completedTrial(state), terminal(responseStatus)]
+    .filter((value): value is JsonRecord => value !== null)
+    .sort((a,b) => (timestampMs(b.observed_at) ?? 0) - (timestampMs(a.observed_at) ?? 0));
+  const outcome = state.mode === "drive" && state.running === true && state.stale !== true ? null : candidates[0] ?? null;
+  const responsePreparation = record(details.preparation);
+  const matchesPreparation = !!outcome && !!preparation?.operatorRequestId
+    && preparation.operatorRequestId === str(outcome.operator_request_id);
+  const matchesResponse = !!outcome && details.started === true
+    && str(responseStatus.run_id) === str(outcome.run_id);
+  const combined = !!preparation && (matchesPreparation || matchesResponse
+    && str(responsePreparation.request_id) === preparation.requestId);
+  const requestErrorCovered = matchesResponse || combined
+    && str(responsePreparation.request_id) === preparation?.requestId;
+  return {preparation, outcome, combined, requestErrorCovered};
+}
+
+export function trialStopReasonKey(reason: unknown): string {
+  const key = "vision.reason." + str(reason);
+  return Object.prototype.hasOwnProperty.call(messages, key) ? key : "trialStopped";
+}
+
+
+/** Only an explicitly confirmed Pi completion is a neutral terminal outcome. */
+export function trialOutcomeTone(reason: unknown): "neutral" | "error" {
+  return reason === "trial_completed" ? "neutral" : "error";
+}
+
+
+export function freshObservation(state: JsonRecord, goals: JsonRecord): boolean {
+  return goals.observe === true && state.mode === "observe" && state.running === true && state.stale === false;
 }

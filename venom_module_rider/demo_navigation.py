@@ -25,7 +25,7 @@ DEFAULT_POLICY: dict[str, Any] = {
     "speed": 0.1,
     "decision_budget_ms": 300,
     "max_motion_ms": 150,
-    "corridor": [0.35, 0.65, 0.65, 0.95],
+    "corridor": [0.35, 0.80, 0.65, 0.95],
     "calibration_id": "",
     "model_sha256": "",
     "perception": {
@@ -83,6 +83,7 @@ class ReplayNavigation:
         self.drop_link = False
         self.http = httpx.AsyncClient(trust_env=False, follow_redirects=False)
         self.motion_generation: str | None = None
+        self.trial_requests: list[str] = []
 
     def attach(self, state):
         self.state = state
@@ -217,10 +218,10 @@ class ReplayNavigation:
             or self.state.generation != self.motion_generation
         ):
             raise ValueError("navigation_authority_lost")
-        self.state.deadline = self.clock() + duration
+        self.state.deadline = self.clock() + duration if speed != 0 else 0.0
         self.events.append(
             {
-                "action": "go",
+                "action": "go" if speed != 0 else "pause",
                 "duration": duration,
                 "speed": speed,
                 "physical_completion": "not_applicable",
@@ -241,6 +242,73 @@ class ReplayNavigation:
         self.events.append({"action": "stop", "physical_completion": "not_applicable"})
         self.events = self.events[-64:]
 
+    async def start_trial(self, body):
+        """The demo Pi implements the same one-request contract in memory."""
+        from .api.schemas import NavigationTrialRequest
+
+        body = NavigationTrialRequest.model_validate(body).model_dump()
+        if not -0.1 <= time.time() - body["ts"] <= body["ttl_ms"] / 1000:
+            raise ValueError("stale_or_invalid_operator_intent")
+        safety = self.state.safety()
+        if safety["generation"] != body["generation"] or safety["stale"]:
+            raise ValueError("navigation_trial_authority_changed")
+        if self.policy["revision"] != body["config_revision"]:
+            raise ValueError("navigation_configuration_conflict")
+        if safety["manual_settings"]["revision"] != body["settings_revision"]:
+            raise ValueError("manual_settings_stale")
+        if body["request_id"] in self.trial_requests:
+            raise ValueError("navigation_trial_replay")
+        if not self.policy["verified"] or not self.policy["calibration_id"]:
+            raise ValueError("navigation_validation_required")
+        self.trial_requests = [*self.trial_requests[-63:], body["request_id"]]
+        self.halt("operator_trial_prepare")
+        self.state.goals["s2_camera_preview"] = True
+        self.state.camera_on = True
+        config = self.configure(
+            {"revision": body["config_revision"], "values": {"mode": "drive"}}
+        )
+        if self.state.state == "ARMED":
+            self.state.control(
+                {"action": "stop", "expected_generation": self.state.generation}
+            )
+        reply = self.state.control(
+            {
+                "action": "arm",
+                "source": "manual",
+                "owner": "navigation",
+                "request_id": body["request_id"] + "-arm",
+                "generation": self.state.generation,
+                "seq": self.state.seq + 1,
+                "ts": time.time(),
+                "ttl_ms": 500,
+                "operator_consent": True,
+                "operator_plan": body["operator_plan"],
+                "execution_context": "panel",
+                "arming_mode": "timed",
+                "lease_s": 10,
+            }
+        )
+        if reply.status_code != 200:
+            raise ValueError("navigation_trial_arm_unconfirmed")
+        armed_generation = self.state.generation
+        try:
+            await self.start("s14_venom_navigation")
+        except Exception:
+            self.state.control(
+                {"action": "stop", "expected_generation": armed_generation}
+            )
+            raise
+        self.status.update(
+            generation=self.state.generation, operator_request_id=body["request_id"]
+        )
+        return {
+            "ok": True,
+            "request_id": body["request_id"],
+            "config": config,
+            "status": dict(self.status),
+            "authority": self.state.safety(),
+        }
+
     async def start(self, name):
         mode = LOOP_GOALS[name]
         if mode == "drive":
@@ -256,7 +324,14 @@ class ReplayNavigation:
         policy = {**self.policy, "mode": mode}
         run = uuid.uuid4().hex
         self.motion_generation = self.state.generation
-        self.lease = self.lease_factory(policy, run, self.drive, self.brake, self.clock)
+        self.lease = self.lease_factory(
+            policy,
+            run,
+            self.drive,
+            self.brake,
+            self.clock,
+            pause=lambda duration: self.drive(0.0, duration),
+        )
         self.state.goals[name] = True
         self.state.camera_on = True
         self.status = {
@@ -359,6 +434,13 @@ class ReplayNavigation:
                     latched=self.lease.latched,
                     stop_reason=self.lease.reason,
                     simulated_moving=accepted,
+                    paused=policy["mode"] == "drive"
+                    and not accepted
+                    and not self.lease.latched,
+                    permit_remaining_ms=max(
+                        0.0,
+                        ((self.lease.deadline or self.clock()) - self.clock()) * 1000,
+                    ),
                 )
                 if self.lease.latched:
                     self.status["running"] = False

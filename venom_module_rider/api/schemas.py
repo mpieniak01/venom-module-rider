@@ -1,8 +1,16 @@
 """Only manual commands and explicitly enumerated Pi operations."""
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictFloat,
+    StrictInt,
+    field_validator,
+)
 
 
 class StrictModel(BaseModel):
@@ -61,3 +69,30 @@ class GoalAction(StrictModel):
     ts: float | None = None
     ttl_ms: StrictInt | None = None
     settings_revision: StrictInt | None = None
+
+
+class NavigationTrialRequest(StrictModel):
+    request_id: Annotated[str, Field(strict=True, min_length=1, max_length=128)]
+    generation: Annotated[str, Field(strict=True, min_length=1, max_length=128)]
+    ts: Annotated[StrictFloat, Field(ge=0)]
+    ttl_ms: Annotated[StrictInt, Field(ge=1, le=500)]
+    config_revision: Annotated[StrictInt, Field(ge=0)]
+    settings_revision: Annotated[StrictInt, Field(ge=0)]
+    operator_consent: StrictBool
+    operator_plan: Annotated[str, Field(strict=True, min_length=1, max_length=512)]
+    source: Literal["manual"]
+    execution_context: Literal["panel"]
+
+    @field_validator("operator_consent")
+    @classmethod
+    def explicit_consent(cls, value):
+        if value is not True:
+            raise ValueError("explicit operator consent required")
+        return value
+
+    @field_validator("operator_plan")
+    @classmethod
+    def specific_plan(cls, value):
+        if not value.strip():
+            raise ValueError("specific operator plan required")
+        return value

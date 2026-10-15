@@ -4,6 +4,7 @@ import asyncio
 import time
 from collections import OrderedDict
 
+from . import depth_trace
 from .depth_detector import DepthDetector
 from .errors import RiderError
 from .floor_detector import FloorDetector
@@ -108,7 +109,9 @@ class VisionLoop:
             result = await asyncio.wait_for(
                 asyncio.shield(task), (frame.deadline_ms - frame.age_ms) / 1000
             )
-        except (TimeoutError, ValueError, OSError, RuntimeError, ImportError):
+        except Exception:
+            # Detector libraries can also raise KeyError/TypeError. Convert all
+            # inference failures to UNKNOWN; cancellation must still propagate.
             result = {
                 "state": "unknown",
                 "reason": "vision_inference_unavailable",
@@ -119,6 +122,35 @@ class VisionLoop:
                 self._drain(task)
             else:
                 task.add_done_callback(self._drain)
+        trace_depth = result.pop("_trace_depth", None)
+        if depth_mode and trace_depth is not None:
+            # Diagnostic only: exact input of this inference, never another RAW.
+            # Queueing/copy time remains inside the original decision budget.
+            try:
+                trace_id = depth_trace.submit(
+                    payload,
+                    trace_depth,
+                    {
+                        **{
+                            key: value
+                            for key, value in result.items()
+                            if not key.startswith("_")
+                        },
+                        "stage": "depth_assessment",
+                        "device_id": device_id,
+                        "run_id": frame.run_id,
+                        "frame_id": frame.frame_id,
+                        "sequence": frame.sequence,
+                        "config_revision": frame.config_revision,
+                    },
+                    frame.corridor,
+                    frame.perception,
+                )
+                if trace_id:
+                    result["depth_trace_id"] = trace_id
+            except Exception:
+                # Storage must neither grant nor revoke a visual decision.
+                pass
         elapsed = (self.clock() - now) * 1000
         if elapsed + frame.age_ms >= frame.deadline_ms:
             result = {
@@ -160,6 +192,16 @@ class VisionLoop:
                 {
                     **result,
                     "frame_id": frame.frame_id,
+                    "run_id": frame.run_id,
+                    "sequence": frame.sequence,
+                    "clear_count": count,
+                    "vision_action": vision_action,
+                    "model_sha256": model,
+                    "age_source": (
+                        "host-received"
+                        if with_preview
+                        else "pi-reported-plus-host-elapsed"
+                    ),
                     "corridor": frame.corridor,
                     "config_revision": frame.config_revision,
                     "observed_at": time.time() - (frame.age_ms + elapsed) / 1000,
@@ -195,9 +237,22 @@ class VisionLoop:
             "drive_supported": True,
         }
 
-    def preview(self, device_id, *, corridor=None, revision=None):
+    def preview(self, device_id, *, corridor=None, revision=None, run_id=None):
         row = self.previews.get(device_id)
         if row is None or self.clock() - row[0] > 0.5:
+            return None
+        if run_id is not None and row[2]["run_id"] != run_id:
+            return None
+        # A newly admitted run cannot display a result from the preceding run.
+        latest = next(
+            (
+                identity[1]
+                for identity in reversed(self.runs)
+                if identity[0] == device_id
+            ),
+            None,
+        )
+        if latest != row[2]["run_id"]:
             return None
         if corridor is not None and row[2]["corridor"] != corridor:
             return None
@@ -205,11 +260,15 @@ class VisionLoop:
             return None
         return row
 
-    async def wait_for_preview(self, device_id, *, corridor, revision, timeout=0.5):
+    async def wait_for_preview(
+        self, device_id, *, corridor, revision, run_id=None, timeout=0.5
+    ):
         deadline = asyncio.get_running_loop().time() + timeout
         while not self.closed:
             changed = self.preview_changed
-            row = self.preview(device_id, corridor=corridor, revision=revision)
+            row = self.preview(
+                device_id, corridor=corridor, revision=revision, run_id=run_id
+            )
             if row is not None:
                 return row
             remaining = deadline - asyncio.get_running_loop().time()
