@@ -12,7 +12,11 @@ from PIL import Image
 from venom_module_rider.api.routes import router
 from venom_module_rider.config import Device
 from venom_module_rider.demo import DemoPi, create_app
-from venom_module_rider.demo_navigation import ReplayNavigation, load_pi_lease
+from venom_module_rider.demo_navigation import (
+    DEFAULT_POLICY,
+    ReplayNavigation,
+    load_pi_lease,
+)
 from venom_module_rider.service import RiderService
 from venom_module_rider.vision_loop import VisionLoop
 
@@ -400,7 +404,7 @@ async def test_recorded_depth_model_reaches_simulated_drive_then_stops(monkeypat
     blocked = (root / "box-20cm-1.jpg").read_bytes()
     model = DepthDetector()
     settings = PerceptionSettings(engine="depth_plane")
-    roi = (0.35, 0.65, 0.65, 0.95)
+    roi = tuple(DEFAULT_POLICY["corridor"])
     assert model.detect(clear, roi, settings)["state"] == "clear"
     assert model.detect(blocked, roi, settings)["state"] in {"obstacle", "unknown"}
     loop = VisionLoop()
