@@ -46,5 +46,5 @@ export function navigationView(previous: RiderStatus, next: RiderStatus): RiderS
 }
 
 export function continuousAvailable(status: RiderStatus | null, panelId: string): boolean {
-  return navigationAvailable(status, panelId) && ["online", "degraded"].includes(status?.connection.status ?? "") && record(safetyOf(status).panel_control).version === 1;
+  return !status?.errors.control && safetyOf(status).stale !== true && navigationAvailable(status, panelId) && ["online", "degraded"].includes(status?.connection.status ?? "") && record(safetyOf(status).panel_control).version === 1;
 }

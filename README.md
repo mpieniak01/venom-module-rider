@@ -377,3 +377,5 @@ that physical acceptance is pending. Keep the stable deployed SHA; test an
 explicit preview candidate, stop/disarm before rollback, then select the prior
 version through the existing deployment procedure. Never reset an active robot
 or delete a branch as a substitute for rollback.
+
+Panel identities provide concurrency ownership within the single-operator control domain. Caller authorization remains the existing module access guard; a panel identity is not a credential or a separate user account.

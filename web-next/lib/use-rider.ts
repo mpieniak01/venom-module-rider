@@ -131,6 +131,7 @@ export function useRider(section: Section) {
         next = retainControl(previous, next);
         if (controlChanged(previous, next)) { hold.cancel(); seqRef.current = 0; replaceFrame("camera", null, previous?.connection.session===next.connection.session && previous?.connection.device_id===next.connection.device_id); replaceFrame("face", null); if (previous?.connection.session !== next.connection.session) { mediaRef.current = { camera: null, face: false }; setCameraStream(null); setShowRuntimeFrame(false); } }
         if (!["online", "degraded"].includes(next.connection.status)) { replaceFrame("camera", null); replaceFrame("face", null); }
+        if (next.errors.control) hold.release();
         if (!["online", "degraded"].includes(next.connection.status) || next.control && !next.errors.control && !navigationAvailable(next, panelId)) hold.cancel();
         if (previous && settingsOf(previous).revision !== settingsOf(next).revision) hold.cancel();
         if (sessionRef.current && sessionRef.current !== next.connection.session) { hold.cancel(); setNotice({ key: "conflict", tone: "info" }); }

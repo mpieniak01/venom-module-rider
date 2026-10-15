@@ -7,6 +7,18 @@ async page => {
  check(cfg.devices?.length && cfg.devices.every(d=>d.mode==="demo"),"demo-only allowlist required");
  await page.getByTestId("takeover-manual").click();
  await page.waitForTimeout(500);
+ await page.getByTestId("rider-continuous-forward").click();
+ await page.route("**/api/v1/rider/status?section=control", async route=>{
+   const response=await route.fetch();const body=await response.json();
+   body.control=null;body.errors.control="pi_unreachable";body.connection.status="degraded";
+   await route.fulfill({response,json:body});
+ });
+ await page.waitForTimeout(1000);
+ check(await page.getByTestId("rider-continuous-forward").getAttribute("aria-pressed")==="false","lost control read did not end direction");
+ check(await page.getByTestId("rider-continuous-forward").isDisabled(),"lost control read allowed a new latch");
+ await page.unroute("**/api/v1/rider/status?section=control");
+ await page.waitForTimeout(700);
+ check(await page.getByTestId("rider-continuous-forward").getAttribute("aria-pressed")==="false","restored control read resumed direction");
  await page.route("**/api/v1/rider/control",route=>route.abort());
  await page.getByTestId("rider-continuous-forward").click();
  await page.waitForTimeout(800);

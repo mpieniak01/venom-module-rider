@@ -42,3 +42,13 @@ test("pending, rejection, generation changes and missing observations remain dis
   assert.equal(manualFeedback(current,{generation:"one",phase:"failed"},true).requestKey,"manualRejected");
   assert.equal(manualFeedback(null,null,false).executionKey,"manualOutputUnknown");
 });
+
+test("a missing control read cannot sustain or start continuous motion",()=>{
+  const current=state();
+  current.connection.status="degraded";
+  current.errors.control="pi_unreachable";
+  assert.equal(continuousAvailable(current,"panel-a"),false);
+  delete current.errors.control;
+  (current.control!.safety as Record<string,unknown>).stale=true;
+  assert.equal(continuousAvailable(current,"panel-a"),false);
+});
