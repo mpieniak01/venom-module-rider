@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -15,6 +16,13 @@ MODELS = {
     "da3metric-large": (
         "depth-anything/DA3METRIC-LARGE",
         "4010e39f3634a45bc60553321fb49fb760bd594e",
+    ),
+}
+CHECKPOINT_HASHES = {
+    "da3-small": "364492e38a3a06d221ac75da7f6621ada3f2361cd24fde11ba79091e9f40efcf",
+    "da3-base": "e01067dc1659613083d9145a9a2547ccdbe6ccbbf83c4fe7b3e8a4e2bdae78b5",
+    "da3metric-large": (
+        "bbea5b0b3ee389849cffa7ddae89de064a90abd2b055fc5aa99aac68db324776"
     ),
 }
 SDK_REVISION = "3d835ec1a5802d64a8b8b15f817a1ab54809bfe4"
@@ -74,7 +82,9 @@ class Candidate:
         self.metadata["parameters"] = sum(p.numel() for p in self.model.parameters())
         self.metadata["torch"] = torch.__version__
         self.metadata["precision"] = (
-            "bf16" if device == "cuda" and torch.cuda.is_bf16_supported() else "fp32"
+            "bf16"
+            if name != "da2" and device == "cuda" and torch.cuda.is_bf16_supported()
+            else "fp32"
         )
 
     def _load_da2(self):
@@ -93,12 +103,24 @@ class Candidate:
         )
 
     def _load_da3(self):
+        import depth_anything_3.registry as registry
         import torch
         from depth_anything_3.cfg import create_object, load_config
         from depth_anything_3.registry import MODEL_REGISTRY
         from depth_anything_3.utils.io.input_processor import InputProcessor
         from safetensors.torch import load_model
 
+        sdk = Path(registry.__file__).resolve().parents[2]
+        revision = subprocess.check_output(
+            ["git", "-C", str(sdk), "rev-parse", "HEAD"], text=True
+        ).strip()
+        if revision != SDK_REVISION:
+            raise ValueError("sdk_revision_mismatch")
+        subprocess.run(
+            ["git", "-C", str(sdk), "diff", "--quiet", "HEAD", "--", "src"], check=True
+        )
+        if self.metadata["files"]["model.safetensors"] != CHECKPOINT_HASHES[self.name]:
+            raise ValueError("checkpoint_hash_mismatch")
         config = json.loads((self.path / "config.json").read_text())
         if config["model_name"] != self.name:
             raise ValueError("model_variant_mismatch")
@@ -122,11 +144,13 @@ class Candidate:
     def infer(self, image):
         import torch
 
+        assert self.processor is not None
         with torch.inference_mode():
             if self.name == "da2":
                 inputs = self.processor(images=image, return_tensors="pt").to(
                     self.device
                 )
+                self.metadata["processed_shape"] = list(inputs["pixel_values"].shape)
                 result = self.model(**inputs)
                 depth = (
                     self.processor.post_process_depth_estimation(
@@ -146,6 +170,7 @@ class Candidate:
                     print_progress=False,
                 )
                 images = batch.unsqueeze(0).to(self.device)
+                self.metadata["processed_shape"] = list(images.shape)
                 # Match official forward's GPU autocast; CPU stays fp32.
                 enabled = self.device == "cuda" and torch.cuda.is_bf16_supported()
                 with torch.autocast("cuda", dtype=torch.bfloat16, enabled=enabled):

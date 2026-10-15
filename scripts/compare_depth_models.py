@@ -43,7 +43,21 @@ def percentile(values, fraction):
 def summarize(rows):
     values = [ms for row in rows for ms in row["latency_ms"]]
     labelled = [r for r in rows if r["expected"] != "unlabelled"]
+    inferred = [
+        ms
+        for row in rows
+        for result, ms in zip(
+            row.get(
+                "assessments", [{"reason": "not_recorded"}] * len(row["latency_ms"])
+            ),
+            row["latency_ms"],
+            strict=True,
+        )
+        if result["reason"] != "vision_image_quality"
+    ]
     return {
+        "inferred_samples": len(inferred),
+        "inferred_p95_ms": percentile(inferred, 0.95) if inferred else None,
         "frames": len(rows),
         "samples": len(values),
         "p50_ms": percentile(values, 0.50),
@@ -71,11 +85,19 @@ def benchmark(args):
     import torch
 
     torch.set_num_threads(args.threads)
+    if args.device == "cuda":
+        torch.cuda.set_per_process_memory_fraction(
+            args.cuda_memory_mib
+            * 2**20
+            / torch.cuda.get_device_properties(0).total_memory
+        )
     dataset = load_dataset(args.manifest)
     settings = PerceptionSettings(engine="depth_plane")
     corridor = (0.35, 0.80, 0.65, 0.95)
     started = time.perf_counter()
     model = Candidate(args.backend, args.model, args.device, args.resolution)
+    if args.device == "cuda":
+        torch.cuda.synchronize()
     load_ms = (time.perf_counter() - started) * 1000
     if args.device == "cuda":
         torch.cuda.synchronize()
@@ -123,13 +145,22 @@ def benchmark(args):
             }
         )
     return {
+        "status": "completed",
         "model": model.metadata,
         "load_ms": load_ms,
         "warmup_ms": warmup_ms,
         "warmup_samples": args.warmup,
         "threads": args.threads,
+        "cuda_memory_limit_mib": args.cuda_memory_mib
+        if args.device == "cuda"
+        else None,
+        "gpu": torch.cuda.get_device_name(0) if args.device == "cuda" else None,
+        "input_manifest_sha256": file_hash(args.manifest),
         "peak_rss_mib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024,
         "peak_cuda_allocated_mib": torch.cuda.max_memory_allocated() / 2**20
+        if args.device == "cuda"
+        else None,
+        "peak_cuda_reserved_mib": torch.cuda.max_memory_reserved() / 2**20
         if args.device == "cuda"
         else None,
         "settings": settings.model_dump(),
@@ -162,11 +193,30 @@ def main():
     parser.add_argument("--threads", type=int, choices=range(1, 17), default=4)
     parser.add_argument("--repeats", type=int, choices=range(1, 101), default=5)
     parser.add_argument("--warmup", type=int, choices=range(1, 11), default=2)
+    parser.add_argument(
+        "--cuda-memory-mib", type=int, choices=range(256, 12289), default=1024
+    )
     args = parser.parse_args()
     if args.output.exists():
         raise FileExistsError("report already exists")
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    report = benchmark(args)
+    try:
+        report = benchmark(args)
+    except Exception as error:
+        args.output.write_text(
+            json.dumps(
+                {
+                    "status": "failed",
+                    "backend": args.backend,
+                    "device": args.device,
+                    "drive_supported": False,
+                    "error_type": type(error).__name__,
+                    "error": str(error)[:2000],
+                },
+                indent=2,
+            )
+        )
+        raise
     args.output.write_text(json.dumps(report, indent=2, allow_nan=False))
     print(json.dumps(report["summary"], indent=2))
 

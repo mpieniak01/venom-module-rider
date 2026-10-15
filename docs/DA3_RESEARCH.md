@@ -46,3 +46,22 @@ latency qualification; the existing DA2 route remains the baseline.
 - [Small checkpoint](https://huggingface.co/depth-anything/DA3-SMALL)
 - [Base checkpoint](https://huggingface.co/depth-anything/DA3-BASE)
 - [Metric Large checkpoint](https://huggingface.co/depth-anything/DA3METRIC-LARGE)
+
+
+## Setup and execution
+A clean separate environment can install the module's `vision_depth` extra and
+`requirements-da3-research.txt`. This workspace instead reused its existing host
+site-packages through a local .pth file and installed missing packages only in
+`data/da3-research/venv`; that local environment file is not distributed.
+The native network path does not require xformers, open3d, pycolmap or Gradio.
+Clone the SDK to `data/da3-research/sdk`, checkout the pinned commit, then add its
+`src` to PYTHONPATH as shown above. Runtime source/version and checkpoint checks fail
+closed. The SDK checkout must have no tracked source modifications.
+
+`make research-depth ARGS="--backend ... --model ... --manifest ... --output ..."`
+runs the same offline command. Choose `--device cuda` explicitly; its default allocator
+limit is 1024 MiB, overridable with `--cuda-memory-mib`. Model selection never occurs
+automatically. Run models sequentially to avoid measuring mutual contention.
+Reports are never overwritten; failures write `status: failed` and exit nonzero.
+
+[Measured results and next-step criteria](DA3_RESULTS.md).

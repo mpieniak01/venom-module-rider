@@ -332,3 +332,11 @@ and a bounded wait for another fresh decision, not an immediate trial failure.
 It cannot extend old GO, renew ARM or exceed the saved speed and pulse limits.
 Loss of feedback, invalid identities and executor faults remain terminal STOP.
 The companion Pi implementation is required; see Rider-Pi PR275.
+
+
+### Alternative depth models (offline research)
+
+[DA3 comparison runner](docs/DA3_RESEARCH.md) provides explicit DA2 / DA3 Small /
+Base / Metric Large selection for recorded-scene tests.
+[Measured results](docs/DA3_RESULTS.md) retain DA2 as the production baseline.
+The research lane does not change the live panel, Pi policy or movement permissions.

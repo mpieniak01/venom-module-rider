@@ -26,3 +26,9 @@ demo:
 
 demo-pi:
 	$(PYTHON) -m venom_module_rider.demo --port 18880
+
+.PHONY: research-depth
+DA3_PYTHON ?= data/da3-research/venv/bin/python
+DA3_SDK_PATH ?= data/da3-research/sdk/src
+research-depth:
+	PYTHONPATH=.:$(DA3_SDK_PATH) $(DA3_PYTHON) scripts/compare_depth_models.py $(ARGS)
