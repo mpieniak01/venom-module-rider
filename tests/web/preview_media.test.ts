@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { decodePreview, nextPreviewDelay, previewLifetime } from "../../web-next/lib/preview-media";
+import { decodePreview, nextPreviewDelay, previewLifetime, previewRequestCurrent } from "../../web-next/lib/preview-media";
 
 test("camera cadence is start-to-start while a slow read never overlaps another request", () => {
   assert.equal(nextPreviewDelay(1000, 1000), 500);
@@ -53,4 +53,17 @@ test("an already cancelled read never starts decoding, and corrupt media rejects
   await assert.rejects(decodePreview("blob:bad",new AbortController().signal,()=>({
     src:"", decode:async()=>{throw new Error("invalid JPEG");},
   })),/invalid JPEG/);
+});
+
+
+test("handoff pauses only processed preview and rejects pre-handoff frames after resume", () => {
+  // The same guard runs before issuing GET and before installing its response.
+  assert.equal(previewRequestCurrent("camera","/camera/venom",false,0,0),true);
+  assert.equal(previewRequestCurrent("camera","/camera/venom",true,0,1),false);
+  assert.equal(previewRequestCurrent("camera","/camera/venom",true,1,1),false);
+  assert.equal(previewRequestCurrent("camera","/camera/venom",false,0,2),false);
+  assert.equal(previewRequestCurrent("camera","/camera/venom",false,2,2),true);
+  for(const [kind,path] of [["camera","/camera/raw"],["camera","/camera/proc"],["face","/face/runtime/frame"]] as const){
+    assert.equal(previewRequestCurrent(kind,path,true,0,2),true,path);
+  }
 });

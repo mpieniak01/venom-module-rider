@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import ts from "typescript";
 import { test } from "node:test";
-import { calibrationAcceptance, calibrationMatches, completedTrial, executionHeadline, freshPolicyFrame, previewNotice, calibrationScope, decisionView, freshAnalysisFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, motionPermission, stoppingZone, stoppingZoneValues, trialBlock, trialPreparation, trialPreparationTitle, trialPreparationErrorKey, trialDiagnostics, trialStopReasonKey, trialOutcomeTone } from "../../web-next/lib/loop-controls";
+import { calibrationAcceptance, calibrationMatches, completedTrial, executionHeadline, freshPolicyFrame, previewNotice, calibrationScope, decisionView, freshAnalysisFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, motionPermission, stoppingZone, stoppingZoneValues, trialBlock, trialPreparation, trialPreparationTitle, trialPreparationErrorKey, trialDiagnostics, trialStopReasonKey, trialOutcomeTone, freshObservation } from "../../web-next/lib/loop-controls";
 import { translate } from "../../web-next/lib/i18n";
 import { featureRows, frameRequested, type RiderStatus } from "../../web-next/lib/model";
 
@@ -483,4 +483,42 @@ test("confirmed ARM-window completion is stopped and neutral; faults remain erro
   assert.equal(message.includes("10"),false);
   assert.ok(message.includes("ARM"));
  }
+});
+
+
+test("preview transition is neutral and model or stale-frame errors remain visible outside it",()=>{
+ assert.equal(previewNotice(true,"venom",false,false,true),"visionPreviewRestarting");
+ assert.equal(previewNotice(false,"venom",true,true,true),"visionPreviewRestarting");
+ assert.equal(previewNotice(true,"venom",false,false,false),"previewPausedNotice");
+ assert.equal(previewNotice(true,"venom",false,true,false),"previewDelayedNotice");
+ assert.equal(previewNotice(true,"raw",false,false,true),"previewDelayedNotice");
+ assert.equal(previewNotice(false,"raw",true,true,true),null);
+ for(const language of ["pl","en","de"] as const)assert.notEqual(translate(language,"visionPreviewRestarting"),"visionPreviewRestarting");
+});
+test("recovery errors clear only after a confirmed fresh observation",()=>{
+ const state={mode:"observe",running:true,stale:false},goals={observe:true};
+ assert.equal(freshObservation(state,goals),true);
+ for(const row of [{...state,mode:"drive"},{...state,running:false},{...state,stale:true},{...state,stale:undefined},{}]){
+  assert.equal(freshObservation(row,goals),false);
+ }
+ assert.equal(freshObservation(state,{observe:false}),false);
+ assert.equal(freshObservation(state,{}),false);
+});
+test("recovery brackets preview polling and late processed GETs cannot publish old GO",()=>{
+ const effects=matchingNodes(navigationSource,node=>ts.isCallExpression(node)&&node.expression.getText(navigationSource)==="useEffect");
+ const recovery=effects.find(node=>node.getText(navigationSource).includes('client.mutate("/goal/s14_venom_navigation"'));
+ assert.ok(recovery);
+ const source=recovery.getText(navigationSource);
+ assert.ok(source.indexOf("setCameraTransition(true)")<source.indexOf('client.mutate("/goal/s14_venom_navigation"'));
+ assert.ok(source.indexOf('client.mutate("/goal/s15_venom_perception"')<source.indexOf("await readState()"));
+ assert.ok(source.indexOf(".finally(")<source.indexOf("setCameraTransition(false)"));
+ const client=fs.readFileSync(new URL("../../web-next/lib/use-rider.ts",import.meta.url),"utf8");
+ const fetchStart=client.indexOf("const fetchFrame =");
+ const dispatch=client.indexOf("const response = await fetch",fetchStart);
+ assert.ok(client.indexOf("if (!currentPreview()) return;",fetchStart)<dispatch);
+ assert.ok(client.indexOf("!currentPreview()",dispatch)>dispatch);
+ assert.ok(client.indexOf("!currentPreview()",client.indexOf("await decodePreview",dispatch))>dispatch);
+ assert.ok(client.includes('cameraStream === "venom" && cameraTransition'));
+ assert.ok(client.includes('if (!cameraStream || !["control", "vision"].includes(section) || processedTransition) return;'));
+ assert.ok(client.includes("stale: true, knownFreshness: false"));
 });

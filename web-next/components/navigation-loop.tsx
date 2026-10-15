@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Play, Square, RefreshCw } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 import { data, errorCode, formatNumber, formatTime, record, type JsonRecord } from "../lib/model";
-import { calibrationAcceptance, calibrationMatches, calibrationScope, decisionView, executionHeadline, freshPolicyFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, motionPermission, stoppingZone, stoppingZoneValues, trialBlock, trialPreparation, trialPreparationTitle, trialPreparationErrorKey, trialDiagnostics, trialStopReasonKey, trialOutcomeTone } from "../lib/loop-controls";
+import { calibrationAcceptance, calibrationMatches, calibrationScope, decisionView, executionHeadline, freshPolicyFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, motionPermission, stoppingZone, stoppingZoneValues, trialBlock, trialPreparation, trialPreparationTitle, trialPreparationErrorKey, trialDiagnostics, trialStopReasonKey, trialOutcomeTone, freshObservation } from "../lib/loop-controls";
 import type { RiderClient } from "../lib/use-rider";
 import type { Translator } from "../lib/i18n";
 import { LoopDecision } from "./loop-decision";
@@ -42,12 +42,13 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
   const trialArmed=useRef(false);
   const operationEpoch=useRef(0);
   const operationGeneration=useRef("");
-  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
+  const {setCameraTransition}=client;
+  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;setCameraTransition(false);};},[setCameraTransition]);
   const connected=client.canMutate;
   const session=client.status?.connection.session;
   useEffect(()=>{
     const abort=new AbortController();let timer:ReturnType<typeof setTimeout>;let configured=false;let reading=false;
-    setLoopState({stale:true});setGoals({});setRuntime({});setTrialFailure(null);setRecoveryFailure(null);
+    setLoopState({stale:true});setGoals({});setRuntime({});setTrialFailure(null);
     if(!connected)return ()=>abort.abort();
     setLoading(true);setReadError("");
     const apply=(row:JsonRecord)=>{setLoopState(record(row.status));setDetector(record(row.detector));setGoals(record(row.goals));};
@@ -196,7 +197,7 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
   };
   const runTrial=async()=>{
     if(!policy||trialUnavailable||operation||loading||phase==="running"&&goals.drive===true)return;
-    client.setNotice(null);setOperation("check");setError("");setTrialFailure(null);setRecoveryFailure(null);setTrialResult("trialChecking");setTrialStopReason("");trialArmed.current=false;
+    client.setNotice(null);setOperation("check");setError("");setTrialFailure(null);setTrialResult("trialChecking");setTrialStopReason("");trialArmed.current=false;
     const origin=client.currentSession();operationEpoch.current=client.currentMotionEpoch();operationGeneration.current=client.currentGeneration();
     trialSession.current=origin;
     const task=(async()=>{
@@ -221,7 +222,7 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
       ||loopState.mode!=="drive"||loopState.running!==false||loopState.latched!==true)return;
     const reason=String(loopState.stop_reason??"");
     if(["navigation_stopped","operator_stop","process_signal"].includes(reason))return;
-    trialArmed.current=false;setError("");setTrialStopReason(reason);setTrialResult("trialEnded");setOperation("start");
+    trialArmed.current=false;setError("");setTrialStopReason(reason);setTrialResult("trialEnded");setOperation("start");setCameraTransition(true);
     const origin=client.currentSession();
     const task=(async()=>{
       if(stopping.current||client.currentSession()!==origin)return;
@@ -234,9 +235,12 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
     })();startTask.current=task;
     void task.catch(err=>{if(!stopping.current)setRecoveryFailure({runId:String(loopState.run_id??""),code:errorCode(err)});}).finally(()=>{
       if(startTask.current===task)startTask.current=null;
-      if(mounted.current&&!stopping.current)setOperation(null);
+      if(mounted.current){setCameraTransition(false);if(!stopping.current)setOperation(null);}
     });
-  },[client,connected,failure,loopState,operation]);
+  },[client,connected,failure,loopState,operation,setCameraTransition]);
+  useEffect(()=>{
+    if(freshObservation(loopState,goals))setRecoveryFailure(null);
+  },[loopState,goals]);
   const observeBlock=policy?loopBlock({...policy,mode:"observe"},runtime,detector,connected,dirty,client.status):"loopLoadFailed";
   const trialUnavailable=trialBlock(policy,runtime,detector,connected,dirty,client.status);
   const decision=record(loopState.decision);

@@ -38,3 +38,11 @@ export async function decodePreview(
     if (abort) signal.removeEventListener("abort", abort);
   }
 }
+
+
+/** A handoff invalidates in-flight processed frames, even after polling resumes. */
+export function previewRequestCurrent(
+  kind: "camera" | "face", path: string, transitioning: boolean, requestEpoch: number, currentEpoch: number,
+): boolean {
+  return kind !== "camera" || path !== "/camera/venom" || !transitioning && requestEpoch === currentEpoch;
+}

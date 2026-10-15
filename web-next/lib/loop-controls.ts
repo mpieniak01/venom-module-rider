@@ -163,7 +163,8 @@ export function executionHeadline(state:JsonRecord,goals:JsonRecord,status:Rider
   return "permissionVenomNo";
 }
 
-export function previewNotice(stale:boolean,selected:string,current:boolean|undefined,running:boolean|undefined):string|null {
+export function previewNotice(stale:boolean,selected:string,current:boolean|undefined,running:boolean|undefined,transitioning=false):string|null {
+  if(selected==="venom"&&transitioning)return "visionPreviewRestarting";
   if(!stale&&!(selected==="venom"&&current===false))return null;
   return selected==="venom"&&running===false?"previewPausedNotice":"previewDelayedNotice";
 }
@@ -259,4 +260,9 @@ export function trialStopReasonKey(reason: unknown): string {
 /** Only an explicitly confirmed Pi completion is a neutral terminal outcome. */
 export function trialOutcomeTone(reason: unknown): "neutral" | "error" {
   return reason === "trial_completed" ? "neutral" : "error";
+}
+
+
+export function freshObservation(state: JsonRecord, goals: JsonRecord): boolean {
+  return goals.observe === true && state.mode === "observe" && state.running === true && state.stale === false;
 }

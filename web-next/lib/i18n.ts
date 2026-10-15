@@ -1,5 +1,6 @@
 // Module-owned translations. Every key contains PL, EN and DE by construction.
 export const messages = {
+  visionPreviewRestarting: ["Wznawianie podglądu po jeździe", "Resuming preview after driving", "Vorschau wird nach der Fahrt fortgesetzt"],
   "vision.reason.trial_completed": ["Próba zakończona: minęło pierwotne okno zgody ARM. Silniki zatrzymane.", "Trial completed: its original ARM permission window ended. Motors are stopped.", "Versuch beendet: Das ursprüngliche ARM-Freigabefenster ist abgelaufen. Die Motoren sind gestoppt."],
   trialStartHelp: ["Jedno kliknięcie przygotowuje kamerę, analizę i sterowanie na Pi. Próba: do 10 s, krótkie impulsy przy wolnej drodze, postój przy przeszkodzie. STOP kończy próbę.", "One click prepares camera, analysis and control on Pi. Trial: up to 10 s, short pulses on a clear path, pause for obstacles. STOP ends the trial.", "Ein Klick bereitet Kamera, Analyse und Steuerung auf Pi vor. Versuch: bis zu 10 s, kurze Impulse bei freiem Weg, Pause bei Hindernissen. STOP beendet den Versuch."],
   observationOptional: ["Podgląd bez jazdy (opcjonalnie)", "Preview without driving (optional)", "Vorschau ohne Fahrt (optional)"],
