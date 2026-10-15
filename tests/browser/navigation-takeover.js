@@ -7,10 +7,11 @@ async (page) => {
     await page.goto("about:blank");await page.unroute("**/api/v1/rider/**");
     const sha="a".repeat(64),calls=[];
     let policy={revision:1,mode:"observe",speed:.1,max_motion_ms:150,decision_budget_ms:300,corridor:[.35,.65,.65,.95],perception:{engine:"depth_plane",residual_limit:.06,outlier_limit:.005,slope_min:2},verified:true,calibration_id:"operator-fixture",model_sha256:sha};
-    if(mode==="steering")policy.avoidance={protocol_version:3,enabled:true,sweep_verified:true,mirrored:false,turn_speed:.05,turn_ms:100,max_turn_pulses:3};
+    if(mode==="steering"||mode==="ground")policy.avoidance={protocol_version:3,enabled:true,sweep_verified:true,mirrored:false,turn_speed:.05,turn_ms:100,max_turn_pulses:3};
+    if(mode==="ground")policy.avoidance={...policy.avoidance,max_stalled_corrections:2,progress_min_delta:.03,geometry:{mode:"ground",fx:.5,fy:.5,cx:.5,cy:.5,radius_ratio:.35,lookahead_ratio:1.5,max_heading_deg:45}};
     let observing=true,driving=false,driveRequested=false,armed=false,owner=null,generation="fixture-initial";
     let obstacle=false,mediaFailure=false,starting=false,cancelled=false,terminal=null,armCount=0,cameraOn=true;
-    const detector={configured:true,loaded:true,sha256:sha,purpose:"relative_ground_geometry",drive_supported:true,clear_frames_required:3,supported_protocol_versions:[1,2,3]};
+    const detector={configured:true,loaded:true,sha256:sha,purpose:"relative_ground_geometry",drive_supported:true,clear_frames_required:3,supported_protocol_versions:[1,2,3],ground_geometry_supported:true};
  const settings={"schema_version": 2, "revision": 0, "values": {"linear_speed": 0.2, "turn_speed": 0.35, "pulse_duration": 0.25, "speed_limit": 1.0, "linear_rate": 3.0, "turn_rate": 4.0, "linear_deceleration": 3.0, "turn_deceleration": 4.0, "reversal_pause": 0.0, "ramp_mode": 0}, "directions": {"forward": {"minimum": 0.0, "maximum": 1.0, "step": 0.01, "speed": 0.2, "duration": 0.25}, "backward": {"minimum": 0.0, "maximum": 1.0, "step": 0.01, "speed": 0.2, "duration": 0.25}, "left": {"minimum": 0.0, "maximum": 1.0, "step": 0.01, "speed": 0.35, "duration": 0.25}, "right": {"minimum": 0.0, "maximum": 1.0, "step": 0.01, "speed": 0.35, "duration": 0.25}}, "profiles": {}, "active_profile": null, "contract_id": "rider.manual_settings", "contract_version": 2, "limits": {"linear_speed": 1.0, "turn_speed": 1.0, "pulse_duration": 1.0, "speed_limit": 1.0, "linear_rate": 100.0, "turn_rate": 100.0, "linear_deceleration": 100.0, "turn_deceleration": 100.0, "reversal_pause": 0.25, "ramp_mode": 2}, "actuation": false, "units": "normalized_command", "legacy_units_scope": "command_magnitude_only; use parameter_schema for individual fields", "parameter_schema": {"version": 1, "actuator_fields": {"height": {"type": "integer", "unit": "sdk_height_command", "display_unit": "SDK", "display_factor": 1, "display_precision": 0, "minimum": 75, "maximum": 115, "step": 1, "meaning": "height_command_not_physical_measurement"}, "balance": {"type": "boolean", "unit": "enabled", "display_unit": "", "meaning": "roll_compensation_not_full_balance_shutdown"}}, "ramp_modes": [{"value": 0, "id": "linear", "label_pl": "Liniowy", "label_en": "Linear"}, {"value": 1, "id": "smooth_s", "label_pl": "\u0141agodny S", "label_en": "Smooth S"}, {"value": 2, "id": "logarithmic", "label_pl": "Logarytmiczny", "label_en": "Logarithmic"}], "direction_fields": {"speed": {"type": "number", "unit": "normalized_command", "display_unit": "%", "display_factor": 100, "minimum": 0, "maximum": 1, "display_precision": 1, "meaning": "command_magnitude_not_physical_speed"}, "minimum": {"type": "number", "unit": "normalized_command", "display_unit": "%", "display_factor": 100, "minimum": 0, "maximum": 1, "display_precision": 1, "meaning": "operator_defined_minimum_nonzero_command"}, "maximum": {"type": "number", "unit": "normalized_command", "display_unit": "%", "display_factor": 100, "minimum": 0, "maximum": 1, "display_precision": 1, "meaning": "profile_command_ceiling"}, "step": {"type": "number", "unit": "normalized_command", "display_unit": "%", "display_factor": 100, "minimum": 0, "maximum": 1, "display_precision": 3, "meaning": "manual_adjustment_step", "exclusive_minimum": true}, "duration": {"type": "number", "unit": "s", "display_unit": "ms", "display_factor": 1000, "minimum": 0.01, "maximum": 1.0, "display_precision": 0, "meaning": "whole_click_pulse"}}, "value_fields": {"linear_rate": {"type": "number", "unit": "normalized_command/s", "display_unit": "%/s", "display_factor": 100, "minimum": 0.001, "maximum": 100.0, "display_precision": 1, "meaning": "linear_rate"}, "turn_rate": {"type": "number", "unit": "normalized_command/s", "display_unit": "%/s", "display_factor": 100, "minimum": 0.001, "maximum": 100.0, "display_precision": 1, "meaning": "turn_rate"}, "linear_deceleration": {"type": "number", "unit": "normalized_command/s", "display_unit": "%/s", "display_factor": 100, "minimum": 0.001, "maximum": 100.0, "display_precision": 1, "meaning": "linear_deceleration"}, "turn_deceleration": {"type": "number", "unit": "normalized_command/s", "display_unit": "%/s", "display_factor": 100, "minimum": 0.001, "maximum": 100.0, "display_precision": 1, "meaning": "turn_deceleration"}, "reversal_pause": {"type": "number", "unit": "s", "display_unit": "ms", "display_factor": 1000, "minimum": 0, "maximum": 0.25, "display_precision": 0, "meaning": "pause_before_reversal"}}, "constraints": [{"id": "direction_range", "rule": "minimum <= maximum"}, {"id": "direction_speed", "rule": "speed == 0 or minimum <= speed <= maximum"}, {"id": "direction_step", "rule": "step > 0; zero-width range permits a disabled slider"}, {"id": "pulse_minimum", "rule": "minimum <= duration / (1/acceleration + 1/deceleration)"}]}, "control_modes": {"version": 1, "supported": ["pulse", "hold", "release"], "default": "pulse", "directions": ["forward", "backward", "left", "right"], "hold_renewal_ms": 150, "hold_timeout_ms": 500, "click_threshold_ms": 180, "request_ttl_ms": 500, "replacement": "latest_valid_sequence_wins", "release": "decelerate_keep_armed", "release_timeout_ms": 500, "stop": "immediate_disarm", "hold_permission": "operator_manual_panel", "settings_change": "idle_only", "command": {"endpoint": "/api/control", "action": "move", "fields": ["direction", "mode", "device_settings", "settings_revision"]}}, "authority": "device", "profile_modified": false, "legacy_aliases": {"linear_speed": "directions.forward.speed", "turn_speed": "directions.right.speed", "pulse_duration": "maximum_direction_duration"}};
     const state=()=>{
       const run_id=driving?"fixture-drive":"fixture-observe";
@@ -69,6 +70,27 @@ async (page) => {
     await page.goto("http://localhost:3300/rider");await page.bringToFront();
     await page.getByTestId("loop-start").waitFor();
     await wait(async()=>!await page.getByTestId("loop-start").isDisabled(),"start button unavailable");
+    if(mode==="ground"){
+      await page.getByTestId("loop-stop").click();
+      await wait(()=>!observing&&!driveRequested&&!cameraOn,"ground edit STOP incomplete");
+      await wait(async()=>!await page.getByTestId("loop-stop").isDisabled(),"ground edit still busy");
+      const details=page.locator("details").filter({has:page.getByTestId("ground-geometry-settings")});
+      await details.locator("summary").click();
+      const fields=page.getByTestId("ground-geometry-settings").locator("input");
+      check(await fields.count()===7,"projection/footprint controls missing");
+      await fields.nth(0).fill("");
+      await details.getByRole("button").filter({hasText:"Zapisz"}).click();
+      await wait(()=>policy.avoidance.geometry.fx===null,"empty focal was not persisted as uncalibrated");
+      check(await page.getByTestId("loop-start").isDisabled(),"uncalibrated ground enabled trial");
+      check(!policy.verified&&!policy.avoidance.sweep_verified,"geometry edit reused acceptance");
+      await fields.nth(0).fill("0.55");
+      await fields.nth(4).fill("0.4");
+      await fields.nth(5).fill("1.6");
+      await details.getByRole("button").filter({hasText:"Zapisz"}).click();
+      await wait(()=>policy.avoidance.geometry.fx===.55&&policy.avoidance.geometry.radius_ratio===.4&&policy.avoidance.geometry.lookahead_ratio===1.6,"projection edits not persisted");
+      check(armCount===0&&!armed&&!driving,"ground calibration edit actuated");
+      return {mode,result:"PASS",geometry:policy.avoidance.geometry};
+    }
     if(mode==="editor"){
       const original=JSON.stringify(policy.corridor),revision=policy.revision;
       await page.getByTestId("zone-edit").click();
@@ -156,5 +178,5 @@ async (page) => {
     check(!calls.some(c=>c.path==="/control"&&c.body.action!=="stop"),"browser issued actuators directly");
     return {mode,result:"PASS",trialRequests:calls.filter(c=>c.path==="/navigation/trial").length,armCount};
   };
-  return {result:"PASS",scenarios:[await run("editor"),await run("remote"),await run("zone"),await run("positive"),await run("steering"),await run("cancel"),await run("terminal")]};
+  return {result:"PASS",scenarios:[await run("ground"),await run("editor"),await run("remote"),await run("zone"),await run("positive"),await run("steering"),await run("cancel"),await run("terminal")]};
 }

@@ -117,6 +117,11 @@ export function trialBlock(policy: JsonRecord|null, runtime:JsonRecord, detector
   if(!connected)return "loopOffline";
   if(!policy)return "loopLoadFailed";
   if(dirty)return "loopUnsaved";
+  const avoidance=record(policy.avoidance),geometry=record(avoidance.geometry);
+  if(avoidance.enabled===true&&avoidance.protocol_version===3&&geometry.mode==="ground"){
+    if(detector.ground_geometry_supported!==true)return "geometryHostUpdate";
+    if(!["fx","fy","radius_ratio"].every(key=>typeof geometry[key]==="number"&&Number.isFinite(geometry[key])&&Number(geometry[key])>0))return "geometryCalibrationMissing";
+  }
   if(runtime.drive!==true)return runtime.drive_reason==="navigation_executor_update_required"?"loopExecutorUpdate":"loopRuntimeMissing";
   if(detector.configured!==true)return "loopNoModel";
   if(detector.drive_supported===false)return "loopDepthObservation";
@@ -140,7 +145,16 @@ export function motionPermission(state:JsonRecord, goals:JsonRecord, policy:Json
   const manual=known?navigationAvailable(status)&&safety.can_move===true&&ready:null;
   let reason="permissionUnknown", allowed=false;
   if(known){
+    const geometry=record(record(policy?.avoidance).geometry),reference=record(decision.ground_reference);
+    const normal=reference.normal;
+    const groundValid=geometry.mode!=="ground"||record(policy?.avoidance).enabled!==true
+      ||decision.geometry==="ground_capsule"&&Array.isArray(normal)&&normal.length===3
+        &&normal.every(v=>typeof v==="number"&&Number.isFinite(v))
+        &&Number(normal[1])>=.2&&normal.reduce((sum:number,v:number)=>sum+v*v,0)>=.9&&normal.reduce((sum:number,v:number)=>sum+v*v,0)<=1.1
+        &&typeof reference.height==="number"&&Number.isFinite(reference.height)&&reference.height>0
+        &&typeof decision.ground_support==="number"&&Number.isFinite(decision.ground_support)&&decision.ground_support>=.3&&decision.ground_support<=1;
     if(!ready)reason="permissionExecutorBlocked";
+    else if(!groundValid)reason="permissionDecisionStop";
     else if(view.current&&view.vision!=="go"&&!turning)reason="permissionDecisionStop";
     else if(goals.drive!==true||state.mode!=="drive")reason=goals.observe===true?"permissionObservation":"permissionIdle";
     else if(safety.state!=="ARMED"||safety.can_move!==true)reason="permissionDisarmed";

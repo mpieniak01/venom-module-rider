@@ -552,3 +552,28 @@ test("v3 steering needs clear near guard and connecting path in addition to side
    assert.equal(motionPermission(blocked,{drive:true},policy,permissionDetector,permissionStatus()).venom,false);
  }
 });
+
+test("ground mode requires configured projection and host support before a trial",()=>{
+ const geometry={mode:"ground",fx:.5,fy:.5,radius_ratio:.35};
+ const policy={...permissionPolicy,avoidance:{enabled:true,protocol_version:3,geometry}};
+ const detector={...permissionDetector,configured:true,ground_geometry_supported:true};
+ assert.equal(trialBlock(policy,{drive:true},detector,true,false,permissionStatus()),"");
+ assert.equal(trialBlock(policy,{drive:true},{...detector,ground_geometry_supported:false},true,false,permissionStatus()),"geometryHostUpdate");
+ for(const key of ["fx","fy","radius_ratio"]){
+  for(const value of [null,NaN,0,undefined]){
+   const invalid={...policy,avoidance:{...policy.avoidance,geometry:{...geometry,[key]:value}}};
+   assert.equal(trialBlock(invalid,{drive:true},detector,true,false,permissionStatus()),"geometryCalibrationMissing");
+  }
+ }
+ const changed={...policy,avoidance:{...policy.avoidance,geometry:{...geometry,radius_ratio:.4}}};
+ assert.equal(loopSettingsValues(policy,changed).verified,false);
+});
+test("ground permission matches Pi evidence instead of displaying a bare GO as valid",()=>{
+ const policy={...permissionPolicy,avoidance:{enabled:true,geometry:{mode:"ground"}}};
+ const decision={...permissionLoop.decision,geometry:"ground_capsule",ground_support:.8,ground_reference:{normal:[0,0.6,.8],height:1}};
+ const state={...permissionLoop,decision};
+ assert.equal(motionPermission(state,{drive:true},policy,permissionDetector,permissionStatus()).venom,true);
+ for(const patch of [{ground_support:.1},{ground_reference:{}},{ground_reference:{normal:[0,0,3],height:1}},{geometry:"image"}]){
+  assert.equal(motionPermission({...state,decision:{...decision,...patch}},{drive:true},policy,permissionDetector,permissionStatus()).venom,false);
+ }
+});

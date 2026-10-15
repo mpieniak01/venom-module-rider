@@ -176,6 +176,12 @@ class DepthDetector:
         )
 
     def detect(self, payload, corridor, settings):
+        return self._detect(payload, corridor, settings)
+
+    def detect_ground(self, payload, corridor, settings, geometry):
+        return self._detect(payload, corridor, settings, geometry)
+
+    def _detect(self, payload, corridor, settings, geometry=None):
         import numpy as np
         import torch
         from PIL import Image, ImageDraw
@@ -215,7 +221,12 @@ class DepthDetector:
             .cpu()
             .numpy()
         )
-        assessment = assess_depth(depth, corridor, settings)
+        if geometry is None or geometry.mode == "image":
+            assessment = assess_depth(depth, corridor, settings)
+        else:
+            from .adaptive_ground import assess
+
+            assessment = assess(depth, corridor, settings, geometry)
         errors = assessment.pop("_errors")
         colors = np.full((*depth.shape, 3), (255, 185, 35), dtype=np.uint8)
         colors[np.isfinite(errors) & (errors <= settings.residual_limit)] = (
@@ -224,31 +235,51 @@ class DepthDetector:
             100,
         )
         colors[np.isfinite(errors) & (errors > settings.residual_limit)] = (240, 60, 65)
-        if assessment["reason"] == "depth_ground_orientation":
+        if assessment["state"] == "unknown":
             colors[np.isfinite(errors)] = (255, 185, 35)
         preview = Image.blend(image, Image.fromarray(colors), 0.4)
         x0, y0, x1, y1 = corridor
         draw = ImageDraw.Draw(preview)
-        reference_y0 = assessment["plane_reference_corridor"][1]
-        if reference_y0 < y0:
-            # Dashed blue: fitting context, not an additional STOP zone.
-            left, right = int(x0 * (image.width - 1)), int(x1 * (image.width - 1))
-            top, bottom = (
-                int(reference_y0 * (image.height - 1)),
-                int(y0 * (image.height - 1)),
-            )
-            for pos in range(left, right, 10):
-                draw.line(
-                    (pos, top, min(pos + 5, right), top), fill=(80, 170, 255), width=2
+        overlays = assessment.pop("_path_overlay", None)
+        if overlays is not None:
+            for side, points in overlays.items():
+                previous = None
+                for point in points:
+                    current = (
+                        (point[0] * image.width, point[1] * image.height)
+                        if point
+                        else None
+                    )
+                    if previous is not None and current is not None:
+                        draw.line(
+                            (previous, current),
+                            fill="white" if side == "center" else (80, 170, 255),
+                            width=2,
+                        )
+                    previous = current
+        elif geometry is None or geometry.mode == "image":
+            reference_y0 = assessment["plane_reference_corridor"][1]
+            if reference_y0 < y0:
+                # Dashed blue: fitting context, not an additional STOP zone.
+                left, right = int(x0 * (image.width - 1)), int(x1 * (image.width - 1))
+                top, bottom = (
+                    int(reference_y0 * (image.height - 1)),
+                    int(y0 * (image.height - 1)),
                 )
-            for side in (left, right):
-                for pos in range(top, bottom, 10):
+                for pos in range(left, right, 10):
                     draw.line(
-                        (side, pos, side, min(pos + 5, bottom)),
+                        (pos, top, min(pos + 5, right), top),
                         fill=(80, 170, 255),
                         width=2,
                     )
-        draw_stop_border(draw, depth.shape, corridor)
+                for side in (left, right):
+                    for pos in range(top, bottom, 10):
+                        draw.line(
+                            (side, pos, side, min(pos + 5, bottom)),
+                            fill=(80, 170, 255),
+                            width=2,
+                        )
+            draw_stop_border(draw, depth.shape, corridor)
         stream = io.BytesIO()
         preview.save(stream, format="JPEG", quality=85)
         return {

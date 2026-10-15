@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .ground_config import GroundGeometry
+
 
 class AvoidanceSettings(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
@@ -14,6 +16,11 @@ class AvoidanceSettings(BaseModel):
     turn_speed: float = Field(default=0.05, ge=0.01, le=0.1)
     turn_ms: int = Field(default=100, ge=50, le=150)
     max_turn_pulses: int = Field(default=3, ge=1, le=5)
+    max_stalled_corrections: int = Field(default=2, ge=1, le=5)
+    progress_min_delta: float = Field(default=0.03, ge=0.0, le=0.3)
+    geometry: GroundGeometry = Field(
+        default_factory=lambda: GroundGeometry(mode="image")
+    )
 
 
 def plan(result, previous, settings, phase, eligible):

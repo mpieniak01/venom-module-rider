@@ -25,6 +25,13 @@ class VisionLoop:
         self.previews = OrderedDict()
         self.preview_changed = asyncio.Event()
 
+    def _detect_depth(self, payload, frame):
+        if frame.protocol_version == 3 and frame.avoidance.geometry.mode == "ground":
+            return self.depth_detector.detect_ground(
+                payload, frame.corridor, frame.perception, frame.avoidance.geometry
+            )
+        return self.depth_detector.detect(payload, frame.corridor, frame.perception)
+
     def status(self, perception=None):
         selected = (
             self.depth_detector
@@ -36,6 +43,9 @@ class VisionLoop:
             "busy": (self.depth_busy if selected is self.depth_detector else self.busy)
             is not None,
             "supported_protocol_versions": [1, 2, 3],
+            "ground_geometry_supported": callable(
+                getattr(self.depth_detector, "detect_ground", None)
+            ),
             "protocol_version": 1,
             "max_frame_bytes": 512 * 1024,
             "max_deadline_ms": 500,
@@ -96,12 +106,7 @@ class VisionLoop:
         selected = self.depth_detector if depth_mode else self.detector
         if depth_mode:
             task = asyncio.create_task(
-                asyncio.to_thread(
-                    self.depth_detector.detect,
-                    payload,
-                    frame.corridor,
-                    frame.perception,
-                )
+                asyncio.to_thread(self._detect_depth, payload, frame)
             )
         else:
             task = asyncio.create_task(
@@ -143,6 +148,7 @@ class VisionLoop:
                             if not key.startswith("_")
                         },
                         "stage": "depth_assessment",
+                        "avoidance": frame.avoidance.model_dump(mode="json"),
                         "device_id": device_id,
                         "run_id": frame.run_id,
                         "frame_id": frame.frame_id,
@@ -157,6 +163,9 @@ class VisionLoop:
             except Exception:
                 # Storage must neither grant nor revoke a visual decision.
                 pass
+        # Full heading grid stays in the depth trace, not Pi's bounded response
+        # or the preview HTTP header. Keep only selected paths and gap extents.
+        result.pop("heading_candidates", None)
         elapsed = (self.clock() - now) * 1000
         if elapsed + frame.age_ms >= frame.deadline_ms:
             result = {
@@ -241,6 +250,9 @@ class VisionLoop:
                 maneuver_clear_count=3 if action.startswith("steer_") else 0,
                 maneuver_phase=motion_reason,
                 turn_count=planner["turns"],
+                stalled_corrections=planner.get("stalled", 0),
+                progress_delta=planner.get("progress_delta"),
+                pose_resets=planner.get("pose_resets", 0),
             )
         image = result.pop("_preview", None)
         if image is not None:

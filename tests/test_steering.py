@@ -11,7 +11,9 @@ from venom_module_rider.avoidance import AvoidanceSettings
 from venom_module_rider.depth_detector import PerceptionSettings, assess_depth
 from venom_module_rider.steering import plan
 
-SETTINGS = AvoidanceSettings(enabled=True, sweep_verified=True)
+SETTINGS = AvoidanceSettings(
+    enabled=True, sweep_verified=True, geometry={"mode": "image"}
+)
 
 
 def obstacle(side="left"):

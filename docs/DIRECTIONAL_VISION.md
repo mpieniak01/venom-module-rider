@@ -1,109 +1,118 @@
-# Editable zones and bounded directional trials
+# Directional vision and bounded steering
 
-The control screen supports dragging and resizing the STOP rectangle on the
-current camera image, restoring the near-zone preset, and editing relative depth
-residual and outlier sensitivity beside the preview. Changes remain drafts until
-Save. Saving stops producers, checks the Pi revision, writes its existing policy,
-and resumes observation only if observation was previously active. Save never
-arms the robot. Editing is unavailable during a driving trial. Numeric coordinates
-remain available under the existing advanced settings.
+## Operator flow and compatibility
 
-The close STOP region and wider ground-fit reference are separate. The editor
-uses normalized image coordinates with letterboxing accounted for. The detector
-rejects masks below 64 pixels. Relative depth deviations and pixel fractions are
-not obstacle height, distance or a measured stopping envelope.
+One drive action prepares the camera, analysis and Pi authority for the existing
+10-second trial. Manual takeover and the separate STOP controls remain available.
+Avoidance is disabled by default. Protocol v1 retains forward-only behavior;
+v2 retains STOP followed by yaw-only turns. Explicit v3 uses steer_left/right:
+the existing low forward command and yaw are submitted together.
 
-## Directional assessment
+The image mode keeps the draggable STOP rectangle, near preset and residual/
+outlier settings beside the preview. Save checks the Pi revision, stops producers
+and resumes observation only if it was previously active. Save never arms.
+Old policies without geometry migrate to image mode; they do not silently gain
+a new projection. The Pi-owned policy remains the shared source for all panels.
 
-One DA2 depth map and one shared ground plane produce left, center and right
-sector assessments. Each reports coverage, state, near/far outlier counts,
-fraction, centroid and bounds in normalized image coordinates. Incomplete or
-incorrectly oriented sectors report UNKNOWN. No second model inference is added.
-Three consecutive valid samples report growing/stable/receding image occupancy;
-this is diagnostic, not measured approach velocity or time to collision. Gaps
-over 500 ms, unknown data and turn settling reset trend continuity.
+## Adaptive ground mode
 
-Without avoidance, side labels follow the image. With protocol v2 avoidance,
-left/right decisions follow the robot; the saved mirrored-camera setting swaps
-image sides. Centroid and bounds explicitly remain in image coordinates.
-The operator must verify actual camera orientation and yaw direction.
+V3 also supports avoidance.geometry.mode=ground. The same single DA2 inference
+provides the depth map; no second model is loaded. A deterministic robust inverse-Z
+plane fit uses broad lower-image support. Every trimmed refit must retain wide,
+near and sufficient support. A vertical front face cannot replace the floor
+merely because it is large. Missing support produces UNKNOWN.
 
-## Legacy optional protocol v2
+Projection uses the plane normal and model-scale height estimated from this
+capture, replacing the legacy fixed image-slope test. This is vision-derived
+geometry, not synchronized IMU or measured height. Small changes are evaluated in
+the current ground coordinates. A normal change over 3 degrees or model height
+change over 15% clears stability history; it never restores the turn budget.
+Progress comparisons require a stricter 1 degree / 5% match.
 
-Avoidance is disabled by default. Old saved Pi policies migrate to disabled
-avoidance; the forward-only protocol v1 remains available. An enabled v2 request
-requires depth_plane. Venom advertises supported_protocol_versions [1, 2]; the
-panel requires v2 support before enabling avoidance. Pi independently checks the
-version and every run/frame/sequence/revision/model and freshness permit.
+The planner checks 49 headings over the configured range. Each projects a capsule
+inflated by a conservative circumscribed body radius. Continuous groups of clear
+headings form gaps; left/right summaries report an available passage, not that
+the entire half-image is free. Every selected path needs full image coverage and
+a clear near guard. Deviating depth points are checked against the capsule as
+well as sampled rays so a thin observed obstacle cannot fall between samples.
+Recesses are blocked at the missing ground intersection.
 
-Pi owns these avoidance policy values:
-- enabled, sweep_verified, mirrored: booleans;
-- turn_speed: 0.01–0.1 SDK, default 0.05;
-- turn_ms: 50–150 ms, default 100;
-- max_turn_pulses: 1–5 per original trial, default 3.
+White preview outlines show the straight capsule; blue outlines show candidate
+side passages. An outline is interrupted outside the camera field of view.
+Incomplete projection remains UNKNOWN. Ground mode replaces the image ROI editor
+with camera/footprint settings; a percentage rectangle is not a physical path.
 
-The v2 frame includes avoidance and motion_phase (ready or turn_settling).
-The response retains the v1 identity and TTL fields, adds directional sectors and
-maneuver_clear_count, and permits go, stop, turn_left or turn_right. Unknown
-versions/actions or malformed sector evidence are rejected by Pi.
+## Calibration fields
 
-The sequence is STOP, three distinct clear side observations, bounded yaw-only
-turn, new captures after the turn permit plus 100 ms settling, then three front
-CLEAR observations before forward motion. A locked side cannot oscillate to the
-other side mid-maneuver. Recesses, unavailable coverage, exhausted turn budget
-or missing consent produce STOP. The Pi also requires an actual preceding zero
-submission and verifies selected-sector coverage before a turn callback.
-All waiting and turns consume the existing total 10-second trial; no new ARM,
-watchdog extension or increase to the 0.1 SDK / 150 ms forward limit is added.
-Resuming means travel in the newly assessed heading, not a return to the old path.
+These fields live in the existing avoidance policy and existing revision/save
+transaction; there is no separate configuration service.
 
-## Acceptance status and tests
+| Field | Meaning |
+| --- | --- |
+| fx, fy | Focal lengths divided by delivered image width and height |
+| cx, cy | Principal point in normalized delivered-image coordinates |
+| radius_ratio | Conservative body radius / minimum accepted camera height |
+| lookahead_ratio | Forward horizon in current inferred ground-height units |
+| max_heading_deg | Half-range of searched headings, default 45 degrees |
+| max_stalled_corrections | Consecutive comparable corrections without improvement, default 2 |
+| progress_min_delta | Minimum normalized clearance gain, default 0.03 |
 
-This is an experimental, paired module/Pi implementation. Existing recorded
-floor/box/dark-scene regressions remain applicable. They do not validate side
-clearance, swept-body clearance, yaw sign, thin lateral obstacles, corners or
-post-turn camera conditions. A frontal camera alone cannot establish side/rear
-clearance. Hardware acceptance on both directions remains outstanding; do not
-treat software test success or a motor ACK as observed physical success.
+The body radius must cover every robot point relative to the ground projection
+of the camera across accepted heights/poses, with a margin. Using the minimum
+physical camera height conservatively inflates this bound at higher poses.
+Intrinsics must correspond to actual resize/crop/rotation of the delivered
+image. Lens distortion must be characterized or corrected before acceptance;
+this path assumes a pinhole image. No SDK height command substitutes for a
+measurement. fx, fy and radius_ratio start empty: they are not guessed.
 
-Automated tests run the real Venom decision loop against a supplied copy of the
-real Pi DecisionLease, recording callbacks instead of contacting motors. Use
-RIDER_TEST_PI_LEASE for that private source locator. The existing full browser
-regression also covers pointer editing, draft-only changes and save/resume,
-besides trial admission, cancellation, visual pause, terminal STOP and takeover.
-Every Rider HTTP request is intercepted in that browser test.
+The preview explains missing calibration. The host advertises
+ground_geometry_supported. The Pi rejects nonzero ground commands without its
+configured projection and valid normalized ground-reference/support evidence.
 
-The host serves a generated copy under web-next/optional-modules. After editing
-module frontend sources, run the existing host command
-node web-next/scripts/prepare-optional-module-node-paths.mjs before browser checks.
-A successful module type check alone does not refresh this generated copy.
+## Maneuver and progress
 
+A v3 correction requires three distinct clear path observations and an accepted
+near guard. The chosen side stays locked. Frames captured before/during a
+correction cannot authorize subsequent nonzero output. Three new front CLEAR
+observations straighten the motion in its new heading.
 
-## Protocol v3: bounded correction during forward motion
+Comparable fresh post-correction observations measure the change in normalized
+front clearance. Insufficient gain increments the stalled counter; sufficient
+gain clears it. Uncertain or changed perspective cannot count as improvement.
+The independent max_turn_pulses limit still applies. Stagnation or an exhausted
+budget without a clear path produces terminal avoidance_no_progress. Later GO
+cannot revive it. UNKNOWN submits ZERO only within the original valid session;
+loss of feedback or operator/global STOP ends the run.
 
-Newly enabled avoidance uses explicit protocol_version=3 in the Pi policy and
-steer_left/steer_right actions. These commands submit the existing low forward
-speed and bounded yaw together. They do not reinterpret the legacy v2 yaw-only
-turn actions; old saved enabled policies without the field migrate to v2.
-Changing to v3 changes calibration scope and requires matching host capabilities.
+No speed, pulse, feedback budget or original ARM window is increased:
+forward <=0.1 SDK and <=150 ms; yaw 0.01–0.1 SDK and 50–150 ms.
+A heading candidate chooses the correction side; it is not a metric yaw command
+or a certified dynamic trajectory. Physical combined-vx/yaw sweep and braking
+must be validated for the configured limits.
 
-A v3 correction requires three distinct clear-side and connecting-path
-assessments, plus a clear near guard. Destination free space alone is insufficient.
-The connecting corridor is a slanted mask from the current near corridor to the
-candidate side; the near guard is the nearest third of the configured STOP ROI.
-Both share the existing plane and residual thresholds. This is explicitly an
-image-space approximation, not a calibrated metric swept-body simulation.
-Unknown orientation/coverage, a recess or a blocked connecting path cannot
-authorize a correction.
+## Validation boundary and next data PR
 
-Each correction keeps existing speed/pulse/freshness bounds. Pi rejects captures
-from before or during the correction for subsequent nonzero output. Three new
-front CLEAR assessments straighten the motion; the previous side remains locked
-until then. Exhausting max_turn_pulses without clearing the path produces
-terminal avoidance_no_progress, which cannot resume from a later GO.
+Software tests cover changed height/pitch/roll, boxes, thin obstacles, recesses,
+missing calibration, incomplete coverage, gap width, stagnation, one inference,
+rendering and real Venom-loop to real Pi-lease admission with recorded callbacks.
+Browser tests intercept every Rider request and cover editing, persistence,
+start/cancel/STOP and terminal outcomes. These are not physical acceptance.
 
-Current limitations: camera-height/pitch compensation, robust ground estimation
-with a foreground box, metric footprint projection and complete gap extraction
-remain unaccepted follow-ups. Weak recorded box inputs still return UNKNOWN/STOP;
-thresholds were not relaxed to force a turn. Software tests establish contract
-behavior, not that the actual robot can traverse the predicted image corridor.
+Historical weak box recordings remain negative examples; thresholds were not
+relaxed to force a correction. They lack calibrated intrinsics/body geometry,
+so the new ground mode cannot establish a physical turn from them. Dominant
+raised planes, monocular depth errors and unseen lateral/rear space remain
+limitations. This is experimental and stays disabled until calibrated.
+
+The next PR collects timestamped independent sequences: free floor and left/
+right/central/both-side obstacles, thin objects, recesses, light changes, accepted
+heights, pitch/roll transitions, and frames after real bounded corrections.
+Record camera intrinsics/image transforms, conservative body measurements,
+capture identity, configuration/model digest and executor outcome. Split tuning
+from held-out acceptance. Report false GO/STOP, side errors, flicker, latency,
+progress and observed trajectory/braking. A motor ACK is not observed movement.
+
+The host serves a generated frontend copy. After module UI edits, run the
+existing host web-next/scripts/prepare-optional-module-node-paths.mjs before
+browser checks. RIDER_TEST_PI_LEASE points tests at the paired Pi source copy;
+tests never contact motor hardware.
