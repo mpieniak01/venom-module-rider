@@ -1,0 +1,7 @@
+# Additional packages for an isolated research venv reusing host vision_depth.
+# Official SDK source is pinned in docs/DA3_RESEARCH.md; do not pip-install
+# its full exporter/3D dependency stack into the production Venom environment.
+addict==2.4.0
+imageio==2.37.2
+omegaconf==2.3.0
+einops==0.8.2
