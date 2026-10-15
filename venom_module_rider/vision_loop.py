@@ -4,6 +4,7 @@ import asyncio
 import time
 from collections import OrderedDict
 
+from . import depth_trace
 from .depth_detector import DepthDetector
 from .errors import RiderError
 from .floor_detector import FloorDetector
@@ -121,6 +122,35 @@ class VisionLoop:
                 self._drain(task)
             else:
                 task.add_done_callback(self._drain)
+        trace_depth = result.pop("_trace_depth", None)
+        if depth_mode and trace_depth is not None:
+            # Diagnostic only: exact input of this inference, never another RAW.
+            # Queueing/copy time remains inside the original decision budget.
+            try:
+                trace_id = depth_trace.submit(
+                    payload,
+                    trace_depth,
+                    {
+                        **{
+                            key: value
+                            for key, value in result.items()
+                            if not key.startswith("_")
+                        },
+                        "stage": "depth_assessment",
+                        "device_id": device_id,
+                        "run_id": frame.run_id,
+                        "frame_id": frame.frame_id,
+                        "sequence": frame.sequence,
+                        "config_revision": frame.config_revision,
+                    },
+                    frame.corridor,
+                    frame.perception,
+                )
+                if trace_id:
+                    result["depth_trace_id"] = trace_id
+            except Exception:
+                # Storage must neither grant nor revoke a visual decision.
+                pass
         elapsed = (self.clock() - now) * 1000
         if elapsed + frame.age_ms >= frame.deadline_ms:
             result = {

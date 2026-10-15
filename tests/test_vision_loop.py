@@ -807,3 +807,74 @@ async def test_depth_denies_execution_without_matching_operator_acceptance(
     assert result["vision_action"] == "go"
     assert result["action"] == "stop"
     await loop.close()
+
+
+async def test_exact_depth_trace_is_bound_to_admitted_frame_and_never_serialized(
+    monkeypatch,
+):
+    from venom_module_rider.depth_detector import PerceptionSettings
+
+    depth = np.ones((32, 32))
+
+    class TracedDetector(Detector):
+        def detect(self, *_):
+            return {
+                **super().detect(),
+                "_trace_depth": depth,
+                "model_sha256": "a" * 64,
+                "_preview": b"jpeg",
+            }
+
+    recorded = []
+
+    def capture(*args):
+        recorded.append(args)
+        return "queued-trace"
+
+    monkeypatch.setattr("venom_module_rider.depth_trace.submit", capture)
+    loop = VisionLoop(Detector())
+    loop.depth_detector = TracedDetector()
+    admitted = frame().model_copy(
+        update={"perception": PerceptionSettings(engine="depth_plane")}
+    )
+    result = await loop.decide("pi", admitted, b"exact-input")
+    payload, captured, assessment, corridor, settings = recorded[0]
+    assert payload == b"exact-input"
+    assert captured is depth
+    assert assessment["run_id"] == admitted.run_id
+    assert assessment["frame_id"] == admitted.frame_id
+    assert assessment["sequence"] == admitted.sequence
+    assert assessment["config_revision"] == admitted.config_revision
+    assert assessment["model_sha256"] == "a" * 64
+    assert not any(key.startswith("_") for key in assessment)
+    assert corridor == admitted.corridor
+    assert settings is admitted.perception
+    assert result["depth_trace_id"] == "queued-trace"
+    assert "_trace_depth" not in result
+    assert "_trace_depth" not in loop.preview("pi")[2]
+    assert result["action"] == "stop"  # still only one CLEAR
+    await loop.close()
+
+
+async def test_trace_storage_failure_cannot_change_go_stop(monkeypatch):
+    from venom_module_rider.depth_detector import PerceptionSettings
+
+    class TracedDetector(Detector):
+        def detect(self, *_):
+            return {**super().detect(), "_trace_depth": np.ones((32, 32))}
+
+    def fail(*_):
+        raise OSError("unwritable diagnostic directory")
+
+    monkeypatch.setattr("venom_module_rider.depth_trace.submit", fail)
+    loop = VisionLoop(Detector())
+    loop.depth_detector = TracedDetector()
+    for seq in range(1, 4):
+        admitted = frame(seq).model_copy(
+            update={"perception": PerceptionSettings(engine="depth_plane")}
+        )
+        result = await loop.decide("pi", admitted, b"exact-input")
+    assert result["action"] == "go"
+    assert "depth_trace_id" not in result
+    assert "_trace_depth" not in result
+    await loop.close()

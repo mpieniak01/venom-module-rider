@@ -237,4 +237,5 @@ class DepthDetector:
             **assessment,
             "_preview": stream.getvalue(),
             "model_sha256": self.digest,
+            "_trace_depth": depth,
         }

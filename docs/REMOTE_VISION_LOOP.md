@@ -11,15 +11,17 @@ decision budget, maximum pulse, calibration identity and validated model hash.
 Both panels use the same revisioned Pi API. Saving never arms, starts a goal,
 loads a model, opens a camera, or changes LCD orientation.
 
-Venom owns an independent lazy ONNX floor model. Active chat model switches do
-not choose this model. Requests are Pi-authenticated over the existing TLS or
+Venom owns independent lazy vision engines: ONNX SegFormer floor segmentation
+and Transformers/PyTorch Depth Anything V2 Metric Indoor Small for relative ground
+geometry. Active chat model switches do not choose these models. Requests are Pi-authenticated over the existing TLS or
 SSH tunnel, bounded to 512 KiB, and never queued behind general LLM work.
 
 ## Provisioning
 
 Install declared vision and vision_export extras in the existing host virtualenv.
-The runtime requires ONNX Runtime, NumPy and Pillow; Torch/Transformers are export
-tools only. Provision explicitly:
+The segmentation runtime requires ONNX Runtime, NumPy and Pillow. The depth
+engine additionally requires Torch/Transformers at runtime and a locally verified
+model manifest. Its output is relative ground geometry, not calibrated centimetres. Provision explicitly:
 
     python scripts/export_floor_model.py --revision PINNED_MODEL_COMMIT_SHA --output /models/rider-floor
 
@@ -42,9 +44,13 @@ automatic restart, no local inference fallback. Opening either panel has no
 hardware side effects.
 
 Every result echoes run, frame, sequence and policy revision. Three distinct,
-fresh confident floor observations are required before GO. Any non-floor or
-uncertain pixel in the configured rectangular stopping corridor means STOP.
-After movement begins, STOP, timeout or invalid result latches the run off.
+fresh CLEAR observations are required before GO. Segmentation rejects non-floor
+or uncertain pixels; geometry uses the saved bilateral residual and pixel-fraction
+limits in the rectangular stopping corridor. A fresh visual STOP zeros motion
+while analysis continues in the original bounded trial. Three fresh CLEAR
+observations may resume only that still-valid trial, without another ARM or
+extending its deadline. Operator STOP, timeout, invalid contract or executor
+failure terminates the trial; these faults never resume automatically.
 Local executor pulse duration independently limits motion if the loop or host
 dies. Fresh heartbeats do not renew permission. Manual takeover supersedes
 navigation authority.
@@ -82,3 +88,30 @@ Selecting Near never raises motion settings and caps the selection at 0.1 SDK / 
 The depth engine keeps at least 30% image-height support for the inverse-depth plane fit, scale and orientation. It scores deviations only in the selected STOP corridor. Cropping the fit itself to the close strip can make a broad, flat obstacle look like the ground, so the two masks are deliberately different. White outlines mark STOP; dashed blue marks the additional fitting context. Reference outlier fraction is diagnostic, not another direct STOP threshold. A larger distant object can still invalidate the ground fit; a clear close strip does not establish metric clearance.
 
 The state endpoint returns the current Pi policy as well as the decision. Other panels follow newer revisions unless they have unsaved edits; an old acceptance is not retained after another panel changes the zone.
+
+
+## Geometry diagnostics and exact inference traces
+
+The STOP comparison uses the fraction of pixels whose absolute relative residual
+exceeds the saved tolerance. P99 is descriptive and is not that comparison.
+For 3456 scored pixels and a 0.005 fraction limit, at most 17 may deviate;
+18 cause STOP even if P99 remains below the residual tolerance. Responses include
+the scored, allowed and actual pixel counts, split into nearer and farther
+deviations. Farther deviations remain blocking: they may indicate a recess.
+These are geometry observations, not object identification or physical distance.
+The white border is outside the scored pixels so it does not hide edge errors.
+
+An optional bounded local trace records the exact input and depth map from the
+same inference, together with the decision identity and saved settings. It never
+requests another camera frame or runs another inference. Traces are diagnostic,
+best effort, private, and never grant motion permission. Enable explicitly with
+RIDER_DEPTH_TRACE_DIR pointing to a private writable directory; leave unset to
+disable. The recorder bounds its pending queue and retained archives, drops work
+rather than blocking a decision, and tolerates storage failure. A trace identifier
+in the result means submission, not durable storage confirmation. Check the
+archive manifest before treating a trace as evidence. Do not publish home images
+or trace archives in a public issue or PR.
+
+Fixing preview transport does not establish stable obstacle detection. Recorded
+observation still contains intermittent ground deviations. Physical acceptance
+and a paired-input validation of any later estimator change remain outstanding.
