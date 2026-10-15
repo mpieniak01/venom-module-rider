@@ -23,6 +23,9 @@ class Selection(StrictModel):
 
 class Command(StrictModel):
     action: Literal["arm", "disarm", "stop", "clear_estop", "move", "height", "balance"]
+    panel_id: (
+        Annotated[str, Field(strict=True, min_length=1, max_length=128)] | None
+    ) = None
     session: str | None = None
     request_id: str | None = None
     source: Literal["manual"] = "manual"
@@ -42,6 +45,13 @@ class Command(StrictModel):
     device_settings: StrictBool | None = None
     height: StrictInt | None = None
     enabled: StrictBool | None = None
+
+    @field_validator("panel_id")
+    @classmethod
+    def nonblank_panel(cls, value):
+        if value is not None and not value.strip():
+            raise ValueError("invalid_panel_id")
+        return value
 
 
 class SettingsPatch(StrictModel):

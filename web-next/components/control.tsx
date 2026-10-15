@@ -1,4 +1,5 @@
 import { CorridorOverlay, type CorridorEditorProps } from "./corridor-overlay";
+import { manualFeedback } from "../lib/manual-feedback";
 import { frameAge } from "../lib/vision-frame";
 import { previewNotice } from "../lib/loop-controls";
 /* eslint-disable @next/next/no-img-element -- Pi binary frames use revocable object URLs. */
@@ -26,15 +27,31 @@ export function ManualPad({ client, t, language, compact = false }: { client: Ri
     if (!client.canNavigate || event.button !== 0) return;
     event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); client.hold.start(direction, event.pointerId);
   };
+  const feedback = manualFeedback(client.status, client.manualRequest, client.controlFresh);
   return <div>
     {!compact && <p className={styles.hint}>{t("manualHint")}</p>}
+    <div className={styles.manualPads}>
+    <div><strong className={styles.padLabel}>{t("pulsePad")}</strong>
     <div className={styles.pad}>
-      {arrows.map(({ direction, row, column, Icon }) => <button type="button" key={direction} aria-label={t(direction)} title={t(direction)} disabled={!client.canNavigate} data-testid={`rider-${direction}`} className={`${styles.arrow} ${client.activeDirection === direction ? styles.arrowActive : ""}`} style={{ gridRow: row, gridColumn: column }} onPointerDown={event => pointerDown(direction, event)} onPointerUp={event => client.hold.end(event.pointerId)} onPointerCancel={event => client.hold.release(event.pointerId)} onLostPointerCapture={event => client.hold.release(event.pointerId)} onClick={event => { if (event.detail === 0 && client.canNavigate && !client.activeDirection) { client.hold.start(direction, -2); client.hold.end(-2); } }} onKeyDown={event => { if (["Enter", " "].includes(event.key) && !event.repeat) { event.preventDefault(); client.hold.start(direction, -1); } }} onKeyUp={event => { if (["Enter", " "].includes(event.key)) { event.preventDefault(); client.hold.end(-1); } }} onBlur={() => client.hold.release()}>
+      {arrows.map(({ direction, row, column, Icon }) => <button type="button" key={direction} aria-label={t(direction)} title={t(direction)} disabled={!client.canNavigate} data-testid={`rider-${direction}`} className={`${styles.arrow} ${client.manualMode === "hold" && client.activeDirection === direction ? styles.arrowActive : ""}`} style={{ gridRow: row, gridColumn: column }} onPointerDown={event => pointerDown(direction, event)} onPointerUp={event => client.hold.end(event.pointerId)} onPointerCancel={event => client.hold.release(event.pointerId)} onLostPointerCapture={event => client.hold.release(event.pointerId)} onClick={event => { if (event.detail === 0 && client.canNavigate && !client.activeDirection) { client.hold.start(direction, -2); client.hold.end(-2); } }} onKeyDown={event => { if (["Enter", " "].includes(event.key) && !event.repeat) { event.preventDefault(); client.hold.start(direction, -1); } }} onKeyUp={event => { if (["Enter", " "].includes(event.key)) { event.preventDefault(); client.hold.end(-1); } }} onBlur={() => client.hold.releasePointer()}>
         <Icon size={compact?20:25} />{!compact&&<span>{t(direction)}</span>}<span className={styles.small}>{displayValue(record(directions[direction]).speed, speedDescriptor, language)} {speedDescriptor.display_unit ?? ""}</span>
       </button>)}
-      <button type="button" className={`${styles.padCenter} ${styles.padStop}`} style={{ gridRow: 2, gridColumn: 2 }} aria-label={t("stopMotors")} title={t("manualStopHint")} data-testid="rider-pad-stop" disabled={!client.canNavigate} onClick={() => void client.stopManual()}><CircleStop size={27} /><span>{t("stopShort")}</span></button>
+      <button type="button" className={`${styles.padCenter} ${styles.padStop}`} style={{ gridRow: 2, gridColumn: 2 }} aria-label={t("stopMotors")} title={t("manualStopHint")} data-testid="rider-pad-stop" onClick={() => void client.stopManual()}><CircleStop size={27} /><span>{t("stopShort")}</span></button>
     </div>
-    <div className={styles.padStatus}><Pill tone={safety.state === "ARMED" ? "good" : "warning"}>{t(safety.state === "ARMED" ? "armed" : safety.state === "ESTOP" ? "estop" : safety.state === "DISARMED" ? "disarmed" : "unknown")}</Pill>{(client.status?.errors.control || safety.stale === true) && <Pill tone="warning">{t("lastPermission")}</Pill>}{!!record(safety.execution).inhibit && <Pill tone="warning">{t("executionPaused")}</Pill>}{client.activeDirection && <Pill tone="good">{t("held")} · {t(client.activeDirection)}</Pill>}</div>
+    </div>
+    <div><strong className={styles.padLabel}>{t("continuousPad")}</strong>
+    <div className={styles.pad} role="group" aria-label={t("continuousPad")}>
+      {arrows.map(({direction, row, column, Icon}) => <button type="button" key={direction} data-testid={`rider-continuous-${direction}`} aria-label={`${t("continuousPad")} · ${t(direction)}`} aria-pressed={client.manualMode === "continuous" && client.activeDirection === direction} disabled={!client.canContinuous} className={`${styles.arrow} ${client.manualMode === "continuous" && client.activeDirection === direction ? styles.arrowActive : ""}`} style={{gridRow:row,gridColumn:column}} onClick={()=>client.hold.toggle(direction)}><Icon size={compact?20:25}/>{!compact&&<span>{t(direction)}</span>}<span className={styles.small}>{displayValue(record(directions[direction]).speed, speedDescriptor, language)} {speedDescriptor.display_unit ?? ""}</span></button>)}
+      <button type="button" className={`${styles.padCenter} ${styles.padStop}`} style={{gridRow:2,gridColumn:2}} aria-label={t("stopMotors")} title={t("manualStopHint")} data-testid="rider-continuous-stop" onClick={()=>void client.stopManual()}><CircleStop size={27}/><span>{t("stopShort")}</span></button>
+    </div></div></div>
+    <p className={styles.hint}>{t("continuousHint")}</p>
+    {!client.canContinuous && <p className={styles.hint} role="status">{t(record(safety.panel_control).version === 1 ? "continuousTakeover" : "continuousUnsupported")}</p>}
+    <div className={styles.manualFeedback} data-testid="manual-feedback" aria-live="polite">
+      <span>{t("manualIntent")}: <strong>{client.activeDirection ? `${t(client.manualMode === "continuous" ? "continuousPad" : "pulsePad")} · ${t(client.activeDirection)}` : t("manualNoDirection")}</strong></span>
+      <span>{t("manualAck")}: <strong>{t(feedback.requestKey)}</strong></span>
+      <span>{t("manualOutput")}: <strong>{t(feedback.executionKey)}</strong> · {feedback.output}</span>
+    </div>
+    <div className={styles.padStatus}><Pill tone={safety.state === "ARMED" ? "good" : "warning"}>{t(safety.state === "ARMED" ? "armed" : safety.state === "ESTOP" ? "estop" : safety.state === "DISARMED" ? "disarmed" : "unknown")}</Pill>{(client.status?.errors.control || safety.stale === true) && <Pill tone="warning">{t("lastPermission")}</Pill>}{!!record(safety.execution).inhibit && <Pill tone="warning">{t("executionPaused")}</Pill>}{client.activeDirection && <Pill tone="good">{t(client.manualMode === "continuous" ? "continuousPad" : "held")} · {t(client.activeDirection)}</Pill>}</div>
     <div className={`${styles.flex} ${styles.space}`} style={{ marginTop: 15 }}><span className={styles.small}>{t("owner")}: {typeof safety.owner === "string" ? safety.owner : "—"}</span><Button onClick={() => client.hold.release()} disabled={!client.activeDirection}><CirclePause size={15} />{t("endDirection")}</Button></div>
   </div>;
 }

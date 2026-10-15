@@ -77,6 +77,7 @@ class DemoPi:
         self.offline = False
         self.stale = False
         self.owner = None
+        self.panel_id = None
         self.arming_deadline = None
         self.navigation = navigation
         if navigation:
@@ -90,6 +91,7 @@ class DemoPi:
         ):
             self.state, self.owner, self.deadline = "DISARMED", None, 0.0
             self.arming_deadline = None
+            self.panel_id = None
         moving = self.deadline > time.monotonic()
         if not moving:
             self.deadline = 0.0
@@ -104,6 +106,7 @@ class DemoPi:
             and not self.stale
             and self.owner in {None, "manual"},
             "test_motion_enabled": False,
+            "panel_control": {"version": 1, "holder": self.panel_id},
             "owner": (self.owner or "manual") if self.state == "ARMED" else None,
             "execution_context": "panel" if self.state == "ARMED" else None,
             "arming_mode": "operator",
@@ -151,6 +154,7 @@ class DemoPi:
                 self.navigation.halt("operator_stop")
             self.state = "DISARMED"
             self.owner = None
+            self.panel_id = None
             self.arming_deadline = None
             self.deadline = 0.0
             self.generation = uuid.uuid4().hex
@@ -186,6 +190,7 @@ class DemoPi:
                     self.generation = uuid.uuid4().hex
                     self.deadline = 0.0
                 self.owner = body.get("owner", "manual")
+                self.panel_id = body.get("panel_id") if self.owner == "manual" else None
                 self.arming_deadline = (
                     time.monotonic() + min(float(body.get("lease_s", 10)), 10)
                     if self.owner == "navigation"
@@ -193,6 +198,8 @@ class DemoPi:
                 )
                 self.state = "ARMED"
             elif action in {"move", "height", "balance"}:
+                if self.panel_id is not None and body.get("panel_id") != self.panel_id:
+                    return envelope({"error": "panel_owner_mismatch"}, status=409)
                 if self.state != "ARMED" or self.owner not in {None, "manual"}:
                     return envelope({"error": "motion_not_armed"}, status=409)
                 if body.get("settings_revision") != self.controls["revision"]:
@@ -231,6 +238,7 @@ class DemoPi:
             "source": body.get("source"),
             "execution_context": body.get("execution_context"),
             "channel": body.get("channel"),
+            "panel_id": body.get("panel_id"),
             "seq": body.get("seq"),
             "command_generation": body.get("generation"),
             "observed_at": time.time(),

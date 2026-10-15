@@ -108,11 +108,14 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
   const stop=async()=>{
     if(stopping.current)return;
     const trialWasArmed=trialArmed.current;
+    const manualWasActive=client.canNavigate||!!client.activeDirection;
+    client.hold.cancel();
     stopping.current=true;trialArmed.current=false;setOperation("stop");setError("");
     client.setCameraTransition(true);client.setCameraStream(null);
     try {
       const stoppedMotion=goals.drive===true||trialWasArmed;
       if(stoppedMotion)await client.command({action:"stop"},true);
+      else if(manualWasActive)await client.stopManual();
       await startTask.current?.catch(()=>undefined);
       const row=await apiFetch<JsonRecord>("/api/v1/rider/navigation/state");
       const actualGoals=record(row.goals);

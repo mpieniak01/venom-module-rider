@@ -195,3 +195,7 @@
 .loopCamera .cameraEmbedded .camera { height: clamp(240px, 30vh, 340px); max-height: 340px; aspect-ratio: auto; }
 
 .cameraTransition { border-color: var(--r-border); color: var(--ui-muted); }
+
+.manualPads { display: flex; flex-wrap: wrap; justify-content: center; gap: 16px; }
+.padLabel { display: block; text-align: center; font-size: 12px; margin-top: 12px; }
+.manualFeedback { display: grid; gap: 6px; padding: 12px; margin: 10px 0; border: 1px solid var(--r-border); border-radius: 12px; font-size: 12px; }

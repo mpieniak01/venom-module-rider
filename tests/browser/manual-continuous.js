@@ -1,0 +1,44 @@
+// Invoke with playwright-cli run-code against the local hardware-free demo.
+async page => {
+  const origin=new URL(page.url());
+  if(!["localhost","127.0.0.1","[::1]"].includes(origin.hostname))throw new Error("loopback fixture required");
+  const config=await (await page.request.get(origin.origin+"/api/v1/rider/config")).json();
+  if(!config.devices?.length || config.devices.some(device=>device.mode!=="demo"))throw new Error("fixture-only device allowlist required");
+  await page.getByTestId("takeover-manual").click();
+  await page.getByTestId("rider-continuous-forward").waitFor({state:"visible"});
+  const check = (ok,why) => { if(!ok) throw new Error(why); };
+  const pressed=()=>page.getByTestId("rider-continuous-forward").getAttribute("aria-pressed");
+  await page.getByTestId("rider-continuous-forward").click();
+  await page.waitForTimeout(900);
+  check(await pressed()==="true","direction did not latch after release");
+  await page.getByRole("button",{name:"Wizja Venom",exact:true}).click();
+  await page.getByRole("button",{name:"Obraz surowy",exact:true}).click();
+  await page.waitForTimeout(600);
+  check(await pressed()==="true","RAW switch cancelled direction");
+  await page.getByTestId("rider-forward").focus();
+  await page.getByTestId("rider-continuous-forward").focus();
+  check(await pressed()==="true","element blur cancelled direction");
+  await page.getByTestId("rider-continuous-forward").click();
+  await page.waitForTimeout(700);
+  check(await pressed()==="false","same direction did not stop");
+  const stopped=await page.getByTestId("manual-feedback").innerText();
+  check(stopped.includes("Zgłoszone ZERO"),"no zero after release");
+  await page.getByTestId("rider-continuous-forward").click();
+  await page.getByTestId("rider-left").click();
+  await page.waitForTimeout(700);
+  check(await pressed()==="false","pulse restored previous latch");
+  await page.getByTestId("rider-continuous-forward").click();
+  await page.getByTestId("rider-pad-stop").click();
+  await page.waitForTimeout(700);
+  check(await pressed()==="false","pulse pad STOP did not clear latch");
+  check(await page.getByTestId("rider-arm").getAttribute("aria-pressed")==="true","manual STOP revoked ARM");
+  await page.getByTestId("rider-continuous-forward").click();
+  await page.evaluate(()=>window.dispatchEvent(new Event("blur")));
+  await page.waitForTimeout(700);
+  check(await pressed()==="false","window blur did not stop");
+  await page.getByTestId("rider-continuous-forward").click();
+  await page.reload();
+  await page.waitForTimeout(1000);
+  check(await page.getByTestId("rider-continuous-forward").isDisabled(),"reload inherited panel ownership");
+  return {flow:"PASS",stopped, reloadRequiresExplicitTakeover:true};
+}

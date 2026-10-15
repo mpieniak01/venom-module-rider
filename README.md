@@ -347,3 +347,33 @@ The research lane does not change the live panel, Pi policy or movement permissi
 See [directional vision](docs/DIRECTIONAL_VISION.md) for the camera-zone editor,
 shared left/center/right assessment and versioned paired directional trials (v2 legacy turns, v3 forward corrections).
 Avoidance is off by default and requires physical acceptance on the actual mount.
+
+## Manual continuous drive
+
+The camera workspace provides **Pulse / hold** and **Continuous drive** pads.
+The latter selects a direction with one click; clicking the same direction or
+using either centre STOP brakes and keeps ARM. A pulse replaces the continuous
+selection permanently. Left/right turn in place using Pi's current settings.
+This is manual control and does not use vision obstacle avoidance.
+
+The panel distinguishes selected intent, Pi acknowledgement and the latest
+reported actuator output. Acknowledgement is not proof of physical travel.
+Continuous drive requires `panel_control.version == 1` on Pi and explicit ARM
+or Take manual control in this browser. Other panels may always use global
+STOP; takeover stops and invalidates the previous generation before ARM.
+Legacy Pi retains the pulse/hold controls and reports continuous drive unavailable.
+
+The direction lives only in memory. Closing, hiding or leaving the control
+view, window blur, loss of communication, rejection or a changed generation or
+settings revision cancels it. A return to the page or connection never resumes
+movement. Changing RAW/Venom preview within the same panel keeps the direction.
+Pi enforces its existing hold timeout even when release cannot be delivered.
+
+`tests/browser/manual-continuous.js` is a Playwright CLI flow for the real host
+UI connected exclusively to the loopback demo. It refuses physical allowlists.
+Automated acceptance uses fixture outputs; physical acceptance remains a separate
+operator step before release. Publish candidate PRs without auto-merge when
+that physical acceptance is pending. Keep the stable deployed SHA; test an
+explicit preview candidate, stop/disarm before rollback, then select the prior
+version through the existing deployment procedure. Never reset an active robot
+or delete a branch as a substitute for rollback.

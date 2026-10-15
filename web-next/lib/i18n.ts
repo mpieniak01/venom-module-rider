@@ -732,6 +732,22 @@ export const messages = {
   "compute.error.compute_session_closed": ["Sesja zakończona", "Session closed", "Sitzung beendet"],
   "compute.error.compute_access_denied": ["Brak dostępu do wykonawcy", "Executor access denied", "Zugriff auf Ausführer verweigert"],
   "compute.error.compute_invalid_configuration": ["Nieprawidłowe ustawienia wykonawcy", "Invalid executor settings", "Ungültige Ausführereinstellungen"],
+  pulsePad: ["Impuls / przytrzymanie","Pulse / hold","Impuls / gedrückt halten"],
+  continuousPad: ["Jazda ciągła","Continuous drive","Dauerfahrt"],
+  continuousHint: ["Kliknij kierunek, aby jechać bez trzymania. Ponowne kliknięcie lub środkowy STOP kończy ruch i zachowuje ARM. To sterowanie ręczne; wizja nie zatrzymuje go przy przeszkodzie.","Click a direction to drive without holding. Click again or press the centre STOP to brake and keep ARM. This is manual control; vision does not stop it at obstacles.","Richtung anklicken, um ohne Halten zu fahren. Erneut klicken oder mittleren STOP drücken, um bei bestehendem ARM zu bremsen. Manuelle Steuerung; die Bildanalyse stoppt nicht bei Hindernissen."],
+  continuousUnsupported: ["Jazda ciągła wymaga obsługi właściciela panelu na Pi. Dotychczasowe strzałki pozostają dostępne po ARM.","Continuous drive requires Pi panel ownership support. Existing arrows remain available after ARM.","Dauerfahrt erfordert Panel-Eigentümerschaft auf dem Pi. Bisherige Pfeile sind nach ARM weiter verfügbar."],
+  continuousTakeover: ["Aby jechać ciągle, połącz Pi i użyj ARM lub „Przejmij ręcznie” w tym panelu.","For continuous drive, connect Pi and use ARM or Take manual control in this panel.","Für Dauerfahrt Pi verbinden und ARM oder Manuell übernehmen in diesem Panel wählen."],
+  manualIntent: ["Wybrany kierunek","Selected direction","Gewählte Richtung"],
+  manualNoDirection: ["Brak","None","Keine"],
+  manualAck: ["Przyjęcie polecenia","Command acknowledgement","Befehlsbestätigung"],
+  manualNoRequest: ["Brak bieżącego polecenia","No current command","Kein aktueller Befehl"],
+  manualPending: ["Oczekiwanie na Pi","Awaiting Pi","Warten auf Pi"],
+  manualAccepted: ["Pi przyjęło polecenie","Pi accepted the command","Pi hat den Befehl angenommen"],
+  manualRejected: ["Polecenie nieprzyjęte","Command not accepted","Befehl nicht angenommen"],
+  manualOutput: ["Wyjście wykonawcy Pi","Pi actuator output","Pi-Aktuatorausgang"],
+  manualOutputUnknown: ["Stan nieznany","Unknown state","Zustand unbekannt"],
+  manualOutputZero: ["Zgłoszone ZERO","Reported ZERO","Gemeldete NULL"],
+  manualOutputNonzero: ["Zgłoszone niezerowe wyjście; ruch wymaga obserwacji","Nonzero output reported; observe physical movement","Ausgang ungleich null gemeldet; physische Bewegung beobachten"],
 } as const;
 export type RiderLanguage = "pl" | "en" | "de";
 export type Translator = (key: string, replacements?: Record<string, string | number>) => string;

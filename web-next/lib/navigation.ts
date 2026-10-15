@@ -3,8 +3,10 @@ import { controlIdentity, data, record, safetyOf, settingsOf, str, timestampMs, 
 
 export type ControlClock = { offset: number; rtt: number; at: number };
 /** Buttons accept a new operator intent; Pi still authorizes every command. */
-export function navigationAvailable(status: RiderStatus | null): boolean {
+export function navigationAvailable(status: RiderStatus | null, panelId?: string): boolean {
   const safety = safetyOf(status);
+  const panel = record(safety.panel_control);
+  if (panelId && panel.version === 1 && panel.holder !== panelId) return false;
   return !!status?.connection.configured && status.connection.status !== "unconfigured" && safety.state === "ARMED" && safety.owner === "manual" && safety.panel_motion_enabled === true && record(record(safety.capabilities).move).available === true && !!str(safety.generation) && Number.isInteger(settingsOf(status).revision);
 }
 export function freshControl(status: RiderStatus | null, clock: ControlClock | null, now: number, cadence: number): boolean {
@@ -41,4 +43,8 @@ export function navigationView(previous: RiderStatus, next: RiderStatus): RiderS
   const errors = { ...previous.errors, ...next.errors };
   for (const key of ["control", "settings"]) if (!next.errors[key]) delete errors[key];
   return { ...previous, connection: next.connection, control: next.control, settings: next.settings, errors };
+}
+
+export function continuousAvailable(status: RiderStatus | null, panelId: string): boolean {
+  return navigationAvailable(status, panelId) && ["online", "degraded"].includes(status?.connection.status ?? "") && record(safetyOf(status).panel_control).version === 1;
 }
