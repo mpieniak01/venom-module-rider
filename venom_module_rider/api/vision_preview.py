@@ -13,16 +13,6 @@ from .vision_routes import loop_goals
 async def processed_camera(request: Request):
     domain = request.app.state.rider
     client = domain.transport()
-    payload, mime, headers = await domain.camera("raw")
-    if mime not in {"image/jpeg", "image/png"}:
-        raise RiderError("vision_input_format", 415)
-    normalized = {key.lower(): value for key, value in headers.items()}
-    if (
-        normalized.get("x-rider-stale") == "true"
-        or normalized.get("x-rider-placeholder") == "true"
-    ):
-        raise RiderError("frame_stale", 409)
-    headers = normalized
     corridor = (0.35, 0.65, 0.65, 0.95)
     revision = 0
     source = "diagnostic_default"
@@ -36,53 +26,79 @@ async def processed_camera(request: Request):
     except RiderError as exc:
         if exc.status != 404:
             raise
-    frame = VisionFrame(
-        protocol_version=1,
-        run_id=uuid.uuid4().hex,
-        frame_id=uuid.uuid4().hex,
-        sequence=1,
-        config_revision=revision,
-        age_ms=0.0,
-        deadline_ms=500,
-        mode="observe",
-        corridor=corridor,
-        perception=PerceptionSettings.model_validate(perception),
-    )
     loop = request.app.state.rider_vision
     cached = loop.preview(client.device.id, corridor=corridor, revision=revision)
-    if cached is None and source == "device_policy":
-        # Pi permits own the detector. Wait only for their next fresh result.
+    if source == "device_policy":
+        # Requested Pi loops own the detector. A browser consumes their result,
+        # without fetching another RAW image or admitting diagnostic inference.
         goals = await loop_goals(domain, force=False)
         if any(goals.get(mode) is not False for mode in ("observe", "drive")):
+            cached = None
             if any(goals.get(mode) is True for mode in ("observe", "drive")):
-                cached = await loop.wait_for_preview(
-                    client.device.id, corridor=corridor, revision=revision
-                )
+                status = (await domain.read("/api/navigation/status", 0.2))["data"]
+                run_id = status.get("run_id")
+                if (
+                    status.get("running") is True
+                    and status.get("stale") is not True
+                    and isinstance(run_id, str)
+                    and run_id
+                ):
+                    cached = await loop.wait_for_preview(
+                        client.device.id,
+                        corridor=corridor,
+                        revision=revision,
+                        run_id=run_id,
+                    )
             if cached is None:
                 raise RiderError("vision_busy", 429)
-    if cached is not None:
-        _, image, result, elapsed = cached
-        result = {**result, "_preview": image, "inference_ms": elapsed}
-        headers = {
-            **headers,
-            "x-rider-frame-id": result["frame_id"],
-            "x-rider-file-observed-at": str(result["observed_at"]),
-        }
-    else:
+    if cached is None:
+        payload, mime, raw_headers = await domain.camera("raw")
+        if mime not in {"image/jpeg", "image/png"}:
+            raise RiderError("vision_input_format", 415)
+        normalized = {key.lower(): value for key, value in raw_headers.items()}
+        if (
+            normalized.get("x-rider-stale") == "true"
+            or normalized.get("x-rider-placeholder") == "true"
+        ):
+            raise RiderError("frame_stale", 409)
+        # Legacy snapshots expose a Pi wall-clock timestamp, not a relative age.
+        # Do not compare clocks on different hosts or grant motion from this path.
+        frame = VisionFrame(
+            protocol_version=1,
+            run_id=uuid.uuid4().hex,
+            frame_id=uuid.uuid4().hex,
+            sequence=1,
+            config_revision=revision,
+            age_ms=0.0,
+            deadline_ms=500,
+            mode="observe",
+            corridor=corridor,
+            perception=PerceptionSettings.model_validate(perception),
+        )
         result = await loop.decide(client.device.id, frame, payload, with_preview=True)
-    image = result.pop("_preview", None)
-    if image is None:
-        raise RiderError(result["reason"], 503)
+        cached = loop.preview(client.device.id, corridor=corridor, revision=revision)
+        if cached is None:
+            raise RiderError(result["reason"], 503)
+    captured_at, image, result, elapsed = cached
+    age_ms = max(0.0, (loop.clock() - captured_at) * 1000)
     return Response(
         image,
         media_type="image/jpeg",
         headers={
-            **headers,
             "cache-control": "no-store",
             "x-rider-source": "venom",
+            "x-rider-stale": "false",
+            "x-rider-placeholder": "false",
+            "x-rider-run-id": result["run_id"],
+            "x-rider-sequence": str(result["sequence"]),
+            "x-rider-frame-id": result["frame_id"],
+            "x-rider-config-revision": str(result["config_revision"]),
+            "x-rider-frame-age-ms": str(round(age_ms, 2)),
+            "x-rider-frame-age-source": result["age_source"],
+            "x-rider-file-observed-at": str(result["observed_at"]),
             "x-rider-vision-state": result["state"],
             "x-rider-vision-reason": result["reason"],
-            "x-rider-vision-inference-ms": str(result["inference_ms"]),
+            "x-rider-vision-inference-ms": str(elapsed),
             "x-rider-vision-policy": source,
             "x-rider-vision-action": "stop",
         },

@@ -69,6 +69,8 @@ class Domain:
         self.calls.append(("read", path))
         if path == "/api/logic/state":
             return {"data": {"state": {"features": self.features}}}
+        if path == "/api/navigation/status":
+            return {"data": {"running": True, "stale": False, "run_id": "run"}}
         if self.legacy:
             raise RiderError("frame_unavailable", 404)
         return {"data": {"corridor": [0.3, 0.6, 0.7, 0.9], "revision": 4}}

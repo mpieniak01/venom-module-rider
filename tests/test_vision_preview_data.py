@@ -1,0 +1,211 @@
+"""Preview correlation and bounded, camera-independent active-loop reads."""
+
+import asyncio
+from types import SimpleNamespace
+
+import pytest
+
+from venom_module_rider.api.vision_preview import processed_camera
+from venom_module_rider.errors import RiderError
+from venom_module_rider.vision_contract import VisionFrame
+from venom_module_rider.vision_loop import VisionLoop
+
+
+class Detector:
+    def __init__(self):
+        self.calls = 0
+        self.failure = None
+
+    def status(self):
+        return {"sha256": "a" * 64}
+
+    def detect(self, *args):
+        self.calls += 1
+        if self.failure:
+            raise self.failure
+        return {
+            "state": "clear",
+            "reason": "floor_candidate",
+            "_preview": b"jpeg-fixture",
+        }
+
+
+def frame(sequence=1, run="run", age=40.0):
+    return VisionFrame(
+        protocol_version=1,
+        run_id=run,
+        frame_id=f"{run}-{sequence}",
+        sequence=sequence,
+        config_revision=4,
+        corridor=(0.3, 0.6, 0.7, 0.9),
+        age_ms=age,
+        deadline_ms=300,
+        mode="observe",
+    )
+
+
+class Domain:
+    def __init__(self, *, run="run", active=True):
+        self.run, self.active = run, active
+        self.camera_calls = 0
+        self.reads = []
+        self.status = {"running": True, "stale": False, "run_id": run}
+
+    def transport(self):
+        return SimpleNamespace(device=SimpleNamespace(id="pi"))
+
+    async def read(self, path, ttl, force=False):
+        self.reads.append((path, ttl, force))
+        if path.endswith("config"):
+            return {"data": {"corridor": [0.3, 0.6, 0.7, 0.9], "revision": 4}}
+        if path.endswith("status"):
+            return {"data": self.status}
+        return {
+            "data": {
+                "features": {
+                    "s15_venom_perception": {"requested": self.active},
+                    "s14_venom_navigation": {"requested": False},
+                }
+            }
+        }
+
+    async def camera(self, stream):
+        self.camera_calls += 1
+        raise AssertionError("An active loop must never fetch RAW for the preview")
+
+
+def request(domain, loop):
+    return SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(rider=domain, rider_vision=loop))
+    )
+
+
+async def test_two_browsers_share_one_result_without_raw_fetch_or_inference():
+    now = [1.0]
+    detector = Detector()
+    loop = VisionLoop(detector, clock=lambda: now[0])
+    await loop.decide("pi", frame(sequence=7), b"raw")
+    now[0] = 1.06
+    domain = Domain()
+    responses = await asyncio.gather(
+        processed_camera(request(domain, loop)),
+        processed_camera(request(domain, loop)),
+    )
+    for response in responses:
+        assert response.body == b"jpeg-fixture"
+        assert response.headers["x-rider-run-id"] == "run"
+        assert response.headers["x-rider-sequence"] == "7"
+        assert response.headers["x-rider-frame-id"] == "run-7"
+        assert response.headers["x-rider-config-revision"] == "4"
+        assert float(response.headers["x-rider-frame-age-ms"]) == pytest.approx(100)
+        assert (
+            response.headers["x-rider-frame-age-source"]
+            == "pi-reported-plus-host-elapsed"
+        )
+        assert response.headers["cache-control"] == "no-store"
+    assert detector.calls == 1 and domain.camera_calls == 0
+    assert all(ttl == 0.2 and not force for _, ttl, force in domain.reads)
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        {"run_id": "new-run", "running": True, "stale": False},
+        {"run_id": "run", "running": False, "stale": False},
+        {"run_id": "run", "running": True, "stale": True},
+        {"running": True, "stale": False},
+    ],
+)
+async def test_active_loop_never_displays_previous_or_unconfirmed_run(status):
+    detector, domain = Detector(), Domain()
+    loop = VisionLoop(detector)
+    await loop.decide("pi", frame(age=0), b"raw")
+    domain.status = status
+
+    async def no_wait(*args, **kwargs):
+        assert kwargs["run_id"] == "new-run"
+        return None
+
+    loop.wait_for_preview = no_wait
+    with pytest.raises(RiderError, match="vision_busy"):
+        await processed_camera(request(domain, loop))
+    assert detector.calls == 1 and domain.camera_calls == 0
+
+
+async def test_waiter_can_only_receive_its_matching_run():
+    loop = VisionLoop(Detector())
+    await loop.decide("pi", frame(run="old", age=0), b"raw")
+    assert loop.preview("pi", run_id="new") is None
+    waiter = asyncio.create_task(
+        loop.wait_for_preview("pi", corridor=frame().corridor, revision=4, run_id="new")
+    )
+    await asyncio.sleep(0)
+    assert not waiter.done()
+    await loop.decide("pi", frame(run="new", age=0), b"raw")
+    row = await waiter
+    assert row[2]["run_id"] == "new"
+    assert loop.preview("pi", run_id="old") is None
+
+
+async def test_admitting_new_run_hides_old_preview_even_before_result():
+    import threading
+
+    detector, loop = Detector(), VisionLoop(Detector())
+    await loop.decide("pi", frame(run="old", age=0), b"raw")
+    release = threading.Event()
+
+    def blocked(*args):
+        release.wait(1)
+        return detector.detect(*args)
+
+    loop.detector.detect = blocked
+    pending = asyncio.create_task(loop.decide("pi", frame(run="new", age=0), b"raw"))
+    await asyncio.sleep(0.01)
+    assert loop.preview("pi", run_id="old") is None
+    release.set()
+    await pending
+    assert loop.preview("pi", run_id="new") is not None
+
+
+@pytest.mark.parametrize("error", [KeyError("bad-output"), TypeError("bad-type")])
+async def test_unexpected_detector_exception_returns_unknown_and_clears_preview(error):
+    detector = Detector()
+    loop = VisionLoop(detector)
+    await loop.decide("pi", frame(age=0), b"raw")
+    detector.failure = error
+    result = await loop.decide("pi", frame(sequence=2, age=0), b"raw")
+    assert result["state"] == "unknown"
+    assert result["action"] == result["vision_action"] == "stop"
+    assert result["reason"] == "vision_inference_unavailable"
+    assert result["clear_count"] == 0
+    assert loop.preview("pi") is None and loop.busy is None
+
+
+async def test_preview_age_uses_reported_age_and_host_monotonic_only(monkeypatch):
+    now = [10.0]
+    loop = VisionLoop(Detector(), clock=lambda: now[0])
+    monkeypatch.setattr("venom_module_rider.vision_loop.time.time", lambda: 999999.0)
+    await loop.decide("pi", frame(age=45), b"raw")
+    now[0] = 10.05
+    monkeypatch.setattr("venom_module_rider.vision_loop.time.time", lambda: 1.0)
+    first = await processed_camera(request(Domain(), loop))
+    assert float(first.headers["x-rider-frame-age-ms"]) == pytest.approx(95)
+    now[0] = 10.1
+    second = await processed_camera(request(Domain(), loop))
+    assert float(second.headers["x-rider-frame-age-ms"]) == pytest.approx(145)
+    now[0] = 10.46
+    assert loop.preview("pi") is None
+
+
+async def test_diagnostic_snapshot_reports_unverified_relative_age_source():
+    class Snapshot(Domain):
+        async def camera(self, stream):
+            self.camera_calls += 1
+            # Pi wall time deliberately differs from the Venom clock.
+            return b"raw", "image/jpeg", {"x-rider-file-observed-at": "1"}
+
+    domain, loop = Snapshot(active=False), VisionLoop(Detector())
+    response = await processed_camera(request(domain, loop))
+    assert response.headers["x-rider-frame-age-source"] == "host-received"
+    assert response.headers["x-rider-vision-action"] == "stop"
+    assert domain.camera_calls == 1
