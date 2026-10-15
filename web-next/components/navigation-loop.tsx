@@ -260,12 +260,18 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
     </div>
     <div className={styles.loopToolbar}>
     <div className={styles.loopActions}>
-      <Button data-testid="loop-preview" disabled={!connected||!!operation||loading||!!observeBlock||active&&loopState.running===true} onClick={()=>void observePreview()}><Play size={18}/>{t(active&&loopState.running===true?"analysisRunning":"startObservation")}</Button>
-      {<Button tone="primary" data-testid="loop-start" title={t("trialSimpleHelp")} aria-describedby={trialUnavailable?"rider-trial-block":undefined} disabled={!!trialUnavailable||!!operation||!!client.busy||loading||phase==="running"&&goals.drive===true} onClick={()=>void runTrial()}><Play size={18}/>{t("trialRun")}</Button>}
+      <Button tone="primary" data-testid="loop-start" title={t("trialSimpleHelp")} aria-describedby={trialUnavailable?"rider-trial-help rider-trial-block":"rider-trial-help"} disabled={!!trialUnavailable||!!operation||!!client.busy||loading||phase==="running"&&goals.drive===true} onClick={()=>void runTrial()}><Play size={18}/>{t("trialRun")}</Button>
       <Button tone="danger" data-testid="loop-stop" disabled={!connected||operation==="stop"||operation==="save"} onClick={()=>void stop()}><Square size={18}/>{t(operation==="stop"?"loopStopping":"loopStop")}</Button>
       {detector.drive_supported!==false&&<span className={styles.small} data-testid="trial-plan">{String(policy?.speed??"—")} SDK · ≤ {String(policy?.max_motion_ms??"—")} ms</span>}
     </div>
     </div>
+    <p id="rider-trial-help" className={styles.hint} data-testid="trial-start-help">{t("trialStartHelp")}</p>
+    <details className={styles.details} data-testid="loop-observation">
+      <summary>{t("observationOptional")}</summary>
+      <p className={styles.hint}>{t("observationOptionalHelp")}</p>
+      <Button data-testid="loop-preview" disabled={!connected||!!operation||loading||!!observeBlock||active&&loopState.running===true} onClick={()=>void observePreview()}><Play size={14}/>{t(active&&loopState.running===true?"analysisRunning":"startObservation")}</Button>
+      {!!observeBlock&&<p className={styles.hint}>{t(observeBlock)}</p>}
+    </details>
     {policy&&<div className={styles.loopModeRow} data-testid="stopping-zone">
       <Field label={t("stopZone")}><select aria-label={t("stopZone")} data-testid="loop-zone" className={styles.select} value={stoppingZone(policy)} disabled={!connected||loading||!!operation||!!client.busy||dirty||goals.drive===true} onChange={e=>{if(e.target.value==="near"||e.target.value==="far")void changeStoppingZone(e.target.value);}}>
         <option value="near" disabled={!stoppingZoneValues(policy,"near")}>{t("stopZoneNear")}</option>

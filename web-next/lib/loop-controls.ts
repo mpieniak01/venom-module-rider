@@ -113,10 +113,12 @@ export function decisionView(state: JsonRecord, detector: JsonRecord) {
   };
 }
 export function trialBlock(policy: JsonRecord|null, runtime:JsonRecord, detector:JsonRecord, connected:boolean, dirty:boolean, status:RiderStatus|null):string {
-  const base=loopBlock(policy?{...policy,mode:"observe"}:null,runtime,detector,connected,dirty,status);
-  if(base)return base;
-  if(detector.drive_supported===false)return "loopDepthObservation";
+  if(!connected)return "loopOffline";
+  if(!policy)return "loopLoadFailed";
+  if(dirty)return "loopUnsaved";
   if(runtime.drive!==true)return runtime.drive_reason==="navigation_executor_update_required"?"loopExecutorUpdate":"loopRuntimeMissing";
+  if(detector.configured!==true)return "loopNoModel";
+  if(detector.drive_supported===false)return "loopDepthObservation";
   if(!calibrationRecorded(policy)||detector.loaded===true&&!calibrationMatches(policy,detector))return "loopUnverified";
   const safety=safetyOf(status);
   if(safety.state==="ESTOP")return "trialEstop";

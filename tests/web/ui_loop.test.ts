@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import ts from "typescript";
 import { test } from "node:test";
 import { calibrationAcceptance, calibrationMatches, completedTrial, executionHeadline, freshPolicyFrame, previewNotice, calibrationScope, decisionView, freshAnalysisFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, motionPermission, stoppingZone, stoppingZoneValues, trialBlock, trialPreparation, trialPreparationTitle, trialPreparationErrorKey, trialDiagnostics, trialStopReasonKey } from "../../web-next/lib/loop-controls";
 import { translate } from "../../web-next/lib/i18n";
@@ -395,4 +397,65 @@ test("unknown historical stop codes have a bounded module-owned display key",()=
  for(const value of [null,{},"<script>","unknown_future_reason"]){
   assert.equal(trialStopReasonKey(value),"trialStopped");
  }
+});
+
+
+const navigationSource = ts.createSourceFile(
+ "navigation-loop.tsx",
+ fs.readFileSync(new URL("../../web-next/components/navigation-loop.tsx", import.meta.url), "utf8"),
+ ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX,
+);
+function matchingNodes(root:ts.Node, match:(node:ts.Node)=>boolean):ts.Node[] {
+ const found:ts.Node[]=[];
+ const visit=(node:ts.Node)=>{if(match(node))found.push(node);ts.forEachChild(node,visit);};
+ visit(root);return found;
+}
+function jsxAttribute(node:ts.Node, name:string):string|undefined {
+ const opening=ts.isJsxElement(node)?node.openingElement:ts.isJsxSelfClosingElement(node)?node:null;
+ const attribute=opening?.attributes.properties.find(value=>ts.isJsxAttribute(value)&&value.name.getText(navigationSource)===name);
+ return attribute&&ts.isJsxAttribute(attribute)?attribute.initializer?.getText(navigationSource):undefined;
+}
+function jsxByTestId(id:string):ts.Node {
+ const result=matchingNodes(navigationSource,node=>jsxAttribute(node,"data-testid")===JSON.stringify(id));
+ assert.equal(result.length,1,id);return result[0];
+}
+test("forward driving is the main action; observation is a closed optional section",()=>{
+ const start=jsxByTestId("loop-start"),stop=jsxByTestId("loop-stop"),preview=jsxByTestId("loop-preview");
+ let toolbar:ts.Node|undefined=start.parent;
+ while(toolbar&&jsxAttribute(toolbar,"className")!=="{styles.loopActions}")toolbar=toolbar.parent;
+ assert.ok(toolbar);
+ assert.ok(matchingNodes(toolbar,node=>node===stop).length);
+ assert.equal(matchingNodes(toolbar,node=>node===preview).length,0);
+ const optional=jsxByTestId("loop-observation");
+ assert.ok(ts.isJsxElement(optional)&&optional.openingElement.tagName.getText(navigationSource)==="details");
+ assert.equal(jsxAttribute(optional,"open"),undefined);
+ assert.ok(matchingNodes(optional,node=>node===preview).length);
+ assert.equal(jsxAttribute(start,"tone"),'"primary"');
+ assert.ok(jsxByTestId("trial-start-help"));
+});
+test("the deliberate drive handler calls one prepared trial and never races observation or ARM",()=>{
+ const handler=matchingNodes(navigationSource,node=>ts.isVariableDeclaration(node)&&node.name.getText(navigationSource)==="runTrial")[0];
+ assert.ok(handler);
+ const calls=matchingNodes(handler,ts.isCallExpression).map(node=>(node as ts.CallExpression).expression.getText(navigationSource));
+ assert.equal(calls.filter(call=>call==="client.startNavigationTrial").length,1);
+ for(const prerequisite of ["ensureAnalysis","observePreview","client.command","client.mutate"])assert.equal(calls.includes(prerequisite),false,prerequisite);
+ assert.equal(/freshPolicyFrame|imageDecision|vision_action|clear_count/.test(handler.getText(navigationSource)),false);
+ const effects=matchingNodes(navigationSource,node=>ts.isCallExpression(node)&&node.expression.getText(navigationSource)==="useEffect");
+ for(const effect of effects){
+  const actions=matchingNodes(effect,ts.isCallExpression).map(node=>(node as ts.CallExpression).expression.getText(navigationSource));
+  assert.equal(actions.includes("runTrial"),false);
+  assert.equal(actions.includes("client.startNavigationTrial"),false);
+ }
+});
+test("driving preparation needs its own runtime, never an already running observation or preview",()=>{
+ const policy={mode:"observe",verified:true,calibration_id:"accepted",model_sha256:"a".repeat(64)};
+ const detector={configured:true,loaded:false,sha256:""};
+ const status={control:{safety:{state:"DISARMED",owner:null,generation:"current",stale:false,ready:true,capabilities:{move:{available:true}},remote_decision_deadline_supported:true,scoped_stop_generation_supported:true}},errors:{}} as unknown as RiderStatus;
+ assert.equal(trialBlock(policy,{observe:false,drive:true},detector,true,false,status),"");
+ assert.equal(trialBlock(policy,{observe:true,drive:false},detector,true,false,status),"loopRuntimeMissing");
+ assert.equal(trialBlock(policy,{drive:true},detector,true,true,status),"loopUnsaved");
+ for(const language of ["pl","en","de"] as const){
+  for(const key of ["trialStartHelp","observationOptional","observationOptionalHelp"])assert.notEqual(translate(language,key),key);
+ }
+ assert.equal(translate("pl","trialRun"),"Jedź prosto · 10 s");
 });
