@@ -224,6 +224,8 @@ def test_dark_quality_gate_skips_model_without_motion(tmp_path, monkeypatch):
     report = compare.benchmark(args)
     assert report["status"] == "completed"
     assert report["drive_supported"] is False
+    assert report["warmup_samples"] == 0
+    assert report["warmup_kind"] == "quality_gate_only"
     assert report["summary"]["inferred_samples"] == 0
     assert report["rows"][0]["states"] == ["unknown", "unknown"]
 
@@ -286,3 +288,112 @@ def test_probe_mode_is_explicit_and_still_never_grants_motion(tmp_path, monkeypa
     assert report["drive_supported"] is False
     assert report["summary"]["inferred_samples"] == 2
     assert all(not a["image_quality_passed"] for a in report["rows"][0]["assessments"])
+
+
+def test_probe_cli_does_not_replace_production_default(tmp_path, monkeypatch):
+    import sys
+
+    from scripts import compare_depth_models as compare
+
+    received = []
+
+    def fake_benchmark(args):
+        received.append(args.quality_mode)
+        return {"summary": {}, "drive_supported": False}
+
+    monkeypatch.setattr(compare, "benchmark", fake_benchmark)
+    output = tmp_path / "default.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "compare",
+            "--backend",
+            "da2",
+            "--model",
+            str(tmp_path),
+            "--manifest",
+            str(tmp_path / "manifest.json"),
+            "--output",
+            str(output),
+        ],
+    )
+    compare.main()
+    assert received == ["production"]
+
+
+def test_sdk_rejects_untracked_source(tmp_path, monkeypatch):
+    import subprocess
+
+    from scripts import depth_candidates as candidates
+
+    def git(*args):
+        return subprocess.check_output(
+            ["git", "-C", str(tmp_path), *args], text=True
+        ).strip()
+
+    git("init", "-q")
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "original.py").write_text("pass")
+    git("add", "src")
+    git(
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.invalid",
+        "commit",
+        "-qm",
+        "fixture",
+    )
+    monkeypatch.setattr(candidates, "SDK_REVISION", git("rev-parse", "HEAD"))
+    candidates.verify_sdk(tmp_path)
+    (source / "untracked.py").write_text("pass")
+    with pytest.raises(ValueError, match="sdk_source_modified"):
+        candidates.verify_sdk(tmp_path)
+    (source / "untracked.py").unlink()
+    (source / "original.py").write_text("changed")
+    with pytest.raises(ValueError, match="sdk_source_modified"):
+        candidates.verify_sdk(tmp_path)
+
+
+def test_warmup_uses_valid_image_after_initial_dark_frame(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    pytest.importorskip("torch")
+    from scripts import compare_depth_models as compare
+
+    dark = manifest_row(tmp_path, "dark.jpg", "unlabelled")
+    Image.new("RGB", (64, 64), (0, 0, 0)).save(tmp_path / "dark.jpg")
+    dark["sha256"] = file_hash(tmp_path / "dark.jpg")
+    bright = manifest_row(tmp_path, "bright.jpg", "unlabelled")
+    pixels = np.tile(np.arange(64, dtype=np.uint8) * 3, (64, 1))
+    Image.fromarray(pixels).convert("RGB").save(tmp_path / "bright.jpg")
+    bright["sha256"] = file_hash(tmp_path / "bright.jpg")
+    calls = []
+
+    class Probe:
+        def __init__(self, *args):
+            self.metadata = {}
+
+        def infer(self, image):
+            calls.append(np.asarray(image).mean())
+            return np.ones((64, 64), dtype=np.float32)
+
+    monkeypatch.setattr(compare, "Candidate", Probe)
+    args = SimpleNamespace(
+        threads=1,
+        device="cpu",
+        manifest=write_manifest(tmp_path, [dark, bright]),
+        backend="da3-small",
+        model=tmp_path,
+        resolution=280,
+        warmup=2,
+        repeats=1,
+        quality_mode="production",
+    )
+    report = compare.benchmark(args)
+    assert len(calls) == 3
+    assert report["warmup_samples"] == 2
+    assert report["warmup_kind"] == "model_inference"
+    assert all(value > 0 for value in calls)

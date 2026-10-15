@@ -34,6 +34,7 @@ Memory is Torch's peak live tensor allocation, not total process/GPU occupancy.
 | DA3 Small 504 | 48.4 | 404.5 | 256 |
 | DA3 Base 504 | 71.9 | 965.9 | 748 |
 | DA3 Metric Large 504 | 95.7 | 2846.5 | 1504 |
+
 DA3 Small/Base and DA2 used a 1024 MiB process allocator limit. Metric Large failed
 with OutOfMemoryError under that limit and completed with a separately declared
 2048 MiB limit. This is a resource-budget result, not a claim that Metric cannot run
@@ -89,3 +90,8 @@ model-family parameter figures in marketing tables.
    selected model, no silent fallback and no parallel GPU lane that starves decisions.
 
 See [reproduction and official sources](DA3_RESEARCH.md).
+
+
+## New current-camera low-light sequence
+See [the separate low-light benchmark](DA3_LOW_LIGHT_RESULTS.md): 20 new RAW frames,
+production quality rejection versus explicit offline inference probes.

@@ -65,3 +65,16 @@ automatically. Run models sequentially to avoid measuring mutual contention.
 Reports are never overwritten; failures write `status: failed` and exit nonzero.
 
 [Measured results and next-step criteria](DA3_RESULTS.md).
+
+
+## Low-light replay
+The default `--quality-mode production` keeps the exact production image-quality
+rejection before inference. Its sub-millisecond rejection timings are not model speed.
+An explicitly selected `--quality-mode model_probe` runs the same saved dark image
+through the depth backend despite failing that offline gate. This is diagnostic only:
+the top-level report and per-frame assessment never support motion; it does not
+change any live image gate, threshold or Pi contract.
+Reports include RGB mean/std, quality result, labelled-frame count, actual inference
+count and low-quality CLEAR count. Unlabelled low-light scenes have no measured
+obstacle/free-floor accuracy; a zero false-CLEAR counter with zero labelled frames
+must not be interpreted as perfect accuracy.

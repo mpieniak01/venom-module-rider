@@ -54,6 +54,29 @@ def resize_depth(depth, size):
     return validate_depth(np.asarray(result))
 
 
+def verify_sdk(sdk):
+    revision = subprocess.check_output(
+        ["git", "-C", str(sdk), "rev-parse", "HEAD"], text=True
+    ).strip()
+    if revision != SDK_REVISION:
+        raise ValueError("sdk_revision_mismatch")
+    changed = subprocess.check_output(
+        [
+            "git",
+            "-C",
+            str(sdk),
+            "status",
+            "--porcelain",
+            "--untracked-files=all",
+            "--",
+            "src",
+        ],
+        text=True,
+    ).strip()
+    if changed:
+        raise ValueError("sdk_source_modified")
+
+
 class Candidate:
     """One model per benchmark process; official SDK network + input processor."""
 
@@ -111,14 +134,7 @@ class Candidate:
         from safetensors.torch import load_model
 
         sdk = Path(registry.__file__).resolve().parents[2]
-        revision = subprocess.check_output(
-            ["git", "-C", str(sdk), "rev-parse", "HEAD"], text=True
-        ).strip()
-        if revision != SDK_REVISION:
-            raise ValueError("sdk_revision_mismatch")
-        subprocess.run(
-            ["git", "-C", str(sdk), "diff", "--quiet", "HEAD", "--", "src"], check=True
-        )
+        verify_sdk(sdk)
         if self.metadata["files"]["model.safetensors"] != CHECKPOINT_HASHES[self.name]:
             raise ValueError("checkpoint_hash_mismatch")
         config = json.loads((self.path / "config.json").read_text())

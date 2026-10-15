@@ -8,6 +8,7 @@ import resource
 import time
 from collections import Counter
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from PIL import Image
@@ -87,6 +88,21 @@ def summarize(rows):
     }
 
 
+def decode_image(path):
+    payload = path.read_bytes()
+    with Image.open(io.BytesIO(payload)) as opened:
+        if (
+            opened.format not in {"JPEG", "PNG"}
+            or not (32 <= opened.width <= 1280 and 32 <= opened.height <= 720)
+            or len(payload) > 512 * 1024
+        ):
+            raise ValueError("vision_image_bounds")
+        image = opened.convert("RGB")
+    rgb = np.asarray(image, dtype=np.float32) / 255
+    mean, std = float(rgb.mean()), float(rgb.std())
+    return image, mean, std, mean >= 0.04 and std >= 0.01
+
+
 def benchmark(args):
     import torch
 
@@ -111,18 +127,8 @@ def benchmark(args):
 
     def evaluate(row):
         started = time.perf_counter()
-        payload = row["path"].read_bytes()
-        with Image.open(io.BytesIO(payload)) as opened:
-            if (
-                opened.format not in {"JPEG", "PNG"}
-                or not (32 <= opened.width <= 1280 and 32 <= opened.height <= 720)
-                or len(payload) > 512 * 1024
-            ):
-                raise ValueError("vision_image_bounds")
-            image = opened.convert("RGB")
-        rgb = np.asarray(image, dtype=np.float32) / 255
-        mean, std = float(rgb.mean()), float(rgb.std())
-        quality_passed = mean >= 0.04 and std >= 0.01
+        image, mean, std, quality_passed = decode_image(row["path"])
+        result: dict[str, Any]
         if not quality_passed and args.quality_mode == "production":
             result = {"state": "unknown", "reason": "vision_image_quality"}
         else:
@@ -131,6 +137,8 @@ def benchmark(args):
             result.pop("_errors")
         result.update(
             {
+                "drive_supported": False,
+                "distance_measurement": False,
                 "image_quality_passed": quality_passed,
                 "image_mean_rgb": mean,
                 "image_std_rgb": std,
@@ -140,10 +148,18 @@ def benchmark(args):
             torch.cuda.synchronize()
         return result, (time.perf_counter() - started) * 1000
 
-    warm = next((row for row in dataset if row["expected"] == "clear"), dataset[0])
+    # Warm a real inference, not a labelled frame that the quality gate rejects.
+    warm = (
+        dataset[0]
+        if args.quality_mode == "model_probe"
+        else next((row for row in dataset if decode_image(row["path"])[3]), None)
+    )
+    warmup_samples = args.warmup if warm is not None else 0
     start = time.perf_counter()
-    for _ in range(args.warmup):
-        evaluate(warm)
+    for _ in range(warmup_samples):
+        result, _ = evaluate(warm)
+        if result["reason"] == "vision_image_quality":
+            raise ValueError("warmup_image_quality")
     warmup_ms = (time.perf_counter() - start) * 1000
     results = []
     # Same input repeated checks deterministic stability, not live video freshness.
@@ -165,7 +181,9 @@ def benchmark(args):
         "model": model.metadata,
         "load_ms": load_ms,
         "warmup_ms": warmup_ms,
-        "warmup_samples": args.warmup,
+        "warmup_samples": warmup_samples,
+        "requested_warmup_samples": args.warmup,
+        "warmup_kind": "model_inference" if warm is not None else "quality_gate_only",
         "threads": args.threads,
         "cuda_memory_limit_mib": args.cuda_memory_mib
         if args.device == "cuda"
