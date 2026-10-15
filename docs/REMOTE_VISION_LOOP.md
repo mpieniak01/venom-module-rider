@@ -32,7 +32,7 @@ Weights and generated files are not committed.
 
 ## Run contract
 
-Use observation first. For drive, characterize the actual stopping zone at the
+Optional observation is available before driving. For drive, characterize the actual stopping zone at the
 configured speed, camera mounting and posture, lighting and floor conditions.
 Record its calibration_id and exact validated model hash. This is an operator
 acceptance record, not a proof supplied by the model. Changes require a stopped
@@ -112,6 +112,26 @@ in the result means submission, not durable storage confirmation. Check the
 archive manifest before treating a trace as evidence. Do not publish home images
 or trace archives in a public issue or PR.
 
-Fixing preview transport does not establish stable obstacle detection. Recorded
-observation still contains intermittent ground deviations. Physical acceptance
-and a paired-input validation of any later estimator change remain outstanding.
+The operator confirmed stability of the currently calibrated physical scene on
+2026-10-15. Earlier captures with intermittent ground deviations remain historical
+regression data. This acceptance does not establish general obstacle-detection
+accuracy, metric clearance or performance in different scenes. Later estimator
+changes still require paired-input validation and appropriate physical acceptance.
+
+## Complete stop and bounded recovery
+
+The main Drive forward action prepares the camera and navigation on Pi with one
+request. Service preparation is bounded by 15 s; the final start after ARM by 5 s
+within that budget. The client waits up to 18 s for the preparation result.
+These preparation budgets do not extend the original ARM window or motion TTL.
+
+A valid reply too close to its source deadline for a 50 ms pulse submits only
+ZERO while waiting for another fresh reply under the existing feedback watchdog.
+The original ARM deadline and generation remain unchanged. The panel preserves
+image GO separately from the actual STOP execution during this wait.
+
+Stop loop and camera closes the preview, stops drive and observation, withdraws
+the S2 camera reservation, and asks Pi to stop capture and the unused distributor.
+Pi enforces resource ownership; another consumer is reported, not forcibly
+released. Starting passive observation or a new explicit trial prepares the
+camera again. Page startup and reconnect never arm or drive.
