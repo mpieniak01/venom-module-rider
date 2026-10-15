@@ -49,7 +49,7 @@ class Domain:
         self.run, self.active = run, active
         self.camera_calls = 0
         self.reads = []
-        self.status = {"running": True, "stale": False, "run_id": run}
+        self.status = {"running": active, "stale": False, "run_id": run}
 
     def transport(self):
         return SimpleNamespace(device=SimpleNamespace(id="pi"))
@@ -209,3 +209,59 @@ async def test_diagnostic_snapshot_reports_unverified_relative_age_source():
     assert response.headers["x-rider-frame-age-source"] == "host-received"
     assert response.headers["x-rider-vision-action"] == "stop"
     assert domain.camera_calls == 1
+
+
+async def test_active_cached_preview_does_not_read_full_service_graph():
+    class Lightweight(Domain):
+        async def read(self, path, *args, **kwargs):
+            if path == "/api/logic/state":
+                raise AssertionError(
+                    "A matching live preview must not read the service graph"
+                )
+            return await super().read(path, *args, **kwargs)
+
+    loop = VisionLoop(Detector())
+    await loop.decide("pi", frame(age=0), b"raw")
+    domain = Lightweight()
+    response = await processed_camera(request(domain, loop))
+    assert response.body == b"jpeg-fixture"
+    assert [path for path, *_ in domain.reads] == [
+        "/api/navigation/config",
+        "/api/navigation/status",
+    ]
+    assert domain.camera_calls == 0
+
+
+async def test_stopped_pi_cannot_serve_its_still_fresh_previous_mask():
+    class Snapshot(Domain):
+        async def camera(self, stream):
+            self.camera_calls += 1
+            return b"new-raw", "image/jpeg", {"x-rider-stale": "false"}
+
+    detector, domain = Detector(), Snapshot(active=False)
+    loop = VisionLoop(detector)
+    await loop.decide("pi", frame(age=0), b"old-raw")
+    response = await processed_camera(request(domain, loop))
+    assert response.headers["x-rider-frame-id"] != "run-1"
+    assert response.headers["x-rider-run-id"] != "run"
+    assert response.headers["x-rider-frame-age-source"] == "host-received"
+    assert detector.calls == 2 and domain.camera_calls == 1
+
+
+async def test_live_producer_without_cache_cannot_fall_back_to_independent_inference():
+    class Lightweight(Domain):
+        async def read(self, path, *args, **kwargs):
+            if path == "/api/logic/state":
+                raise AssertionError("A running producer already owns inference")
+            return await super().read(path, *args, **kwargs)
+
+    detector, domain = Detector(), Lightweight()
+    loop = VisionLoop(detector)
+
+    async def no_result(*args, **kwargs):
+        return None
+
+    loop.wait_for_preview = no_result
+    with pytest.raises(RiderError, match="vision_busy"):
+        await processed_camera(request(domain, loop))
+    assert detector.calls == 0 and domain.camera_calls == 0

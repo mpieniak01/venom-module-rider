@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api-client";
 import { getApiBaseUrl } from "@/lib/env";
 import { readAnalysis } from "./vision-frame";
+import { decodePreview, nextPreviewDelay, previewLifetime } from "./preview-media";
 import { configForConnection } from "./device-session";
 import { HoldController, readHoldTiming, type MovementIntent } from "./hold-controller";
 import { canRequestArm, commandAccepted, controlIdentity, data, errorCode, faceRunning, featureRows, finite, frameRequested, record, safetyOf, settingsOf, str, type DeviceConfig, type Direction, type JsonRecord, type RiderStatus, type Section } from "./model";
@@ -69,13 +70,26 @@ export function useRider(section: Section) {
       setMediaError(code === "camera_off" ? "visionCameraOff" : code === "vision_busy" ? "visionBusy" : path === "/camera/venom" ? "visionPreviewUnavailable" : "frameMissing");
       return;
     }
+    const receivedAt = performance.now();
+    const ageMs = response.headers.has("X-Rider-Frame-Age-Ms") ? Number(response.headers.get("X-Rider-Frame-Age-Ms")) : undefined;
     const stale = response.headers.get("X-Rider-Stale");
     const placeholder = response.headers.get("X-Rider-Placeholder") === "true";
     if (stale === "true" || placeholder) { replaceFrame(kind, null, kind === "camera"); setMediaError("frameStale"); return; }
     const blob = await response.blob();
     if (signal.aborted || !frameRequested(kind, path, sectionRef.current, mediaRef.current)) return;
-    replaceFrame(kind, { analysis: readAnalysis(response.headers.get("X-Rider-Analysis-Json")), ageMs: response.headers.has("X-Rider-Frame-Age-Ms") ? Number(response.headers.get("X-Rider-Frame-Age-Ms")) : undefined, receivedAt: performance.now(), ageSource: response.headers.get("X-Rider-Frame-Age-Source") ?? undefined, decoded: false, url: URL.createObjectURL(blob), stale: false, knownFreshness: stale === "false", source: response.headers.get("X-Rider-Source") || response.headers.get("X-Face-Source") || "", fileAt: response.headers.get("X-Rider-File-Observed-At") || "", id: response.headers.get("X-Rider-Frame-Id") || "", visionState: response.headers.get("X-Rider-Vision-State") || "", visionReason: response.headers.get("X-Rider-Vision-Reason") || "", inferenceMs: response.headers.get("X-Rider-Vision-Inference-Ms") || "", visionPolicy: response.headers.get("X-Rider-Vision-Policy") || "", recordedAt: response.headers.get("X-Rider-Recorded-At") || "" });
-    setMediaError(null);
+    const url = URL.createObjectURL(blob);
+    try {
+      if (kind === "camera") await decodePreview(url, signal);
+      if (signal.aborted || !frameRequested(kind, path, sectionRef.current, mediaRef.current)) {
+        URL.revokeObjectURL(url); return;
+      }
+      const expired = kind === "camera" && path === "/camera/venom" && previewLifetime({ageMs,receivedAt}) === 0;
+      replaceFrame(kind, { analysis: readAnalysis(response.headers.get("X-Rider-Analysis-Json")), ageMs, receivedAt, ageSource: response.headers.get("X-Rider-Frame-Age-Source") ?? undefined, decoded: kind === "camera", url, stale: expired, knownFreshness: stale === "false" && !expired, source: response.headers.get("X-Rider-Source") || response.headers.get("X-Face-Source") || "", fileAt: response.headers.get("X-Rider-File-Observed-At") || "", id: response.headers.get("X-Rider-Frame-Id") || "", visionState: response.headers.get("X-Rider-Vision-State") || "", visionReason: response.headers.get("X-Rider-Vision-Reason") || "", inferenceMs: response.headers.get("X-Rider-Vision-Inference-Ms") || "", visionPolicy: response.headers.get("X-Rider-Vision-Policy") || "", recordedAt: response.headers.get("X-Rider-Recorded-At") || "" });
+      setMediaError(null);
+    } catch (error) {
+      URL.revokeObjectURL(url);
+      throw error;
+    }
   }, [replaceFrame]);
   const poll = useCallback(async (target?: Section, fast = false) => {
     const pending = fast ? controlPollPromise : pollPromise;
@@ -308,15 +322,25 @@ export function useRider(section: Section) {
     let alive = true, cycle = 0, timer: ReturnType<typeof setTimeout> | undefined, abort: AbortController | undefined;
     const tick = async () => {
       if (!alive || document.hidden) return;
-      const current = ++cycle; abort = new AbortController();
+      const current = ++cycle, started = performance.now(); abort = new AbortController();
       try { await fetchFrame("/camera/" + cameraStream, abort.signal, "camera"); }
       catch { if (!abort.signal.aborted && alive) { replaceFrame("camera", null, true); setMediaError("frameMissing"); } }
-      if (alive && current === cycle && !document.hidden) timer = setTimeout(() => void tick(), 500);
+      if (alive && current === cycle && !document.hidden) timer = setTimeout(() => void tick(), nextPreviewDelay(started, performance.now()));
     };
     const visibility = () => { cycle++; clearTimeout(timer); abort?.abort(); if (!document.hidden) void tick(); };
     document.addEventListener("visibilitychange", visibility); void tick();
     return () => { alive=false; cycle++; clearTimeout(timer); abort?.abort(); document.removeEventListener("visibilitychange", visibility); };
   }, [cameraStream, section, mediaSession, fetchFrame, replaceFrame]);
+  useEffect(() => {
+    if (cameraStream !== "venom" || !camera || camera.stale) return;
+    const remaining = previewLifetime(camera);
+    if (remaining === null) return;
+    const url = camera.url;
+    const timer = setTimeout(() => {
+      setCamera(previous => previous?.url === url ? { ...previous, stale: true, knownFreshness: false } : previous);
+    }, remaining);
+    return () => clearTimeout(timer);
+  }, [camera, cameraStream]);
   useEffect(() => () => { hold.release(); abortReads(); }, [abortReads, hold]);
   // ARM always refreshes the fast control endpoint before making its envelope.
   // The latency of a diagnostics view must not prevent that refresh request.

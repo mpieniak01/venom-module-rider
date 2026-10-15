@@ -30,28 +30,29 @@ async def processed_camera(request: Request):
     loop = request.app.state.rider_vision
     cached = loop.preview(client.device.id, corridor=corridor, revision=revision)
     if source == "device_policy":
-        # Requested Pi loops own the detector. A browser consumes their result,
-        # without fetching another RAW image or admitting diagnostic inference.
-        goals = await loop_goals(domain, force=False)
-        if any(goals.get(mode) is not False for mode in ("observe", "drive")):
-            cached = None
-            if any(goals.get(mode) is True for mode in ("observe", "drive")):
-                status = (await domain.read("/api/navigation/status", 0.2))["data"]
-                run_id = status.get("run_id")
-                if (
-                    status.get("running") is True
-                    and status.get("stale") is not True
-                    and isinstance(run_id, str)
-                    and run_id
-                ):
-                    cached = await loop.wait_for_preview(
-                        client.device.id,
-                        corridor=corridor,
-                        revision=revision,
-                        run_id=run_id,
-                    )
+        # The producer status is lightweight. Serving a current Pi result must
+        # not wait for the full service/ownership graph on every browser read.
+        status = (await domain.read("/api/navigation/status", 0.2))["data"]
+        run_id = status.get("run_id")
+        if (
+            status.get("running") is True
+            and status.get("stale") is not True
+            and isinstance(run_id, str)
+            and run_id
+        ):
+            cached = await loop.wait_for_preview(
+                client.device.id, corridor=corridor, revision=revision, run_id=run_id
+            )
             if cached is None:
                 raise RiderError("vision_busy", 429)
+        else:
+            # A stopped or stale producer cannot validate its previous JPEG.
+            # Independent inference still requires both Pi goals confirmed OFF.
+            goals = await loop_goals(domain, force=False)
+            if any(goals.get(mode) is not False for mode in ("observe", "drive")):
+                raise RiderError("vision_busy", 429)
+            if cached is not None and cached[2]["age_source"] != "host-received":
+                cached = None
     if cached is None:
         payload, mime, raw_headers = await domain.camera("raw")
         if mime not in {"image/jpeg", "image/png"}:
