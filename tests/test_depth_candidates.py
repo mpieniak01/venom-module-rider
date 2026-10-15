@@ -397,3 +397,31 @@ def test_warmup_uses_valid_image_after_initial_dark_frame(tmp_path, monkeypatch)
     assert report["warmup_samples"] == 2
     assert report["warmup_kind"] == "model_inference"
     assert all(value > 0 for value in calls)
+
+
+def test_retained_profile_is_explicit_and_keeps_legacy_defaults():
+    from argparse import Namespace
+
+    from scripts.compare_depth_models import apply_profile
+
+    selected = apply_profile(
+        Namespace(profile="da3-small-280", backend=None, model=None, resolution=None)
+    )
+    assert selected.backend == "da3-small"
+    assert selected.resolution == 280
+    assert selected.model.name == "small"
+    legacy = apply_profile(
+        Namespace(profile=None, backend="da2", model="unchanged", resolution=None)
+    )
+    assert legacy.model == "unchanged"
+    assert legacy.resolution == 504
+    with pytest.raises(ValueError, match="profile_conflicts"):
+        apply_profile(
+            Namespace(
+                profile="da3-small-280", backend="da2", model=None, resolution=None
+            )
+        )
+    with pytest.raises(ValueError, match="backend_and_model_required"):
+        apply_profile(
+            Namespace(profile=None, backend=None, model=None, resolution=None)
+        )

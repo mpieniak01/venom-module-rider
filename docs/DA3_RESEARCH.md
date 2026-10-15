@@ -83,3 +83,27 @@ must not be interpreted as perfect accuracy.
 ## Continuous video and temporal windows
 [Online MJPEG, codec and causal-window experiments](VIDEO_SEQUENCE_RESEARCH.md)
 separate delivery latency from changes in pixel decoding and joint DA3 attention.
+
+
+## Retained configuration after evaluation
+The live panel keeps DA2 at `data/depth-small`. The versioned
+`config/vision-research.json` records this baseline and the retained
+`da3-small-280` offline option. It is a research configuration, not a new
+production backend or automatic fallback. Use:
+
+```sh
+make research-depth ARGS="--profile da3-small-280 --device cuda --manifest PATH/manifest.json --output docs_dev/small-retained.json"
+```
+
+The profile supplies backend, local model directory and 280-pixel resolution;
+do not combine it with explicit model/backend/resolution arguments. Device
+selection and the production quality gate keep their existing defaults.
+
+Keep DA3 Small weights and the pinned SDK. Base and Metric Large local weights
+were removed after comparison to reclaim disk; their benchmark reports, pinned
+revisions and comparison code remain reproducible. Larger candidates require
+an explicit download before reuse. No models are downloaded at startup.
+
+The video runner, causal 1/3/5-frame windows and documented streaming experiments
+remain available for further development. They do not enable a live video lane
+or robot motion. See [video experiments](VIDEO_SEQUENCE_RESEARCH.md).

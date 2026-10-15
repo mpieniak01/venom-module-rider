@@ -213,18 +213,42 @@ def benchmark(args):
     }
 
 
+def apply_profile(args):
+    """Resolve an explicit retained preset; never alter the live model."""
+    if args.profile:
+        if (
+            args.backend is not None
+            or args.model is not None
+            or args.resolution is not None
+        ):
+            raise ValueError("profile_conflicts_with_model_arguments")
+        root = Path(__file__).resolve().parent.parent
+        profiles = json.loads((root / "config/vision-research.json").read_text())[
+            "profiles"
+        ]
+        profile = profiles[args.profile]
+        args.backend = profile["backend"]
+        args.model = root / profile["model"]
+        args.resolution = profile["resolution"]
+    elif args.backend is None or args.model is None:
+        raise ValueError("backend_and_model_required")
+    elif args.resolution is None:
+        args.resolution = 504
+    return args
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--backend",
         choices=["da2", "da3-small", "da3-base", "da3metric-large"],
-        required=True,
     )
-    parser.add_argument("--model", type=Path, required=True)
+    parser.add_argument("--profile", choices=["da3-small-280"])
+    parser.add_argument("--model", type=Path)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--device", choices=["cpu", "cuda"], default="cpu")
-    parser.add_argument("--resolution", type=int, choices=[280, 504], default=504)
+    parser.add_argument("--resolution", type=int, choices=[280, 504])
     parser.add_argument("--threads", type=int, choices=range(1, 17), default=4)
     parser.add_argument("--repeats", type=int, choices=range(1, 101), default=5)
     parser.add_argument("--warmup", type=int, choices=range(1, 11), default=2)
@@ -238,6 +262,10 @@ def main():
         help="model_probe: offline inference on rejected images",
     )
     args = parser.parse_args()
+    try:
+        apply_profile(args)
+    except ValueError as error:
+        parser.error(str(error))
     if args.output.exists():
         raise FileExistsError("report already exists")
     args.output.parent.mkdir(parents=True, exist_ok=True)
