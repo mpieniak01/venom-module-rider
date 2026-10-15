@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Play, Square, RefreshCw } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
-import { data, errorCode, formatTime, record, type JsonRecord } from "../lib/model";
-import { calibrationAcceptance, calibrationMatches, completedTrial, calibrationScope, decisionView, executionHeadline, freshPolicyFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, motionPermission, stoppingZone, stoppingZoneValues, trialBlock } from "../lib/loop-controls";
+import { data, errorCode, formatNumber, formatTime, record, type JsonRecord } from "../lib/model";
+import { calibrationAcceptance, calibrationMatches, completedTrial, calibrationScope, decisionView, executionHeadline, freshPolicyFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, motionPermission, stoppingZone, stoppingZoneValues, trialBlock, trialPreparation, trialPreparationTitle, trialPreparationErrorKey } from "../lib/loop-controls";
 import type { RiderClient } from "../lib/use-rider";
 import type { Translator } from "../lib/i18n";
 import { LoopDecision } from "./loop-decision";
@@ -27,6 +27,7 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
   const [operation,setOperation]=useState<"check"|"start"|"stop"|"save"|"zone"|null>(null);
   const [error,setError]=useState("");
   const [errorRun,setErrorRun]=useState("");
+  const [trialFailure,setTrialFailure]=useState<unknown>(null);
   const [readError,setReadError]=useState("");
   const [trialResult,setTrialResult]=useState("");
   const [trialStopReason,setTrialStopReason]=useState("");
@@ -45,7 +46,7 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
   const session=client.status?.connection.session;
   useEffect(()=>{
     const abort=new AbortController();let timer:ReturnType<typeof setTimeout>;let configured=false;let reading=false;
-    setLoopState({stale:true});setGoals({});setRuntime({});
+    setLoopState({stale:true});setGoals({});setRuntime({});setTrialFailure(null);
     if(!connected)return ()=>abort.abort();
     setLoading(true);setReadError("");
     const apply=(row:JsonRecord)=>{setLoopState(record(row.status));setDetector(record(row.detector));setGoals(record(row.goals));};
@@ -92,6 +93,7 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
     setLoopState(record(row.status));setGoals(record(row.goals));setDetector(record(row.detector));
   };
   const failure=useCallback((err:unknown)=>{
+    setTrialFailure(err);
     const diagnostic=record(record(record(record(err).data).detail).details).navigation;
     const row=record(diagnostic);setErrorRun(String(row.run_id??""));const cause=String(record(row.motion_failure).reason??row.stop_reason??"");
     const key="vision.reason."+cause, translated=t(key);
@@ -193,7 +195,7 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
   };
   const runTrial=async()=>{
     if(!policy||trialUnavailable||operation||loading||phase==="running"&&goals.drive===true)return;
-    setOperation("check");setError("");setTrialResult("trialChecking");setTrialStopReason("");trialArmed.current=false;
+    setOperation("check");setError("");setTrialFailure(null);setTrialResult("trialChecking");setTrialStopReason("");trialArmed.current=false;
     const origin=client.currentSession();operationEpoch.current=client.currentMotionEpoch();operationGeneration.current=client.currentGeneration();
     trialSession.current=origin;
     const task=(async()=>{
@@ -242,7 +244,10 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
   const imageDecision=decisionView(loopState,detector);
   const sharedTrial=loopState.running===true&&loopState.mode==="drive"?null:completedTrial(loopState);
   const displayedStopReason=sharedTrial?String(sharedTrial.stop_reason):trialStopReason;
-  const visibleError=errorRun&&sharedTrial?.run_id===errorRun?"":error;
+  const preparation=trialPreparation(loopState,trialFailure);
+  const hasPreparationError=trialPreparation({},trialFailure)!==null;
+  const visibleError=preparation?.source==="pi"&&hasPreparationError||errorRun&&sharedTrial?.run_id===errorRun?"":error;
+
   return <Panel title={t("loopTitle")} extra={<Button aria-label={t("loopLoad")} disabled={loading||!!operation||!connected} onClick={()=>setRefresh(v=>v+1)}><RefreshCw size={14}/>{t("refresh")}</Button>}>
     <div className={styles.loopStatus} role="status" data-testid="loop-state">
       <Pill tone={phase==="running"?"good":phase==="offline"||phase==="unknown"||phase==="fault"?"warning":undefined}>{t(operation==="stop"?"loopStopping":phase==="fault"?"loopPhase.fault":operation==="check"?"trialChecking":operation==="start"?"loopStarting":"loopPhase."+phase)}</Pill>
@@ -269,6 +274,12 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
     {policy&&!calibrationMatches(policy,detector)&&detector.drive_supported!==false&&<div className={styles.stack} data-testid="trial-acceptance">
       <p className={styles.hint}>{t("trialAcceptanceHelp")}</p>
       <Button data-testid="trial-accept" disabled={!connected||!!operation||loading||dirty||goals.drive===true||imageDecision.vision!=="go"||!freshPolicyFrame(client.camera,client.cameraStream,loopState,policy)} onClick={()=>void acceptTrial()}>{t("trialAccept")}</Button>
+    </div>}
+    {preparation&&<div className={preparation.state==="failed"?styles.loopError:styles.metric} role={preparation.state==="failed"?"alert":"status"} data-testid="trial-preparation" data-request-id={preparation.requestId}>
+      <strong>{t(trialPreparationTitle(preparation))} · {t("trialPreparation.phase."+preparation.phase)}</strong>
+      <p className={styles.small}>{t("trialPreparationElapsed",{seconds:formatNumber(preparation.elapsedMs===null?null:preparation.elapsedMs/1000,language,1)})}</p>
+      <p className={styles.small}>{t(preparation.source==="pi"?"trialPreparationSource":"trialPreparationResponse")} · {formatTime(preparation.observedAt,language)}{!preparation.fresh?" · "+t("trialPreparationStale"):""}</p>
+      {preparation.error&&<p>{t(trialPreparationErrorKey(preparation))}</p>}
     </div>}
     {!!trialUnavailable&&<p id="rider-trial-block" className={styles.loopError} role="status" data-testid="loop-block">{t(trialUnavailable)}</p>}
     {!!trialResult&&!displayedStopReason&&!(trialResult==="trialStarted"&&phase==="running")&&<p className={styles.hint} role="status" data-testid="trial-result">{t(phase==="fault"?"trialEnded":trialResult==="trialStarted"&&phase==="stopped"?"trialStopped":trialResult)}</p>}

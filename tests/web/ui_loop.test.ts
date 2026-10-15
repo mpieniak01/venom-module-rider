@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { calibrationAcceptance, calibrationMatches, completedTrial, executionHeadline, freshPolicyFrame, previewNotice, calibrationScope, decisionView, freshAnalysisFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, motionPermission, stoppingZone, stoppingZoneValues, trialBlock } from "../../web-next/lib/loop-controls";
+import { calibrationAcceptance, calibrationMatches, completedTrial, executionHeadline, freshPolicyFrame, previewNotice, calibrationScope, decisionView, freshAnalysisFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, motionPermission, stoppingZone, stoppingZoneValues, trialBlock, trialPreparation, trialPreparationTitle, trialPreparationErrorKey } from "../../web-next/lib/loop-controls";
+import { translate } from "../../web-next/lib/i18n";
 import { featureRows, frameRequested, type RiderStatus } from "../../web-next/lib/model";
 
 test("confirmed stopped goals stay stopped when the last loop file has aged",()=>{
@@ -250,4 +251,80 @@ test("accepting a near zone requires the displayed JPEG to match its current run
  assert.equal(freshPolicyFrame({...frame,analysis:undefined},"venom",state,policy),false);
  assert.equal(freshPolicyFrame(null,"venom",state,policy),false);
  assert.equal(stoppingZoneValues({corridor:[.35,.65,.65,.95]},"near"),null);
+});
+
+
+const preparation = {
+ request_id:"prepare-one", phase:"camera_reservation", state:"preparing",
+ elapsed_ms:1250, observed_at:1792043923, error:null, fresh:true,
+};
+const preparationError = (value:Record<string,unknown>)=>({data:{detail:{code:"navigation_trial_prepare_timeout",details:{preparation:value}}}});
+test("preparation phases and Pi elapsed time are presentation only",()=>{
+ for(const phase of ["admission","camera_reservation","stop_old_producer","configure","authority_handoff","arm_ack","start_navigation","first_status","ready"]){
+  const value=trialPreparation({preparation:{...preparation,phase}});
+  assert.equal(value?.phase,phase);assert.equal(value?.elapsedMs,1250);
+  assert.equal(value?.source,"pi");assert.equal(value?.fresh,true);
+ }
+ const state={preparation:{...preparation,phase:"ready",state:"completed"}};
+ assert.equal(trialPreparation(state)?.state,"completed");
+ assert.equal(decisionView(state,permissionDetector).vision,"none");
+ assert.equal(motionPermission(state,{drive:false},permissionPolicy,permissionDetector,permissionStatus()).venom,false);
+});
+test("fresh Pi preparation replaces previous per-tab errors in both browsers",()=>{
+ const failed={...preparation,state:"failed",phase:"arm_ack",error:"navigation_trial_arm_unconfirmed",elapsed_ms:4300};
+ const previous={...failed,request_id:"older-request",observed_at:preparation.observed_at-10};
+ const chrome=trialPreparation({preparation:failed},preparationError(previous));
+ const embedded=trialPreparation({preparation:{...failed}});
+ assert.deepEqual(chrome,embedded);
+ assert.equal(chrome?.error,"navigation_trial_arm_unconfirmed");
+ assert.equal(chrome?.elapsedMs,4300);
+ const completed={...preparation,request_id:"new-request",phase:"ready",state:"completed",observed_at:preparation.observed_at+10};
+ assert.equal(trialPreparation({preparation:completed},preparationError(failed))?.state,"completed");
+ assert.equal(trialPreparation({preparation:completed},preparationError(failed))?.source,"pi");
+});
+test("request details expose exact failure stage until a newer Pi poll arrives",()=>{
+ const failed={...preparation,phase:"first_status",state:"failed",error:{code:"navigation_trial_stopped"},elapsed_ms:4700};
+ const fallback=trialPreparation({},preparationError(failed));
+ assert.equal(fallback?.phase,"first_status");assert.equal(fallback?.error,"navigation_trial_stopped");
+ assert.equal(fallback?.source,"request");assert.equal(fallback?.elapsedMs,4700);
+ const previous={...preparation,request_id:"previous",observed_at:preparation.observed_at-5};
+ assert.equal(trialPreparation({preparation:previous},preparationError(failed))?.requestId,preparation.request_id);
+ assert.equal(trialPreparation({preparation:{...failed}},preparationError(failed))?.source,"pi");
+});
+test("old Pi and invalid preparation snapshots keep the existing UI compatible",()=>{
+ assert.equal(trialPreparation({running:false}),null);
+ for(const patch of [{request_id:""},{state:"running"},{observed_at:null},{observed_at:NaN}]){
+  assert.equal(trialPreparation({preparation:{...preparation,...patch}}),null);
+ }
+ for(const elapsed_ms of [-1,NaN,Infinity,undefined]){
+  assert.equal(trialPreparation({preparation:{...preparation,elapsed_ms}})?.elapsedMs,null);
+ }
+ assert.equal(trialPreparation({preparation:{...preparation,fresh:false}})?.fresh,false);
+ assert.equal(trialPreparation({preparation:{...preparation,phase:"future_stage"}})?.phase,"unknown");
+ assert.equal(trialPreparation({}, {data:{detail:{code:"start_failed"}}}),null);
+});
+test("all preparation stages states and sources are translated in PL EN DE",()=>{
+ const keys=["trialPreparation.state.preparing","trialPreparation.state.failed","trialPreparation.state.completed","trialPreparationElapsed","trialPreparationSource","trialPreparationResponse","trialPreparationStale",...["admission","camera_reservation","stop_old_producer","configure","authority_handoff","arm_ack","start_navigation","first_status","ready","unknown"].map(phase=>"trialPreparation.phase."+phase)];
+ for(const language of ["pl","en","de"] as const){
+  for(const key of keys)assert.notEqual(translate(language,key,{seconds:"1.2"}),key);
+  assert.ok(translate(language,"trialPreparationElapsed",{seconds:"1.2"}).includes("1.2"));
+  assert.ok(!translate(language,"trialStarting").includes("GO"));
+ }
+});
+
+
+test("stale preparation is historical and unknown Pi errors never become translation keys",()=>{
+ const current=trialPreparation({preparation});
+ assert.ok(current);
+ assert.equal(trialPreparationTitle(current),"trialPreparation.state.preparing");
+ const historical=trialPreparation({preparation:{...preparation,fresh:false}});
+ assert.ok(historical);
+ assert.equal(trialPreparationTitle(historical),"trialPreparationHistorical");
+ assert.equal(trialPreparationErrorKey({...current,error:"navigation_trial_prepare_timeout"}),"trial.error.navigation_trial_prepare_timeout");
+ for(const error of ["unrecognized_code","__proto__","<script>invalid</script>","trial.error.navigation_trial_prepare_timeout"]){
+  assert.equal(trialPreparationErrorKey({...current,error}),"requestFailed");
+ }
+ for(const language of ["pl","en","de"] as const){
+  assert.notEqual(translate(language,"trialPreparationHistorical"),"trialPreparationHistorical");
+ }
 });

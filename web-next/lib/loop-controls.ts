@@ -1,3 +1,4 @@
+import { messages } from "./i18n";
 import { frameAge } from "./vision-frame";
 import { navigationAvailable } from "./navigation";
 import { record, safetyOf, str, timestampMs, type JsonRecord, type RiderStatus } from "./model";
@@ -171,4 +172,52 @@ export function completedTrial(state: JsonRecord): JsonRecord | null {
   const row=record(state.last_trial);
   return row.mode==="drive"&&row.running===false&&!!str(row.run_id)
     &&timestampMs(row.observed_at)!==null&&!!str(row.stop_reason)?row:null;
+}
+
+
+export type TrialPreparation = {
+  requestId: string;
+  phase: string;
+  state: "preparing" | "failed" | "completed";
+  elapsedMs: number | null;
+  observedAt: number;
+  error: string;
+  fresh: boolean;
+  source: "pi" | "request";
+};
+const preparationPhases = new Set([
+  "admission", "camera_reservation", "stop_old_producer", "configure",
+  "authority_handoff", "arm_ack", "start_navigation", "first_status", "ready",
+]);
+function preparationRecord(value: unknown, source: "pi" | "request"): TrialPreparation | null {
+  const row = record(value), state = row.state, observedAt = timestampMs(row.observed_at);
+  if (!["preparing", "failed", "completed"].includes(str(state)) || !str(row.request_id) || observedAt === null) return null;
+  return {
+    requestId: str(row.request_id),
+    phase: preparationPhases.has(str(row.phase)) ? str(row.phase) : "unknown",
+    state: state as TrialPreparation["state"],
+    elapsedMs: typeof row.elapsed_ms === "number" && Number.isFinite(row.elapsed_ms) && row.elapsed_ms >= 0 ? row.elapsed_ms : null,
+    observedAt,
+    error: str(row.error) || str(record(row.error).code),
+    fresh: row.fresh === true,
+    source,
+  };
+}
+/** Pi preparation is shared across tabs; it never grants movement permission. */
+export function trialPreparation(state: JsonRecord, error: unknown = null): TrialPreparation | null {
+  const pi = preparationRecord(state.preparation, "pi");
+  const details = record(record(record(record(error).data).detail).details);
+  const request = preparationRecord(details.preparation, "request");
+  // Both timestamps originate on Pi. A just-returned newer failure can precede
+  // the next status poll; a fresh newer Pi record replaces older per-tab errors.
+  if (pi?.fresh && (!request || pi.observedAt >= request.observedAt)) return pi;
+  return request ?? pi;
+}
+
+export function trialPreparationTitle(value: TrialPreparation): string {
+  return value.fresh ? "trialPreparation.state." + value.state : "trialPreparationHistorical";
+}
+export function trialPreparationErrorKey(value: TrialPreparation): string {
+  const key = "trial.error." + value.error;
+  return Object.prototype.hasOwnProperty.call(messages, key) ? key : "requestFailed";
 }
