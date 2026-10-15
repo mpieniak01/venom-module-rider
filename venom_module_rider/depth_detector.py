@@ -35,7 +35,10 @@ def assess_depth(depth, corridor, settings):
     scale = float(np.median(inverse))
     design = np.column_stack((x[mask] / w, y[mask] / h, np.ones(mask.sum())))
     coefficients = np.linalg.lstsq(design, inverse, rcond=None)[0]
-    errors = np.abs(design @ coefficients - inverse) / scale
+    # Positive residuals are nearer than the fitted plane; negative ones are
+    # farther away. Keep both: a recess/drop-off must not become a clear path.
+    signed_errors = (inverse - design @ coefficients) / scale
+    errors = np.abs(signed_errors)
     slope = float(coefficients[1] / scale)
     outliers = float((errors > settings.residual_limit).mean())
     residual = float(np.quantile(errors, 0.99))
@@ -54,6 +57,12 @@ def assess_depth(depth, corridor, settings):
         "plane_residual_p99": residual,
         "plane_slope": slope,
         "outlier_fraction": outliers,
+        "nearer_outlier_fraction": float(
+            (signed_errors > settings.residual_limit).mean()
+        ),
+        "farther_outlier_fraction": float(
+            (signed_errors < -settings.residual_limit).mean()
+        ),
         "residual_limit": settings.residual_limit,
         "outlier_limit": settings.outlier_limit,
         "slope_min": settings.slope_min,
