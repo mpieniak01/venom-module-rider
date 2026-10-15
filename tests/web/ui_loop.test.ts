@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { calibrationAcceptance, calibrationMatches, completedTrial, executionHeadline, previewNotice, calibrationScope, decisionView, freshAnalysisFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, motionPermission, trialBlock } from "../../web-next/lib/loop-controls";
+import { calibrationAcceptance, calibrationMatches, completedTrial, executionHeadline, freshPolicyFrame, previewNotice, calibrationScope, decisionView, freshAnalysisFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, motionPermission, stoppingZone, stoppingZoneValues, trialBlock } from "../../web-next/lib/loop-controls";
 import { featureRows, frameRequested, type RiderStatus } from "../../web-next/lib/model";
 
 test("confirmed stopped goals stay stopped when the last loop file has aged",()=>{
@@ -213,4 +213,41 @@ test("both panels retain the Pi trial outcome while current observation gives GO
  assert.equal(completedTrial({...chrome,mode:"drive",running:true}),null);
  assert.equal(completedTrial({...chrome,last_trial:{...last_trial,running:true}}),null);
  assert.equal(completedTrial({...chrome,last_trial:{mode:"observe",running:false}}),null);
+});
+
+
+test("near stopping extent preserves path width and nearest edge without increasing motion",()=>{
+ const policy={revision:4,protocol_version:1,mode:"drive",verified:true,calibration_id:"old",model_sha256:"a".repeat(64),corridor:[.25,.65,.75,.95],speed:.12,max_motion_ms:180,decision_budget_ms:300};
+ const near=stoppingZoneValues(policy,"near");
+ assert.deepEqual(near?.corridor,[.25,.8,.75,.95]);
+ assert.equal(near?.speed,.1);assert.equal(near?.max_motion_ms,150);
+ assert.equal(near?.decision_budget_ms,300);assert.equal(near?.verified,false);
+ assert.equal(near?.calibration_id,"");assert.equal(near?.model_sha256,"");
+ assert.equal(stoppingZone(near),"near");
+ const far=stoppingZoneValues({...policy,...near},"far");
+ assert.deepEqual(far?.corridor,policy.corridor);
+ assert.equal(far?.speed,.1);assert.equal(far?.max_motion_ms,150);
+ assert.equal(stoppingZone(far),"far");
+ assert.equal(stoppingZone({...policy,corridor:[.2,.4,.8,.9]}),"custom");
+});
+
+test("stopping extents reject unknown bounds and keep slower operator limits",()=>{
+ for(const corridor of [null,[],[0,0,1,NaN],[.8,.6,.2,.95],[0,0,1,.1]]){
+  assert.equal(stoppingZoneValues({corridor},"near"),null);
+ }
+ const values=stoppingZoneValues({corridor:[.35,.65,.65,.95],speed:.05,max_motion_ms:80},"near");
+ assert.equal(values?.speed,.05);assert.equal(values?.max_motion_ms,80);
+});
+
+
+test("accepting a near zone requires the displayed JPEG to match its current run and revision",()=>{
+ const frame={decoded:true,stale:false,knownFreshness:true,id:"capture",fileAt:"",visionState:"clear",visionPolicy:"device_policy",ageMs:30,receivedAt:performance.now(),ageSource:"pi-reported-plus-host-elapsed",analysis:{run_id:"new-zone",config_revision:8,state:"clear",vision_action:"go"}};
+ const state={run_id:"new-zone"},policy={revision:8};
+ assert.equal(freshPolicyFrame(frame,"venom",state,policy),true);
+ assert.equal(freshPolicyFrame({...frame,analysis:{...frame.analysis,config_revision:7}},"venom",state,policy),false);
+ assert.equal(freshPolicyFrame({...frame,analysis:{...frame.analysis,run_id:"old-zone"}},"venom",state,policy),false);
+ assert.equal(freshPolicyFrame({...frame,analysis:{...frame.analysis,state:"obstacle"}},"venom",state,policy),false);
+ assert.equal(freshPolicyFrame({...frame,analysis:undefined},"venom",state,policy),false);
+ assert.equal(freshPolicyFrame(null,"venom",state,policy),false);
+ assert.equal(stoppingZoneValues({corridor:[.35,.65,.65,.95]},"near"),null);
 });

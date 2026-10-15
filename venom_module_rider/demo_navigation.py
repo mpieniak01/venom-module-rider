@@ -25,7 +25,7 @@ DEFAULT_POLICY: dict[str, Any] = {
     "speed": 0.1,
     "decision_budget_ms": 300,
     "max_motion_ms": 150,
-    "corridor": [0.35, 0.65, 0.65, 0.95],
+    "corridor": [0.35, 0.80, 0.65, 0.95],
     "calibration_id": "",
     "model_sha256": "",
     "perception": {

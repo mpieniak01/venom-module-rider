@@ -14,7 +14,7 @@ from .vision_routes import loop_goals
 async def processed_camera(request: Request):
     domain = request.app.state.rider
     client = domain.transport()
-    corridor = (0.35, 0.65, 0.65, 0.95)
+    corridor = (0.35, 0.80, 0.65, 0.95)
     revision = 0
     source = "diagnostic_default"
     perception = {}

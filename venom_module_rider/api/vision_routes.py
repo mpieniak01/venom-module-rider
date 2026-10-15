@@ -104,6 +104,7 @@ async def navigation_state(request: Request):
     return {
         "goals": await loop_goals(request.app.state.rider),
         "status": state["data"],
+        "config": config["data"],
         "detector": request.app.state.rider_vision.status(
             config["data"].get("perception")
         ),

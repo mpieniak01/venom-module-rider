@@ -14,13 +14,19 @@ async (page) => {
       const run_id=driving?"fixture-drive":"fixture-observe";
       const decision={run_id,frame_id:"fixture-capture",sequence:4,config_revision:policy.revision,state:obstacle?"obstacle":"clear",clear_count:obstacle?0:4,vision_action:obstacle?"stop":"go",action:driving&&!obstacle?"go":"stop",reason:obstacle?"depth_ground_deviation":"depth_plane_candidate",motion_reason:obstacle?"depth_ground_deviation":driving?"clear_frames_ready":"observe_only",perception_engine:"depth_plane",valid_for_ms:150};
       const status=terminal??{running:observing||driving,stale:false,latched:false,paused:driving&&obstacle,mode:driving?"drive":"observe",run_id,config_revision:policy.revision,decision,permit_remaining_ms:150};
-      return {goals:{observe:observing,drive:driveRequested},status:{...status,last_trial:terminal},detector};
+      return {goals:{observe:observing,drive:driveRequested},status:{...status,last_trial:terminal},detector,config:policy};
     };
     await page.route("**/api/v1/rider/**",async route=>{
       const req=route.request(),path=new URL(req.url()).pathname.slice("/api/v1/rider".length);
       const json=(body,status=200)=>route.fulfill({status,contentType:"application/json",body:JSON.stringify(body)});
       if(req.method()!=="GET"){
         const body=req.postDataJSON();calls.push({path,body});
+        if(path==="/navigation/config"){
+          check(!observing&&!driving&&!driveRequested,"configuration saved while a loop was active");
+          check(body.revision===policy.revision,"configuration revision mismatch");
+          policy={...policy,...body.values,revision:policy.revision+1};
+          return json({ok:true,data:{ok:true,persisted:true,config:policy}});
+        }
         if(path==="/navigation/trial"){
           check(body.generation===generation&&body.config_revision===policy.revision,"trial identity mismatch");
           check(body.operator_consent===true&&body.operator_plan&&body.request_id&&body.source==="manual"&&body.execution_context==="panel","operator intent missing");
@@ -54,6 +60,25 @@ async (page) => {
     await page.goto("http://localhost:3300/rider");await page.bringToFront();
     await page.getByTestId("loop-start").waitFor();
     await wait(async()=>!await page.getByTestId("loop-start").isDisabled(),"start button unavailable");
+    if(mode==="remote"){
+      // Another panel changes the Pi-owned policy; this card must follow it.
+      policy={...policy,revision:policy.revision+1,corridor:[.35,.8,.65,.95],verified:false,calibration_id:"",model_sha256:""};
+      await wait(async()=>await page.getByTestId("loop-zone").inputValue()==="near","remote zone revision not synchronized");
+      check(await page.getByTestId("loop-start").isDisabled(),"old receipt still enables start after remote change");
+      check(!armed&&armCount===0,"remote configuration armed");
+      return {mode,result:"PASS"};
+    }
+    if(mode==="zone"){
+      await page.getByTestId("loop-zone").selectOption("near");
+      await wait(()=>policy.corridor[1]===.8&&observing,"near zone not saved and observation not resumed");
+      check(JSON.stringify(policy.corridor)===JSON.stringify([.35,.8,.65,.95]),"near zone changed path width or nearest edge");
+      check(!policy.verified&&!armed&&armCount===0,"zone change reused receipt or armed");
+      check(policy.speed===.1&&policy.max_motion_ms===150,"zone change increased motion settings");
+      await wait(async()=>!await page.getByTestId("trial-accept").isDisabled(),"fresh near-zone acceptance unavailable");
+      await page.getByTestId("trial-accept").click();
+      await wait(()=>policy.verified&&observing,"near-zone receipt not saved");
+      await wait(async()=>!await page.getByTestId("loop-start").isDisabled(),"accepted near-zone trial unavailable");
+    }
     await page.getByTestId("loop-start").click();
     if(mode==="cancel"){
       await wait(()=>starting,"trial did not reach endpoint");
@@ -65,6 +90,7 @@ async (page) => {
     }
     await wait(()=>driving&&armed,"single endpoint did not start trial");
     check(armCount===1&&calls.filter(c=>c.path==="/navigation/trial").length===1,"duplicate start/ARM");
+    check(await page.getByTestId("loop-zone").isDisabled(),"zone editable during active driving");
     if(mode==="terminal"){
       const old=state().status;driving=false;armed=false;owner=null;generation="fixture-fault";
       terminal={...old,running:false,latched:true,paused:false,stop_reason:"decision_timeout",observed_at:Date.now()/1000};
@@ -87,5 +113,5 @@ async (page) => {
     check(!calls.some(c=>c.path==="/control"&&c.body.action!=="stop"),"browser issued actuators directly");
     return {mode,result:"PASS",trialRequests:calls.filter(c=>c.path==="/navigation/trial").length,armCount};
   };
-  return {result:"PASS",scenarios:[await run("positive"),await run("cancel"),await run("terminal")]};
+  return {result:"PASS",scenarios:[await run("remote"),await run("zone"),await run("positive"),await run("cancel"),await run("terminal")]};
 }

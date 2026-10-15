@@ -92,3 +92,58 @@ def test_smooth_local_deviations_remain_visible(delta):
     result = assess_depth(1.0 / inverse, CORRIDOR, SETTINGS)
     assert result["state"] == "obstacle"
     assert result["outlier_fraction"] > SETTINGS.outlier_limit
+
+
+NEAR_CORRIDOR = (0.35, 0.80, 0.65, 0.95)
+
+
+@pytest.mark.parametrize("scale", [0.2, 1.0, 5.0])
+def test_near_zone_keeps_original_plane_support(scale):
+    result = assess_depth(ground_depth() * scale, NEAR_CORRIDOR, SETTINGS)
+    assert result["state"] == "clear"
+    assert result["plane_reference_corridor"] == CORRIDOR
+    assert np.isfinite(result["_errors"]).sum() == 3456
+
+
+@pytest.mark.parametrize("delta", [0.08, -0.08, 0.2, -0.2])
+@pytest.mark.parametrize("shape", ["thin_horizontal", "thin_vertical", "patch"])
+def test_near_zone_stops_on_near_obstacles_and_recesses(delta, shape):
+    inverse = 1.0 / ground_depth()
+    region = {
+        "thin_horizontal": (slice(210, 212), slice(135, 185)),
+        "thin_vertical": (slice(194, 225), slice(159, 161)),
+        "patch": (slice(205, 215), slice(155, 165)),
+    }[shape]
+    inverse[region] += delta
+    result = assess_depth(1.0 / inverse, NEAR_CORRIDOR, SETTINGS)
+    assert result["state"] == "obstacle"
+    assert result["reason"] == "depth_ground_deviation"
+
+
+@pytest.mark.parametrize("delta", [0.12, -0.12, 0.2, -0.2])
+def test_near_obstacle_covering_whole_stop_zone_does_not_become_the_plane(delta):
+    inverse = 1.0 / ground_depth()
+    inverse[192:228, 112:208] += delta
+    result = assess_depth(1.0 / inverse, NEAR_CORRIDOR, SETTINGS)
+    assert result["state"] == "obstacle"
+
+
+def test_far_local_deviation_is_not_an_immediate_near_zone_stop():
+    inverse = 1.0 / ground_depth()
+    inverse[162:164, 135:185] += 0.2
+    depth = 1.0 / inverse
+    assert assess_depth(depth, CORRIDOR, SETTINGS)["state"] == "obstacle"
+    near = assess_depth(depth, NEAR_CORRIDOR, SETTINGS)
+    assert near["state"] == "clear"
+    assert np.isnan(near["_errors"][162:164, 135:185]).all()
+
+
+def test_recorded_motion_floor_is_clear_with_near_horizon():
+    fixture = os.getenv("RIDER_TEST_RECORDED_DEPTH_TRIAL")
+    if not fixture:
+        pytest.skip("private recorded depth fixture not configured")
+    for index in range(4):
+        with np.load(Path(fixture) / f"frame-{index}-depth.npz") as archive:
+            outcome = assess_depth(archive["depth"], NEAR_CORRIDOR, SETTINGS)
+        assert outcome["state"] == "clear"
+        assert outcome["plane_reference_corridor"] == CORRIDOR

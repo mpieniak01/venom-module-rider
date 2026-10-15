@@ -71,3 +71,14 @@ a running loop. Expired or failed inference cannot display the old mask.
 If an older Pi returns 404 for the new policy API, the preview explicitly uses
 a default diagnostic corridor; this fallback cannot authorize driving and
 does not persist a second configuration.
+
+
+## Close STOP horizon for slow starts
+
+The default corridor is now `[0.35, 0.80, 0.65, 0.95]`: the closest 15% of image height, retaining the previous lateral width and nearest edge. The panel offers Near / Farther (15% / 30%) above the camera. These extents write the existing Pi-owned `corridor`; no second policy store or physical distance is introduced. Existing saved corridors are kept until explicitly changed.
+
+Selecting Near never raises motion settings and caps the selection at 0.1 SDK / 150 ms. The original trial time, ramps, source deadline, STOP and communication watchdog remain unchanged. Changing the zone stops observation, saves a new revision and resumes observation if it was active; it does not ARM or start driving. The existing zone acceptance is invalidated and can be recorded with the existing single button after inspecting fresh analysis. Zone changes are disabled during a driving trial.
+
+The depth engine keeps at least 30% image-height support for the inverse-depth plane fit, scale and orientation. It scores deviations only in the selected STOP corridor. Cropping the fit itself to the close strip can make a broad, flat obstacle look like the ground, so the two masks are deliberately different. White outlines mark STOP; dashed blue marks the additional fitting context. Reference outlier fraction is diagnostic, not another direct STOP threshold. A larger distant object can still invalidate the ground fit; a clear close strip does not establish metric clearance.
+
+The state endpoint returns the current Pi policy as well as the decision. Other panels follow newer revisions unless they have unsaved edits; an old acceptance is not retained after another panel changes the zone.

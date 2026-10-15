@@ -52,6 +52,28 @@ export function loopSettingsValues(policy: JsonRecord, draft: JsonRecord): JsonR
   return calibrationScope(policy, {}) === calibrationScope(draft, {}) ? values
     : {...values, verified: false, calibration_id: "", model_sha256: ""};
 }
+/** UI extents write the existing Pi corridor; they are not distance presets. */
+export function stoppingZone(policy: JsonRecord | null): "near" | "far" | "custom" {
+  const roi=policy?.corridor;
+  if(!Array.isArray(roi)||roi.length!==4)return "custom";
+  const height=Number(roi[3])-Number(roi[1]);
+  return Math.abs(height-.15)<1e-6?"near":Math.abs(height-.30)<1e-6?"far":"custom";
+}
+export function stoppingZoneValues(policy: JsonRecord, zone: "near" | "far"): JsonRecord | null {
+  const roi=policy.corridor, height=zone==="near"?.15:.30;
+  if(!Array.isArray(roi)||roi.length!==4||roi.some(v=>typeof v!=="number"||!Number.isFinite(v)))return null;
+  const [x0,,x1,y1]=roi as number[];
+  if(!(0<=x0&&x0<x1&&x1<=1&&height<=y1&&y1<=1))return null;
+  if(typeof policy.speed!=="number"||!Number.isFinite(policy.speed)||policy.speed<=0
+    ||typeof policy.max_motion_ms!=="number"||!Number.isFinite(policy.max_motion_ms)||policy.max_motion_ms<=0)return null;
+  const next:JsonRecord={...policy,mode:"observe",corridor:[x0,Number((y1-height).toFixed(6)),x1,y1]};
+  // Selecting the close trial extent never raises motion settings.
+  if(zone==="near"){
+    next.speed=Math.min(Number(policy.speed),.1);
+    next.max_motion_ms=Math.min(Number(policy.max_motion_ms),150);
+  }
+  return loopSettingsValues(policy,next);
+}
 export function calibrationAcceptance(policy: JsonRecord, detector: JsonRecord, id: string): JsonRecord {
   if (!/^[a-f0-9]{64}$/.test(str(detector.sha256)) || !id.trim()) throw new Error("calibration_model_unavailable");
   return {...loopSettingsValues(policy, policy), verified: true, calibration_id: id, model_sha256: detector.sha256};
@@ -64,6 +86,14 @@ export function freshAnalysisFrame(frame: {ageMs?: number; receivedAt?: number; 
   return !!frame && frame.decoded === true && stream === "venom" && !frame.stale && frame.knownFreshness && !!frame.id
     && !!frame.visionState && !!frame.visionPolicy && frame.visionPolicy !== "diagnostic_default"
     && at !== null && now >= at - 1000 && now - at <= 3000;
+}
+
+/** A new zone cannot be accepted from the previous zone's still-fresh JPEG. */
+export function freshPolicyFrame(frame: (Parameters<typeof freshAnalysisFrame>[0] & {analysis?:JsonRecord})|null, stream:string|null, state:JsonRecord, policy:JsonRecord|null):boolean {
+  const analysis=record(frame?.analysis);
+  return freshAnalysisFrame(frame,stream)&&!!state.run_id&&analysis.run_id===state.run_id
+    &&typeof policy?.revision==="number"&&analysis.config_revision===policy.revision
+    &&analysis.state==="clear"&&analysis.vision_action==="go";
 }
 
 export function decisionView(state: JsonRecord, detector: JsonRecord) {

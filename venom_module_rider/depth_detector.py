@@ -18,7 +18,7 @@ class PerceptionSettings(BaseModel):
 
 
 def assess_depth(depth, corridor, settings):
-    """Fit inverse-depth plane. No conversion to physical stopping distance."""
+    """Fit with broad support; score the STOP zone. No physical distance."""
     import numpy as np
 
     if depth.ndim != 2 or min(depth.shape) < 32:
@@ -31,16 +31,25 @@ def assess_depth(depth, corridor, settings):
     mask = (x >= x0 * w) & (x < x1 * w) & (y >= y0 * h) & (y < y1 * h)
     if mask.sum() < 64 or not np.isfinite(depth).all() or (depth <= 0).any():
         raise ValueError("vision_model_output")
-    inverse = 1.0 / depth[mask]
-    scale = float(np.median(inverse))
-    design = np.column_stack((x[mask] / w, y[mask] / h, np.ones(mask.sum())))
-    coefficients = np.linalg.lstsq(design, inverse, rcond=None)[0]
+    # A shorter STOP horizon must not also shrink the plane-fitting support:
+    # a flat obstacle could otherwise become the fitted ground. Keep at least
+    # the original 30% image-height support, while scoring only the chosen zone.
+    reference_y0 = min(y0, max(0.0, round(y1 - 0.30, 12)))
+    reference = (x >= x0 * w) & (x < x1 * w) & (y >= reference_y0 * h) & (y < y1 * h)
+    inverse_reference = 1.0 / depth[reference]
+    scale = float(np.median(inverse_reference))
+    design = np.column_stack(
+        (x[reference] / w, y[reference] / h, np.ones(reference.sum()))
+    )
+    coefficients = np.linalg.lstsq(design, inverse_reference, rcond=None)[0]
+    scoring_design = np.column_stack((x[mask] / w, y[mask] / h, np.ones(mask.sum())))
     # Positive residuals are nearer than the fitted plane; negative ones are
     # farther away. Keep both: a recess/drop-off must not become a clear path.
-    signed_errors = (inverse - design @ coefficients) / scale
+    signed_errors = (1.0 / depth[mask] - scoring_design @ coefficients) / scale
     errors = np.abs(signed_errors)
     slope = float(coefficients[1] / scale)
     outliers = float((errors > settings.residual_limit).mean())
+    reference_errors = np.abs(inverse_reference - design @ coefficients) / scale
     residual = float(np.quantile(errors, 0.99))
     if not settings.slope_min <= slope <= 6.0:
         state, reason = "unknown", "depth_ground_orientation"
@@ -56,7 +65,11 @@ def assess_depth(depth, corridor, settings):
         "perception_engine": "depth_plane",
         "plane_residual_p99": residual,
         "plane_slope": slope,
+        "plane_reference_corridor": (x0, reference_y0, x1, y1),
         "outlier_fraction": outliers,
+        "reference_outlier_fraction": float(
+            (reference_errors > settings.residual_limit).mean()
+        ),
         "nearer_outlier_fraction": float(
             (signed_errors > settings.residual_limit).mean()
         ),
@@ -179,7 +192,27 @@ class DepthDetector:
             colors[np.isfinite(errors)] = (255, 185, 35)
         preview = Image.blend(image, Image.fromarray(colors), 0.4)
         x0, y0, x1, y1 = corridor
-        ImageDraw.Draw(preview).rectangle(
+        draw = ImageDraw.Draw(preview)
+        reference_y0 = assessment["plane_reference_corridor"][1]
+        if reference_y0 < y0:
+            # Dashed blue: fitting context, not an additional STOP zone.
+            left, right = int(x0 * (image.width - 1)), int(x1 * (image.width - 1))
+            top, bottom = (
+                int(reference_y0 * (image.height - 1)),
+                int(y0 * (image.height - 1)),
+            )
+            for pos in range(left, right, 10):
+                draw.line(
+                    (pos, top, min(pos + 5, right), top), fill=(80, 170, 255), width=2
+                )
+            for side in (left, right):
+                for pos in range(top, bottom, 10):
+                    draw.line(
+                        (side, pos, side, min(pos + 5, bottom)),
+                        fill=(80, 170, 255),
+                        width=2,
+                    )
+        draw.rectangle(
             (
                 int(x0 * (image.width - 1)),
                 int(y0 * (image.height - 1)),
