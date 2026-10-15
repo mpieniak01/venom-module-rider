@@ -3,6 +3,7 @@
 import hashlib
 import io
 import json
+import math
 import os
 from pathlib import Path
 
@@ -48,7 +49,10 @@ def assess_depth(depth, corridor, settings):
     signed_errors = (1.0 / depth[mask] - scoring_design @ coefficients) / scale
     errors = np.abs(signed_errors)
     slope = float(coefficients[1] / scale)
-    outliers = float((errors > settings.residual_limit).mean())
+    outlier_pixels = int((errors > settings.residual_limit).sum())
+    zone_pixels = int(mask.sum())
+    allowed_pixels = math.floor(settings.outlier_limit * zone_pixels)
+    outliers = outlier_pixels / zone_pixels
     reference_errors = np.abs(inverse_reference - design @ coefficients) / scale
     residual = float(np.quantile(errors, 0.99))
     if not settings.slope_min <= slope <= 6.0:
@@ -67,6 +71,11 @@ def assess_depth(depth, corridor, settings):
         "plane_slope": slope,
         "plane_reference_corridor": (x0, reference_y0, x1, y1),
         "outlier_fraction": outliers,
+        "outlier_pixels": outlier_pixels,
+        "zone_pixels": zone_pixels,
+        "allowed_outlier_pixels": allowed_pixels,
+        "nearer_outlier_pixels": int((signed_errors > settings.residual_limit).sum()),
+        "farther_outlier_pixels": int((signed_errors < -settings.residual_limit).sum()),
         "reference_outlier_fraction": float(
             (reference_errors > settings.residual_limit).mean()
         ),
@@ -83,6 +92,15 @@ def assess_depth(depth, corridor, settings):
         "distance_measurement": False,
         "_errors": error_map,
     }
+
+
+def draw_stop_border(draw, shape, corridor):
+    """Keep the inward PIL stroke outside every pixel of the scored mask."""
+    h, w = shape
+    x0, y0, x1, y1 = corridor
+    left, top = math.ceil(x0 * w), math.ceil(y0 * h)
+    right, bottom = math.ceil(x1 * w) - 1, math.ceil(y1 * h) - 1
+    draw.rectangle((left - 2, top - 2, right + 2, bottom + 2), outline="white", width=2)
 
 
 class DepthDetector:
@@ -212,16 +230,7 @@ class DepthDetector:
                         fill=(80, 170, 255),
                         width=2,
                     )
-        draw.rectangle(
-            (
-                int(x0 * (image.width - 1)),
-                int(y0 * (image.height - 1)),
-                int(x1 * (image.width - 1)),
-                int(y1 * (image.height - 1)),
-            ),
-            outline="white",
-            width=2,
-        )
+        draw_stop_border(draw, depth.shape, corridor)
         stream = io.BytesIO()
         preview.save(stream, format="JPEG", quality=85)
         return {

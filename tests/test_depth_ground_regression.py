@@ -147,3 +147,33 @@ def test_recorded_motion_floor_is_clear_with_near_horizon():
             outcome = assess_depth(archive["depth"], NEAR_CORRIDOR, SETTINGS)
         assert outcome["state"] == "clear"
         assert outcome["plane_reference_corridor"] == CORRIDOR
+
+
+def test_pixel_count_explains_stop_even_when_p99_is_below_residual_limit():
+    # At 0.5%, P99 need not cross the residual threshold to trigger STOP.
+    inverse = 1.0 / ground_depth()
+    inverse[210:212, 150:165] -= 0.09
+    outcome = assess_depth(1.0 / inverse, NEAR_CORRIDOR, SETTINGS)
+    assert outcome["state"] == "obstacle"
+    assert outcome["zone_pixels"] == 3456
+    assert outcome["allowed_outlier_pixels"] == 17
+    assert 18 <= outcome["outlier_pixels"] < 35
+    assert outcome["plane_residual_p99"] < SETTINGS.residual_limit
+    assert outcome["farther_outlier_pixels"] == outcome["outlier_pixels"]
+    assert outcome["nearer_outlier_pixels"] == 0
+    assert outcome["outlier_fraction"] == outcome["outlier_pixels"] / 3456
+
+
+def test_preview_border_preserves_every_scored_edge_pixel():
+    from PIL import Image, ImageDraw
+
+    from venom_module_rider.depth_detector import draw_stop_border
+
+    for corridor in (NEAR_CORRIDOR, (0.351, 0.801, 0.649, 0.949), (0.0, 0.0, 1.0, 1.0)):
+        image = Image.new("RGB", (320, 240), "red")
+        draw_stop_border(ImageDraw.Draw(image), (240, 320), corridor)
+        pixels = np.asarray(image)
+        y, x = np.mgrid[:240, :320]
+        x0, y0, x1, y1 = corridor
+        mask = (x >= x0 * 320) & (x < x1 * 320) & (y >= y0 * 240) & (y < y1 * 240)
+        assert (pixels[mask] == [255, 0, 0]).all()
