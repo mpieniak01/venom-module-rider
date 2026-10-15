@@ -215,7 +215,10 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
     const origin=client.currentSession();
     const task=(async()=>{
       if(stopping.current||client.currentSession()!==origin)return;
-      // Pi has stopped this run. Resume observation only, with no motor authority.
+      // Retire the stopped drive intent before observation; a requested S14
+      // otherwise survives the producer STOP and disables the next operator test.
+      await client.mutate("/goal/s14_venom_navigation",{enabled:false},"POST",true);
+      if(stopping.current||client.currentSession()!==origin)return;
       await client.mutate("/goal/s15_venom_perception",{enabled:true},"POST",true);
       if(mounted.current&&client.currentSession()===origin)await readState();
     })();startTask.current=task;
