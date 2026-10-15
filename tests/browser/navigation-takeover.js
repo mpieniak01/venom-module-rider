@@ -78,6 +78,7 @@ async (page) => {
       await details.locator("summary").click();
       const fields=page.getByTestId("ground-geometry-settings").locator("input");
       check(await fields.count()===7,"projection/footprint controls missing");
+      check(await details.getByRole("textbox",{name:"Strefa zatrzymania: x0,y0,x1,y1 (0–1)",exact:true}).count()===0,"unused image ROI shown in ground mode");
       await fields.nth(0).fill("");
       await details.getByRole("button").filter({hasText:"Zapisz"}).click();
       await wait(()=>policy.avoidance.geometry.fx===null,"empty focal was not persisted as uncalibrated");
