@@ -96,6 +96,7 @@ class DemoPi:
         return {
             "contract_version": 1,
             "remote_decision_deadline_supported": self.navigation is not None,
+            "scoped_stop_generation_supported": self.navigation is not None,
             "state": self.state,
             "ready": not self.stale,
             "can_move": self.state == "ARMED" and not self.stale,
@@ -141,6 +142,11 @@ class DemoPi:
     def control(self, body):
         action = body.get("action")
         if action in {"stop", "disarm"}:
+            if (
+                "expected_generation" in body
+                and body["expected_generation"] != self.generation
+            ):
+                return envelope({"error": "stale_stop_generation"}, status=409)
             if self.navigation:
                 self.navigation.halt("operator_stop")
             self.state = "DISARMED"
@@ -568,6 +574,16 @@ def create_app(pi: DemoPi | None = None):
                 "rider.catalog",
                 2,
             )
+        if path == "/api/navigation/trial":
+            if state.navigation is None:
+                return envelope({"error": "navigation_api_unavailable"}, status=503)
+            try:
+                result = await state.navigation.start_trial(body)
+                return envelope(result, "rider.navigation_loop")
+            except ValueError as exc:
+                return envelope(
+                    {"error": str(exc)}, "rider.navigation_loop", status=409
+                )
         if state.navigation and path in {
             "/api/navigation/config",
             "/api/navigation/status",

@@ -1,11 +1,17 @@
+import { frameAge } from "../lib/vision-frame";
+import type { Frame } from "../lib/use-rider";
 import { decisionView } from "../lib/loop-controls";
 import { formatNumber, formatTime, record, safetyOf, type JsonRecord, type RiderStatus } from "../lib/model";
 import type { Translator } from "../lib/i18n";
 import styles from "../rider.module.css";
 
-export function LoopDecision({state,detector,policy,status,t,language}:{state:JsonRecord;detector:JsonRecord;policy:JsonRecord|null;status:RiderStatus|null;t:Translator;language:string}) {
+export function LoopDecision({frame,state,detector,policy,status,t,language}:{frame?:Frame|null;state:JsonRecord;detector:JsonRecord;policy:JsonRecord|null;status:RiderStatus|null;t:Translator;language:string}) {
   const view=decisionView(state,detector), safety=safetyOf(status);
-  const decision=record(state.decision), key="vision.reason."+view.imageReason;
+  const sameRun=frame?.analysis?.run_id===state.run_id&&frame?.analysis?.config_revision===state.config_revision;
+  const age=frameAge(frame??null);
+  const imageState=frame?.analysis ? {running: sameRun&&!frame.stale&&age!==null&&age<1000, stale:frame.stale, decision:frame.analysis} : state;
+  const imageView=decisionView(imageState,detector);
+  const decision=record(state.decision), key="vision.reason."+imageView.imageReason;
   const reason=t(key)===key?t("vision.reason.default"):t(key);
   const replyReasonKey="vision.reason."+view.reason;
   const replyReason=t(replyReasonKey)===replyReasonKey?t("vision.reason.default"):t(replyReasonKey);
@@ -17,7 +23,7 @@ export function LoopDecision({state,detector,policy,status,t,language}:{state:Js
   return <section className={styles.decisionArea} aria-label={t("decisionTitle")} data-testid="loop-decision">
     {classId!==null&&<p className={styles.modelClass} data-testid="vision-class">{t("visionClassInZone",{name:className,fraction:formatNumber(Number(decision.dominant_class_fraction)*100,language,1)})}{[6,11,28].includes(classId)&&<> {t("visionUnsupportedGround")}</>}</p>}
     <div className={styles.decisionGrid}>
-      <div className={styles.decisionCard}><span>{t("decisionVision")}</span><strong data-testid="vision-verdict" className={view.vision==="go"?styles.verdictGo:styles.verdictStop}>{t("decision."+view.vision)}</strong><p data-testid="decision-reason">{view.vision==="go"?t("imageGoHint"):reason}</p>{view.current&&view.floor!==null&&<p>{t("confidentFloorCoverage",{value:formatNumber(view.floor*100,language,2)})}</p>}</div>
+      <div className={styles.decisionCard}><span>{t("decisionVision")}</span><strong data-testid="vision-verdict" className={imageView.vision==="go"?styles.verdictGo:styles.verdictStop}>{t("decision."+imageView.vision)}</strong><p data-testid="decision-reason">{imageView.vision==="go"?t("imageGoHint"):reason}</p>{view.current&&view.floor!==null&&<p>{t("confidentFloorCoverage",{value:formatNumber(view.floor*100,language,2)})}</p>}</div>
       <div className={styles.decisionCard}><span>{t("decisionReply")}</span><strong data-testid="pi-reply">{view.reply==="none"?"—":view.reply.toUpperCase()}</strong><p>{view.reply==="go"?t("decisionForward")+" · "+String(policy?.speed??"—")+" SDK · ≤ "+String(policy?.max_motion_ms??"—")+" ms":view.current?replyReason:t("decisionNoReply")}</p></div>
       <div className={styles.decisionCard}><span>{t("decisionExecutor")}</span><strong data-testid="pi-motion">{t(observed?moving?"decisionMoving":"decisionStopped":"unknown")}</strong><p>{t("owner")}: {String(safety.owner??"—")}</p><p>{t("decisionReportedMotion")}</p></div>
     </div>
@@ -29,7 +35,8 @@ export function LoopDecision({state,detector,policy,status,t,language}:{state:Js
       <span>{t("decisionLatency")}: <b>{String(decision.inference_ms??"—")} ms</b> / {String(policy?.decision_budget_ms??"—")} ms</span>
       <span>{t("decisionRoundtrip")}: <b>{String(state.request_roundtrip_ms??"—")} ms</b></span>
       <span>{t("decisionAge")}: <b>{String(state.response_age_ms??"—")} ms</b> / {String(policy?.decision_budget_ms??"—")} ms</span>
-      <span>{t("decisionValidity")}: <b>{String(decision.valid_for_ms??"—")} ms</b></span>
+      <span>{t("decisionPermit")}: <b>{String(state.permit_remaining_ms??"—")} ms</b></span>
+      <span>{t("decisionFrame")}: <b>{String(decision.sequence??"—")} · {String(decision.frame_id??"—").slice(0,12)}</b></span>
       <span>{formatTime(state.observed_at,language)} · {t(view.current?"decisionLive":"decisionHistorical")}</span>
     </div></details>
   </section>;

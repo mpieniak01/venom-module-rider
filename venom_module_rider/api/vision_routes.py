@@ -7,6 +7,7 @@ from ..errors import RiderError
 from ..vision_contract import VisionFrame
 from .compute_routes import authenticate, bounded_body
 from .routing import RiderRoute
+from .schemas import NavigationTrialRequest
 
 router = APIRouter(route_class=RiderRoute)
 
@@ -132,3 +133,14 @@ async def loop_goals(domain, *, force=True):
         if isinstance(requested, bool):
             result[mode] = requested
     return result
+
+
+@router.post("/navigation/trial")
+async def start_trial(request: Request, body: NavigationTrialRequest):
+    # Preserve the original Pi-clock intent. Pi owns preparation, arming and
+    # cancellation; a browser or host cannot redate an older start request.
+    return await request.app.state.rider.mutate(
+        "/api/navigation/trial",
+        body.model_dump(),
+        request.headers.get("X-Rider-Session"),
+    )

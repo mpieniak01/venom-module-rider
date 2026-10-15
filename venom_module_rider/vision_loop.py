@@ -164,6 +164,9 @@ class VisionLoop:
                     "frame_id": frame.frame_id,
                     "run_id": frame.run_id,
                     "sequence": frame.sequence,
+                    "clear_count": count,
+                    "vision_action": vision_action,
+                    "model_sha256": model,
                     "age_source": (
                         "host-received"
                         if with_preview

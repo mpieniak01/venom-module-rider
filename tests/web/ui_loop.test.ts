@@ -103,7 +103,7 @@ test("warmup, uncertainty and missing replies cannot appear as image GO",()=>{
 test("trial preparation does not demand prior manual or navigation ARM",()=>{
  const policy={mode:"observe",verified:true,calibration_id:"test",model_sha256:"a".repeat(64)};
  const runtime={observe:true,drive:true},detector={configured:true,loaded:true,sha256:"a".repeat(64)};
- const status=(state:string,owner:string|null)=>({connection:{configured:true},errors:{},control:{safety:{state,owner,generation:"one",stale:false,capabilities:{move:{available:true}},remote_decision_deadline_supported:true}}} as unknown as RiderStatus);
+ const status=(state:string,owner:string|null)=>({connection:{configured:true},errors:{},control:{safety:{state,owner,generation:"one",stale:false,capabilities:{move:{available:true}},remote_decision_deadline_supported:true,scoped_stop_generation_supported:true}}} as unknown as RiderStatus);
  assert.equal(trialBlock(policy,runtime,detector,true,false,status("DISARMED",null)),"");
  assert.equal(trialBlock(policy,runtime,detector,true,false,status("ARMED","manual")),"");
  assert.equal(trialBlock(policy,runtime,detector,true,false,status("ESTOP",null)),"trialEstop");
@@ -119,7 +119,7 @@ const permissionDetector={sha256:"a".repeat(64)};
 const permissionLoop={running:true,stale:false,mode:"drive",decision:{state:"clear",clear_count:3,action:"go",vision_action:"go",valid_for_ms:150}};
 const permissionStatus=(owner="navigation")=>({
  connection:{configured:true,status:"online"},errors:{},settings:{revision:1},
- control:{safety:{generation:"one",state:"ARMED",owner,can_move:true,panel_motion_enabled:true,stale:false,ready:true,capabilities:{move:{available:true}},remote_decision_deadline_supported:true,execution:{}}}
+ control:{safety:{generation:"one",state:"ARMED",owner,can_move:true,panel_motion_enabled:true,stale:false,ready:true,capabilities:{move:{available:true}},remote_decision_deadline_supported:true,scoped_stop_generation_supported:true,execution:{}}}
 } as unknown as RiderStatus);
 test("manual ARM is explicit manual permission, never Venom permission",()=>{
  const result=motionPermission({...permissionLoop,mode:"observe"},{observe:true,drive:false},permissionPolicy,permissionDetector,permissionStatus("manual"));

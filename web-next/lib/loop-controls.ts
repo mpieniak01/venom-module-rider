@@ -1,3 +1,4 @@
+import { frameAge } from "./vision-frame";
 import { navigationAvailable } from "./navigation";
 import { record, safetyOf, str, timestampMs, type JsonRecord, type RiderStatus } from "./model";
 
@@ -31,7 +32,7 @@ export function loopFailure(error: unknown): string {
   if (["offline", "pi_unreachable"].includes(code)) return "loopOffline";
   if (code === "navigation_api_unavailable") return "loopApiMissing";
   if (code === "pi_operation_timeout") return "operationUnconfirmed";
-  if (["navigation_trial_cancelled","navigation_configuration_changed","navigation_authority_unconfirmed","navigation_estop","stale_or_invalid_operator_intent"].includes(code)) return "trial.error."+code;
+  if (["navigation_trial_cancelled","navigation_configuration_changed","navigation_authority_unconfirmed","navigation_estop","stale_or_invalid_operator_intent","navigation_trial_prepare_timeout","navigation_trial_authority_changed","navigation_trial_replay","navigation_trial_journal_unavailable","navigation_trial_stopped","navigation_trial_arm_unconfirmed","navigation_trial_authority_unknown"].includes(code)) return "trial.error."+code;
   return "requestFailed";
 }
 
@@ -55,7 +56,10 @@ export function calibrationAcceptance(policy: JsonRecord, detector: JsonRecord, 
   if (!/^[a-f0-9]{64}$/.test(str(detector.sha256)) || !id.trim()) throw new Error("calibration_model_unavailable");
   return {...loopSettingsValues(policy, policy), verified: true, calibration_id: id, model_sha256: detector.sha256};
 }
-export function freshAnalysisFrame(frame: {decoded?: boolean; stale: boolean; knownFreshness: boolean; fileAt: string; id: string; visionState: string; visionPolicy: string} | null, stream: string | null, now = Date.now()): boolean {
+export function freshAnalysisFrame(frame: {ageMs?: number; receivedAt?: number; ageSource?: string; decoded?: boolean; stale: boolean; knownFreshness: boolean; fileAt: string; id: string; visionState: string; visionPolicy: string} | null, stream: string | null, now = Date.now()): boolean {
+  const age = frameAge(frame);
+  if (age !== null) return !!frame && frame.decoded === true && stream === "venom" && !frame.stale
+    && frame.knownFreshness && !!frame.id && frame.ageSource === "pi-reported-plus-host-elapsed" && age <= 3000;
   const at = timestampMs(frame?.fileAt && Number.isFinite(Number(frame.fileAt)) ? Number(frame.fileAt) : frame?.fileAt);
   return !!frame && frame.decoded === true && stream === "venom" && !frame.stale && frame.knownFreshness && !!frame.id
     && !!frame.visionState && !!frame.visionPolicy && frame.visionPolicy !== "diagnostic_default"
@@ -88,7 +92,7 @@ export function trialBlock(policy: JsonRecord|null, runtime:JsonRecord, detector
   if(safety.stale===true||status?.errors?.control)return "trialControlStale";
   if(!str(safety.generation)||!["DISARMED","ARMED"].includes(str(safety.state)))return "trialControlStale";
   if(safety.ready===false||record(record(safety.capabilities).move).available!==true)return "trialExecutorUnavailable";
-  if(safety.remote_decision_deadline_supported!==true)return "loopExecutorUpdate";
+  if(safety.remote_decision_deadline_supported!==true||safety.scoped_stop_generation_supported!==true)return "loopExecutorUpdate";
   if(record(safety.execution).inhibit)return "trialExecutionInhibited";
   return "";
 }
@@ -108,13 +112,14 @@ export function motionPermission(state:JsonRecord, goals:JsonRecord, policy:Json
     else if(!calibrationMatches(policy,detector))reason="permissionParameters";
     else if(!view.current)reason="permissionNoDecision";
     else if(view.reply!=="go"||view.vision!=="go")reason="permissionDecisionStop";
-    else if(safety.remote_decision_deadline_supported!==true||!Number.isFinite(record(state.decision).valid_for_ms)||Number(record(state.decision).valid_for_ms)<50)reason="permissionPermitShort";
+    else if(safety.remote_decision_deadline_supported!==true||!Number.isFinite(state.permit_remaining_ms??record(state.decision).valid_for_ms)||Number(state.permit_remaining_ms??record(state.decision).valid_for_ms)<50)reason="permissionPermitShort";
     else {allowed=true;reason="permissionGo";}
   }
   return {venom:known?allowed:null,manual,reason};
 }
 
 export function executionHeadline(state:JsonRecord,goals:JsonRecord,status:RiderStatus|null,permission:{venom:boolean|null}):string {
+  if(state.mode==="drive"&&goals.drive===true&&state.paused===true&&state.running===true&&state.stale!==true&&safetyOf(status).state==="ARMED"&&safetyOf(status).owner==="navigation")return "trialVisualPause";
   if(permission.venom===null)return "permissionVenomUnknown";
   if(permission.venom)return "permissionVenomYes";
   const safety=safetyOf(status);

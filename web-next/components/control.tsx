@@ -1,3 +1,4 @@
+import { frameAge } from "../lib/vision-frame";
 import { previewNotice } from "../lib/loop-controls";
 /* eslint-disable @next/next/no-img-element -- Pi binary frames use revocable object URLs. */
 import { useState } from "react";
@@ -64,6 +65,7 @@ export function CameraPanel({ client, t, language, compact = false, onObservatio
     <div className={styles.camera}>{client.camera&&notice&&<div className={styles.cameraPaused} role="status" data-testid="vision-preview-paused">{t(notice!)}</div>}{client.camera ? <img src={client.camera.url} alt={t("cameraAlt")} onLoad={event=>client.markCameraDecoded(event.currentTarget.currentSrc,true)} onError={event=>client.markCameraDecoded(event.currentTarget.currentSrc,false)} /> : <Empty><Camera size={32} />{t(client.mediaError ?? (client.cameraStream ? "frameMissing" : "showPreview"))}{onObservation&&<><p className={styles.hint}>{t("loopPreviewHelp")}</p><Button tone="primary" disabled={observationDisabled} onClick={onObservation}>{t("loopPreparePreview")}</Button></>}</Empty>}</div>
     {selected === "venom" && <p className={styles.hint}>{t("visionLegend")}</p>}
     {client.camera?.visionState && <p className={styles.hint}>{t(client.camera.stale?"loopDecision":"state")}: {t("vision." + client.camera.visionState)} · {client.camera.inferenceMs} ms · <code>{client.camera.visionReason}</code>{client.camera.visionPolicy === "diagnostic_default" && <> · {t("visionDefaultZone")}</>}</p>}
+    {client.camera?.analysis && <p className={styles.small} data-testid="frame-identity">{t("frameSequence")}: {String(client.camera.analysis.sequence)} · {String(client.camera.analysis.frame_id).slice(0,12)} · {t("frameRelativeAge")}: {Math.round(frameAge(client.camera)??0)} ms</p>}
     {client.camera && <div className={styles.meta}><Pill>{t(client.camera.stale?"framePaused":Number(client.camera.recordedAt)>0 ? "frameReplay" : client.camera.knownFreshness ? "frameFresh" : "frameTimeUnknown")}</Pill>{Number(client.camera.recordedAt)>0&&<span>{t("frameRecorded")}: {formatTime(Number(client.camera.recordedAt),language)}</span>}{client.camera.fileAt && <span>{t("frameAt")}: {formatTime(Number(client.camera.fileAt), language)}</span>}{client.camera.source && <span>{t("source")}: {client.camera.source}</span>}</div>}
   </Panel>;
 }

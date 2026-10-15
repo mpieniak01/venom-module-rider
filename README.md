@@ -303,3 +303,14 @@ physical robot. With the local panel running, use Playwright CLI:
 
 Run from the module checkout. Browser launch settings are environment-specific;
 the Node syntax check is included in the check-web target.
+
+
+### Bounded vision trial
+
+The operator starts a trial with one POST to /api/v1/rider/navigation/trial. The request identifies the current Pi generation, configuration and manual-settings revisions, a unique request_id, a fresh Pi-clock timestamp/TTL, and explicit operator consent/plan. The live executor must advertise scoped_stop_generation_supported and remote_decision_deadline_supported. Pi prepares its existing camera/goal/configuration services and grants one navigation ARM for at most 10 seconds. Requests are not replayed on refresh or reconnect.
+
+During that original trial, fresh visual STOP sends an immediate zero goal while analysis continues. Three new CLEAR observations may resume the existing small forward pulses. Operator STOP, manual takeover, loss of current decisions/communication, invalid contracts, executor errors and ARM expiry end the trial; no automatic ARM or restart follows. Legacy lease adapters without scoped pause retain terminal STOP.
+
+Active processed previews consume the existing inference result instead of fetching another Pi RAW. X-Rider-Run-Id, X-Rider-Sequence, X-Rider-Frame-Id and X-Rider-Config-Revision identify the image; X-Rider-Analysis-Json contains its corresponding assessment. Relative preview age uses host monotonic elapsed time plus Pi-reported input age, and does not measure the uplink. Pi remains authoritative for end-to-end decision freshness. A diagnostic host-received age is a lower bound, not proof of source-capture freshness.
+
+Depth-plane geometry remains experimental. The recorded floor-seam false STOP is retained as a regression; geometry diagnostics now distinguish nearer and farther deviations. No threshold, speed, pulse, ramp or freshness limit is loosened by this change.

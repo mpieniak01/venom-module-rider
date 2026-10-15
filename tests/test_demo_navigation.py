@@ -18,9 +18,10 @@ from venom_module_rider.vision_loop import VisionLoop
 
 
 class PermitFixture:
-    def __init__(self, config, run, drive, stop, clock):
+    def __init__(self, config, run, drive, stop, clock, *, pause=None):
         self.latched, self.reason = False, "waiting"
         self.stop = stop
+        self.deadline = None
 
     def halt(self, reason):
         self.latched, self.reason = True, reason
@@ -317,17 +318,16 @@ async def test_full_authenticated_loop_actual_pi_permit_go_obstacle_timeout_and_
         await nav.start("s14_venom_navigation")
         await until(lambda: any(e["action"] == "go" for e in nav.events))
         assert nav.status["decision"]["clear_count"] >= 3 and pi.safety()["moving"]
+        generation = pi.generation
+        arming_deadline = pi.arming_deadline
         detector.state = "obstacle"
-        await until(lambda: nav.status.get("latched"))
+        await until(lambda: nav.status.get("paused"))
         assert not pi.safety()["moving"]
-        assert pi.safety()["state"] == "DISARMED"
+        assert pi.safety()["state"] == "ARMED" and pi.generation == generation
         assert nav.status["decision"]["action"] == "stop"
         detector.state = "clear"
-        await asyncio.sleep(0.05)
-        assert not nav.status["running"]
-        grant_navigation()
-        await nav.start("s14_venom_navigation")
         await until(lambda: nav.status.get("simulated_moving"))
+        assert pi.generation == generation and pi.arming_deadline == arming_deadline
         nav.drop_link = True
         await until(lambda: nav.status.get("latched"))
         assert not pi.safety()["moving"]
@@ -467,7 +467,7 @@ async def test_recorded_depth_model_reaches_simulated_drive_then_stops(monkeypat
         assert pi.safety()["moving"]
         assert nav.status["decision"]["model_sha256"] == model.digest
         nav.payload = blocked
-        await until(lambda: nav.status.get("latched"))
+        await until(lambda: nav.status.get("latched") or nav.status.get("paused"))
         if nav.status["decision"]["action"] == "stop":
             assert nav.status["decision"]["state"] in {"obstacle", "unknown"}
         else:
@@ -475,9 +475,19 @@ async def test_recorded_depth_model_reaches_simulated_drive_then_stops(monkeypat
             # Its older GO must still result in a stopped, latched executor.
             assert nav.lease.reason == "decision_timeout"
         assert not pi.safety()["moving"]
+        was_terminal = nav.status.get("latched")
         nav.payload = clear
-        await asyncio.sleep(0.1)
-        assert not nav.status["running"]
+        if was_terminal:
+            await asyncio.sleep(0.1)
+            assert not nav.status["running"]
+        else:
+            await until(
+                lambda: nav.status.get("simulated_moving") or nav.status.get("latched")
+            )
+            assert (
+                nav.status.get("simulated_moving")
+                or nav.lease.reason == "decision_timeout"
+            )
     finally:
         await nav.close()
         await loop.close()

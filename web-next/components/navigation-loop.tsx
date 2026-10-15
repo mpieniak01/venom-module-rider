@@ -60,7 +60,7 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
         setReadError(t(loopFailure(err)));
       } finally {
         reading=false;
-        if(!abort.signal.aborted){setLoading(false);if(!document.hidden)timer=setTimeout(()=>void tick(),1000);}
+        if(!abort.signal.aborted){setLoading(false);if(!document.hidden)timer=setTimeout(()=>void tick(),500);}
       }
     };
     const visibility=()=>{clearTimeout(timer);if(!document.hidden)void tick();};
@@ -173,31 +173,14 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
     const origin=client.currentSession();operationEpoch.current=client.currentMotionEpoch();operationGeneration.current=client.currentGeneration();
     trialSession.current=origin;
     const task=(async()=>{
-      await ensureAnalysis(origin);ensureOperation(origin);
-      const deadline=Date.now()+8000;
-      let row:JsonRecord={}, ready=false;
-      while(Date.now()<deadline){
-        ensureOperation(origin);row=await apiFetch<JsonRecord>("/api/v1/rider/navigation/state");ensureOperation(origin);applyState(row);
-        const state=record(row.status),view=decisionView(state,record(row.detector)),camera=client.currentCamera();
-        if(view.current&&record(state.decision).state==="obstacle"){setTrialResult("trialImageStop");return;}
-        if(view.vision==="go"&&freshAnalysisFrame(camera.frame,camera.stream)){ready=true;break;}
-        await new Promise(resolve=>setTimeout(resolve,150));
-      }
-      if(!ready){setTrialResult("trialNoFreshDecision");return;}
-      // Refetch the Pi-owned policy; concurrent edits must not inherit this trial.
-      const loaded=await apiFetch<JsonRecord>("/api/v1/rider/navigation/config");ensureOperation(origin);
-      const selected=record(loaded.config);
-      if(!calibrationMatches(selected,record(loaded.detector))||selected.revision!==record(record(row.status).decision).config_revision||calibrationScope(selected,record(loaded.detector))!==calibrationScope(policy,record(loaded.detector)))throw Object.assign(new Error("navigation_configuration_changed"),{data:{error:"navigation_configuration_changed"}});
-      setOperation("start");setTrialResult("trialStarting");
-      // Retain both capture and frame feed while replacing the analysis goal.
-      await client.mutate("/goal/s2_camera_preview",{enabled:true},"POST",true);ensureOperation(origin);
-      await stopGoals(origin);ensureOperation(origin);
-      const values=loopSettingsValues(selected,{...selected,mode:"drive"});
-      const result=selected.mode==="drive"?{config:selected}:await client.mutate("/navigation/config",{revision:selected.revision,values},"POST",true);ensureOperation(origin);
-      const saved=record(data(result).config);setPolicy(saved);setDraft(saved);
-      const plan=t("trialPlan")+" · "+String(saved.speed)+" SDK · ≤ "+String(saved.max_motion_ms)+" ms";
-      trialArmed.current=true;const authority=await client.armNavigation(plan,origin,operationGeneration.current,operationEpoch.current);operationGeneration.current=authority.generation;operationEpoch.current=authority.epoch;ensureOperation(origin);
-      await client.mutate("/goal/s14_venom_navigation",{enabled:true},"POST",true);ensureOperation(origin);await readState();
+      setOperation("start");setTrialResult("trialStarting");client.setCameraStream("venom");
+      const plan=t("trialPlan")+" · "+String(policy.speed)+" SDK · ≤ "+String(policy.max_motion_ms)+" ms";
+      trialArmed.current=true;
+      const result=await client.startNavigationTrial(plan,Number(policy.revision));
+      if(stopping.current||client.currentSession()!==origin)throw new Error("navigation_trial_cancelled");
+      const saved=record(result.config);if(Object.keys(saved).length){setPolicy(saved);setDraft(saved);}
+      operationGeneration.current=client.currentGeneration();operationEpoch.current=client.currentMotionEpoch();
+      await readState();
       setTrialResult("trialStarted");
     })();
     startTask.current=task;
@@ -233,7 +216,7 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
   const perception=record(draft?.perception);
   const permission=motionPermission(loopState,goals,policy,detector,client.status);
   const imageDecision=decisionView(loopState,detector);
-  const sharedTrial=completedTrial(loopState);
+  const sharedTrial=loopState.running===true&&loopState.mode==="drive"?null:completedTrial(loopState);
   const displayedStopReason=sharedTrial?String(sharedTrial.stop_reason):trialStopReason;
   const visibleError=errorRun&&sharedTrial?.run_id===errorRun?"":error;
   return <Panel title={t("loopTitle")} extra={<Button aria-label={t("loopLoad")} disabled={loading||!!operation||!connected} onClick={()=>setRefresh(v=>v+1)}><RefreshCw size={14}/>{t("refresh")}</Button>}>
@@ -257,6 +240,7 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
     </div>}
     {!!trialUnavailable&&<p id="rider-trial-block" className={styles.loopError} role="status" data-testid="loop-block">{t(trialUnavailable)}</p>}
     {!!trialResult&&!displayedStopReason&&!(trialResult==="trialStarted"&&phase==="running")&&<p className={styles.hint} role="status" data-testid="trial-result">{t(phase==="fault"?"trialEnded":trialResult==="trialStarted"&&phase==="stopped"?"trialStopped":trialResult)}</p>}
+    {loopState.mode==="drive"&&loopState.paused===true&&loopState.running===true&&<p className={styles.hint} data-testid="trial-visual-pause">{t("trialVisualPause")}</p>}
     {!!displayedStopReason&&<p role="status" className={styles.loopError} data-testid="trial-stop-reason">{sharedTrial?t("lastTrial")+" · "+formatTime(sharedTrial.observed_at,language):t("trialEnded")} · {t("vision.reason."+displayedStopReason)}</p>}
     {phase==="fault"&&!displayedStopReason&&<p role="alert" className={styles.loopError}>{t("loopFaultHint")} · {String(loopState.stop_reason??"")}</p>}
 
@@ -265,7 +249,7 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
       <div className={styles.loopCamera}><CameraPanel client={client} t={t} language={language} compact analysisRunning={active&&loopState.running===true} analysisCurrent={imageDecision.current&&decision.reason!=="vision_observation_transport_retry"}/></div>
       <div className={styles.loopSidebar}>
         {manual}
-        <LoopDecision state={loopState} detector={detector} policy={policy} status={client.status} t={t} language={language}/>
+        <LoopDecision frame={client.cameraStream==="venom"?client.camera:null} state={loopState} detector={detector} policy={policy} status={client.status} t={t} language={language}/>
       </div>
     </div>
     <details ref={settingsRef} className={styles.details}><summary>{t("loopSettings")}{dirty?" · "+t("unsaved"):""}</summary>

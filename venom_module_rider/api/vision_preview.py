@@ -1,5 +1,6 @@
 """Operator-requested host processing; no camera start or actuation."""
 
+import json
 import uuid
 
 from fastapi import Request, Response
@@ -101,5 +102,14 @@ async def processed_camera(request: Request):
             "x-rider-vision-inference-ms": str(elapsed),
             "x-rider-vision-policy": source,
             "x-rider-vision-action": "stop",
+            "x-rider-analysis-json": json.dumps(
+                {
+                    key: value
+                    for key, value in result.items()
+                    if key not in {"_preview", "corridor"}
+                },
+                separators=(",", ":"),
+                allow_nan=False,
+            ),
         },
     )

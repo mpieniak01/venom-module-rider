@@ -47,6 +47,7 @@ def expected_contract(path: str):
         "/api/logic/state": ("rider.tasks", 2),
         "/api/services/graph": ("rider.service_graph", 2),
         "/api/navigation/config": ("rider.navigation_loop", 1),
+        "/api/navigation/trial": ("rider.navigation_loop", 1),
         "/api/navigation/status": ("rider.navigation_loop", 1),
         "/api/compute/config": ("rider.compute", 1),
         "/api/compute/status": ("rider.compute", 1),
@@ -79,6 +80,8 @@ def json_timeout(path: str, method: str, stop: bool) -> httpx.Timeout:
             ("/api/logic/feature/", "/api/resource/", "/api/face-studio/runtime/")
         ):
             duration = 20.0
+        elif method == "POST" and path == "/api/navigation/trial":
+            duration = 6.0
         elif method == "GET" and path.startswith("/api/services/"):
             duration = 10.0
     return httpx.Timeout(duration, connect=0.5, pool=0.5)
