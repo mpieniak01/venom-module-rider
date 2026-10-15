@@ -6,6 +6,7 @@ import { record, safetyOf, str, timestampMs, type JsonRecord, type RiderStatus }
 export type LoopPhase = "offline" | "unknown" | "stopped" | "starting" | "running" | "fault";
 export function loopPhase(connected: boolean, state: JsonRecord, goals: JsonRecord): LoopPhase {
   if (!connected) return "offline";
+  if (state.mode === "drive" && state.running === false && state.stop_reason === "trial_completed") return "stopped";
   if (state.latched === true && state.mode === "drive" && state.running === false) return "fault";
   if (goals.observe === false && goals.drive === false) return "stopped";
   if (state.latched === true && (goals.observe === true || goals.drive === true)) return "fault";
@@ -252,4 +253,10 @@ export function trialDiagnostics(state: JsonRecord, error: unknown = null) {
 export function trialStopReasonKey(reason: unknown): string {
   const key = "vision.reason." + str(reason);
   return Object.prototype.hasOwnProperty.call(messages, key) ? key : "trialStopped";
+}
+
+
+/** Only an explicitly confirmed Pi completion is a neutral terminal outcome. */
+export function trialOutcomeTone(reason: unknown): "neutral" | "error" {
+  return reason === "trial_completed" ? "neutral" : "error";
 }

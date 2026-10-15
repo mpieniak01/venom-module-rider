@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import ts from "typescript";
 import { test } from "node:test";
-import { calibrationAcceptance, calibrationMatches, completedTrial, executionHeadline, freshPolicyFrame, previewNotice, calibrationScope, decisionView, freshAnalysisFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, motionPermission, stoppingZone, stoppingZoneValues, trialBlock, trialPreparation, trialPreparationTitle, trialPreparationErrorKey, trialDiagnostics, trialStopReasonKey } from "../../web-next/lib/loop-controls";
+import { calibrationAcceptance, calibrationMatches, completedTrial, executionHeadline, freshPolicyFrame, previewNotice, calibrationScope, decisionView, freshAnalysisFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, motionPermission, stoppingZone, stoppingZoneValues, trialBlock, trialPreparation, trialPreparationTitle, trialPreparationErrorKey, trialDiagnostics, trialStopReasonKey, trialOutcomeTone } from "../../web-next/lib/loop-controls";
 import { translate } from "../../web-next/lib/i18n";
 import { featureRows, frameRequested, type RiderStatus } from "../../web-next/lib/model";
 
@@ -458,4 +458,29 @@ test("driving preparation needs its own runtime, never an already running observ
   for(const key of ["trialStartHelp","observationOptional","observationOptionalHelp"])assert.notEqual(translate(language,key),key);
  }
  assert.equal(translate("pl","trialRun"),"Jedź prosto · 10 s");
+});
+
+
+test("confirmed ARM-window completion is stopped and neutral; faults remain errors",()=>{
+ const completed={mode:"drive",running:false,latched:true,stale:false,stop_reason:"trial_completed"};
+ assert.equal(loopPhase(true,completed,{drive:true,observe:false}),"stopped");
+ assert.equal(loopPhase(true,completed,{drive:false,observe:false}),"stopped");
+ assert.equal(loopPhase(false,completed,{drive:true}),"offline");
+ assert.equal(trialOutcomeTone("trial_completed"),"neutral");
+ assert.equal(trialStopReasonKey("trial_completed"),"vision.reason.trial_completed");
+ for(const reason of ["motion_submission_failed","decision_timeout","navigation_motion_rejected","stale_generation","unknown"]){
+  assert.equal(loopPhase(true,{...completed,stop_reason:reason},{drive:true}),"fault",reason);
+  assert.equal(trialOutcomeTone(reason),"error",reason);
+ }
+ assert.notEqual(loopPhase(true,{...completed,running:true},{drive:true}),"stopped");
+ const outcome=trialDiagnostics({mode:"observe",running:true,stale:false,last_trial:{...completed,run_id:"completed-run",observed_at:100}});
+ assert.equal(outcome.outcome?.stop_reason,"trial_completed");
+ const panel=jsxByTestId("trial-stop-reason");
+ assert.equal(jsxAttribute(panel,"className"),'{trialOutcomeTone(displayedStopReason)==="neutral"?styles.hint:styles.loopError}');
+ for(const language of ["pl","en","de"] as const){
+  const message=translate(language,"vision.reason.trial_completed");
+  assert.notEqual(message,"vision.reason.trial_completed");
+  assert.equal(message.includes("10"),false);
+  assert.ok(message.includes("ARM"));
+ }
 });
