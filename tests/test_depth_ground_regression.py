@@ -177,3 +177,15 @@ def test_preview_border_preserves_every_scored_edge_pixel():
         x0, y0, x1, y1 = corridor
         mask = (x >= x0 * 320) & (x < x1 * 320) & (y >= y0 * 240) & (y < y1 * 240)
         assert (pixels[mask] == [255, 0, 0]).all()
+
+
+def test_stop_uses_the_displayed_pixel_allowance_at_float_rounding_boundary():
+    inverse = 1.0 / ground_depth()
+    inverse[210, 125:186] -= 0.09
+    # This representable fraction multiplies back to 60.99999999999999.
+    settings = SETTINGS.model_copy(update={"outlier_limit": 61 / 3456})
+    outcome = assess_depth(1.0 / inverse, NEAR_CORRIDOR, settings)
+    assert outcome["outlier_pixels"] == 61
+    assert outcome["allowed_outlier_pixels"] == 60
+    assert outcome["outlier_fraction"] == settings.outlier_limit
+    assert outcome["state"] == "obstacle"

@@ -7,7 +7,7 @@ async (page) => {
     const sha="a".repeat(64),calls=[];
     let policy={revision:1,mode:"observe",speed:.1,max_motion_ms:150,decision_budget_ms:300,corridor:[.35,.65,.65,.95],perception:{engine:"depth_plane",residual_limit:.06,outlier_limit:.005,slope_min:2},verified:true,calibration_id:"operator-fixture",model_sha256:sha};
     let observing=true,driving=false,driveRequested=false,armed=false,owner=null,generation="fixture-initial";
-    let obstacle=false,mediaFailure=false,starting=false,cancelled=false,terminal=null,armCount=0;
+    let obstacle=false,mediaFailure=false,starting=false,cancelled=false,terminal=null,armCount=0,cameraOn=true;
     const detector={configured:true,loaded:true,sha256:sha,purpose:"relative_ground_geometry",drive_supported:true,clear_frames_required:3};
  const settings={"schema_version": 2, "revision": 0, "values": {"linear_speed": 0.2, "turn_speed": 0.35, "pulse_duration": 0.25, "speed_limit": 1.0, "linear_rate": 3.0, "turn_rate": 4.0, "linear_deceleration": 3.0, "turn_deceleration": 4.0, "reversal_pause": 0.0, "ramp_mode": 0}, "directions": {"forward": {"minimum": 0.0, "maximum": 1.0, "step": 0.01, "speed": 0.2, "duration": 0.25}, "backward": {"minimum": 0.0, "maximum": 1.0, "step": 0.01, "speed": 0.2, "duration": 0.25}, "left": {"minimum": 0.0, "maximum": 1.0, "step": 0.01, "speed": 0.35, "duration": 0.25}, "right": {"minimum": 0.0, "maximum": 1.0, "step": 0.01, "speed": 0.35, "duration": 0.25}}, "profiles": {}, "active_profile": null, "contract_id": "rider.manual_settings", "contract_version": 2, "limits": {"linear_speed": 1.0, "turn_speed": 1.0, "pulse_duration": 1.0, "speed_limit": 1.0, "linear_rate": 100.0, "turn_rate": 100.0, "linear_deceleration": 100.0, "turn_deceleration": 100.0, "reversal_pause": 0.25, "ramp_mode": 2}, "actuation": false, "units": "normalized_command", "legacy_units_scope": "command_magnitude_only; use parameter_schema for individual fields", "parameter_schema": {"version": 1, "actuator_fields": {"height": {"type": "integer", "unit": "sdk_height_command", "display_unit": "SDK", "display_factor": 1, "display_precision": 0, "minimum": 75, "maximum": 115, "step": 1, "meaning": "height_command_not_physical_measurement"}, "balance": {"type": "boolean", "unit": "enabled", "display_unit": "", "meaning": "roll_compensation_not_full_balance_shutdown"}}, "ramp_modes": [{"value": 0, "id": "linear", "label_pl": "Liniowy", "label_en": "Linear"}, {"value": 1, "id": "smooth_s", "label_pl": "\u0141agodny S", "label_en": "Smooth S"}, {"value": 2, "id": "logarithmic", "label_pl": "Logarytmiczny", "label_en": "Logarithmic"}], "direction_fields": {"speed": {"type": "number", "unit": "normalized_command", "display_unit": "%", "display_factor": 100, "minimum": 0, "maximum": 1, "display_precision": 1, "meaning": "command_magnitude_not_physical_speed"}, "minimum": {"type": "number", "unit": "normalized_command", "display_unit": "%", "display_factor": 100, "minimum": 0, "maximum": 1, "display_precision": 1, "meaning": "operator_defined_minimum_nonzero_command"}, "maximum": {"type": "number", "unit": "normalized_command", "display_unit": "%", "display_factor": 100, "minimum": 0, "maximum": 1, "display_precision": 1, "meaning": "profile_command_ceiling"}, "step": {"type": "number", "unit": "normalized_command", "display_unit": "%", "display_factor": 100, "minimum": 0, "maximum": 1, "display_precision": 3, "meaning": "manual_adjustment_step", "exclusive_minimum": true}, "duration": {"type": "number", "unit": "s", "display_unit": "ms", "display_factor": 1000, "minimum": 0.01, "maximum": 1.0, "display_precision": 0, "meaning": "whole_click_pulse"}}, "value_fields": {"linear_rate": {"type": "number", "unit": "normalized_command/s", "display_unit": "%/s", "display_factor": 100, "minimum": 0.001, "maximum": 100.0, "display_precision": 1, "meaning": "linear_rate"}, "turn_rate": {"type": "number", "unit": "normalized_command/s", "display_unit": "%/s", "display_factor": 100, "minimum": 0.001, "maximum": 100.0, "display_precision": 1, "meaning": "turn_rate"}, "linear_deceleration": {"type": "number", "unit": "normalized_command/s", "display_unit": "%/s", "display_factor": 100, "minimum": 0.001, "maximum": 100.0, "display_precision": 1, "meaning": "linear_deceleration"}, "turn_deceleration": {"type": "number", "unit": "normalized_command/s", "display_unit": "%/s", "display_factor": 100, "minimum": 0.001, "maximum": 100.0, "display_precision": 1, "meaning": "turn_deceleration"}, "reversal_pause": {"type": "number", "unit": "s", "display_unit": "ms", "display_factor": 1000, "minimum": 0, "maximum": 0.25, "display_precision": 0, "meaning": "pause_before_reversal"}}, "constraints": [{"id": "direction_range", "rule": "minimum <= maximum"}, {"id": "direction_speed", "rule": "speed == 0 or minimum <= speed <= maximum"}, {"id": "direction_step", "rule": "step > 0; zero-width range permits a disabled slider"}, {"id": "pulse_minimum", "rule": "minimum <= duration / (1/acceleration + 1/deceleration)"}]}, "control_modes": {"version": 1, "supported": ["pulse", "hold", "release"], "default": "pulse", "directions": ["forward", "backward", "left", "right"], "hold_renewal_ms": 150, "hold_timeout_ms": 500, "click_threshold_ms": 180, "request_ttl_ms": 500, "replacement": "latest_valid_sequence_wins", "release": "decelerate_keep_armed", "release_timeout_ms": 500, "stop": "immediate_disarm", "hold_permission": "operator_manual_panel", "settings_change": "idle_only", "command": {"endpoint": "/api/control", "action": "move", "fields": ["direction", "mode", "device_settings", "settings_revision"]}}, "authority": "device", "profile_modified": false, "legacy_aliases": {"linear_speed": "directions.forward.speed", "turn_speed": "directions.right.speed", "pulse_duration": "maximum_direction_duration"}};
     const state=()=>{
@@ -34,7 +34,7 @@ async (page) => {
           starting=true;
           if(mode==="cancel")await new Promise(r=>setTimeout(r,800));
           if(cancelled)return json({detail:{code:"navigation_trial_cancelled"}},409);
-          observing=false;driving=true;driveRequested=true;armed=true;owner="navigation";generation="fixture-navigation";armCount++;policy={...policy,mode:"drive",revision:policy.revision+1};
+          cameraOn=true;observing=false;driving=true;driveRequested=true;armed=true;owner="navigation";generation="fixture-navigation";armCount++;policy={...policy,mode:"drive",revision:policy.revision+1};
           return json({ok:true,data:{ok:true,config:policy,status:state().status,authority:{generation}}});
         }
         if(path==="/control"){
@@ -43,14 +43,20 @@ async (page) => {
           return json({ok:true,data:{ok:true}});
         }
         if(path==="/goal/s14_venom_navigation"){driveRequested=body.enabled;driving=body.enabled;return json({ok:true,data:{ok:true}});}
-        if(path==="/goal/s15_venom_perception"){observing=body.enabled;return json({ok:true,data:{ok:true}});}
+        if(path==="/goal/s15_venom_perception"){observing=body.enabled;if(observing)cameraOn=true;return json({ok:true,data:{ok:true}});}
+        if(path==="/resource/camera"){
+          check(body.action==="stop"&&!observing&&!driveRequested,"camera released before loop producers stopped");
+          cameraOn=false;
+          return json({camera:{ok:true},feed:{ok:true}});
+        }
         await route.abort();throw new Error("unexpected mutation "+path);
       }
       if(path==="/config")return json({devices:[{id:"fixture-demo",label:"Fixture",mode:"demo"}],device_id:"fixture-demo",session:"fixture-session"});
       if(path==="/navigation/config")return json({...state(),config:policy,runtime:{observe:true,drive:true,known:true}});
       if(path==="/navigation/state")return json(state());
-      if(path==="/status")return json({connection:{status:"online",configured:true,device_id:"fixture-demo",mode:"demo",session:"fixture-session"},polling:{control_ms:200},errors:{},settings,control:{server_time:Date.now()/1000,safety:{state:armed?"ARMED":"DISARMED",owner,generation,observed_at:Date.now()/1000,stale:false,can_move:armed,moving:driving&&!obstacle,ready:true,capabilities:{move:{available:true}},remote_decision_deadline_supported:true,scoped_stop_generation_supported:true}},telemetry:{camera:{on:true}},health:{camera:{on:true}},catalog:{features:[{name:"s14_venom_navigation",can_move:true,control_owner:"navigation"},{name:"s15_venom_perception",can_move:false}]},logic:{},resources:{},face:{}});
+      if(path==="/status")return json({connection:{status:"online",configured:true,device_id:"fixture-demo",mode:"demo",session:"fixture-session"},polling:{control_ms:200},errors:{},settings,control:{server_time:Date.now()/1000,safety:{state:armed?"ARMED":"DISARMED",owner,generation,observed_at:Date.now()/1000,stale:false,can_move:armed,moving:driving&&!obstacle,ready:true,capabilities:{move:{available:true}},remote_decision_deadline_supported:true,scoped_stop_generation_supported:true}},telemetry:{camera:{on:cameraOn}},health:{camera:{on:cameraOn}},catalog:{features:[{name:"s14_venom_navigation",can_move:true,control_owner:"navigation"},{name:"s15_venom_perception",can_move:false}]},logic:{},resources:{},face:{}});
       if(path.startsWith("/camera/")){
+        if(!cameraOn)return json({detail:{code:"camera_off"}},404);
         if(mediaFailure)return route.abort("failed");
         const analysis=state().status.decision;
         return route.fulfill({body:Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aN2kAAAAASUVORK5CYII=","base64"),contentType:"image/png",headers:{"X-Rider-Stale":"false","X-Rider-Frame-Id":analysis.frame_id,"X-Rider-File-Observed-At":String(Date.now()/1000),"X-Rider-Vision-State":analysis.state,"X-Rider-Vision-Reason":analysis.reason,"X-Rider-Vision-Policy":"device_policy","X-Rider-Source":"fixture","X-Rider-Frame-Age-Ms":"50","X-Rider-Frame-Age-Source":"pi-reported-plus-host-elapsed","X-Rider-Analysis-Json":JSON.stringify(analysis)}});
@@ -86,6 +92,8 @@ async (page) => {
       await wait(()=>cancelled,"STOP not sent during start");
       await new Promise(r=>setTimeout(r,1000));
       check(armCount===0&&!armed&&!driving,"cancelled start armed the robot");
+      await wait(()=>!observing&&!driveRequested&&!cameraOn,"cancelled start left camera or loop active");
+      await wait(async()=>!await page.getByTestId("loop-stop").isDisabled(),"cancelled STOP did not finish");
       return {mode,result:"PASS",trialRequests:calls.filter(c=>c.path==="/navigation/trial").length};
     }
     await wait(()=>driving&&armed,"single endpoint did not start trial");
@@ -109,7 +117,10 @@ async (page) => {
     check(await page.getByText("Połączono",{exact:true}).isVisible(),"media failure marked robot offline");
     mediaFailure=false;
     await page.getByTestId("loop-stop").click();
-    await wait(()=>!driving&&!armed,"operator stop did not end trial");
+    await wait(()=>!driving&&!armed&&!driveRequested&&!observing&&!cameraOn,"operator stop did not release camera and producers");
+    await wait(async()=>!await page.getByTestId("loop-stop").isDisabled(),"operator STOP did not finish");
+    check(await page.locator("img").count()===0,"stopped preview still mounted");
+    check(calls.filter(c=>c.path==="/resource/camera").length===1,"camera STOP missing or duplicated");
     check(!calls.some(c=>c.path==="/control"&&c.body.action!=="stop"),"browser issued actuators directly");
     return {mode,result:"PASS",trialRequests:calls.filter(c=>c.path==="/navigation/trial").length,armCount};
   };

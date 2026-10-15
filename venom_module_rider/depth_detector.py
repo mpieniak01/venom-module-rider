@@ -57,7 +57,7 @@ def assess_depth(depth, corridor, settings):
     residual = float(np.quantile(errors, 0.99))
     if not settings.slope_min <= slope <= 6.0:
         state, reason = "unknown", "depth_ground_orientation"
-    elif outliers > settings.outlier_limit:
+    elif outlier_pixels > allowed_pixels:
         state, reason = "obstacle", "depth_ground_deviation"
     else:
         state, reason = "clear", "depth_plane_candidate"
