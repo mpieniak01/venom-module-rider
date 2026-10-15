@@ -78,3 +78,8 @@ Reports include RGB mean/std, quality result, labelled-frame count, actual infer
 count and low-quality CLEAR count. Unlabelled low-light scenes have no measured
 obstacle/free-floor accuracy; a zero false-CLEAR counter with zero labelled frames
 must not be interpreted as perfect accuracy.
+
+
+## Continuous video and temporal windows
+[Online MJPEG, codec and causal-window experiments](VIDEO_SEQUENCE_RESEARCH.md)
+separate delivery latency from changes in pixel decoding and joint DA3 attention.

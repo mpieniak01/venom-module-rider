@@ -6,5 +6,5 @@ imageio==2.37.2
 omegaconf==2.3.0
 einops==0.8.2
 torchvision>=0.21,<1
-opencv-python-headless>=4.10,<5
+opencv-python-headless>=4.10,<6
 safetensors>=0.5,<1

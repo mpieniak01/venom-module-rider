@@ -6,6 +6,7 @@ import json
 import time
 from collections import Counter
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from PIL import Image
@@ -27,7 +28,8 @@ def decode_video(path, expected):
     if not 1 <= expected <= 600:
         raise ValueError("video_frame_bounds")
     capture = cv2.VideoCapture(str(path), cv2.CAP_FFMPEG)
-    images, times = [], []
+    images: list[Image.Image] = []
+    times: list[float] = []
     try:
         if not capture.isOpened():
             raise ValueError("video_open_failed")
@@ -53,6 +55,7 @@ def assess_window(candidate, images, times, index, width, mode):
     rgb = np.asarray(history[-1], dtype=np.float32) / 255
     quality = float(rgb.mean()) >= 0.04 and float(rgb.std()) >= 0.01
     started = time.perf_counter()
+    result: dict[str, Any]
     if not quality and mode == "production":
         result = {"state": "unknown", "reason": "vision_image_quality"}
     else:
@@ -80,6 +83,7 @@ def summarize_sequence(rows):
     states = [r["state"] for r in rows]
     return {
         "samples": len(rows),
+        "inferred_samples": sum(r["reason"] != "vision_image_quality" for r in rows),
         "states": dict(Counter(states)),
         "sampled_state_changes": sum(
             a != b for a, b in zip(states, states[1:], strict=False)
@@ -105,10 +109,16 @@ def replay(args):
             / torch.cuda.get_device_properties(0).total_memory
         )
     rows = load_dataset(args.manifest)
-    original = [
-        Image.open(io.BytesIO(row["path"].read_bytes())).convert("RGB") for row in rows
-    ]
-    images, decode_ms = decode_video(args.video, len(rows))
+    original, jpeg_decode_ms = [], []
+    for row in rows:
+        start = time.perf_counter()
+        with Image.open(io.BytesIO(row["path"].read_bytes())) as image:
+            original.append(image.convert("RGB"))
+        jpeg_decode_ms.append((time.perf_counter() - start) * 1000)
+    if args.decoder == "jpeg":
+        images, decode_ms = original, jpeg_decode_ms
+    else:
+        images, decode_ms = decode_video(args.video, len(rows))
     if any(a.size != b.size for a, b in zip(original, images, strict=True)):
         raise ValueError("video_frame_geometry_changed")
     mae = [
@@ -133,7 +143,7 @@ def replay(args):
     indices = window_indices(len(images), args.samples)
     runs = []
     for width in args.windows:
-        assess_window(
+        warmup = assess_window(
             candidate, images, times, int(indices[0]), width, args.quality_mode
         )
         measured = [
@@ -143,14 +153,20 @@ def replay(args):
             for index in indices
         ]
         runs.append(
-            {"window": width, "summary": summarize_sequence(measured), "rows": measured}
+            {
+                "window": width,
+                "warmup_inferred": warmup["reason"] != "vision_image_quality",
+                "summary": summarize_sequence(measured),
+                "rows": measured,
+            }
         )
     return {
         "drive_supported": False,
         "quality_mode": args.quality_mode,
         "model": candidate.metadata,
         "video_frames": len(images),
-        "video_sha256": file_hash(args.video),
+        "video_sha256": file_hash(args.video) if args.decoder == "video" else None,
+        "decoder": args.decoder,
         "manifest_sha256": file_hash(args.manifest),
         "video_decode_p95_ms": percentile(decode_ms, 0.95),
         "pixel_mae_mean": float(np.mean(mae)),
@@ -185,6 +201,7 @@ def main():
     parser.add_argument(
         "--cuda-memory-mib", type=int, choices=range(256, 4097), default=2048
     )
+    parser.add_argument("--decoder", choices=["jpeg", "video"], default="video")
     args = parser.parse_args()
     if args.output.exists():
         raise FileExistsError("report exists")
