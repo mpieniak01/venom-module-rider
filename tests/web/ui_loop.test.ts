@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { calibrationAcceptance, calibrationMatches, completedTrial, executionHeadline, freshPolicyFrame, previewNotice, calibrationScope, decisionView, freshAnalysisFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, motionPermission, stoppingZone, stoppingZoneValues, trialBlock, trialPreparation, trialPreparationTitle, trialPreparationErrorKey } from "../../web-next/lib/loop-controls";
+import { calibrationAcceptance, calibrationMatches, completedTrial, executionHeadline, freshPolicyFrame, previewNotice, calibrationScope, decisionView, freshAnalysisFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, motionPermission, stoppingZone, stoppingZoneValues, trialBlock, trialPreparation, trialPreparationTitle, trialPreparationErrorKey, trialDiagnostics, trialStopReasonKey } from "../../web-next/lib/loop-controls";
 import { translate } from "../../web-next/lib/i18n";
 import { featureRows, frameRequested, type RiderStatus } from "../../web-next/lib/model";
 
@@ -326,5 +326,73 @@ test("stale preparation is historical and unknown Pi errors never become transla
  }
  for(const language of ["pl","en","de"] as const){
   assert.notEqual(translate(language,"trialPreparationHistorical"),"trialPreparationHistorical");
+ }
+});
+
+
+const failedPreparationPacket={
+ request_id:"0fb2c2e3-864a-4c25-88d0-f56eb08b2bbc",
+ operator_request_id:"trial-7d4514424976331315f72fe9e7d4aa03-start",
+ phase:"start_navigation",state:"failed",elapsed_ms:5835.28,
+ observed_at:1792061152.396262,error:"navigation_trial_prepare_timeout",fresh:true,
+};
+const stoppedProductionRun={
+ mode:"drive",running:false,stale:true,latched:true,
+ run_id:"0cb83d21740e44a188862a8856600821",
+ operator_request_id:"trial-7d4514424976331315f72fe9e7d4aa03-start",
+ observed_at:1792061149.3272917,stop_reason:"decision_timeout",
+ decision:{action:"go",vision_action:"go",sequence:5,clear_count:4},
+};
+test("real stopped-run plus delayed prepare timeout becomes one correlated outcome",()=>{
+ const state={...stoppedProductionRun,preparation:failedPreparationPacket,last_trial:stoppedProductionRun};
+ const error={data:{detail:{code:"navigation_trial_prepare_timeout",details:{preparation:failedPreparationPacket}}}};
+ const value=trialDiagnostics(state,error);
+ assert.equal(value.outcome?.run_id,stoppedProductionRun.run_id);
+ assert.equal(value.outcome?.stop_reason,"decision_timeout");
+ assert.equal(value.preparation?.elapsedMs,5835.28);
+ assert.equal(value.combined,true);
+ assert.equal(value.requestErrorCovered,true);
+ assert.equal(decisionView(state,permissionDetector).vision,"none");
+ const otherBrowser=trialDiagnostics({...state});
+ assert.equal(otherBrowser.combined,true);
+ assert.deepEqual(otherBrowser.outcome,value.outcome);
+});
+test("Pi started=true terminal response remains an outcome before the next status poll",()=>{
+ const details={started:true,status:stoppedProductionRun,preparation:failedPreparationPacket};
+ const error={data:{detail:{code:"navigation_trial_stopped",details}}};
+ const value=trialDiagnostics({},error);
+ assert.equal(value.outcome?.stop_reason,"decision_timeout");
+ assert.equal(value.combined,true);assert.equal(value.requestErrorCovered,true);
+ assert.equal(value.preparation?.source,"request");
+});
+test("separate requests are never folded into a single stopped trial by time alone",()=>{
+ const another={...failedPreparationPacket,request_id:"another-request",operator_request_id:"trial-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-start",observed_at:failedPreparationPacket.observed_at+10};
+ const value=trialDiagnostics({last_trial:stoppedProductionRun,preparation:another});
+ assert.equal(value.combined,false);
+ assert.equal(value.outcome?.run_id,stoppedProductionRun.run_id);
+ assert.equal(value.preparation?.requestId,"another-request");
+ assert.equal(value.requestErrorCovered,false);
+ const malformed=trialDiagnostics({last_trial:stoppedProductionRun,preparation:{...failedPreparationPacket,operator_request_id:""}});
+ assert.equal(malformed.combined,false);
+});
+test("an unrelated HTTP 502 is never masked as a successful or confirmed trial",()=>{
+ const error={data:{detail:{code:"http_502",details:{operation:{status:"unknown",confirmed:false}}}}};
+ const value=trialDiagnostics({last_trial:stoppedProductionRun,preparation:failedPreparationPacket},error);
+ assert.equal(value.combined,true);
+ assert.equal(value.requestErrorCovered,false);
+ assert.equal(value.outcome?.running,false);
+});
+test("a newer active run does not inherit a stopped result from an older request",()=>{
+ const value=trialDiagnostics({mode:"drive",running:true,stale:false,run_id:"new-run",last_trial:stoppedProductionRun,preparation:{...failedPreparationPacket,state:"preparing"}});
+ assert.equal(value.outcome,null);
+ assert.equal(value.combined,false);
+ assert.equal(value.requestErrorCovered,false);
+});
+
+
+test("unknown historical stop codes have a bounded module-owned display key",()=>{
+ assert.equal(trialStopReasonKey("decision_timeout"),"vision.reason.decision_timeout");
+ for(const value of [null,{},"<script>","unknown_future_reason"]){
+  assert.equal(trialStopReasonKey(value),"trialStopped");
  }
 });

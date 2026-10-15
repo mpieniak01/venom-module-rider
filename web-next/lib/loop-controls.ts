@@ -177,6 +177,7 @@ export function completedTrial(state: JsonRecord): JsonRecord | null {
 
 export type TrialPreparation = {
   requestId: string;
+  operatorRequestId: string;
   phase: string;
   state: "preparing" | "failed" | "completed";
   elapsedMs: number | null;
@@ -194,6 +195,7 @@ function preparationRecord(value: unknown, source: "pi" | "request"): TrialPrepa
   if (!["preparing", "failed", "completed"].includes(str(state)) || !str(row.request_id) || observedAt === null) return null;
   return {
     requestId: str(row.request_id),
+    operatorRequestId: /^trial-[0-9a-f]{32}-start$/.test(str(row.operator_request_id)) ? str(row.operator_request_id) : "",
     phase: preparationPhases.has(str(row.phase)) ? str(row.phase) : "unknown",
     state: state as TrialPreparation["state"],
     elapsedMs: typeof row.elapsed_ms === "number" && Number.isFinite(row.elapsed_ms) && row.elapsed_ms >= 0 ? row.elapsed_ms : null,
@@ -220,4 +222,32 @@ export function trialPreparationTitle(value: TrialPreparation): string {
 export function trialPreparationErrorKey(value: TrialPreparation): string {
   const key = "trial.error." + value.error;
   return Object.prototype.hasOwnProperty.call(messages, key) ? key : "requestFailed";
+}
+
+
+/** One stopped-run outcome may supersede a delayed preparation failure. */
+export function trialDiagnostics(state: JsonRecord, error: unknown = null) {
+  const preparation = trialPreparation(state, error);
+  const details = record(record(record(record(error).data).detail).details);
+  const responseStatus = record(details.status);
+  const terminal = (value: JsonRecord) => completedTrial({last_trial:value});
+  const candidates = [terminal(state), completedTrial(state), terminal(responseStatus)]
+    .filter((value): value is JsonRecord => value !== null)
+    .sort((a,b) => (timestampMs(b.observed_at) ?? 0) - (timestampMs(a.observed_at) ?? 0));
+  const outcome = state.mode === "drive" && state.running === true && state.stale !== true ? null : candidates[0] ?? null;
+  const responsePreparation = record(details.preparation);
+  const matchesPreparation = !!outcome && !!preparation?.operatorRequestId
+    && preparation.operatorRequestId === str(outcome.operator_request_id);
+  const matchesResponse = !!outcome && details.started === true
+    && str(responseStatus.run_id) === str(outcome.run_id);
+  const combined = !!preparation && (matchesPreparation || matchesResponse
+    && str(responsePreparation.request_id) === preparation.requestId);
+  const requestErrorCovered = matchesResponse || combined
+    && str(responsePreparation.request_id) === preparation?.requestId;
+  return {preparation, outcome, combined, requestErrorCovered};
+}
+
+export function trialStopReasonKey(reason: unknown): string {
+  const key = "vision.reason." + str(reason);
+  return Object.prototype.hasOwnProperty.call(messages, key) ? key : "trialStopped";
 }

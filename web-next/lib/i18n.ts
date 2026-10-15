@@ -1,5 +1,7 @@
 // Module-owned translations. Every key contains PL, EN and DE by construction.
 export const messages = {
+  trialPreparationReport: ["Raport przygotowania: {phase} · {seconds} s", "Preparation report: {phase} · {seconds} s", "Vorbereitungsbericht: {phase} · {seconds} s"],
+  trialRecoveryFailed: ["Nie udało się odświeżyć obserwacji z tej karty", "This tab could not refresh observation", "Dieser Tab konnte die Beobachtung nicht aktualisieren"],
   trialPreparationHistorical: ["Ostatni zapis przygotowania", "Last preparation record", "Letzter Vorbereitungseintrag"],
   "trialPreparation.state.preparing": ["Trwa przygotowanie próby", "Preparing the trial", "Versuch wird vorbereitet"],
   "trialPreparation.state.failed": ["Przygotowanie próby nieudane", "Trial preparation failed", "Versuchsvorbereitung fehlgeschlagen"],

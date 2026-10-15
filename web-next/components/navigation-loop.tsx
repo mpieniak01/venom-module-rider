@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Play, Square, RefreshCw } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 import { data, errorCode, formatNumber, formatTime, record, type JsonRecord } from "../lib/model";
-import { calibrationAcceptance, calibrationMatches, completedTrial, calibrationScope, decisionView, executionHeadline, freshPolicyFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, motionPermission, stoppingZone, stoppingZoneValues, trialBlock, trialPreparation, trialPreparationTitle, trialPreparationErrorKey } from "../lib/loop-controls";
+import { calibrationAcceptance, calibrationMatches, calibrationScope, decisionView, executionHeadline, freshPolicyFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, motionPermission, stoppingZone, stoppingZoneValues, trialBlock, trialPreparation, trialPreparationTitle, trialPreparationErrorKey, trialDiagnostics, trialStopReasonKey } from "../lib/loop-controls";
 import type { RiderClient } from "../lib/use-rider";
 import type { Translator } from "../lib/i18n";
 import { LoopDecision } from "./loop-decision";
@@ -28,6 +28,7 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
   const [error,setError]=useState("");
   const [errorRun,setErrorRun]=useState("");
   const [trialFailure,setTrialFailure]=useState<unknown>(null);
+  const [recoveryFailure,setRecoveryFailure]=useState<{runId:string;code:string}|null>(null);
   const [readError,setReadError]=useState("");
   const [trialResult,setTrialResult]=useState("");
   const [trialStopReason,setTrialStopReason]=useState("");
@@ -46,7 +47,7 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
   const session=client.status?.connection.session;
   useEffect(()=>{
     const abort=new AbortController();let timer:ReturnType<typeof setTimeout>;let configured=false;let reading=false;
-    setLoopState({stale:true});setGoals({});setRuntime({});setTrialFailure(null);
+    setLoopState({stale:true});setGoals({});setRuntime({});setTrialFailure(null);setRecoveryFailure(null);
     if(!connected)return ()=>abort.abort();
     setLoading(true);setReadError("");
     const apply=(row:JsonRecord)=>{setLoopState(record(row.status));setDetector(record(row.detector));setGoals(record(row.goals));};
@@ -96,8 +97,8 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
     setTrialFailure(err);
     const diagnostic=record(record(record(record(err).data).detail).details).navigation;
     const row=record(diagnostic);setErrorRun(String(row.run_id??""));const cause=String(record(row.motion_failure).reason??row.stop_reason??"");
-    const key="vision.reason."+cause, translated=t(key);
-    setError(t(loopFailure(err))+" · "+errorCode(err)+(cause?" · "+(translated===key?cause:translated):""));
+    const key=trialStopReasonKey(cause), translated=t(key);
+    setError(t(loopFailure(err))+" · "+errorCode(err)+(cause?" · "+(key==="trialStopped"?cause:translated):""));
   },[t]);
   const stop=async()=>{
     if(stopping.current)return;
@@ -195,7 +196,7 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
   };
   const runTrial=async()=>{
     if(!policy||trialUnavailable||operation||loading||phase==="running"&&goals.drive===true)return;
-    setOperation("check");setError("");setTrialFailure(null);setTrialResult("trialChecking");setTrialStopReason("");trialArmed.current=false;
+    client.setNotice(null);setOperation("check");setError("");setTrialFailure(null);setRecoveryFailure(null);setTrialResult("trialChecking");setTrialStopReason("");trialArmed.current=false;
     const origin=client.currentSession();operationEpoch.current=client.currentMotionEpoch();operationGeneration.current=client.currentGeneration();
     trialSession.current=origin;
     const task=(async()=>{
@@ -231,7 +232,7 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
       await client.mutate("/goal/s15_venom_perception",{enabled:true},"POST",true);
       if(mounted.current&&client.currentSession()===origin)await readState();
     })();startTask.current=task;
-    void task.catch(err=>{if(!stopping.current)failure(err);}).finally(()=>{
+    void task.catch(err=>{if(!stopping.current)setRecoveryFailure({runId:String(loopState.run_id??""),code:errorCode(err)});}).finally(()=>{
       if(startTask.current===task)startTask.current=null;
       if(mounted.current&&!stopping.current)setOperation(null);
     });
@@ -242,11 +243,13 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
   const perception=record(draft?.perception);
   const permission=motionPermission(loopState,goals,policy,detector,client.status);
   const imageDecision=decisionView(loopState,detector);
-  const sharedTrial=loopState.running===true&&loopState.mode==="drive"?null:completedTrial(loopState);
+  const diagnostic=trialDiagnostics(loopState,trialFailure);
+  const sharedTrial=diagnostic.outcome;
   const displayedStopReason=sharedTrial?String(sharedTrial.stop_reason):trialStopReason;
-  const preparation=trialPreparation(loopState,trialFailure);
+  const preparation=diagnostic.preparation;
   const hasPreparationError=trialPreparation({},trialFailure)!==null;
-  const visibleError=preparation?.source==="pi"&&hasPreparationError||errorRun&&sharedTrial?.run_id===errorRun?"":error;
+  const visibleError=diagnostic.requestErrorCovered||preparation?.source==="pi"&&hasPreparationError||errorRun&&sharedTrial?.run_id===errorRun?"":error;
+  const sharedRecovery=sharedTrial&&recoveryFailure?.runId===sharedTrial.run_id?recoveryFailure:null;
 
   return <Panel title={t("loopTitle")} extra={<Button aria-label={t("loopLoad")} disabled={loading||!!operation||!connected} onClick={()=>setRefresh(v=>v+1)}><RefreshCw size={14}/>{t("refresh")}</Button>}>
     <div className={styles.loopStatus} role="status" data-testid="loop-state">
@@ -275,7 +278,7 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
       <p className={styles.hint}>{t("trialAcceptanceHelp")}</p>
       <Button data-testid="trial-accept" disabled={!connected||!!operation||loading||dirty||goals.drive===true||imageDecision.vision!=="go"||!freshPolicyFrame(client.camera,client.cameraStream,loopState,policy)} onClick={()=>void acceptTrial()}>{t("trialAccept")}</Button>
     </div>}
-    {preparation&&<div className={preparation.state==="failed"?styles.loopError:styles.metric} role={preparation.state==="failed"?"alert":"status"} data-testid="trial-preparation" data-request-id={preparation.requestId}>
+    {preparation&&!diagnostic.combined&&<div className={preparation.state==="failed"?styles.loopError:styles.metric} role={preparation.state==="failed"?"alert":"status"} data-testid="trial-preparation" data-request-id={preparation.requestId}>
       <strong>{t(trialPreparationTitle(preparation))} · {t("trialPreparation.phase."+preparation.phase)}</strong>
       <p className={styles.small}>{t("trialPreparationElapsed",{seconds:formatNumber(preparation.elapsedMs===null?null:preparation.elapsedMs/1000,language,1)})}</p>
       <p className={styles.small}>{t(preparation.source==="pi"?"trialPreparationSource":"trialPreparationResponse")} · {formatTime(preparation.observedAt,language)}{!preparation.fresh?" · "+t("trialPreparationStale"):""}</p>
@@ -284,7 +287,10 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
     {!!trialUnavailable&&<p id="rider-trial-block" className={styles.loopError} role="status" data-testid="loop-block">{t(trialUnavailable)}</p>}
     {!!trialResult&&!displayedStopReason&&!(trialResult==="trialStarted"&&phase==="running")&&<p className={styles.hint} role="status" data-testid="trial-result">{t(phase==="fault"?"trialEnded":trialResult==="trialStarted"&&phase==="stopped"?"trialStopped":trialResult)}</p>}
     {loopState.mode==="drive"&&loopState.paused===true&&loopState.running===true&&<p className={styles.hint} data-testid="trial-visual-pause">{t("trialVisualPause")}</p>}
-    {!!displayedStopReason&&<p role="status" className={styles.loopError} data-testid="trial-stop-reason">{sharedTrial?t("lastTrial")+" · "+formatTime(sharedTrial.observed_at,language):t("trialEnded")} · {t("vision.reason."+displayedStopReason)}</p>}
+    {!!displayedStopReason&&<p role="status" className={styles.loopError} data-testid="trial-stop-reason">{sharedTrial?t("lastTrial")+" · "+formatTime(sharedTrial.observed_at,language):t("trialEnded")} · {t(trialStopReasonKey(displayedStopReason))}
+      {diagnostic.combined&&preparation&&<><br/><span className={styles.small} data-testid="trial-preparation-report">{t("trialPreparationReport",{phase:t("trialPreparation.phase."+preparation.phase),seconds:formatNumber(preparation.elapsedMs===null?null:preparation.elapsedMs/1000,language,1)})}</span></>}
+      {sharedRecovery&&<><br/><span className={styles.small}>{t("trialRecoveryFailed")} · {sharedRecovery.code}</span></>}
+    </p>}
     {phase==="fault"&&!displayedStopReason&&<p role="alert" className={styles.loopError}>{t("loopFaultHint")} · {String(loopState.stop_reason??"")}</p>}
 
     {(visibleError||readError)&&<p className={styles.loopError} role="alert">{t("trialRequestError")} · {visibleError||readError}</p>}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 
@@ -68,6 +69,34 @@ def expected_contract(path: str):
 
 def reject_constant(_):
     raise ValueError("Non-finite JSON")
+
+
+def preparation_identity(value):
+    """Mirror Pi's existing start-id derivation for diagnostic correlation only."""
+    if not isinstance(value, dict):
+        return value
+    request_id = value.get("request_id")
+    if not isinstance(request_id, str) or not 0 < len(request_id) <= 64:
+        return value
+    start_id = (
+        "trial-" + hashlib.sha256(request_id.encode()).hexdigest()[:32] + "-start"
+    )
+    return {**value, "operator_request_id": start_id}
+
+
+def trial_error_details(payload):
+    """Unwrap diagnostics retained by negotiated Pi errors, never reinterpret OK."""
+    error = payload.get("error")
+    data = payload.get("data")
+    candidates = (
+        error.get("details") if isinstance(error, dict) else None,
+        payload.get("details"),
+        data.get("details") if isinstance(data, dict) else None,
+    )
+    details = next((row for row in candidates if isinstance(row, dict)), payload)
+    if isinstance(details.get("preparation"), dict):
+        return {**details, "preparation": preparation_identity(details["preparation"])}
+    return details
 
 
 def json_timeout(path: str, method: str, stop: bool) -> httpx.Timeout:
@@ -157,7 +186,9 @@ class PiClient:
                     raise RiderError(
                         str(code or "pi_request_failed")[:128],
                         response.status_code,
-                        payload,
+                        trial_error_details(payload)
+                        if path == "/api/navigation/trial"
+                        else payload,
                     )
                 meta = payload.get("meta")
                 if (
@@ -190,6 +221,16 @@ class PiClient:
                     and (data.get("safety") or {}).get("contract_version") != 1
                 ):
                     raise RiderError("unsupported_safety_contract", 502)
+                if path == "/api/navigation/status" and isinstance(
+                    data.get("preparation"), dict
+                ):
+                    payload = {
+                        **payload,
+                        "data": {
+                            **data,
+                            "preparation": preparation_identity(data["preparation"]),
+                        },
+                    }
                 return payload
         except httpx.TimeoutException as exc:
             if method != "GET":

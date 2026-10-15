@@ -241,3 +241,118 @@ async def test_failed_demo_trial_revokes_its_own_arm():
         assert pi.state == "DISARMED" and not pi.safety()["moving"]
     finally:
         await nav.close()
+
+
+@pytest.mark.parametrize("placement", ["data", "error", "legacy"])
+async def test_real_stopped_trial_error_preserves_matched_run_and_preparation(
+    monkeypatch, placement
+):
+    request_id = "0fb2c2e3-864a-4c25-88d0-f56eb08b2bbc"
+    start_id = "trial-7d4514424976331315f72fe9e7d4aa03-start"
+    status = {
+        "mode": "drive",
+        "running": False,
+        "stale": True,
+        "run_id": "0cb83d21740e44a188862a8856600821",
+        "operator_request_id": start_id,
+        "observed_at": 1792061149.3272917,
+        "stop_reason": "decision_timeout",
+        "latched": True,
+    }
+    preparation = {
+        "request_id": request_id,
+        "phase": "start_navigation",
+        "state": "failed",
+        "elapsed_ms": 5835.28,
+        "observed_at": 1792061152.396262,
+        "error": "navigation_trial_prepare_timeout",
+        "fresh": True,
+    }
+    details = {"started": True, "status": status, "preparation": preparation}
+
+    def receive(_):
+        payload = {
+            "ok": False,
+            "data": {},
+            "error": {"code": "navigation_trial_stopped", "message": "Request failed"},
+        }
+        if placement == "data":
+            payload["data"] = {"error": "navigation_trial_stopped", "details": details}
+        elif placement == "error":
+            payload["error"]["details"] = details
+        else:
+            payload["details"] = details
+        return httpx.Response(409, json=payload)
+
+    service, client = await setup_proxy(monkeypatch, receive)
+    try:
+        response = await client.post(
+            "/api/v1/rider/navigation/trial",
+            json=body(request_id=request_id),
+            headers={"X-Rider-Session": service.session},
+        )
+        assert response.status_code == 409
+        diagnostic = response.json()["detail"]
+        assert diagnostic["code"] == "navigation_trial_stopped"
+        assert diagnostic["details"]["started"] is True
+        assert diagnostic["details"]["status"] == status
+        assert diagnostic["details"]["preparation"] == {
+            **preparation,
+            "operator_request_id": start_id,
+        }
+        assert preparation.get("operator_request_id") is None
+    finally:
+        await client.aclose()
+        await service.close()
+
+
+async def test_status_preparation_has_same_existing_pi_start_identity(monkeypatch):
+    preparation = {
+        "request_id": "0fb2c2e3-864a-4c25-88d0-f56eb08b2bbc",
+        "state": "failed",
+    }
+    response = envelope({"preparation": preparation}, "rider.navigation_loop")
+    selected = Device("pi", "Fixture", "http://127.0.0.1:18880", "prod")
+    client = PiClient(
+        selected,
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(
+                200, content=response.body, headers=response.headers
+            )
+        ),
+    )
+    try:
+        result = await client.json("/api/navigation/status")
+        assert (
+            result["data"]["preparation"]["operator_request_id"]
+            == "trial-7d4514424976331315f72fe9e7d4aa03-start"
+        )
+    finally:
+        await client.close()
+
+
+async def test_unconfirmed_feature_stop_502_is_not_masked_as_success():
+    from venom_module_rider.errors import RiderError
+
+    selected = Device("pi", "Fixture", "http://127.0.0.1:18880", "prod")
+    packet = {
+        "ok": False,
+        "error": {"code": "http_502"},
+        "operation": {"status": "unknown", "confirmed": False},
+    }
+    client = PiClient(
+        selected,
+        transport=httpx.MockTransport(lambda _: httpx.Response(502, json=packet)),
+    )
+    try:
+        with pytest.raises(RiderError) as caught:
+            await client.json(
+                "/api/logic/feature/s14_venom_navigation",
+                method="POST",
+                body={"enabled": False},
+            )
+        assert caught.value.status == 502
+        assert caught.value.code == "http_502"
+        assert caught.value.details == packet
+    finally:
+        await client.close()
