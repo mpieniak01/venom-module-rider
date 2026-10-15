@@ -10,6 +10,7 @@ from .depth_detector import DepthDetector
 from .errors import RiderError
 from .floor_detector import FloorDetector
 from .sector_trend import update as sector_trend
+from .steering import plan as steering_plan
 
 
 class VisionLoop:
@@ -34,7 +35,7 @@ class VisionLoop:
             **selected.status(),
             "busy": (self.depth_busy if selected is self.depth_detector else self.busy)
             is not None,
-            "supported_protocol_versions": [1, 2],
+            "supported_protocol_versions": [1, 2, 3],
             "protocol_version": 1,
             "max_frame_bytes": 512 * 1024,
             "max_deadline_ms": 500,
@@ -221,6 +222,26 @@ class VisionLoop:
                 )
             else:
                 action, motion_reason = "stop", "avoidance_not_enabled"
+        if frame.protocol_version == 3:
+            prior = dict(previous.get("avoidance") or {}) if previous else {}
+            if previous and now - previous["at"] > 0.5:
+                prior.update(counts={"left": 0, "right": 0}, front=0)
+            action, motion_reason, planner, sectors, paths, terminal = steering_plan(
+                result,
+                prior,
+                frame.avoidance,
+                frame.motion_phase,
+                permitted and frame.avoidance.enabled and depth_mode,
+            )
+            state["avoidance"] = planner
+            result.update(
+                sectors=sectors,
+                paths=paths,
+                terminal_stop=terminal,
+                maneuver_clear_count=3 if action.startswith("steer_") else 0,
+                maneuver_phase=motion_reason,
+                turn_count=planner["turns"],
+            )
         image = result.pop("_preview", None)
         if image is not None:
             self.previews[device_id] = (

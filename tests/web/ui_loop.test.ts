@@ -538,3 +538,17 @@ test("v2 turn is shown as a maneuver while the forward image remains STOP",()=>{
     assert.equal(motionPermission(state,{drive:true},permissionPolicy,permissionDetector,permissionStatus()).venom,false);
   }
 });
+
+
+test("v3 steering needs clear near guard and connecting path in addition to side",()=>{
+ const state={...permissionLoop,decision:{...permissionLoop.decision,protocol_version:3,action:"steer_right",state:"obstacle",vision_action:"stop",sectors:{right:{state:"clear",coverage_complete:true}},paths:{right:{state:"clear",coverage_complete:true},guard:{state:"clear",coverage_complete:true}}}};
+ const policy={...permissionPolicy,avoidance:{enabled:true,sweep_verified:true,protocol_version:3}};
+ const permission=motionPermission(state,{drive:true},policy,permissionDetector,permissionStatus());
+ assert.equal(permission.venom,true);
+ assert.equal(decisionView(state,permissionDetector).reply,"steer_right");
+ assert.equal(executionHeadline(state,{drive:true},permissionStatus(),permission),"permissionVenomSteerRight");
+ for(const field of ["right","guard"]){
+   const blocked={...state,decision:{...state.decision,paths:{...state.decision.paths,[field]:{state:"obstacle",coverage_complete:true}}}};
+   assert.equal(motionPermission(blocked,{drive:true},policy,permissionDetector,permissionStatus()).venom,false);
+ }
+});

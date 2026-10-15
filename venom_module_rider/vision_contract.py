@@ -17,7 +17,7 @@ from .depth_detector import PerceptionSettings
 
 class VisionFrame(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
-    protocol_version: Literal[1, 2]
+    protocol_version: Literal[1, 2, 3]
     run_id: Annotated[str, Field(pattern=r"^[a-zA-Z0-9_-]{1,64}$")]
     frame_id: Annotated[str, Field(pattern=r"^[a-zA-Z0-9_-]{1,64}$")]
     sequence: Annotated[StrictInt, Field(ge=0, le=2**53 - 1)]
@@ -38,9 +38,10 @@ class VisionFrame(BaseModel):
     @model_validator(mode="after")
     def avoidance_protocol(self):
         if self.avoidance.enabled and (
-            self.protocol_version != 2 or self.perception.engine != "depth_plane"
+            self.protocol_version != self.avoidance.protocol_version
+            or self.perception.engine != "depth_plane"
         ):
-            raise ValueError("avoidance_requires_depth_protocol_v2")
+            raise ValueError("avoidance_requires_depth_protocol_v2_or_v3")
         return self
 
     def valid_corridor(self):

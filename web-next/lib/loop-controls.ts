@@ -107,7 +107,7 @@ export function decisionView(state: JsonRecord, detector: JsonRecord) {
     current, required, count,
     imageReason:!current?(decision.state?"analysis_not_current":"waiting_for_decision"):decision.state!=="clear"?String(decision.reason??"waiting_for_decision"):count<required?"clear_frames_pending":"clear_frames_ready",
     vision:current?vision:"none",
-    reply:current&&["go","stop","turn_left","turn_right"].includes(String(decision.action))?String(decision.action):"none",
+    reply:current&&["go","stop","turn_left","turn_right","steer_left","steer_right"].includes(String(decision.action))?String(decision.action):"none",
     reason:current?String(decision.motion_reason??(decision.state!=="clear"?decision.reason:count<required?"clear_frames_pending":state.mode==="observe"?"observe_only":decision.reason)??"waiting_for_decision"):String(state.stop_reason??"waiting_for_decision"),
     floor:typeof decision.floor_fraction==="number"?decision.floor_fraction:null,
     confidence:typeof decision.confidence_fraction==="number"?decision.confidence_fraction:null,
@@ -134,8 +134,8 @@ export function trialBlock(policy: JsonRecord|null, runtime:JsonRecord, detector
 export function motionPermission(state:JsonRecord, goals:JsonRecord, policy:JsonRecord|null, detector:JsonRecord, status:RiderStatus|null) {
   const safety=safetyOf(status), view=decisionView(state,detector);
   const known=!!status?.connection.configured&&["online","degraded"].includes(status.connection.status)&&!status.errors.control&&safety.stale!==true&&!!str(safety.generation)&&["ARMED","DISARMED","ESTOP"].includes(str(safety.state));
-  const decision=record(state.decision),side=decision.action==="turn_left"?"left":"right";
-  const turning=view.current&&decision.protocol_version===2&&["turn_left","turn_right"].includes(String(decision.action))&&decision.state==="obstacle"&&record(policy?.avoidance).enabled===true&&record(policy?.avoidance).sweep_verified===true&&record(record(decision.sectors)[side]).state==="clear"&&record(record(decision.sectors)[side]).coverage_complete===true;
+  const decision=record(state.decision),side=["turn_left","steer_left"].includes(String(decision.action))?"left":"right";
+  const turning=view.current&&((decision.protocol_version===2&&["turn_left","turn_right"].includes(String(decision.action)))||(decision.protocol_version===3&&["steer_left","steer_right"].includes(String(decision.action))&&["guard",side].every(k=>record(record(decision.paths)[k]).state==="clear"&&record(record(decision.paths)[k]).coverage_complete===true)))&&decision.state==="obstacle"&&record(policy?.avoidance).enabled===true&&record(policy?.avoidance).sweep_verified===true&&record(record(decision.sectors)[side]).state==="clear"&&record(record(decision.sectors)[side]).coverage_complete===true;
   const ready=safety.ready!==false&&record(record(safety.capabilities).move).available===true&&!record(safety.execution).inhibit;
   const manual=known?navigationAvailable(status)&&safety.can_move===true&&ready:null;
   let reason="permissionUnknown", allowed=false;
@@ -157,7 +157,7 @@ export function motionPermission(state:JsonRecord, goals:JsonRecord, policy:Json
 export function executionHeadline(state:JsonRecord,goals:JsonRecord,status:RiderStatus|null,permission:{venom:boolean|null}):string {
   if(state.mode==="drive"&&goals.drive===true&&state.paused===true&&state.running===true&&state.stale!==true&&safetyOf(status).state==="ARMED"&&safetyOf(status).owner==="navigation")return "trialVisualPause";
   if(permission.venom===null)return "permissionVenomUnknown";
-  if(permission.venom){const action=record(state.decision).action;return action==="turn_left"?"permissionVenomTurnLeft":action==="turn_right"?"permissionVenomTurnRight":"permissionVenomYes";}
+  if(permission.venom){const action=record(state.decision).action;return action==="steer_left"?"permissionVenomSteerLeft":action==="steer_right"?"permissionVenomSteerRight":action==="turn_left"?"permissionVenomTurnLeft":action==="turn_right"?"permissionVenomTurnRight":"permissionVenomYes";}
   const safety=safetyOf(status);
   if(goals.drive!==true||state.mode!=="drive")return goals.observe===true?"permissionVenomObserve":"permissionVenomIdle";
   if(safety.state==="DISARMED")return "permissionPiDisarmed";

@@ -345,5 +345,5 @@ The research lane does not change the live panel, Pi policy or movement permissi
 ### Editable zones and directional trials
 
 See [directional vision](docs/DIRECTIONAL_VISION.md) for the camera-zone editor,
-shared left/center/right assessment and optional paired protocol v2 trials.
+shared left/center/right assessment and versioned paired directional trials (v2 legacy turns, v3 forward corrections).
 Avoidance is off by default and requires physical acceptance on the actual mount.

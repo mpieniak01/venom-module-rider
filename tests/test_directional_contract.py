@@ -29,7 +29,7 @@ def frame(seq, phase="ready"):
         calibration_id="accepted",
         model_sha256=SHA,
         perception={"engine": "depth_plane"},
-        avoidance={"enabled": True, "sweep_verified": True},
+        avoidance={"protocol_version": 2, "enabled": True, "sweep_verified": True},
         motion_phase=phase,
     )
 
@@ -77,7 +77,9 @@ async def test_venom_to_actual_pi_lease_stop_turn_new_frames_forward():
         speed=0.1,
         max_motion_ms=150,
         decision_budget_ms=300,
-        avoidance=AvoidanceSettings(enabled=True, sweep_verified=True).model_dump(),
+        avoidance=AvoidanceSettings(
+            protocol_version=2, enabled=True, sweep_verified=True
+        ).model_dump(),
     )
     lease = module.DecisionLease(
         policy,

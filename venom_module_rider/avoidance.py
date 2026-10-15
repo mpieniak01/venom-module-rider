@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class AvoidanceSettings(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
+    protocol_version: Literal[2, 3] = 3
     enabled: bool = False
     sweep_verified: bool = False
     mirrored: bool = False
@@ -81,4 +82,4 @@ def plan(result, previous, settings, phase, eligible):
     return motion, reason, state, sectors
 
 
-MotionPhase = Literal["ready", "turn_settling"]
+MotionPhase = Literal["ready", "turn_settling", "steer_wait"]

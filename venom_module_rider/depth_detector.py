@@ -9,7 +9,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .directional import assess_sectors
+from .directional import assess_paths, assess_sectors
 
 
 class PerceptionSettings(BaseModel):
@@ -69,6 +69,14 @@ def assess_depth(depth, corridor, settings):
         "state": state,
         "reason": reason,
         "sectors": assess_sectors(
+            depth,
+            corridor,
+            coefficients,
+            scale,
+            settings,
+            settings.slope_min <= slope <= 6.0,
+        ),
+        "paths": assess_paths(
             depth,
             corridor,
             coefficients,

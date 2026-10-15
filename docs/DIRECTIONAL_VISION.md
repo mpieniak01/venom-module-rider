@@ -28,7 +28,7 @@ left/right decisions follow the robot; the saved mirrored-camera setting swaps
 image sides. Centroid and bounds explicitly remain in image coordinates.
 The operator must verify actual camera orientation and yaw direction.
 
-## Optional protocol v2
+## Legacy optional protocol v2
 
 Avoidance is disabled by default. Old saved Pi policies migrate to disabled
 avoidance; the forward-only protocol v1 remains available. An enabled v2 request
@@ -77,3 +77,33 @@ The host serves a generated copy under web-next/optional-modules. After editing
 module frontend sources, run the existing host command
 node web-next/scripts/prepare-optional-module-node-paths.mjs before browser checks.
 A successful module type check alone does not refresh this generated copy.
+
+
+## Protocol v3: bounded correction during forward motion
+
+Newly enabled avoidance uses explicit protocol_version=3 in the Pi policy and
+steer_left/steer_right actions. These commands submit the existing low forward
+speed and bounded yaw together. They do not reinterpret the legacy v2 yaw-only
+turn actions; old saved enabled policies without the field migrate to v2.
+Changing to v3 changes calibration scope and requires matching host capabilities.
+
+A v3 correction requires three distinct clear-side and connecting-path
+assessments, plus a clear near guard. Destination free space alone is insufficient.
+The connecting corridor is a slanted mask from the current near corridor to the
+candidate side; the near guard is the nearest third of the configured STOP ROI.
+Both share the existing plane and residual thresholds. This is explicitly an
+image-space approximation, not a calibrated metric swept-body simulation.
+Unknown orientation/coverage, a recess or a blocked connecting path cannot
+authorize a correction.
+
+Each correction keeps existing speed/pulse/freshness bounds. Pi rejects captures
+from before or during the correction for subsequent nonzero output. Three new
+front CLEAR assessments straighten the motion; the previous side remains locked
+until then. Exhausting max_turn_pulses without clearing the path produces
+terminal avoidance_no_progress, which cannot resume from a later GO.
+
+Current limitations: camera-height/pitch compensation, robust ground estimation
+with a foreground box, metric footprint projection and complete gap extraction
+remain unaccepted follow-ups. Weak recorded box inputs still return UNKNOWN/STOP;
+thresholds were not relaxed to force a turn. Software tests establish contract
+behavior, not that the actual robot can traverse the predicted image corridor.
