@@ -219,9 +219,70 @@ def test_dark_quality_gate_skips_model_without_motion(tmp_path, monkeypatch):
         resolution=280,
         warmup=1,
         repeats=2,
+        quality_mode="production",
     )
     report = compare.benchmark(args)
     assert report["status"] == "completed"
     assert report["drive_supported"] is False
     assert report["summary"]["inferred_samples"] == 0
     assert report["rows"][0]["states"] == ["unknown", "unknown"]
+
+
+def test_low_quality_clear_is_reported_without_label_accuracy_claim():
+    result = summarize(
+        [
+            {
+                "expected": "unlabelled",
+                "states": ["clear"],
+                "latency_ms": [90],
+                "assessments": [
+                    {
+                        "state": "clear",
+                        "reason": "depth_plane_candidate",
+                        "image_quality_passed": False,
+                    }
+                ],
+            }
+        ]
+    )
+    assert result["labelled_frames"] == 0
+    assert result["low_quality_clear_samples"] == 1
+
+
+def test_probe_mode_is_explicit_and_still_never_grants_motion(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    pytest.importorskip("torch")
+    from scripts import compare_depth_models as compare
+
+    row = manifest_row(tmp_path, name="dark.jpg", expected="unlabelled")
+    Image.new("RGB", (64, 64), (0, 0, 0)).save(tmp_path / "dark.jpg")
+    row["sha256"] = file_hash(tmp_path / "dark.jpg")
+
+    class Probe:
+        calls = 0
+
+        def __init__(self, *args):
+            self.metadata = {"backend": "da3-small"}
+
+        def infer(self, image):
+            self.calls += 1
+            return np.ones((64, 64), dtype=np.float32)
+
+    monkeypatch.setattr(compare, "Candidate", Probe)
+    args = SimpleNamespace(
+        threads=1,
+        device="cpu",
+        manifest=write_manifest(tmp_path, [row]),
+        backend="da3-small",
+        model=tmp_path,
+        resolution=280,
+        warmup=1,
+        repeats=2,
+        quality_mode="model_probe",
+    )
+    report = compare.benchmark(args)
+    assert report["quality_mode"] == "model_probe"
+    assert report["drive_supported"] is False
+    assert report["summary"]["inferred_samples"] == 2
+    assert all(not a["image_quality_passed"] for a in report["rows"][0]["assessments"])

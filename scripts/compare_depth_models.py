@@ -58,6 +58,12 @@ def summarize(rows):
     return {
         "inferred_samples": len(inferred),
         "inferred_p95_ms": percentile(inferred, 0.95) if inferred else None,
+        "labelled_frames": len(labelled),
+        "low_quality_clear_samples": sum(
+            a.get("image_quality_passed") is False and a["state"] == "clear"
+            for row in rows
+            for a in row.get("assessments", [])
+        ),
         "frames": len(rows),
         "samples": len(values),
         "p50_ms": percentile(values, 0.50),
@@ -115,12 +121,21 @@ def benchmark(args):
                 raise ValueError("vision_image_bounds")
             image = opened.convert("RGB")
         rgb = np.asarray(image, dtype=np.float32) / 255
-        if rgb.mean() < 0.04 or rgb.std() < 0.01:
+        mean, std = float(rgb.mean()), float(rgb.std())
+        quality_passed = mean >= 0.04 and std >= 0.01
+        if not quality_passed and args.quality_mode == "production":
             result = {"state": "unknown", "reason": "vision_image_quality"}
         else:
             depth = model.infer(image)
             result = assess_depth(depth, corridor, settings)
             result.pop("_errors")
+        result.update(
+            {
+                "image_quality_passed": quality_passed,
+                "image_mean_rgb": mean,
+                "image_std_rgb": std,
+            }
+        )
         if args.device == "cuda":
             torch.cuda.synchronize()
         return result, (time.perf_counter() - started) * 1000
@@ -146,6 +161,7 @@ def benchmark(args):
         )
     return {
         "status": "completed",
+        "quality_mode": args.quality_mode,
         "model": model.metadata,
         "load_ms": load_ms,
         "warmup_ms": warmup_ms,
@@ -171,6 +187,7 @@ def benchmark(args):
             "Model timing excludes Pi capture, network, ACK and motor execution.",
             "Recorded labels are scene labels, not metric ground truth.",
             "No model-specific threshold tuning or calibrated metre clearance.",
+            "model_probe bypasses only the offline image gate; never qualifies motion.",
             "DA2 production preprocessing and DA3 resolutions are reported separately.",
         ],
         "summary": summarize(results),
@@ -196,6 +213,12 @@ def main():
     parser.add_argument(
         "--cuda-memory-mib", type=int, choices=range(256, 12289), default=1024
     )
+    parser.add_argument(
+        "--quality-mode",
+        choices=["production", "model_probe"],
+        default="production",
+        help="model_probe: offline inference on rejected images",
+    )
     args = parser.parse_args()
     if args.output.exists():
         raise FileExistsError("report already exists")
@@ -209,6 +232,7 @@ def main():
                     "status": "failed",
                     "backend": args.backend,
                     "device": args.device,
+                    "quality_mode": args.quality_mode,
                     "drive_supported": False,
                     "error_type": type(error).__name__,
                     "error": str(error)[:2000],
