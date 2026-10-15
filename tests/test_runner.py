@@ -77,3 +77,28 @@ def test_audio_is_opt_in_for_configured_host():
     assert runner.resolve_audio_enabled(True) is False
     with pytest.raises(ValueError, match="explicitly configured device host"):
         runner.resolve_audio_enabled(True, True)
+
+
+def test_mixed_launcher_has_demo_and_prod_with_separate_credentials(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("RIDER_DEMO_ONLY", raising=False)
+    path = tmp_path / "devices.json"
+    production = {
+        "id": "prod",
+        "label": "Prod fixture",
+        "mode": "device",
+        "url": "http://127.0.0.1:18881",
+    }
+    path.write_text(json.dumps([production]))
+    devices, selected, isolated = runner.targets(path, None, 18880, with_demo=True)
+    assert selected == "demo" and not isolated
+    assert [d["mode"] for d in devices] == ["demo", "device"]
+    assert devices[0]["compute_token_env"] == "RIDER_DEMO_COMPUTE_TOKEN"
+    assert devices[0]["agent_token_env"] == "RIDER_DEMO_AGENT_TOKEN"
+    assert devices[1]["compute_token_env"] is None
+    assert devices[1]["agent_token_env"] == "RIDER_AGENT_TOKEN"
+    assert runner.targets(path, "prod", 18880, with_demo=True)[1] == "prod"
+    path.write_text(json.dumps([{**production, "id": "demo"}]))
+    with pytest.raises(ValueError, match="reserved"):
+        runner.targets(path, None, 18880, with_demo=True)

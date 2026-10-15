@@ -95,7 +95,21 @@ Configure devices on the **server**, using private environment configuration:
 
     RIDER_DEVICES_JSON=[{"id":"robot","label":"Rider-Pi","url":"https://rider.local","mode":"device"}]
 
-The default list is empty. A browser can select only configured IDs; it cannot provide a destination URL. Selection creates a new session and drops old observations/commands. RIDER_DEFAULT_DEVICE can select an explicitly configured ID at startup; it never arms or starts hardware.
+The default list is empty. The permanent **Demo / Prod** selector uses this single
+device list; there is no second environment setting. A browser can select only
+configured IDs and cannot supply a destination URL. Unconfigured modes remain
+visible and disabled. Selection stops previous active motion and navigation,
+creates a new session, and clears observations, pending commands and preview
+subscriptions. An unreachable previous Pi produces an explicit unconfirmed-stop
+notice; its own watchdog still owns braking.
+
+Venom saves the chosen ID in `data/modules/rider/panel-selection.json`
+(`RIDER_SELECTION_FILE` can override the private path). It survives page and host
+restarts and is shared by panel clients. Only the choice is stored here;
+calibration and loop configuration remain on each Pi. First startup can use an
+explicitly allowlisted `RIDER_DEFAULT_DEVICE`. Restore never arms, starts capture,
+or resumes a loop. Invalid/removed saved IDs select an available demo or no device,
+never a production fallback.
 
 RIDER_ALLOWED_ORIGINS is a comma-separated exact allowlist when UI and API origins differ. Mutations obey Venom's environment policy. STOP and disarm remain available in read-only environments. RIDER_ACCESS_TOKEN optionally requires a Bearer token on all module requests; supply it through a trusted server proxy or emergency CLI, never through a public frontend environment variable. Use the host's access controls when exposing it beyond a trusted local environment.
 
@@ -110,6 +124,40 @@ The launcher reuses existing Python and Node environments, starts a loopback Pi 
 
 The demo forces RIDER_DEMO_ONLY=true, disables physical IoT and LLM startup, and accepts only loopback fixtures. Simulated values and actuator acknowledgements are marked DEMO. Fixture state is ephemeral. A fixture result is not evidence of physical motion or device rendering.
 
+
+### Recorded camera replay
+
+The control screen combines camera preview, loop Start/Stop, and manual arrows.
+While a Pi loop is active, the processed preview reuses its fresh, matching
+analysis. It briefly waits for the next fresh Pi result instead of starting a competing
+inference that could reject a Pi decision. The response wait is bounded to
+500 ms; stale images remain unavailable.
+**Take manual control** retains camera ownership, stops loop goals and requests
+manual ARM through the existing Pi control contract. Giving control to Venom
+uses the independently calibrated drive policy and timed navigation ARM.
+
+For a hardware-free replay, keep a recorded `last_frame.jpg` and a
+`manifest.json` containing its `original_mtime` outside Git. Supply the actual,
+hardware-free `apps/compute/decision_lease.py` from the matching Pi checkout:
+
+    make demo ARGS="--replay-dir /path/to/recording --decision-lease-source /path/to/Rider-Pi/apps/compute/decision_lease.py"
+
+Configure the local segmentation model with `RIDER_VISION_MODEL` and
+`RIDER_VISION_SHA256`. Replay uses the real Venom vision endpoint and Pi's
+monotonic decision permit; actuator callbacks only change fixture state.
+The preview labels a replay and retains the original recording timestamp.
+Replay requires the local fixture; it can coexist with a production allowlist
+when `--with-demo` is explicitly enabled. It always targets the demo ID.
+Defaults remain observation, disarmed and no running camera or loop.
+
+For cross-repository integration checks, set `RIDER_TEST_PI_LEASE` to that Pi
+source file when running `make check`. The scenarios test correlated frames,
+three clear decisions, obstacle STOP, deadline STOP, no reconnect resume and
+manual takeover with a deterministic detector fixture. These scenarios verify
+control behavior; a saved real image is separately checked through the actual
+segmentation/quality detector. The extra integration test skips when no explicit
+Pi source is provided.
+
 ### Local panel connected to a real Pi
 
 Use a private device allowlist JSON under ignored config/local/. Pass it explicitly:
@@ -117,6 +165,18 @@ Use a private device allowlist JSON under ignored config/local/. Pass it explici
     make demo ARGS="--device-file config/local/devices.json --device-id robot"
 
 Alternatively invoke scripts/run_demo.py with those arguments. Without the file flag the launcher always starts the isolated fixture, even if a real device exists in the inherited environment. File mode starts only the Venom API/UI, preserves the hardware authority on Pi, and never automatically arms or starts a resource. It is an operator panel, not an automated physical-motion test runner. The configured-device host defaults to the `full` LLM runtime profile so the Venom cockpit can select installed models. Use `--runtime-profile light` or `--runtime-profile llm_off` explicitly to restrict the host. The isolated fixture always remains `llm_off`; model warmup and background optional services remain disabled by this launcher.
+
+To keep both modes available in one local panel, configure the private production
+allowlist once and add the local fixture:
+
+    make demo ARGS="--device-file /private/devices.json --with-demo"
+
+The initial selection is **Demo**, unless a saved operator choice exists.
+Switch Demo/Prod in the panel without changing files or restarting services.
+The fixture and production target have separate credential references; built-in
+demo tokens are never used for production. Recorded replay flags apply only to
+the local fixture. Automated switching checks use two fixtures; registering a
+production target does not constitute a physical-device test.
 
 Service and resource operations have a separate bounded response timeout. Motion
 and STOP retain their fast transport path. `pi_operation_timeout` means the result
@@ -130,6 +190,46 @@ is unconfirmed: the panel refreshes observations and does not resend the operati
 This runs Ruff, formatting, mypy, targeted Python tests with a 90% coverage floor, TypeScript, ESLint and frontend contract/hold-controller tests, using host dependencies. Tests never import robot/UART/GPIO drivers. Browser acceptance uses the demo; explicit ARM and actuator requests stay within the fixture.
 
 Local session reports, screenshots and operator/device settings stay under ignored docs_dev/, output/ and local environment files. The host integration also requires make pr-fast.
+
+## Camera, decisions and a forward trial
+
+The control workspace keeps the processed camera view, manual takeover and
+navigation decisions together. This loop chooses a short forward pulse or STOP;
+it does not plan a route, estimate distances or steer around obstacles.
+
+- **Analyse image** starts observation and displays the processed camera.
+  Image GO means the zone passed analysis; the reply to Pi remains STOP.
+- **Forward driving test · 10 s** first starts or reuses observation and waits
+  for a fresh decoded preview and three clear decisions. Unknown or blocked
+  image returns STOP before navigation ARM. With a matching saved calibration,
+  available Pi executor and unchanged settings, the same explicit click saves
+  Drive mode, requests timed navigation ARM and starts the loop only after Pi
+  confirms authority. There is no additional per-trial confirmation dialog.
+- **Stop loop** cancels a pending trial, stops motion before disabling the drive
+  goal, and retains the last image labelled as paused. Global STOP and manual
+  takeover also cancel a pending trial; neither permits automatic resumption.
+
+The decision cards separate the image verdict, the actual Venom-to-Pi reply and
+the executor's reported motion. Floor/confidence percentages, consecutive clear
+frames, inference time, request roundtrip and response age explain GO or STOP.
+A GO reply requests forward motion at the saved SDK command magnitude, yaw zero,
+bounded by the smaller of the saved pulse limit and remaining decision permit.
+An accepted request or reported movement is not a travelled-distance measurement.
+Stale and latched records never appear as current GO permission.
+
+The operator workspace has no calibration checklist or repeated acceptance
+form. The existing Pi-owned policy is used directly. Its matching model and
+parameters remain requirements for a driving trial. Changing critical parameters
+revokes that saved policy; the panel reports the exact block instead of displaying
+a form. No diagnostic or page entry arms or manufactures physical calibration.
+
+A single execution summary says whether Venom can send movement, with manual
+permission shown separately. Manual ARM cannot authorise the autonomous loop.
+The preview explains semantic classes: green is confident floor, blue is a
+ground-like class outside the current GO rule (road, sidewalk, rug), red is
+another class and yellow is uncertain. Blue or red pixels are model outputs,
+not measured obstacles. Dominant ROI class/fraction exposes classification
+mistakes, without relaxing the GO rule or decision deadlines.
 
 ## Operation and removal
 
@@ -150,3 +250,56 @@ A missing observation retains the last permission with an explicit warning.
 It never converts ARM to DISARMED or replays a failed gesture. Execution inhibition
 and connectivity are shown separately. Tests require independent permission and
 chat/voice cannot arm the robot. Deploy the Pi authority change before this client.
+
+### Experimental ground geometry
+
+The panel can select semantic surface classes or relative depth-plane geometry
+when the selected Pi exposes the `perception` policy. Pi owns the saved method,
+ROI and thresholds; changing them resets the run and prior acceptance. Legacy
+policies migrate in memory to semantic defaults without rewriting the file.
+
+Depth-plane geometry uses the pinned Depth Anything V2 Indoor Small model on
+Venom, checks inverse-depth plane agreement in the corridor, and exposes relative
+deviation thresholds. It does not report centimetres or calibrated stopping
+distance. Geometry can produce image GO in observation, where its actuator reply stays
+STOP. The forward trial uses the same Pi-owned acceptance, three fresh CLEAR
+frames, model hash and bounded decision lease as semantic driving. The trial
+button releases existing manual ARM, confirms disarming, then obtains navigation
+authority for up to 10 seconds. STOP during transfer cancels subsequent ARM.
+Manual takeover stops navigation and returns authority to the arrow controls.
+Neither image GO nor saving trial conditions starts physical movement.
+
+Pulse duration and decision validity are separate limits. Every SDK pulse remains
+bounded by the saved motion limit; a fresh GO may renew the run after a pulse
+ends while the previous decision is still valid. Expired decisions still latch
+STOP and cannot revive the run.
+
+Install the module's `vision_depth` extra in the host virtualenv, then provision
+explicitly; startup and requests never download weights:
+
+```bash
+python scripts/provision_depth_model.py --output data/depth-small --revision 8078d68a9c75a972131914f6afd0c1723be0da7f
+PYTHONPATH=../..:. python scripts/replay_depth.py --dataset /path/to/recordings --output output/depth-replay
+```
+
+Replay uses synthetic frame identities and cannot validate physical movement,
+capture freshness or braking. Model files, recordings and reports stay ignored.
+
+
+### Forward-trial panel regression
+
+The panel keeps analysis, forward trial and loop stop on the camera/manual-control
+screen. Detailed geometry diagnostics are collapsed; stale image results are not
+shown as current movement permission. Manual ARM does not require a separate
+operator disarm before clicking the trial.
+
+The self-contained browser regression intercepts every Rider API request and
+covers manual-to-navigation transfer and STOP during transfer. It contacts no
+physical robot. With the local panel running, use Playwright CLI:
+
+    playwright-cli -s=rider-regression open http://localhost:3300/rider
+    playwright-cli -s=rider-regression run-code --filename=tests/browser/navigation-takeover.js
+    playwright-cli -s=rider-regression close
+
+Run from the module checkout. Browser launch settings are environment-specific;
+the Node syntax check is included in the check-web target.

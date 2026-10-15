@@ -6,7 +6,9 @@ import ipaddress
 import json
 import os
 import re
+import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from .errors import RiderError
@@ -109,3 +111,42 @@ def configured_devices(raw: str | None = None) -> tuple[Device, ...]:
             raise RiderError("duplicate_device_id", 503)
         devices.append(Device(id_, label, url.rstrip("/"), mode, token_env, agent_env))
     return tuple(devices)
+
+
+def restored_device(path: Path | None, devices: dict[str, Device], default):
+    """Restore only an allowlisted ID; invalid saved state never selects production."""
+    if path is None or not path.exists():
+        return default if default in devices else None
+    try:
+        saved = json.loads(path.read_text())
+        if (
+            isinstance(saved, dict)
+            and type(saved.get("version")) is int
+            and saved.get("version") == 1
+            and (saved.get("device_id") is None or saved.get("device_id") in devices)
+        ):
+            return saved["device_id"]
+    except (OSError, ValueError, TypeError, KeyError):
+        pass
+    return next((d.id for d in devices.values() if d.mode == "demo"), None)
+
+
+def persist_device(path: Path | None, device_id):
+    if path is None:
+        return
+    temporary = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            mode="w", dir=path.parent, delete=False
+        ) as out:
+            temporary = Path(out.name)
+            json.dump({"version": 1, "device_id": device_id}, out)
+            out.flush()
+            os.fsync(out.fileno())
+        temporary.replace(path)
+    except OSError as exc:
+        raise RiderError("selection_persistence_failed", 503) from exc
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)

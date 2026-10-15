@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import logging
 import math
 import time
 import uuid
 from contextlib import suppress
+from pathlib import Path
 from typing import Any
 
 from .client import PiClient
-from .config import Device
+from .config import Device, persist_device, restored_device
 from .errors import RiderError
 
 POLLING = {
@@ -21,6 +23,7 @@ POLLING = {
     "resources_ms": 5000,
     "face_ms": 5000,
     "compute_ms": 5000,
+    "vision_ms": 500,
 }
 READS = {
     "telemetry": ("/state", 2.0),
@@ -34,18 +37,33 @@ READS = {
 }
 SECTIONS = {
     "navigation": ("control", "settings"),
+    "vision": ("control", "settings", "health", "telemetry", "catalog", "logic"),
     "overview": ("control", "settings", "telemetry", "health", "system"),
-    "control": ("control", "settings", "telemetry", "health", "history"),
+    "control": (
+        "control",
+        "settings",
+        "telemetry",
+        "health",
+        "history",
+        "catalog",
+        "logic",
+    ),
     "calibration": ("control", "settings", "history"),
     "resources": ("control", "settings", "health", "catalog", "logic"),
     "face": ("control", "settings", "health"),
-    "compute": ("control", "settings", "health"),
+    "compute": ("control", "settings", "health", "catalog", "logic"),
 }
 RESOURCE_NAMES = ("camera", "lcd", "led", "mic", "speaker", "uart")
 
 
 class RiderService:
-    def __init__(self, devices: tuple[Device, ...], *, client_factory=PiClient):
+    def __init__(
+        self,
+        devices: tuple[Device, ...],
+        *,
+        client_factory=PiClient,
+        selection_file: Path | None = None,
+    ):
         self.devices = {device.id: device for device in devices}
         self.device: Device | None = None
         self.client: PiClient | None = None
@@ -61,6 +79,9 @@ class RiderService:
         self.epoch = 0
         self.sequences: dict[str, int] = {}
         self._selection_lock = asyncio.Lock()
+        self.selection_file = selection_file
+        self.switching = False
+        self.selection_warning: str | None = None
         self.conversation_invalidator = None
         self.conversation_drainer = None
 
@@ -69,35 +90,90 @@ class RiderService:
             "devices": [device.public() for device in self.devices.values()],
             "device_id": self.device.id if self.device else None,
             "session": self.session,
+            "selection_warning": self.selection_warning,
         }
 
     def check_session(self, session):
+        if self.switching:
+            raise RiderError("device_switch_in_progress")
         if session != self.session:
             raise RiderError("stale_device_session")
 
-    async def select(self, device_id, session):
+    async def restore(self, default=None):
+        selected = restored_device(self.selection_file, self.devices, default)
+        await self.select(selected, self.session, persist=False)
+
+    async def select(self, device_id, session, *, persist=True):
         self.check_session(session)
         if device_id is not None and device_id not in self.devices:
             raise RiderError("unknown_device", 404)
         async with self._selection_lock:
             self.check_session(session)
             if (self.device.id if self.device else None) == device_id:
+                if persist:
+                    persist_device(self.selection_file, device_id)
                 return self.config()
-            # No new command can use this epoch. Pi's hold watchdog remains
-            # authoritative; selection never auto-arms the new target.
-            self.epoch += 1
-            if self.conversation_invalidator:
-                self.conversation_invalidator()
-            if self.conversation_drainer:
-                await self.conversation_drainer()
-            await self._close_transport()
-            self.device = self.devices.get(device_id)
-            self.client = self.factory(self.device) if self.device else None
-            self.session = uuid.uuid4().hex
-            self.cache.clear()
-            self.sequences.clear()
-            self.last_seen = None
-            return self.config()
+            self.switching = True
+            try:
+                self.cancel_pending_motion()
+                if self.conversation_drainer:
+                    await self.conversation_drainer()
+                await self._cancel_transport_tasks()
+                warning = await self._stop_previous()
+                if persist:
+                    persist_device(self.selection_file, device_id)
+                await self._close_transport()
+                self.device = self.devices.get(device_id)
+                self.client = self.factory(self.device) if self.device else None
+                self.session = uuid.uuid4().hex
+                self.cache.clear()
+                self.sequences.clear()
+                self.last_seen = None
+                self.selection_warning = warning
+                return self.config()
+            finally:
+                self.switching = False
+
+    async def _stop_previous(self):
+        """Quiesce the previous target without activating the next one."""
+        if self.client is None:
+            return None
+        warning = None
+        client = self.client
+        try:
+            safety = (await client.json("/api/control/state"))["data"]["safety"]
+        except RiderError:
+            safety = {"state": "unknown"}
+        try:
+            if safety.get("state") not in {"DISARMED", "ESTOP"} or safety.get("moving"):
+                await client.json(
+                    "/api/safety", method="POST", body={"action": "stop"}, stop=True
+                )
+            logic = (await client.json("/api/logic/state"))["data"]
+            features = logic.get("state", logic).get("features", {})
+            rows = (
+                features
+                if isinstance(features, list)
+                else [
+                    {"name": name, **row}
+                    for name, row in features.items()
+                    if isinstance(row, dict)
+                ]
+            )
+            for row in rows:
+                if row.get("name") in {
+                    "s14_venom_navigation",
+                    "s15_venom_perception",
+                } and (row.get("requested") is True or row.get("enabled") is True):
+                    await client.json(
+                        "/api/logic/feature/" + row["name"],
+                        method="POST",
+                        body={"enabled": False},
+                        stop=True,
+                    )
+        except RiderError:
+            warning = "previous_device_stop_unconfirmed"
+        return warning
 
     def transport(self):
         if self.closed:
@@ -311,7 +387,13 @@ class RiderService:
             self.operations.discard(task)
             # A timed-out operation may have completed on Pi; never reuse its old state.
             if session == self.session:
+                catalog = self.cache.get("/api/logic/catalog")
                 self.cache.clear()
+                # Definitions remain TTL-bounded; Pi revalidates availability.
+                # Re-reading all unit definitions between ARM and Start wastes
+                # the original operator intent's short validity window.
+                if catalog:
+                    self.cache["/api/logic/catalog"] = catalog
 
     async def settings(self, body, session):
         result = await self.mutate("/api/calibration/controls", body, session)
@@ -329,16 +411,69 @@ class RiderService:
         if feature.get("can_move") is True and body.get("enabled") is True:
             owner = feature.get("control_owner") or feature.get("motion_owner")
             intent = await self.validate_intent(body, session, source=owner)
-            safety = (
-                self.data(await self.read("/api/control/state", 0.8, force=True)).get(
-                    "safety"
+            cached = self.cache.get("/api/control/state")
+            safety: dict[str, Any] = {}
+            if (
+                cached
+                and isinstance(cached[1], dict)
+                and 0 <= time.monotonic() - cached[0] < 0.4
+            ):
+                safety = self.data(cached[1]).get("safety") or {}
+            if (
+                safety.get("generation") != intent["generation"]
+                or safety.get("owner") != owner
+                or safety.get("can_move") is not True
+                or safety.get("stale") is True
+            ):
+                safety = (
+                    self.data(
+                        await self.read("/api/control/state", 0.4, force=True)
+                    ).get("safety")
+                    or {}
                 )
-                or {}
-            )
+            # Never redate an intent. Pi performs final admission under its lock;
+            # a just-confirmed matching ARM does not need another network trip.
             if safety.get("owner") != owner or safety.get("can_move") is not True:
                 raise RiderError("operator_motion_permission_required")
             self.sequences[intent["generation"]] = body["seq"]
-        return await self.mutate("/api/logic/feature/" + name, body, session)
+        started = time.time()
+        try:
+            return await self.mutate("/api/logic/feature/" + name, body, session)
+        except RiderError as exc:
+            if (
+                name == "s14_venom_navigation"
+                and body.get("enabled") is True
+                and exc.code == "start_failed"
+            ):
+                # Collect the failing run before another poll or retry replaces it.
+                with suppress(RiderError):
+                    state = self.data(
+                        await self.read("/api/navigation/status", 0, force=True)
+                    )
+                    if (
+                        isinstance(state.get("observed_at"), (int, float))
+                        and state["observed_at"] >= started
+                    ):
+                        diagnostic = {
+                            key: state.get(key)
+                            for key in (
+                                "run_id",
+                                "observed_at",
+                                "stop_reason",
+                                "motion_failure",
+                                "request_roundtrip_ms",
+                                "response_age_ms",
+                            )
+                        }
+                        details = (
+                            dict(exc.details) if isinstance(exc.details, dict) else {}
+                        )
+                        details["navigation"] = diagnostic
+                        exc.details = details
+                        logging.getLogger(__name__).warning(
+                            "rider navigation start_failed diagnostic=%s", diagnostic
+                        )
+            raise
 
     async def camera(self, stream):
         if stream not in {"raw", "proc"}:
@@ -358,7 +493,7 @@ class RiderService:
             raise RiderError("camera_unknown", 503)
         return await client.image("/camera/" + stream)
 
-    async def _close_transport(self):
+    async def _cancel_transport_tasks(self):
         tasks = (
             list(self.inflight.values()) + list(self.commands) + list(self.operations)
         )
@@ -370,6 +505,9 @@ class RiderService:
         self.commands.clear()
         self.stops.clear()
         self.operations.clear()
+
+    async def _close_transport(self):
+        await self._cancel_transport_tasks()
         if self.client:
             await self.client.close()
         self.client = None

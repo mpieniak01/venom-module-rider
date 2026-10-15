@@ -1,10 +1,10 @@
-.page { width: 100%; min-width: 0; box-sizing: border-box; container-type: inline-size; container-name: rider; --r-accent: var(--primary, #00ff9d); --r-border: var(--ui-border); --r-muted: var(--text-secondary); color: var(--text-primary); max-width: 1450px; margin: 0 auto; padding: 24px 24px 80px; }
-.header { position: sticky; top: 0; z-index: 40; display: flex; flex-wrap: wrap; min-width: 0; max-width: 100%; align-items: center; justify-content: space-between; gap: 20px; padding: 18px 20px; margin-bottom: 18px; background: var(--bg-panel); border: 1px solid var(--r-border); border-radius: 20px; box-shadow: 0 12px 32px #0002; }
-.brand { min-width: 0; flex: 0 1 320px; display: flex; align-items: center; gap: 14px; }
-.brandIcon { flex-shrink: 0; display: grid; place-items: center; width: 48px; height: 48px; color: var(--r-accent); border-radius: 15px; background: var(--primary-dim); }
-.title { font-size: 27px; font-weight: 750; line-height: 1.2; color: var(--text-heading); margin: 0; letter-spacing: -.8px; }
+.page { width: 100%; min-width: 0; box-sizing: border-box; container-type: inline-size; container-name: rider; --r-accent: var(--primary, #00ff9d); --r-border: var(--ui-border); --r-muted: var(--text-secondary); color: var(--text-primary); max-width: 1450px; margin: 0 auto; padding: 12px 16px 60px; }
+.header { position: relative; top: 0; z-index: 40; display: flex; flex-wrap: wrap; min-width: 0; max-width: 100%; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 16px; margin-bottom: 12px; background: var(--bg-panel); border: 1px solid var(--r-border); border-radius: 20px; box-shadow: 0 12px 32px #0002; }
+.brand { min-width: 0; flex: 0 1 180px; display: flex; align-items: center; gap: 14px; }
+.brandIcon { flex-shrink: 0; display: grid; place-items: center; width: 40px; height: 40px; color: var(--r-accent); border-radius: 15px; background: var(--primary-dim); }
+.title { font-size: 22px; font-weight: 750; line-height: 1.2; color: var(--text-heading); margin: 0; letter-spacing: -.8px; }
 .subtitle { color: var(--ui-muted); font-size: 12px; margin-top: 5px; }
-.toolbar { flex: 1 1 550px; min-width: 0; max-width: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.toolbar { flex: 1 1 560px; min-width: 0; max-width: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .button { max-width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid var(--ui-border-strong); border-radius: 11px; padding: 9px 14px; min-height: 40px; font-size: 13px; font-weight: 600; color: var(--text-primary); background: var(--button-secondary-bg); cursor: pointer; transition: background .15s, border-color .15s; }
 .button:hover:not(:disabled) { background: var(--ui-surface-hover); border-color: var(--r-accent); }
 .button:focus-visible, .input:focus-visible, .select:focus-visible, .tab:focus-visible, .arrow:focus-visible { outline: 3px solid var(--secondary); outline-offset: 3px; }
@@ -13,8 +13,8 @@
 .danger { background: #dd2344; border-color: #f04e69; color: white; }
 .stop { padding: 13px 28px; min-height: 48px; border-radius: 13px; font-weight: 850; font-size: 17px; letter-spacing: 1.5px; box-shadow: 0 0 0 3px #dd23441a; }
 .danger:hover:not(:disabled) { background: #bd1536; border-color: #fff; }
-.tabs { min-width: 0; max-width: 100%; display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid var(--r-border); margin-bottom: 22px; padding: 0 2px; }
-.tab { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; padding: 13px 16px; color: var(--ui-muted); border: 0; border-bottom: 3px solid transparent; background: transparent; font-size: 13px; font-weight: 600; cursor: pointer; }
+.tabs { min-width: 0; max-width: 100%; display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid var(--r-border); margin-bottom: 12px; padding: 0 2px; }
+.tab { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; padding: 10px 12px; color: var(--ui-muted); border: 0; border-bottom: 3px solid transparent; background: transparent; font-size: 13px; font-weight: 600; cursor: pointer; }
 .tabActive { color: var(--r-accent); border-bottom-color: var(--r-accent); }
 .grid { min-width: 0; max-width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; }
 .grid3 { min-width: 0; max-width: 100%; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 15px; }
@@ -49,6 +49,8 @@
 .arrow:not(:disabled):hover, .arrowActive { background: var(--primary-dim); border-color: var(--r-accent); color: var(--r-accent); }
 .arrow:disabled { opacity: .32; cursor: not-allowed; }
 .padCenter { display: grid; place-items: center; color: var(--ui-muted); }
+.padStop { align-content: center; gap: 3px; border: 1px solid var(--danger); border-radius: 15px; color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, var(--ui-surface)); cursor: pointer; touch-action: manipulation; font: inherit; font-size: 10px; font-weight: 700; }
+.padStop:not(:disabled):hover, .padStop:focus-visible { background: color-mix(in srgb, var(--danger) 20%, var(--ui-surface)); outline: 2px solid var(--danger); outline-offset: 2px; }
 .padStatus { display: flex; justify-content: center; gap: 10px; min-height: 30px; }
 .camera { position: relative; display: grid; place-items: center; min-height: 260px; aspect-ratio: 4/3; overflow: hidden; background: #030b14; color: #a0aec0; border-radius: 12px; border: 1px solid var(--r-border); }
 .camera img { width: 100%; height: 100%; object-fit: contain; }
@@ -99,3 +101,95 @@
 @container rider (max-width: 960px) { .faceGrid { grid-template-columns: minmax(0, 1fr); } .gestureList { max-height: 180px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @container rider (max-width: 720px) { .grid { grid-template-columns: minmax(0, 1fr); } .grid3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .track { grid-template-columns: repeat(2, minmax(55px, 1fr)); } }
 @container rider (max-width: 420px) { .header { padding: 12px; } .brand, .toolbar { flex-basis: 100%; } .grid3 { grid-template-columns: minmax(0, 1fr); } .gestureList { grid-template-columns: repeat(2, minmax(0, 1fr)); } .panel { padding: 14px; } .pad { grid-template-columns: repeat(3, minmax(0, 80px)); gap: 8px; } .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .metric { padding: 12px; } .metricValue { font-size: 24px; } }
+
+.loopStatus { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; font-size: 13px; }
+.loopActions { display: flex; flex-wrap: wrap; gap: 12px; margin: 16px 0; }
+.loopActions .button { min-height: 46px; padding: 10px 18px; }
+.loopError { padding: 12px; border: 1px solid var(--tone-danger-border); border-radius: 10px; color: var(--tone-danger-text); background: var(--tone-danger-bg); font-size: 13px; overflow-wrap: anywhere; }
+
+.cameraEmbedded { border: 0; border-radius: 0; padding: 0; background: transparent; }
+.cameraEmbedded .camera { min-height: 180px; max-height: 440px; aspect-ratio: 4/3; }
+.cameraEmbedded .panelTitle { font-size: 14px; }
+
+.driveWorkspace { scroll-margin-top: 250px; display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(210px, 1fr); gap: 20px; align-items: start; }
+.driveWorkspace > div { min-width: 0; }
+.manualEmbedded { border: 0; padding: 0; background: transparent; border-radius: 0; }
+.manualEmbedded .pad { grid-template-columns: repeat(3, 56px); grid-template-rows: repeat(3, 50px); gap: 6px; margin: 12px 0; }
+.manualEmbedded .panelTitle { font-size: 14px; }
+@container rider (max-width: 560px) { .driveWorkspace { grid-template-columns: minmax(0, 1.4fr) minmax(160px, 1fr); gap: 12px; } .manualEmbedded .pad { grid-template-columns: repeat(3, 46px); grid-template-rows: repeat(3, 46px); gap: 4px; } .cameraEmbedded .camera { min-height: 140px; width: 100%; } }
+@container rider (max-width: 400px) { .driveWorkspace { grid-template-columns: minmax(0, 1fr); } }
+
+.driveWorkspace .camera { width: 100%; height: clamp(180px, 28vh, 320px); max-height: none; aspect-ratio: auto; }
+
+.loopToolbar { display: flex; align-items: end; gap: 16px; flex-wrap: wrap; margin: 16px 0; }
+.loopToolbar .loopActions { margin: 0; }
+.loopModeRow { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; }
+.loopModeRow .field { flex: 0 1 300px; }
+.manualEmbedded .arrow { gap: 3px; }
+
+.loopModeRow { flex: 0 1 440px; }
+
+.driveWorkspace .camera { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+.driveWorkspace .camera img { min-width: 0; min-height: 0; max-height: 100%; }
+
+.environmentSelect { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--r-muted); }
+.environmentSelect select { width: 160px; }
+
+.loopSidebar { display: grid; gap: 18px; }
+.loopCalibration { padding-top: 16px; border-top: 1px solid var(--r-border); }
+.loopCalibration h3 { margin: 0; font-size: 14px; }
+.loopCalibration .check { margin: 14px 0; align-items: start; line-height: 1.5; }
+.loopCalibration .check input { flex-shrink: 0; margin-top: 4px; }
+.loopCalibration .button { margin-top: 6px; }
+.calibrationSteps { padding-left: 22px; margin: 16px 0; font-size: 12px; line-height: 1.5; }
+.calibrationSteps li { margin-bottom: 14px; padding-left: 4px; }
+.calibrationSteps p { margin: 5px 0; color: var(--ui-muted); }
+@container rider (min-width: 760px) {
+  .driveWorkspace { grid-template-columns: minmax(0, 1.6fr) minmax(300px, 1fr); }
+  .loopCamera { position: sticky; top: 180px; }
+  .driveWorkspace .camera { height: clamp(280px, 42vh, 500px); }
+}
+@container rider (max-width: 759px) {
+  .driveWorkspace { grid-template-columns: minmax(0, 1fr); }
+  .loopCamera { position: static; }
+}
+
+.calibrationSteps .trialParameters { color: var(--r-text); font-weight: 600; }
+
+.decisionArea { margin: 18px 0; }
+.decisionGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.decisionCard { border: 1px solid var(--r-border); border-radius: 10px; padding: 14px; min-width: 0; }
+.decisionCard > span { color: var(--ui-muted); font-size: 12px; }
+.decisionCard > strong { display: block; font-size: 17px; margin-top: 10px; line-height: 1.4; }
+.decisionCard p { font-size: 12px; color: var(--ui-muted); line-height: 1.5; margin: 8px 0 0; }
+.verdictGo { color: #47dca0; }
+.verdictStop { color: #ffd173; }
+.decisionMetrics { display: flex; gap: 12px 20px; flex-wrap: wrap; font-size: 12px; color: var(--ui-muted); margin-top: 14px; }
+@container rider (max-width: 640px) { .decisionGrid { grid-template-columns: minmax(0, 1fr); } }
+
+.loopSidebar .decisionArea { margin: 0; }
+.loopSidebar .decisionGrid { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.loopSidebar .decisionCard { padding: 10px 12px; }
+.loopSidebar .decisionCard > strong { margin-top: 5px; font-size: 16px; }
+.loopSidebar .decisionCard p { margin-top: 5px; }
+.loopSidebar .decisionMetrics { gap: 8px 12px; }
+@container rider (min-width: 760px) {
+  .loopToolbar { position: sticky; top: 170px; z-index: 20; background: var(--r-panel, #030c17); padding: 10px 0; }
+  .loopCamera { top: 250px; }
+}
+
+@container rider (max-width: 759px) { .driveWorkspace { scroll-margin-top: 180px; } }
+
+.permissionSummary { display: grid; gap: 4px; flex: 1 1 100%; font-size: 12px; color: var(--ui-muted); }
+.permissionSummary > strong { font-size: 16px; }
+.modelClass { padding: 10px 12px; margin: 0; border-left: 3px solid #4182f5; font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+@container rider (min-width: 760px) { .loopCamera { top: 340px; } .driveWorkspace { scroll-margin-top: 340px; } }
+
+@container rider (min-width: 760px) { .driveWorkspace .camera { height: clamp(240px, 34vh, 380px); } }
+
+.cameraPaused { position: absolute; top: 8px; left: 8px; right: 8px; z-index: 1; padding: 8px 10px; border: 1px solid var(--danger); border-radius: 8px; background: rgba(12, 15, 20, .9); color: #ffc65c; font-size: 12px; font-weight: 700; text-align: center; }
+
+.padStop:disabled { opacity: .4; cursor: not-allowed; }
+
+/* Keep the complete camera image beside the decision and manual controls. */
+.loopCamera .cameraEmbedded .camera { height: clamp(240px, 30vh, 340px); max-height: 340px; aspect-ratio: auto; }

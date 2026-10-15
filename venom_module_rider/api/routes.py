@@ -6,6 +6,7 @@ import hmac
 import os
 import re
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Annotated
 from urllib.parse import urlsplit
 
@@ -17,7 +18,7 @@ from ..compute import ComputeService
 from ..config import IDENTIFIER, configured_devices
 from ..errors import RiderError
 from ..service import RESOURCE_NAMES, RiderService
-from . import compute_routes, conversation_routes
+from . import compute_routes, conversation_routes, vision_routes
 from .routing import RiderRoute
 from .schemas import Command, GoalAction, ResourceAction, Selection, SettingsPatch
 
@@ -27,7 +28,13 @@ UNIT = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9_@.-]{0,95}\.service")
 @asynccontextmanager
 async def lifespan(app):
     existing = getattr(app.state, "rider", None)
-    service = existing or RiderService(configured_devices())
+    selection_file = os.getenv(
+        "RIDER_SELECTION_FILE", "data/modules/rider/panel-selection.json"
+    )
+    service = existing or RiderService(
+        configured_devices(),
+        selection_file=Path(selection_file) if selection_file else None,
+    )
     app.state.rider = service
     from ..engines import VenomEngines
 
@@ -42,15 +49,19 @@ async def lifespan(app):
         engines = DemoEngines(app)
     compute = getattr(app.state, "rider_compute", None) or ComputeService(engines)
     app.state.rider_compute = compute
+    from ..vision_loop import VisionLoop
+
+    app.state.rider_vision = VisionLoop()
     default = os.getenv("RIDER_DEFAULT_DEVICE")
-    if default and existing is None:
-        await service.select(default, service.session)
+    if existing is None:
+        await service.restore(default)
     try:
         yield
     finally:
         provider = getattr(app.state, "rider_conversation", None)
         if provider:
             await provider.close()
+        await app.state.rider_vision.close()
         await compute.close()
         await service.close()
 
@@ -126,6 +137,7 @@ router = APIRouter(
 )
 router.include_router(compute_routes.router)
 router.include_router(conversation_routes.router)
+router.include_router(vision_routes.router)
 Session = Annotated[str | None, Header(alias="X-Rider-Session")]
 
 
@@ -176,7 +188,15 @@ async def control(payload: Command, request: Request, session: Session = None):
     if payload.action in {"arm", "clear_estop"} and (
         payload.operator_consent is not True
         or not payload.operator_plan
-        or payload.arming_mode != "operator"
+        or not (
+            payload.arming_mode == "operator"
+            and payload.owner == "manual"
+            or payload.action == "arm"
+            and payload.arming_mode == "timed"
+            and payload.owner == "navigation"
+            and payload.lease_s is not None
+            and 0 < payload.lease_s <= 10
+        )
     ):
         raise RiderError("operator_consent_required", 400)
     return await service(request).control(body, session or payload.session)
@@ -191,6 +211,10 @@ async def settings(payload: SettingsPatch, request: Request, session: Session = 
 
 @router.get("/camera/{stream}")
 async def camera(stream: str, request: Request):
+    if stream == "venom":
+        from .vision_preview import processed_camera
+
+        return await processed_camera(request)
     return image_response(await service(request).camera(stream))
 
 

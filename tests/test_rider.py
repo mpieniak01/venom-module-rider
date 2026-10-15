@@ -987,3 +987,131 @@ async def test_manual_intent_has_no_telemetry_get_dependency():
     assert [row["method"] for row in pi.trace[before:]] == ["POST"]
     assert pi.state == "ARMED"
     await service.close()
+
+
+@pytest.mark.parametrize("fresh", [True, False])
+async def test_navigation_start_failure_keeps_only_current_run_diagnostics(
+    monkeypatch, fresh, caplog
+):
+    service, _ = domain()
+
+    async def read(path, *_args, **_kwargs):
+        if path == "/api/logic/catalog":
+            return {
+                "meta": {},
+                "data": {
+                    "features": [{"name": "s14_venom_navigation", "can_move": False}]
+                },
+            }
+        return {
+            "meta": {},
+            "data": {
+                "observed_at": time.time() if fresh else time.time() - 60,
+                "run_id": "failed-run",
+                "stop_reason": "motion_submission_failed",
+                "motion_failure": {"http_status": 409, "reason": "stale_generation"},
+            },
+        }
+
+    async def mutate(*_args, **_kwargs):
+        raise RiderError("start_failed", 503, {"original": True})
+
+    monkeypatch.setattr(service, "read", read)
+    monkeypatch.setattr(service, "mutate", mutate)
+    with pytest.raises(RiderError) as caught:
+        await service.goal("s14_venom_navigation", {"enabled": True}, service.session)
+    assert caught.value.details["original"] is True
+    if fresh:
+        assert (
+            caught.value.details["navigation"]["motion_failure"]["reason"]
+            == "stale_generation"
+        )
+        assert "stale_generation" in caplog.text
+    else:
+        assert "navigation" not in caught.value.details
+    await service.close()
+
+
+@pytest.mark.parametrize(
+    "age,cache_generation,expected_reads",
+    [
+        (0.1, "matching", 0),
+        (1.0, "matching", 1),
+        (0.1, "old", 1),
+    ],
+)
+async def test_goal_uses_just_confirmed_authority_without_redating_intent(
+    monkeypatch,
+    age,
+    cache_generation,
+    expected_reads,
+):
+    service, _ = domain()
+    safety = {"owner": "navigation", "can_move": True, "generation": "matching"}
+    service.cache["/api/control/state"] = (
+        time.monotonic() - age,
+        {"meta": {}, "data": {"safety": {**safety, "generation": cache_generation}}},
+    )
+    body = {
+        "enabled": True,
+        "generation": "matching",
+        "source": "navigation",
+        "execution_context": "panel",
+        "seq": 7,
+        "ts": time.time(),
+        "ttl_ms": 500,
+    }
+    reads = []
+    forwarded = []
+
+    async def read(path, *_args, **kwargs):
+        if path == "/api/logic/catalog":
+            return {
+                "meta": {},
+                "data": {
+                    "features": [
+                        {
+                            "name": "fixture_move",
+                            "can_move": True,
+                            "control_owner": "navigation",
+                        }
+                    ]
+                },
+            }
+        reads.append(path)
+        assert kwargs["force"] is True
+        return {"meta": {}, "data": {"safety": safety}}
+
+    async def mutate(_path, payload, _session):
+        forwarded.append(dict(payload))
+        return {"ok": True}
+
+    monkeypatch.setattr(service, "read", read)
+    monkeypatch.setattr(service, "mutate", mutate)
+    await service.goal("fixture_move", body, service.session)
+    assert len(reads) == expected_reads
+    assert forwarded == [body]
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_goal_mutation_keeps_catalog_ttl_but_invalidates_runtime_cache(
+    monkeypatch,
+):
+    service, _ = domain()
+    await service.select("demo", service.session)
+    stamp = time.monotonic() - 3
+    catalog = (stamp, {"meta": {}, "data": {"features": []}})
+    service.cache["/api/logic/catalog"] = catalog
+    service.cache["/api/control/state"] = (stamp, {"meta": {}, "data": {}})
+
+    async def request(*args, **kwargs):
+        return {"ok": True}
+
+    monkeypatch.setattr(service.client, "json", request)
+    await service.mutate(
+        "/api/logic/feature/s15_venom_perception", {"enabled": False}, service.session
+    )
+    assert service.cache == {"/api/logic/catalog": catalog}
+    assert service.cache["/api/logic/catalog"][0] == stamp
+    await service.close()

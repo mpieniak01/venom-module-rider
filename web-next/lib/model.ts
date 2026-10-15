@@ -1,8 +1,8 @@
 export type JsonRecord = Record<string, unknown>;
-export type Section = "control" | "overview" | "calibration" | "resources" | "face" | "compute";
+export type Section = "control" | "vision" | "overview" | "calibration" | "resources" | "face" | "compute";
 export type Direction = "forward" | "backward" | "left" | "right";
 export const DIRECTIONS: Direction[] = ["forward", "backward", "left", "right"];
-export type DeviceConfig = { devices: { id: string; label: string; mode: "demo" | "device" }[]; device_id: string | null; session: string };
+export type DeviceConfig = { devices: { id: string; label: string; mode: "demo" | "device" }[]; device_id: string | null; session: string; selection_warning?: string | null };
 export type RiderStatus = {
   connection: { status: "unconfigured" | "offline" | "online" | "degraded"; configured: boolean; device_id: string | null; label?: string; session: string; mode: "demo" | "device"; error?: string | null; last_seen?: number | null };
   polling: Record<string, number>;
@@ -36,8 +36,8 @@ export function canRequestArm(status: RiderStatus | null): boolean {
   const safety = safetyOf(status);
   return !!status?.connection.configured && !!str(safety.generation) && ["DISARMED", "ESTOP", "ARMED"].includes(str(safety.state));
 }
-export function frameRequested(kind: "camera" | "face", path: string, section: Section, media: { camera: "raw" | "proc" | null; face: boolean }): boolean {
-  return kind === "camera" ? section === "control" && media.camera !== null && path === `/camera/${media.camera}` : section === "face" && media.face && path === "/face/runtime/frame";
+export function frameRequested(kind: "camera" | "face", path: string, section: Section, media: { camera: "raw" | "proc" | "venom" | null; face: boolean }): boolean {
+  return kind === "camera" ? ["control", "vision"].includes(section) && media.camera !== null && path === `/camera/${media.camera}` : section === "face" && media.face && path === "/face/runtime/frame";
 }
 export const timestampMs = (value: unknown): number | null => { if (finite(value)) return value < 1e12 ? value * 1000 : value; if (typeof value === "string") { const at = Date.parse(value); return Number.isFinite(at) ? at : null; } return null; };
 export const formatNumber = (value: unknown, locale: string, precision = 1): string => finite(value) ? new Intl.NumberFormat(locale, { maximumFractionDigits: precision }).format(value) : "—";
@@ -51,7 +51,8 @@ export function commandAccepted(value: unknown): boolean { const outer = record(
 export function featureRows(status: RiderStatus | null): JsonRecord[] {
   const features = data(status?.catalog).features;
   const catalog = Array.isArray(features) ? rows(features) : Object.entries(record(features)).map(([name, row]) => ({ name, ...record(row) }));
-  const logicFeatures = data(status?.logic).features;
+  const logicData = data(status?.logic);
+  const logicFeatures = record(logicData.state ?? logicData).features;
   const logic = Array.isArray(logicFeatures) ? rows(logicFeatures) : Object.entries(record(logicFeatures)).map(([name, row]) => ({ name, ...record(row) }));
   return catalog.map(item => {
     const state: JsonRecord = logic.find(row => row.name === item.name) ?? {};

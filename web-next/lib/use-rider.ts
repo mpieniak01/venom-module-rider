@@ -9,7 +9,7 @@ import { cameraOn, canRequestArm, commandAccepted, controlIdentity, data, errorC
 
 const BASE = "/api/v1/rider";
 export type Notice = { key: string; code?: string; tone: "error" | "success" | "info" };
-export type Frame = { url: string; stale: boolean; source: string; fileAt: string; id: string; knownFreshness: boolean };
+export type Frame = { decoded?: boolean; url: string; stale: boolean; source: string; fileAt: string; id: string; knownFreshness: boolean; visionState: string; visionReason: string; inferenceMs: string; visionPolicy: string; recordedAt: string };
 import { controlChanged, freshControl, navigationAvailable, navigationView, observationClock, retainControl, type ControlClock } from "./navigation";
 export function useRider(section: Section) {
   const [config, setConfig] = useState<DeviceConfig | null>(null);
@@ -21,16 +21,19 @@ export function useRider(section: Section) {
   const [camera, setCamera] = useState<Frame | null>(null);
   const [runtimeFrame, setRuntimeFrame] = useState<Frame | null>(null);
   const [mediaError, setMediaError] = useState<string | null>(null);
-  const [cameraStream, setCameraStream] = useState<"raw" | "proc" | null>(null);
+  const [cameraStream, setCameraStream] = useState<"raw" | "proc" | "venom" | null>(null);
   const [showRuntimeFrame, setShowRuntimeFrame] = useState(false);
   const statusRef = useRef<RiderStatus | null>(null);
+  const cameraRef = useRef<Frame | null>(null);
+  useEffect(() => { cameraRef.current = camera; }, [camera]);
   const configRef = useRef<DeviceConfig | null>(null);
   const clockRef = useRef<ControlClock | null>(null);
   const seqRef = useRef(0);
   const motionBlocked = useRef(0);
+  const motionEpoch = useRef(0);
   const sessionRef = useRef("");
   const sectionRef = useRef(section);
-  const mediaRef = useRef<{ camera: "raw" | "proc" | null; face: boolean }>({ camera: null, face: false });
+  const mediaRef = useRef<{ camera: "raw" | "proc" | "venom" | null; face: boolean }>({ camera: null, face: false });
   const pollPromise = useRef<Promise<void> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const controlPollPromise = useRef<Promise<void> | null>(null);
@@ -48,20 +51,29 @@ export function useRider(section: Section) {
     onActive: setActiveDirection,
     onError: (error) => setNotice({ key: errorCode(error) === "hold_timed_out" ? "holdExpired" : "requestFailed", code: errorCode(error), tone: "error" }),
   }));
-  const replaceFrame = useCallback((kind: "camera" | "face", next: Frame | null) => {
+  const replaceFrame = useCallback((kind: "camera" | "face", next: Frame | null, retain = false) => {
     const setter = kind === "camera" ? setCamera : setRuntimeFrame;
-    setter(previous => { if (previous) URL.revokeObjectURL(previous.url); return next; });
+    setter(previous => { if (retain && kind === "camera" && !next && previous) return previous.stale ? previous : { ...previous, stale: true, knownFreshness: false }; if (previous) URL.revokeObjectURL(previous.url); return next; });
+  }, []);
+  const markCameraDecoded = useCallback((url: string, decoded: boolean) => {
+    setCamera(previous => previous?.url === url && previous.decoded !== decoded ? { ...previous, decoded } : previous);
   }, []);
   const fetchFrame = useCallback(async (path: string, signal: AbortSignal, kind: "camera" | "face") => {
     const response = await fetch(`${getApiBaseUrl()}${BASE}${path}`, { cache: "no-store", signal });
     if (signal.aborted || !frameRequested(kind, path, sectionRef.current, mediaRef.current)) return;
-    if (!response.ok || !response.headers.get("Content-Type")?.startsWith("image/")) { replaceFrame(kind, null); setMediaError("frameMissing"); return; }
+    if (!response.ok || !response.headers.get("Content-Type")?.startsWith("image/")) {
+      let code = "";
+      try { code = String(record(record(await response.json()).detail).code ?? ""); } catch { /* Non-JSON frame failure. */ }
+      replaceFrame(kind, null, kind === "camera");
+      setMediaError(code === "camera_off" ? "visionCameraOff" : code === "vision_busy" ? "visionBusy" : path === "/camera/venom" ? "visionPreviewUnavailable" : "frameMissing");
+      return;
+    }
     const stale = response.headers.get("X-Rider-Stale");
     const placeholder = response.headers.get("X-Rider-Placeholder") === "true";
-    if (stale === "true" || placeholder) { replaceFrame(kind, null); setMediaError("frameStale"); return; }
+    if (stale === "true" || placeholder) { replaceFrame(kind, null, kind === "camera"); setMediaError("frameStale"); return; }
     const blob = await response.blob();
     if (signal.aborted || !frameRequested(kind, path, sectionRef.current, mediaRef.current)) return;
-    replaceFrame(kind, { url: URL.createObjectURL(blob), stale: false, knownFreshness: stale === "false", source: response.headers.get("X-Rider-Source") || response.headers.get("X-Face-Source") || "", fileAt: response.headers.get("X-Rider-File-Observed-At") || "", id: response.headers.get("X-Rider-Frame-Id") || "" });
+    replaceFrame(kind, { decoded: false, url: URL.createObjectURL(blob), stale: false, knownFreshness: stale === "false", source: response.headers.get("X-Rider-Source") || response.headers.get("X-Face-Source") || "", fileAt: response.headers.get("X-Rider-File-Observed-At") || "", id: response.headers.get("X-Rider-Frame-Id") || "", visionState: response.headers.get("X-Rider-Vision-State") || "", visionReason: response.headers.get("X-Rider-Vision-Reason") || "", inferenceMs: response.headers.get("X-Rider-Vision-Inference-Ms") || "", visionPolicy: response.headers.get("X-Rider-Vision-Policy") || "", recordedAt: response.headers.get("X-Rider-Recorded-At") || "" });
     setMediaError(null);
   }, [replaceFrame]);
   const poll = useCallback(async (target?: Section, fast = false) => {
@@ -86,7 +98,7 @@ export function useRider(section: Section) {
         const previous = statusRef.current;
         const observed = next;
         next = retainControl(previous, next);
-        if (controlChanged(previous, next)) { hold.cancel(); seqRef.current = 0; replaceFrame("camera", null); replaceFrame("face", null); }
+        if (controlChanged(previous, next)) { hold.cancel(); seqRef.current = 0; replaceFrame("camera", null, previous?.connection.session===next.connection.session && previous?.connection.device_id===next.connection.device_id); replaceFrame("face", null); if (previous?.connection.session !== next.connection.session) { mediaRef.current = { camera: null, face: false }; setCameraStream(null); setShowRuntimeFrame(false); } }
         if (!["online", "degraded"].includes(next.connection.status)) { replaceFrame("camera", null); replaceFrame("face", null); }
         if (next.control && !next.errors.control && !navigationAvailable(next)) hold.cancel();
         if (sessionRef.current && sessionRef.current !== next.connection.session) { hold.cancel(); setNotice({ key: "conflict", tone: "info" }); }
@@ -102,9 +114,12 @@ export function useRider(section: Section) {
         if (finite(last)) seqRef.current = Math.max(seqRef.current, last);
         if (configRef.current !== nextConfig) { configRef.current = nextConfig; setConfig(nextConfig); }
         if (!fast && requestedSection === sectionRef.current && ["online", "degraded"].includes(next.connection.status)) {
-          if (requestedSection === "control" && mediaRef.current.camera) {
-            if (cameraOn(next)) await fetchFrame(`/camera/${mediaRef.current.camera}`, abort.signal, "camera");
-            else replaceFrame("camera", null);
+          if (["control", "vision"].includes(requestedSection) && mediaRef.current.camera) {
+            if (cameraOn(next)) {
+              try { await fetchFrame(`/camera/${mediaRef.current.camera}`, abort.signal, "camera"); }
+              catch { if (!abort.signal.aborted) { replaceFrame("camera", null, true); setMediaError("frameMissing"); } }
+            }
+            else replaceFrame("camera", null, true);
           }
           if (requestedSection === "face" && mediaRef.current.face) {
             if (faceRunning(next)) await fetchFrame("/face/runtime/frame", abort.signal, "face");
@@ -150,9 +165,11 @@ export function useRider(section: Section) {
     }
     return envelope;
   }, [hasFreshControl, isConnected]);
-  const sendControl = useCallback(async (body: JsonRecord, current: () => boolean = () => true): Promise<JsonRecord> => {
+  const sendControl = useCallback(async (body: JsonRecord, current: () => boolean = () => true, announce = true): Promise<JsonRecord> => {
     if (!current()) return {};
-    const stopping = ["stop", "disarm"].includes(str(body.action));
+    const action = str(body.action);
+    const stopping = ["stop", "disarm"].includes(action);
+    if (["stop","disarm","clear_estop","height","balance"].includes(action) || action==="arm"&&body.owner!=="navigation" || action==="move"&&body.mode!=="release") motionEpoch.current += 1;
     const origin = controlIdentity(statusRef.current);
     const revision = settingsOf(statusRef.current).revision;
     const manualIntent = ["move", "height", "balance", "arm", "clear_estop"].includes(str(body.action));
@@ -162,20 +179,60 @@ export function useRider(section: Section) {
     if (!stopping && (origin !== controlIdentity(statusRef.current) || revision !== settingsOf(statusRef.current).revision)) throw Object.assign(new Error("stale_control"), { data: { error: "stale_control" } });
     const envelope = makeEnvelope(body);
     const response = await mutation("/control", envelope, "POST", true);
-    setNotice({ key: response.pending === true || record(response.operation).status === "pending" ? "commandPending" : "commandAccepted", tone: "info" });
+    if (announce) setNotice({ key: response.pending === true || record(response.operation).status === "pending" ? "commandPending" : "commandAccepted", tone: "info" });
     return response;
   }, [hasFreshControl, makeEnvelope, mutation, poll]);
   useEffect(() => { commandRef.current = sendControl; }, [sendControl]);
-  const command = useCallback(async (body: JsonRecord) => {
+  const command = useCallback(async (body: JsonRecord, throwOnError = false, quiet = false) => {
     const key = str(body.action); if (key !== "move") hold.cancel();
     const safetyAction = ["arm", "clear_estop", "stop", "disarm"].includes(key);
     if (safetyAction) motionBlocked.current += 1;
     setBusy(key);
-    try { if ((key === "arm" || key === "clear_estop") && !clockRef.current) await poll("control", true); await sendControl(body); if (key !== "move") await poll(); }
-    catch (error) { hold.cancel(); setNotice({ key: errorCode(error).includes("stale") ? "staleControl" : "requestFailed", code: errorCode(error), tone: "error" }); }
+    try { if ((key === "arm" || key === "clear_estop") && !clockRef.current) await poll("control", true); const response = await sendControl(body, () => true, !quiet); if (key !== "move") await poll(); return response; }
+    catch (error) { hold.cancel(); setNotice({ key: errorCode(error).includes("stale") ? "staleControl" : "requestFailed", code: errorCode(error), tone: "error" }); if (throwOnError) throw error; return null; }
     finally { if (safetyAction) motionBlocked.current = Math.max(0, motionBlocked.current - 1); setBusy(null); }
   }, [hold, poll, sendControl]);
-  const runMutation = useCallback(async (path: string, body: JsonRecord = {}, method = "POST") => {
+  const stopManual = useCallback(async () => {
+    if (!canNavigate()) return null;
+    motionEpoch.current += 1;
+    hold.cancel();
+    return command({ action: "move", device_settings: true, direction: "forward", mode: "release" });
+  }, [canNavigate, command, hold]);
+  const armNavigation = useCallback(async (plan: string, expectedSession: string, expectedGeneration: string, expectedEpoch: number) => {
+    let epoch = expectedEpoch;
+    let generation = expectedGeneration;
+    const cancelled = () => Object.assign(new Error("navigation_trial_cancelled"), {data:{error:"navigation_trial_cancelled"}});
+    const assertCurrent = () => {
+      if (sessionRef.current !== expectedSession || motionEpoch.current !== epoch || safetyOf(statusRef.current).generation !== generation) throw cancelled();
+      if (safetyOf(statusRef.current).state === "ESTOP") throw Object.assign(new Error("navigation_estop"), {data:{error:"navigation_estop"}});
+    };
+    await poll("control", true);
+    assertCurrent();
+    // The trial click includes takeover. Pi requires releasing the old ARM first.
+    if (safetyOf(statusRef.current).state === "ARMED") {
+      const previousOwner = safetyOf(statusRef.current).owner;
+      await command({action:"disarm", owner:previousOwner}, true, true);
+      epoch += 1; // Only this deliberate disarm may advance the trial's intent.
+      if (sessionRef.current !== expectedSession || motionEpoch.current !== epoch) throw cancelled();
+      await poll("control", true);
+      const released = safetyOf(statusRef.current);
+      if (released.state !== "DISARMED" || released.stale === true || statusRef.current?.errors.control) throw Object.assign(new Error("navigation_authority_unconfirmed"), {data:{error:"navigation_authority_unconfirmed"}});
+      generation = str(released.generation);
+      assertCurrent();
+    }
+    await command({ action: "arm", owner: "navigation", arming_mode: "timed", lease_s: 10, operator_consent: true, operator_plan: plan }, true, true);
+    // Confirm a new read after ARM, never a cached pre-ARM observation.
+    await poll("control", true);
+    const safety = safetyOf(statusRef.current);
+    if (motionEpoch.current !== epoch || sessionRef.current !== expectedSession) throw cancelled();
+    if (safety.state !== "ARMED" || safety.owner !== "navigation" || safety.stale === true || statusRef.current?.errors.control || safety.can_move !== true) throw Object.assign(new Error("navigation_authority_unconfirmed"),{data:{error:"navigation_authority_unconfirmed"}});
+    return {generation:str(safety.generation), epoch};
+  }, [command, poll]);
+  const currentSession = useCallback(() => sessionRef.current, []);
+  const currentMotionEpoch = useCallback(() => motionEpoch.current, []);
+  const currentGeneration = useCallback(() => str(safetyOf(statusRef.current).generation), []);
+  const currentCamera = useCallback(() => ({ frame: cameraRef.current, stream: mediaRef.current.camera }), []);
+  const runMutation = useCallback(async (path: string, body: JsonRecord = {}, method = "POST", throwOnError = false) => {
     setBusy(path);
     try {
       let request = body;
@@ -183,16 +240,53 @@ export function useRider(section: Section) {
         const name = decodeURIComponent(path.slice("/goal/".length));
         const goal = featureRows(statusRef.current).find(item => item.name === name);
         if (goal?.can_move === true) {
-          await poll("control");
+          await poll("control",true);
           request = makeEnvelope(body, str(safetyOf(statusRef.current).owner));
         }
       }
-      const result = await mutation(path, request, method); await poll(); return result;
+      const result = await mutation(path, request, method, throwOnError); await poll(); return result;
     }
-    catch (error) { const code = errorCode(error); setNotice({ key: code === "pi_operation_timeout" ? "operationUnconfirmed" : "requestFailed", code, tone: "error" }); if (code === "pi_operation_timeout") await poll(); return null; }
+    catch (error) { const code = errorCode(error); if(path!=="/goal/s14_venom_navigation")setNotice({ key: code === "pi_operation_timeout" ? "operationUnconfirmed" : "requestFailed", code, tone: "error" }); if (code === "pi_operation_timeout") await poll(); if (throwOnError) throw error; return null; }
     finally { setBusy(null); }
   }, [makeEnvelope, mutation, poll]);
+  const takeManual = useCallback(async (plan: string) => {
+    let epoch = ++motionEpoch.current;
+    const origin = sessionRef.current;
+    const assertCurrent = () => {
+      if (sessionRef.current !== origin || motionEpoch.current !== epoch || document.hidden) throw Object.assign(new Error("navigation_trial_cancelled"), {data:{error:"navigation_trial_cancelled"}});
+    };
+    hold.cancel(); setBusy("takeover");
+    try {
+      // Keep the preview when handing motor authority back to the operator.
+      assertCurrent();
+      await mutation("/goal/s2_camera_preview", { enabled: true }, "POST", true);
+      const goals = featureRows(statusRef.current);
+      for (const name of ["s14_venom_navigation", "s15_venom_perception"]) {
+        assertCurrent();
+        if (goals.some(goal => goal.name === name)) await mutation("/goal/" + name, { enabled: false }, "POST", true);
+      }
+      await poll("control", true);
+      assertCurrent();
+      let safety = safetyOf(statusRef.current);
+      if (safety.state === "ARMED" && safety.owner !== "manual") {
+        await command({action:"disarm", owner:safety.owner}, true, true);
+        epoch += 1;
+        await poll("control", true);
+        assertCurrent();
+        safety = safetyOf(statusRef.current);
+      }
+      if (!(safety.state === "ARMED" && safety.owner === "manual")) {
+        assertCurrent();
+        await command({ action: "arm", owner: "manual", arming_mode: "operator", operator_consent: true, operator_plan: plan }, true, true);
+        epoch += 1;
+        assertCurrent();
+      }
+      setCameraStream("raw"); await poll();
+    } catch(error) { setNotice({ key: "requestFailed", code: errorCode(error), tone: "error" }); }
+    finally { setBusy(null); }
+  }, [hold, mutation, poll, command]);
   const selectDevice = useCallback(async (device_id: string | null) => {
+    motionEpoch.current += 1;
     hold.release(); motionBlocked.current += 1; setBusy("/config");
     abortReads();
     if (controlPollPromise.current) await controlPollPromise.current;
@@ -201,14 +295,15 @@ export function useRider(section: Section) {
       const result = await mutation("/config", { device_id }, "POST", true);
       const next = result as unknown as DeviceConfig;
       configRef.current = next; sessionRef.current = next.session; setConfig(next); statusRef.current = null; clockRef.current = null; setStatus(null); seqRef.current = 0;
-      replaceFrame("camera", null); replaceFrame("face", null); setNotice(null); await poll();
+      mediaRef.current = { camera: null, face: false }; setCameraStream(null); setShowRuntimeFrame(false); setMediaError(null);
+      replaceFrame("camera", null); replaceFrame("face", null); setNotice(next.selection_warning ? { key: next.selection_warning, tone: "info" } : null); await poll();
     } catch (error) { setNotice({ key: "requestFailed", code: errorCode(error), tone: "error" }); }
     finally { motionBlocked.current = Math.max(0, motionBlocked.current - 1); setBusy(null); }
   }, [abortReads, hold, mutation, poll, replaceFrame]);
   useEffect(() => {
     sectionRef.current = section; mediaRef.current = { camera: cameraStream, face: showRuntimeFrame };
     hold.release();
-    if (section !== "control" || !cameraStream) replaceFrame("camera", null);
+    if (!["control", "vision"].includes(section) || !cameraStream) replaceFrame("camera", null);
     if (section !== "face" || !showRuntimeFrame) replaceFrame("face", null);
     let alive = true; let timer: ReturnType<typeof setTimeout> | null = null;
     const tick = async () => {
@@ -232,6 +327,6 @@ export function useRider(section: Section) {
   // ARM always refreshes the fast control endpoint before making its envelope.
   // The latency of a diagnostics view must not prevent that refresh request.
   const canArm = canRequestArm(status);
-  return { config, status, loading, notice, setNotice, busy, activeDirection, canMutate: isConnected(), canArm, canNavigate: canNavigate(), canMove: movementReady(), poll, command, mutate: runMutation, selectDevice, hold, camera, cameraStream, setCameraStream, runtimeFrame, showRuntimeFrame, setShowRuntimeFrame, mediaError };
+  return { config, status, loading, notice, setNotice, busy, activeDirection, canMutate: isConnected(), canArm, canNavigate: canNavigate(), canMove: movementReady(), poll, command, stopManual, armNavigation, currentSession, currentMotionEpoch, currentGeneration, currentCamera, mutate: runMutation, takeManual, selectDevice, hold, camera, cameraStream, setCameraStream, markCameraDecoded, runtimeFrame, showRuntimeFrame, setShowRuntimeFrame, mediaError };
 }
 export type RiderClient = ReturnType<typeof useRider>;

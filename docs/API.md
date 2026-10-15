@@ -22,6 +22,16 @@ All paths below are under /api/v1/rider. Mutations carry X-Rider-Session from GE
 | GET /face/runtime/frame | Runtime preview frame |
 | GET/POST /conversation/config | Session-scoped optional conversation tools; revisioned ON/OFF, no ARM |
 
+GET /config returns `devices` (public ID, label and demo/device mode),
+`device_id`, `session` and optional `selection_warning`. POST /config takes
+`{"device_id": "<allowlisted ID>" }` or null to disconnect. This same selection
+powers the Demo/Prod panel field and is persisted by Venom. It stops previous
+active motion/navigation, invalidates pending commands, rotates the session and
+does not activate the next target. An offline previous target yields
+`previous_device_stop_unconfirmed`; the UI must show this outcome rather than
+claiming confirmed braking. Commands during a switch return
+`device_switch_in_progress`; commands from an old session remain rejected.
+
 ## Negotiated Pi contracts
 
 Transport requests application/vnd.rider.api+json;version=1. The envelope has meta and data. Domain versions are independent:
