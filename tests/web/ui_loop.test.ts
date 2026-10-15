@@ -522,3 +522,58 @@ test("recovery brackets preview polling and late processed GETs cannot publish o
  assert.ok(client.includes('if (!cameraStream || !["control", "vision"].includes(section) || processedTransition) return;'));
  assert.ok(client.includes("stale: true, knownFreshness: false"));
 });
+
+
+test("v2 turn is shown as a maneuver while the forward image remains STOP",()=>{
+  for(const side of ["left","right"]){
+    const state={...permissionLoop,decision:{...permissionLoop.decision,protocol_version:2,action:"turn_"+side,state:"obstacle",vision_action:"stop",sectors:{[side]:{state:"clear",coverage_complete:true}}}};
+    const policy={...permissionPolicy,avoidance:{enabled:true,sweep_verified:true}};
+    const result=motionPermission(state,{drive:true},policy,permissionDetector,permissionStatus());
+    assert.equal(result.venom,true);
+    assert.equal(result.reason,side==="left"?"permissionTurnLeft":"permissionTurnRight");
+    assert.equal(decisionView(state,permissionDetector).reply,"turn_"+side);
+    assert.equal(decisionView(state,permissionDetector).vision,"stop");
+    assert.equal(executionHeadline(state,{drive:true},permissionStatus(),result),side==="left"?"permissionVenomTurnLeft":"permissionVenomTurnRight");
+    assert.equal(motionPermission({...state,stale:true},{drive:true},policy,permissionDetector,permissionStatus()).venom,false);
+    assert.equal(motionPermission(state,{drive:true},permissionPolicy,permissionDetector,permissionStatus()).venom,false);
+  }
+});
+
+
+test("v3 steering needs clear near guard and connecting path in addition to side",()=>{
+ const state={...permissionLoop,decision:{...permissionLoop.decision,protocol_version:3,action:"steer_right",state:"obstacle",vision_action:"stop",sectors:{right:{state:"clear",coverage_complete:true}},paths:{right:{state:"clear",coverage_complete:true},guard:{state:"clear",coverage_complete:true}}}};
+ const policy={...permissionPolicy,avoidance:{enabled:true,sweep_verified:true,protocol_version:3}};
+ const permission=motionPermission(state,{drive:true},policy,permissionDetector,permissionStatus());
+ assert.equal(permission.venom,true);
+ assert.equal(decisionView(state,permissionDetector).reply,"steer_right");
+ assert.equal(executionHeadline(state,{drive:true},permissionStatus(),permission),"permissionVenomSteerRight");
+ for(const field of ["right","guard"]){
+   const blocked={...state,decision:{...state.decision,paths:{...state.decision.paths,[field]:{state:"obstacle",coverage_complete:true}}}};
+   assert.equal(motionPermission(blocked,{drive:true},policy,permissionDetector,permissionStatus()).venom,false);
+ }
+});
+
+test("ground mode requires configured projection and host support before a trial",()=>{
+ const geometry={mode:"ground",fx:.5,fy:.5,radius_ratio:.35};
+ const policy={...permissionPolicy,avoidance:{enabled:true,protocol_version:3,geometry}};
+ const detector={...permissionDetector,configured:true,ground_geometry_supported:true};
+ assert.equal(trialBlock(policy,{drive:true},detector,true,false,permissionStatus()),"");
+ assert.equal(trialBlock(policy,{drive:true},{...detector,ground_geometry_supported:false},true,false,permissionStatus()),"geometryHostUpdate");
+ for(const key of ["fx","fy","radius_ratio"]){
+  for(const value of [null,NaN,0,undefined]){
+   const invalid={...policy,avoidance:{...policy.avoidance,geometry:{...geometry,[key]:value}}};
+   assert.equal(trialBlock(invalid,{drive:true},detector,true,false,permissionStatus()),"geometryCalibrationMissing");
+  }
+ }
+ const changed={...policy,avoidance:{...policy.avoidance,geometry:{...geometry,radius_ratio:.4}}};
+ assert.equal(loopSettingsValues(policy,changed).verified,false);
+});
+test("ground permission matches Pi evidence instead of displaying a bare GO as valid",()=>{
+ const policy={...permissionPolicy,avoidance:{enabled:true,geometry:{mode:"ground"}}};
+ const decision={...permissionLoop.decision,geometry:"ground_capsule",ground_support:.8,ground_reference:{normal:[0,0.6,.8],height:1}};
+ const state={...permissionLoop,decision};
+ assert.equal(motionPermission(state,{drive:true},policy,permissionDetector,permissionStatus()).venom,true);
+ for(const patch of [{ground_support:.1},{ground_reference:{}},{ground_reference:{normal:[0,0,3],height:1}},{geometry:"image"}]){
+  assert.equal(motionPermission({...state,decision:{...decision,...patch}},{drive:true},policy,permissionDetector,permissionStatus()).venom,false);
+ }
+});

@@ -46,7 +46,7 @@ export function calibrationMatches(policy: JsonRecord | null, detector: JsonReco
   return calibrationRecorded(policy) && /^[a-f0-9]{64}$/.test(str(detector.sha256)) && policy?.model_sha256 === detector.sha256;
 }
 export function calibrationScope(policy: JsonRecord | null, detector: JsonRecord): string {
-  return JSON.stringify([policy?.speed, policy?.max_motion_ms, policy?.decision_budget_ms, policy?.corridor, policy?.perception, detector.sha256]);
+  return JSON.stringify([policy?.speed, policy?.max_motion_ms, policy?.decision_budget_ms, policy?.corridor, policy?.perception, policy?.avoidance, detector.sha256]);
 }
 export function loopSettingsValues(policy: JsonRecord, draft: JsonRecord): JsonRecord {
   const {revision: ignoredRevision, protocol_version: ignoredProtocol, ...values} = draft;
@@ -107,7 +107,7 @@ export function decisionView(state: JsonRecord, detector: JsonRecord) {
     current, required, count,
     imageReason:!current?(decision.state?"analysis_not_current":"waiting_for_decision"):decision.state!=="clear"?String(decision.reason??"waiting_for_decision"):count<required?"clear_frames_pending":"clear_frames_ready",
     vision:current?vision:"none",
-    reply:current&&["go","stop"].includes(String(decision.action))?String(decision.action):"none",
+    reply:current&&["go","stop","turn_left","turn_right","steer_left","steer_right"].includes(String(decision.action))?String(decision.action):"none",
     reason:current?String(decision.motion_reason??(decision.state!=="clear"?decision.reason:count<required?"clear_frames_pending":state.mode==="observe"?"observe_only":decision.reason)??"waiting_for_decision"):String(state.stop_reason??"waiting_for_decision"),
     floor:typeof decision.floor_fraction==="number"?decision.floor_fraction:null,
     confidence:typeof decision.confidence_fraction==="number"?decision.confidence_fraction:null,
@@ -117,6 +117,11 @@ export function trialBlock(policy: JsonRecord|null, runtime:JsonRecord, detector
   if(!connected)return "loopOffline";
   if(!policy)return "loopLoadFailed";
   if(dirty)return "loopUnsaved";
+  const avoidance=record(policy.avoidance),geometry=record(avoidance.geometry);
+  if(avoidance.enabled===true&&avoidance.protocol_version===3&&geometry.mode==="ground"){
+    if(detector.ground_geometry_supported!==true)return "geometryHostUpdate";
+    if(!["fx","fy","radius_ratio"].every(key=>typeof geometry[key]==="number"&&Number.isFinite(geometry[key])&&Number(geometry[key])>0))return "geometryCalibrationMissing";
+  }
   if(runtime.drive!==true)return runtime.drive_reason==="navigation_executor_update_required"?"loopExecutorUpdate":"loopRuntimeMissing";
   if(detector.configured!==true)return "loopNoModel";
   if(detector.drive_supported===false)return "loopDepthObservation";
@@ -134,20 +139,31 @@ export function trialBlock(policy: JsonRecord|null, runtime:JsonRecord, detector
 export function motionPermission(state:JsonRecord, goals:JsonRecord, policy:JsonRecord|null, detector:JsonRecord, status:RiderStatus|null) {
   const safety=safetyOf(status), view=decisionView(state,detector);
   const known=!!status?.connection.configured&&["online","degraded"].includes(status.connection.status)&&!status.errors.control&&safety.stale!==true&&!!str(safety.generation)&&["ARMED","DISARMED","ESTOP"].includes(str(safety.state));
+  const decision=record(state.decision),side=["turn_left","steer_left"].includes(String(decision.action))?"left":"right";
+  const turning=view.current&&((decision.protocol_version===2&&["turn_left","turn_right"].includes(String(decision.action)))||(decision.protocol_version===3&&["steer_left","steer_right"].includes(String(decision.action))&&["guard",side].every(k=>record(record(decision.paths)[k]).state==="clear"&&record(record(decision.paths)[k]).coverage_complete===true)))&&decision.state==="obstacle"&&record(policy?.avoidance).enabled===true&&record(policy?.avoidance).sweep_verified===true&&record(record(decision.sectors)[side]).state==="clear"&&record(record(decision.sectors)[side]).coverage_complete===true;
   const ready=safety.ready!==false&&record(record(safety.capabilities).move).available===true&&!record(safety.execution).inhibit;
   const manual=known?navigationAvailable(status)&&safety.can_move===true&&ready:null;
   let reason="permissionUnknown", allowed=false;
   if(known){
+    const geometry=record(record(policy?.avoidance).geometry),reference=record(decision.ground_reference);
+    const normal=reference.normal;
+    const groundValid=geometry.mode!=="ground"||record(policy?.avoidance).enabled!==true
+      ||decision.geometry==="ground_capsule"&&Array.isArray(normal)&&normal.length===3
+        &&normal.every(v=>typeof v==="number"&&Number.isFinite(v))
+        &&Number(normal[1])>=.2&&normal.reduce((sum:number,v:number)=>sum+v*v,0)>=.9&&normal.reduce((sum:number,v:number)=>sum+v*v,0)<=1.1
+        &&typeof reference.height==="number"&&Number.isFinite(reference.height)&&reference.height>0
+        &&typeof decision.ground_support==="number"&&Number.isFinite(decision.ground_support)&&decision.ground_support>=.3&&decision.ground_support<=1;
     if(!ready)reason="permissionExecutorBlocked";
-    else if(view.current&&view.vision!=="go")reason="permissionDecisionStop";
+    else if(!groundValid)reason="permissionDecisionStop";
+    else if(view.current&&view.vision!=="go"&&!turning)reason="permissionDecisionStop";
     else if(goals.drive!==true||state.mode!=="drive")reason=goals.observe===true?"permissionObservation":"permissionIdle";
     else if(safety.state!=="ARMED"||safety.can_move!==true)reason="permissionDisarmed";
     else if(safety.owner!=="navigation")reason="permissionManualOwner";
     else if(!calibrationMatches(policy,detector))reason="permissionParameters";
     else if(!view.current)reason="permissionNoDecision";
-    else if(view.reply!=="go"||view.vision!=="go")reason="permissionDecisionStop";
+    else if(!turning&&(view.reply!=="go"||view.vision!=="go"))reason="permissionDecisionStop";
     else if(safety.remote_decision_deadline_supported!==true||!Number.isFinite(state.permit_remaining_ms??record(state.decision).valid_for_ms)||Number(state.permit_remaining_ms??record(state.decision).valid_for_ms)<50)reason="permissionPermitShort";
-    else {allowed=true;reason="permissionGo";}
+    else {allowed=true;reason=turning?side==="left"?"permissionTurnLeft":"permissionTurnRight":"permissionGo";}
   }
   return {venom:known?allowed:null,manual,reason};
 }
@@ -155,7 +171,7 @@ export function motionPermission(state:JsonRecord, goals:JsonRecord, policy:Json
 export function executionHeadline(state:JsonRecord,goals:JsonRecord,status:RiderStatus|null,permission:{venom:boolean|null}):string {
   if(state.mode==="drive"&&goals.drive===true&&state.paused===true&&state.running===true&&state.stale!==true&&safetyOf(status).state==="ARMED"&&safetyOf(status).owner==="navigation")return "trialVisualPause";
   if(permission.venom===null)return "permissionVenomUnknown";
-  if(permission.venom)return "permissionVenomYes";
+  if(permission.venom){const action=record(state.decision).action;return action==="steer_left"?"permissionVenomSteerLeft":action==="steer_right"?"permissionVenomSteerRight":action==="turn_left"?"permissionVenomTurnLeft":action==="turn_right"?"permissionVenomTurnRight":"permissionVenomYes";}
   const safety=safetyOf(status);
   if(goals.drive!==true||state.mode!=="drive")return goals.observe===true?"permissionVenomObserve":"permissionVenomIdle";
   if(safety.state==="DISARMED")return "permissionPiDisarmed";

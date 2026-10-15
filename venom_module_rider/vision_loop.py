@@ -5,9 +5,12 @@ import time
 from collections import OrderedDict
 
 from . import depth_trace
+from .avoidance import plan
 from .depth_detector import DepthDetector
 from .errors import RiderError
 from .floor_detector import FloorDetector
+from .sector_trend import update as sector_trend
+from .steering import plan as steering_plan
 
 
 class VisionLoop:
@@ -22,6 +25,13 @@ class VisionLoop:
         self.previews = OrderedDict()
         self.preview_changed = asyncio.Event()
 
+    def _detect_depth(self, payload, frame):
+        if frame.protocol_version == 3 and frame.avoidance.geometry.mode == "ground":
+            return self.depth_detector.detect_ground(
+                payload, frame.corridor, frame.perception, frame.avoidance.geometry
+            )
+        return self.depth_detector.detect(payload, frame.corridor, frame.perception)
+
     def status(self, perception=None):
         selected = (
             self.depth_detector
@@ -32,6 +42,10 @@ class VisionLoop:
             **selected.status(),
             "busy": (self.depth_busy if selected is self.depth_detector else self.busy)
             is not None,
+            "supported_protocol_versions": [1, 2, 3],
+            "ground_geometry_supported": callable(
+                getattr(self.depth_detector, "detect_ground", None)
+            ),
             "protocol_version": 1,
             "max_frame_bytes": 512 * 1024,
             "max_deadline_ms": 500,
@@ -65,6 +79,8 @@ class VisionLoop:
             frame.calibration_id,
             frame.model_sha256,
             frame.perception.model_dump_json(),
+            frame.protocol_version,
+            frame.avoidance.model_dump_json(),
         )
         if previous and (
             frame.sequence <= previous["sequence"]
@@ -90,12 +106,7 @@ class VisionLoop:
         selected = self.depth_detector if depth_mode else self.detector
         if depth_mode:
             task = asyncio.create_task(
-                asyncio.to_thread(
-                    self.depth_detector.detect,
-                    payload,
-                    frame.corridor,
-                    frame.perception,
-                )
+                asyncio.to_thread(self._detect_depth, payload, frame)
             )
         else:
             task = asyncio.create_task(
@@ -137,6 +148,7 @@ class VisionLoop:
                             if not key.startswith("_")
                         },
                         "stage": "depth_assessment",
+                        "avoidance": frame.avoidance.model_dump(mode="json"),
                         "device_id": device_id,
                         "run_id": frame.run_id,
                         "frame_id": frame.frame_id,
@@ -151,6 +163,9 @@ class VisionLoop:
             except Exception:
                 # Storage must neither grant nor revoke a visual decision.
                 pass
+        # Full heading grid stays in the depth trace, not Pi's bounded response
+        # or the preview HTTP header. Keep only selected paths and gap extents.
+        result.pop("heading_candidates", None)
         elapsed = (self.clock() - now) * 1000
         if elapsed + frame.age_ms >= frame.deadline_ms:
             result = {
@@ -184,6 +199,61 @@ class VisionLoop:
             motion_reason = "calibration_not_validated"
         else:
             motion_reason = "clear_frames_ready"
+        if depth_mode and "sectors" in result:
+            history = (
+                previous.get("sector_history")
+                if previous and now - previous["at"] <= 0.5
+                else None
+            )
+            if frame.motion_phase != "ready":
+                history = None
+            result["sectors"], state["sector_history"] = sector_trend(
+                result["sectors"], history
+            )
+        if frame.protocol_version == 2:
+            if frame.avoidance.enabled and depth_mode:
+                prior = dict(previous.get("avoidance") or {}) if previous else {}
+                if previous and now - previous["at"] > 0.5:
+                    prior.update(counts={"left": 0, "right": 0}, front=0, paused=False)
+                action, motion_reason, planner, sectors = plan(
+                    result,
+                    prior,
+                    frame.avoidance,
+                    frame.motion_phase,
+                    permitted,
+                )
+                state["avoidance"] = planner
+                result.update(
+                    sectors=sectors,
+                    maneuver_clear_count=3 if action.startswith("turn_") else 0,
+                    maneuver_phase=motion_reason,
+                    turn_count=planner["turns"],
+                )
+            else:
+                action, motion_reason = "stop", "avoidance_not_enabled"
+        if frame.protocol_version == 3:
+            prior = dict(previous.get("avoidance") or {}) if previous else {}
+            if previous and now - previous["at"] > 0.5:
+                prior.update(counts={"left": 0, "right": 0}, front=0)
+            action, motion_reason, planner, sectors, paths, terminal = steering_plan(
+                result,
+                prior,
+                frame.avoidance,
+                frame.motion_phase,
+                permitted and frame.avoidance.enabled and depth_mode,
+            )
+            state["avoidance"] = planner
+            result.update(
+                sectors=sectors,
+                paths=paths,
+                terminal_stop=terminal,
+                maneuver_clear_count=3 if action.startswith("steer_") else 0,
+                maneuver_phase=motion_reason,
+                turn_count=planner["turns"],
+                stalled_corrections=planner.get("stalled", 0),
+                progress_delta=planner.get("progress_delta"),
+                pose_resets=planner.get("pose_resets", 0),
+            )
         image = result.pop("_preview", None)
         if image is not None:
             self.previews[device_id] = (
@@ -221,7 +291,7 @@ class VisionLoop:
             "action": action,
             "vision_action": vision_action,
             "motion_reason": motion_reason,
-            "protocol_version": 1,
+            "protocol_version": frame.protocol_version,
             "run_id": frame.run_id,
             "frame_id": frame.frame_id,
             "sequence": frame.sequence,

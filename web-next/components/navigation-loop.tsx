@@ -14,6 +14,7 @@ import styles from "../rider.module.css";
 export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:Translator;language:string;manual:ReactNode}) {
   const [policy,setPolicy]=useState<JsonRecord|null>(null);
   const [draft,setDraft]=useState<JsonRecord|null>(null);
+  const [editingZone,setEditingZone]=useState(false);
   const dirty=!!policy&&JSON.stringify(policy)!==JSON.stringify(draft);
   const policyRef=useRef(policy),dirtyRef=useRef(dirty);
   policyRef.current=policy;dirtyRef.current=dirty;
@@ -82,6 +83,8 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
   },[connected,session,refresh,t,applyPolicy]);
   const phase=loopPhase(connected,loopState,goals);
   const active=goals.observe===true||goals.drive===true;
+  const groundDraft=record(draft?.avoidance).enabled===true&&record(record(draft?.avoidance).geometry).mode==="ground";
+  const groundActive=record(policy?.avoidance).enabled===true&&record(record(policy?.avoidance).geometry).mode==="ground";
   const {cameraStream,setCameraStream}=client;
   useEffect(()=>{
     if(stopping.current||!active||loopState.running!==true)return;
@@ -128,10 +131,19 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
     const saved=record(data(result).config);applyPolicy(saved);return saved;
   };
   const save=async()=>{
-    if(!draft||!policy||active)return;
+    if(!draft||!policy||goals.drive===true||operation)return;
     setOperation("save");setError("");
-    try{await persist(loopSettingsValues(policy,draft));}
-    catch(err){failure(err);}finally{setOperation(null);}
+    const origin=client.currentSession();operationEpoch.current=client.currentMotionEpoch();operationGeneration.current=client.currentGeneration();
+    const task=(async()=>{
+      const loaded=await apiFetch<JsonRecord>("/api/v1/rider/navigation/config");ensureOperation(origin);
+      if(record(loaded.config).revision!==policy.revision||record(loaded.goals).drive===true)throw new Error("navigation_configuration_changed");
+      const resume=record(loaded.goals).observe===true;
+      await stopGoals(origin);ensureOperation(origin);
+      await persist(loopSettingsValues(policy,draft));ensureOperation(origin);
+      if(resume)await ensureAnalysis(origin);
+      setEditingZone(false);
+    })();startTask.current=task;
+    try{await task;}catch(err){failure(err);}finally{startTask.current=null;if(!stopping.current)setOperation(null);}
   };
   const applyState=(row:JsonRecord)=>{setLoopState(record(row.status));setGoals(record(row.goals));setDetector(record(row.detector));};
   const ensureOperation=(origin:string)=>{
@@ -204,7 +216,7 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
     trialSession.current=origin;
     const task=(async()=>{
       setOperation("start");setTrialResult("trialStarting");client.setCameraStream("venom");
-      const plan=t("trialPlan")+" · "+String(policy.speed)+" SDK · ≤ "+String(policy.max_motion_ms)+" ms";
+      const plan=t(record(policy.avoidance).enabled===true?"avoidanceTrialPlan":"trialPlan")+" · "+String(policy.speed)+" SDK · ≤ "+String(policy.max_motion_ms)+" ms";
       trialArmed.current=true;
       const result=await client.startNavigationTrial(plan,Number(policy.revision));
       if(stopping.current||client.currentSession()!==origin)throw new Error("navigation_trial_cancelled");
@@ -244,7 +256,8 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
     if(freshObservation(loopState,goals))setRecoveryFailure(null);
   },[loopState,goals]);
   const observeBlock=policy?loopBlock({...policy,mode:"observe"},runtime,detector,connected,dirty,client.status):"loopLoadFailed";
-  const trialUnavailable=trialBlock(policy,runtime,detector,connected,dirty,client.status);
+  const avoidanceSupported=Array.isArray(detector.supported_protocol_versions)&&detector.supported_protocol_versions.includes(Number(record(draft?.avoidance??policy?.avoidance).protocol_version??3));
+  const trialUnavailable=record(policy?.avoidance).enabled===true&&!avoidanceSupported?"avoidanceUpdateRequired":trialBlock(policy,runtime,detector,connected,dirty,client.status);
   const decision=record(loopState.decision);
   const perception=record(draft?.perception);
   const permission=motionPermission(loopState,goals,policy,detector,client.status);
@@ -266,7 +279,7 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
     </div>
     <div className={styles.loopToolbar}>
     <div className={styles.loopActions}>
-      <Button tone="primary" data-testid="loop-start" title={t("trialSimpleHelp")} aria-describedby={trialUnavailable?"rider-trial-help rider-trial-block":"rider-trial-help"} disabled={!!trialUnavailable||!!operation||!!client.busy||loading||phase==="running"&&goals.drive===true} onClick={()=>void runTrial()}><Play size={18}/>{t("trialRun")}</Button>
+      <Button tone="primary" data-testid="loop-start" title={t("trialSimpleHelp")} aria-describedby={trialUnavailable?"rider-trial-help rider-trial-block":"rider-trial-help"} disabled={!!trialUnavailable||!!operation||!!client.busy||loading||phase==="running"&&goals.drive===true} onClick={()=>void runTrial()}><Play size={18}/>{t(record(policy?.avoidance).enabled===true?"avoidanceTrialRun":"trialRun")}</Button>
       <Button tone="danger" data-testid="loop-stop" disabled={!connected||operation==="stop"||operation==="save"} onClick={()=>void stop()}><Square size={18}/>{t(operation==="stop"?"loopStopping":"loopStop")}</Button>
       {detector.drive_supported!==false&&<span className={styles.small} data-testid="trial-plan">{String(policy?.speed??"—")} SDK · ≤ {String(policy?.max_motion_ms??"—")} ms</span>}
     </div>
@@ -278,7 +291,7 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
       <Button data-testid="loop-preview" disabled={!connected||!!operation||loading||!!observeBlock||active&&loopState.running===true} onClick={()=>void observePreview()}><Play size={14}/>{t(active&&loopState.running===true?"analysisRunning":"startObservation")}</Button>
       {!!observeBlock&&<p className={styles.hint}>{t(observeBlock)}</p>}
     </details>
-    {policy&&<div className={styles.loopModeRow} data-testid="stopping-zone">
+    {policy&&!groundActive&&<div className={styles.loopModeRow} data-testid="stopping-zone">
       <Field label={t("stopZone")}><select aria-label={t("stopZone")} data-testid="loop-zone" className={styles.select} value={stoppingZone(policy)} disabled={!connected||loading||!!operation||!!client.busy||dirty||goals.drive===true} onChange={e=>{if(e.target.value==="near"||e.target.value==="far")void changeStoppingZone(e.target.value);}}>
         <option value="near" disabled={!stoppingZoneValues(policy,"near")}>{t("stopZoneNear")}</option>
         <option value="far" disabled={!stoppingZoneValues(policy,"far")}>{t("stopZoneFar")}</option>
@@ -306,10 +319,20 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
     {phase==="fault"&&!displayedStopReason&&<p role="alert" className={styles.loopError}>{t("loopFaultHint")} · {String(loopState.stop_reason??"")}</p>}
 
     {(visibleError||readError)&&<p className={styles.loopError} role="alert">{t("trialRequestError")} · {visibleError||readError}</p>}
+    <div className={styles.loopModeRow}>
+      {!groundActive&&<Button data-testid="zone-edit" disabled={!draft||goals.drive===true||!!operation} onClick={()=>setEditingZone(!editingZone)}>{t(editingZone?"zoneFinish":"zoneEdit")}</Button>}
+      {editingZone&&!groundActive&&<><Button data-testid="zone-save" disabled={!dirty||!!operation||goals.drive===true} onClick={()=>void save()}>{t("loopSave")}</Button><Button onClick={()=>{setDraft(policy);setEditingZone(false);}}>{t("loopDiscard")}</Button><Button disabled={!!operation} onClick={()=>draft&&setDraft({...draft,corridor:[.35,.80,.65,.95]})}>{t("zoneReset")}</Button></>}
+    </div>
+    {editingZone&&!groundActive&&<><p className={styles.hint}>{t("zoneDraftHelp")}</p><div className={styles.grid}>
+      <Field label={t("perceptionResidual")}><input className={styles.input} type="number" min=".01" max=".15" step=".005" value={Number(perception.residual_limit)} onChange={e=>draft&&setDraft({...draft,perception:{...perception,residual_limit:Number(e.target.value)}})}/></Field>
+      <Field label={t("perceptionOutliers")}><input className={styles.input} type="number" min="0" max="2" step=".1" value={Number(perception.outlier_limit)*100} onChange={e=>draft&&setDraft({...draft,perception:{...perception,outlier_limit:Number(e.target.value)/100}})}/></Field>
+    </div></>}
+    {groundActive&&<p className={styles.hint} data-testid="ground-geometry-help">{t("geometryPreviewHelp")}</p>}
     <div className={styles.driveWorkspace}>
-      <div className={styles.loopCamera}><CameraPanel client={client} t={t} language={language} compact analysisRunning={active&&loopState.running===true} analysisCurrent={imageDecision.current&&decision.reason!=="vision_observation_transport_retry"}/></div>
+      <div className={styles.loopCamera}><CameraPanel client={client} t={t} language={language} compact editor={editingZone&&draft&&Array.isArray(draft.corridor)?{value:draft.corridor as number[],disabled:goals.drive===true||!!operation,onChange:value=>setDraft({...draft,corridor:value})}:undefined} analysisRunning={active&&loopState.running===true} analysisCurrent={imageDecision.current&&decision.reason!=="vision_observation_transport_retry"}/></div>
       <div className={styles.loopSidebar}>
         {manual}
+        <div data-testid="directional-results" className={styles.grid}>{(["left","center","right"] as const).map(side=><div className={styles.metric} key={side}><b>{t("sector."+side)}</b><p>{t("vision."+String(imageDecision.current?record(record(decision.sectors)[side]).state??"unknown":"unknown"))}</p></div>)}</div>
         <LoopDecision frame={client.cameraStream==="venom"?client.camera:null} state={loopState} detector={detector} policy={policy} status={client.status} t={t} language={language}/>
       </div>
     </div>
@@ -325,7 +348,7 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
           <Field label={t("loopSpeed")}><input className={styles.input} disabled={active||!!operation} type="number" min="0.01" max="0.15" step="0.01" value={Number(draft.speed)} onChange={e=>setDraft({...draft,speed:Number(e.target.value)})}/></Field>
           <Field label={t("loopBudget")}><input className={styles.input} disabled={active||!!operation} type="number" min="100" max="500" step="10" value={Number(draft.decision_budget_ms)} onChange={e=>setDraft({...draft,decision_budget_ms:Number(e.target.value)})}/></Field>
           <Field label={t("loopPulse")}><input className={styles.input} disabled={active||!!operation} type="number" min="50" max="200" step="10" value={Number(draft.max_motion_ms)} onChange={e=>setDraft({...draft,max_motion_ms:Number(e.target.value)})}/></Field>
-          <Field label={t("loopCorridor")}><input className={styles.input} disabled={active||!!operation} value={Array.isArray(draft.corridor)?draft.corridor.join(","):""} onChange={e=>setDraft({...draft,corridor:e.target.value.split(",").map(Number)})}/></Field>
+          {!groundDraft&&<Field label={t("loopCorridor")}><input className={styles.input} disabled={active||!!operation} value={Array.isArray(draft.corridor)?draft.corridor.join(","):""} onChange={e=>setDraft({...draft,corridor:e.target.value.split(",").map(Number)})}/></Field>}
         </div>
         {"perception" in draft?<div className={styles.grid} data-testid="perception-settings">
           <Field label={t("perceptionMethod")}><select aria-label={t("perceptionMethod")} className={styles.select} disabled={active||!!operation} value={String(perception.engine??"segformer")} onChange={e=>setDraft({...draft,mode:"observe",perception:{...perception,engine:e.target.value}})}>
@@ -334,10 +357,24 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
           {perception.engine==="depth_plane"&&<>
             <Field label={t("perceptionResidual")}><input className={styles.input} disabled={active||!!operation} type="number" min="0.01" max="0.15" step="0.01" value={Number(perception.residual_limit)} onChange={e=>setDraft({...draft,perception:{...perception,residual_limit:Number(e.target.value)}})}/></Field>
             <Field label={t("perceptionOutliers")}><input className={styles.input} disabled={active||!!operation} type="number" min="0" max="2" step="0.1" value={Number(perception.outlier_limit)*100} onChange={e=>setDraft({...draft,perception:{...perception,outlier_limit:Number(e.target.value)/100}})}/></Field>
-            <Field label={t("perceptionSlope")}><input className={styles.input} disabled={active||!!operation} type="number" min="1" max="4" step="0.1" value={Number(perception.slope_min)} onChange={e=>setDraft({...draft,perception:{...perception,slope_min:Number(e.target.value)}})}/></Field>
+            {!groundDraft&&<Field label={t("perceptionSlope")}><input className={styles.input} disabled={active||!!operation} type="number" min="1" max="4" step="0.1" value={Number(perception.slope_min)} onChange={e=>setDraft({...draft,perception:{...perception,slope_min:Number(e.target.value)}})}/></Field>}
           </>}
         </div>:<p className={styles.hint}>{t("perceptionPiUpdate")}</p>}
         {perception.engine==="depth_plane"&&<p className={styles.hint}>{t("perceptionGeometryHint")}</p>}
+        {record(draft?.avoidance).protocol_version===3&&<fieldset className={styles.stack} disabled={active||!!operation} data-testid="ground-geometry-settings"><legend>{t("geometrySettings")}</legend>
+          <Field label={t("geometryMode")}><select className={styles.input} value={String(record(record(draft?.avoidance).geometry).mode??"image")} onChange={e=>draft&&setDraft({...draft,avoidance:{...record(draft.avoidance),geometry:{...record(record(draft.avoidance).geometry),mode:e.target.value},sweep_verified:false}})}><option value="ground">{t("geometryGround")}</option><option value="image">{t("geometryImage")}</option></select></Field>
+          {record(record(draft?.avoidance).geometry).mode==="ground"&&<><p className={styles.hint}>{t("geometryHelp")}</p>{(["fx","fy","cx","cy","radius_ratio","lookahead_ratio","max_heading_deg"] as const).map(key=><Field key={key} label={t("geometry."+key)}><input className={styles.input} type="number" step=".01" value={record(record(draft?.avoidance).geometry)[key]===null?"":Number(record(record(draft?.avoidance).geometry)[key])} onChange={e=>draft&&setDraft({...draft,avoidance:{...record(draft.avoidance),geometry:{...record(record(draft.avoidance).geometry),[key]:e.target.value===""?null:Number(e.target.value)},sweep_verified:false}})}/></Field>)}</>}
+        </fieldset>}
+        {"avoidance" in (draft??{})&&<fieldset disabled={active||!!operation} className={styles.stack} data-testid="avoidance-settings"><legend>{t("avoidanceSettings")}</legend>{!avoidanceSupported&&<p>{t("avoidanceUpdateRequired")}</p>}
+          <label><input type="checkbox" disabled={!avoidanceSupported} checked={record(draft?.avoidance).enabled===true} onChange={e=>draft&&setDraft({...draft,mode:"observe",avoidance:{...record(draft.avoidance),enabled:e.target.checked,protocol_version:3,geometry:record(draft.avoidance).geometry??{mode:"ground",fx:null,fy:null,cx:.5,cy:.5,radius_ratio:null,lookahead_ratio:2,max_heading_deg:45},max_stalled_corrections:record(draft.avoidance).max_stalled_corrections??2,progress_min_delta:record(draft.avoidance).progress_min_delta??.03,sweep_verified:false}})}/>{t("avoidanceEnabled")}</label>
+          <Field label={t("avoidanceTurnSpeed")}><input className={styles.input} type="number" min=".01" max=".1" step=".01" value={Number(record(draft?.avoidance).turn_speed)} onChange={e=>draft&&setDraft({...draft,avoidance:{...record(draft.avoidance),turn_speed:Number(e.target.value),sweep_verified:false}})}/></Field>
+          <Field label={t("avoidanceTurnMs")}><input className={styles.input} type="number" min="50" max="150" step="10" value={Number(record(draft?.avoidance).turn_ms)} onChange={e=>draft&&setDraft({...draft,avoidance:{...record(draft.avoidance),turn_ms:Number(e.target.value),sweep_verified:false}})}/></Field>
+          <label><input type="checkbox" checked={record(draft?.avoidance).mirrored===true} onChange={e=>draft&&setDraft({...draft,avoidance:{...record(draft.avoidance),mirrored:e.target.checked,sweep_verified:false}})}/>{t("avoidanceMirrored")}</label>
+          <label><input type="checkbox" checked={record(draft?.avoidance).sweep_verified===true} onChange={e=>draft&&setDraft({...draft,avoidance:{...record(draft.avoidance),sweep_verified:e.target.checked}})}/>{t("avoidanceSweepAcceptance")}</label>
+          <Field label={t("avoidanceStalled")}><input className={styles.input} type="number" min="1" max="5" step="1" value={Number(record(draft?.avoidance).max_stalled_corrections??2)} onChange={e=>draft&&setDraft({...draft,avoidance:{...record(draft.avoidance),max_stalled_corrections:Number(e.target.value),sweep_verified:false}})}/></Field>
+          <Field label={t("avoidanceProgress")}><input className={styles.input} type="number" min="0" max=".3" step=".01" value={Number(record(draft?.avoidance).progress_min_delta??.03)} onChange={e=>draft&&setDraft({...draft,avoidance:{...record(draft.avoidance),progress_min_delta:Number(e.target.value),sweep_verified:false}})}/></Field>
+          <Field label={t("avoidanceMaxTurns")}><input className={styles.input} type="number" min="1" max="5" step="1" value={Number(record(draft?.avoidance).max_turn_pulses)} onChange={e=>draft&&setDraft({...draft,avoidance:{...record(draft.avoidance),max_turn_pulses:Number(e.target.value),sweep_verified:false}})}/></Field><p className={styles.hint}>{t("avoidanceHelp")}</p>
+        </fieldset>}
         <p className={styles.hint}>{t("loopCalibrationSettingsHelp")}</p>
         <div className={styles.loopModeRow}><Button disabled={!connected||!!operation||active||!dirty} onClick={()=>void save()}>{t("loopSave")}</Button>{dirty&&<Button disabled={!!operation} onClick={()=>setDraft(policy)}>{t("loopDiscard")}</Button>}</div>
 
