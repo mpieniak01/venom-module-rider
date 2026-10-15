@@ -1,0 +1,26 @@
+{
+  "production": {
+    "backend": "da2",
+    "model": "data/depth-small",
+    "status": "default"
+  },
+  "profiles": {
+    "da3-small-280": {
+      "backend": "da3-small",
+      "model": "data/da3-research/small",
+      "resolution": 280,
+      "status": "experimental-offline",
+      "drive_supported": false
+    }
+  },
+  "video": {
+    "runner": "scripts/compare_depth_video.py",
+    "windows": [
+      1,
+      3,
+      5
+    ],
+    "status": "experimental-offline",
+    "production_enabled": false
+  }
+}
