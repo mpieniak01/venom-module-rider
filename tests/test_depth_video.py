@@ -118,3 +118,18 @@ def test_decoder_rejects_extra_frames_and_closes(monkeypatch):
     with pytest.raises(ValueError, match="video_frame_count_changed"):
         decode_video("unused", 2)
     assert fake.closed
+
+
+@pytest.mark.parametrize("dark_index", [0, 1, 2])
+def test_production_rejects_dark_frame_anywhere_in_window(dark_index):
+    class Spy:
+        def infer_window(self, images):
+            raise AssertionError("rejected history reached model")
+
+    image = Image.fromarray(np.tile(np.arange(64, dtype=np.uint8) * 4, (64, 1)))
+    images = [image.convert("RGB") for _ in range(3)]
+    images[dark_index] = Image.new("RGB", (64, 64))
+    result = assess_window(Spy(), images, [0, 0.1, 0.2], 2, 3, "production")
+    assert result["reason"] == "vision_image_quality"
+    assert result["image_quality_passed"] is False
+    assert result["drive_supported"] is False

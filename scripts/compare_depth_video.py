@@ -52,8 +52,10 @@ def assess_window(candidate, images, times, index, width, mode):
     history = images[index - width + 1 : index + 1]
     if len(history) != width:
         raise ValueError("window_incomplete")
-    rgb = np.asarray(history[-1], dtype=np.float32) / 255
-    quality = float(rgb.mean()) >= 0.04 and float(rgb.std()) >= 0.01
+    quality = all(
+        float(rgb.mean()) >= 0.04 and float(rgb.std()) >= 0.01
+        for rgb in (np.asarray(image, dtype=np.float32) / 255 for image in history)
+    )
     started = time.perf_counter()
     result: dict[str, Any]
     if not quality and mode == "production":
