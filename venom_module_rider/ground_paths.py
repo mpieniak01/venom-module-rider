@@ -35,7 +35,6 @@ def assess(depth, reference, camera, tolerance, outlier_limit):
     signed = (
         1 - np.einsum("i,ihw->hw", reference["normal"], observed) / reference["height"]
     )
-    occupied = (abs(signed) > tolerance) & (py / h >= 0.35)
     ox = np.einsum("i,ihw->hw", reference["right"], observed) / reference["height"]
     oz = np.einsum("i,ihw->hw", reference["forward"], observed) / reference["height"]
     # A recess is blocked at the missing ground location, not only its distant bottom.
@@ -44,6 +43,10 @@ def assess(depth, reference, camera, tolerance, outlier_limit):
         + reference["coefficients"][1] * py / h
         + reference["coefficients"][2]
     )
+    # The 35% band belongs only to fitting. A tilted-camera sweep may project
+    # above it; keep every visible positive obstacle point. A recess requires
+    # an actual ground intersection (sky beyond the horizon is not a hole).
+    occupied = (signed > tolerance) | ((signed < -tolerance) & (plane_inverse > 0))
     floor_depth = np.divide(
         1.0, plane_inverse, out=np.zeros_like(depth), where=plane_inverse > 0
     )

@@ -332,3 +332,14 @@ def test_thin_recess_between_sampled_rays_stays_a_recess_not_a_steer():
             True,
         )
     assert action == "stop" and reason == "avoidance_recess"
+
+
+@pytest.mark.parametrize(
+    "pixel", [(80, 192), (85, 193), (89, 195), (90, 190), (93, 193)]
+)
+def test_tilted_camera_keeps_thin_obstacle_above_old_image_fit_band(pixel):
+    depth = np.repeat(np.repeat(scene(pitch=60), 3, axis=0), 3, axis=1)
+    assert assess(depth, (0.35, 0.8, 0.65, 0.95), SETTINGS, CAMERA)["state"] == "clear"
+    depth[pixel] *= 0.9
+    row = assess(depth, (0.35, 0.8, 0.65, 0.95), SETTINGS, CAMERA)
+    assert row["state"] == "obstacle"
