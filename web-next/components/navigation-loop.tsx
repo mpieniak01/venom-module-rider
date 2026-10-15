@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Play, Square, RefreshCw } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 import { data, errorCode, formatTime, record, type JsonRecord } from "../lib/model";
-import { calibrationAcceptance, calibrationMatches, calibrationScope, decisionView, executionHeadline, freshAnalysisFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, motionPermission, trialBlock } from "../lib/loop-controls";
+import { calibrationAcceptance, calibrationMatches, completedTrial, calibrationScope, decisionView, executionHeadline, freshAnalysisFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, motionPermission, trialBlock } from "../lib/loop-controls";
 import type { RiderClient } from "../lib/use-rider";
 import type { Translator } from "../lib/i18n";
 import { LoopDecision } from "./loop-decision";
@@ -20,6 +20,7 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
   const [loading,setLoading]=useState(false);
   const [operation,setOperation]=useState<"check"|"start"|"stop"|"save"|null>(null);
   const [error,setError]=useState("");
+  const [errorRun,setErrorRun]=useState("");
   const [readError,setReadError]=useState("");
   const [trialResult,setTrialResult]=useState("");
   const [trialStopReason,setTrialStopReason]=useState("");
@@ -85,7 +86,7 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
   };
   const failure=useCallback((err:unknown)=>{
     const diagnostic=record(record(record(record(err).data).detail).details).navigation;
-    const row=record(diagnostic), cause=String(record(row.motion_failure).reason??row.stop_reason??"");
+    const row=record(diagnostic);setErrorRun(String(row.run_id??""));const cause=String(record(row.motion_failure).reason??row.stop_reason??"");
     const key="vision.reason."+cause, translated=t(key);
     setError(t(loopFailure(err))+" · "+errorCode(err)+(cause?" · "+(translated===key?cause:translated):""));
   },[t]);
@@ -229,6 +230,9 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
   const perception=record(draft?.perception);
   const permission=motionPermission(loopState,goals,policy,detector,client.status);
   const imageDecision=decisionView(loopState,detector);
+  const sharedTrial=completedTrial(loopState);
+  const displayedStopReason=sharedTrial?String(sharedTrial.stop_reason):trialStopReason;
+  const visibleError=errorRun&&sharedTrial?.run_id===errorRun?"":error;
   return <Panel title={t("loopTitle")} extra={<Button aria-label={t("loopLoad")} disabled={loading||!!operation||!connected} onClick={()=>setRefresh(v=>v+1)}><RefreshCw size={14}/>{t("refresh")}</Button>}>
     <div className={styles.loopStatus} role="status" data-testid="loop-state">
       <Pill tone={phase==="running"?"good":phase==="offline"||phase==="unknown"||phase==="fault"?"warning":undefined}>{t(operation==="stop"?"loopStopping":phase==="fault"?"loopPhase.fault":operation==="check"?"trialChecking":operation==="start"?"loopStarting":"loopPhase."+phase)}</Pill>
@@ -249,11 +253,11 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
       <Button data-testid="trial-accept" disabled={!connected||!!operation||loading||dirty||goals.drive===true||imageDecision.vision!=="go"||!freshAnalysisFrame(client.camera,client.cameraStream)} onClick={()=>void acceptTrial()}>{t("trialAccept")}</Button>
     </div>}
     {!!trialUnavailable&&<p id="rider-trial-block" className={styles.loopError} role="status" data-testid="loop-block">{t(trialUnavailable)}</p>}
-    {!!trialResult&&!trialStopReason&&!(trialResult==="trialStarted"&&phase==="running")&&<p className={styles.hint} role="status" data-testid="trial-result">{t(phase==="fault"?"trialEnded":trialResult==="trialStarted"&&phase==="stopped"?"trialStopped":trialResult)}</p>}
-    {!!trialStopReason&&<p role="status" className={styles.loopError} data-testid="trial-stop-reason">{t("trialEnded")} · {t("vision.reason."+trialStopReason)}</p>}
-    {phase==="fault"&&!trialStopReason&&<p role="alert" className={styles.loopError}>{t("loopFaultHint")} · {String(loopState.stop_reason??"")}</p>}
+    {!!trialResult&&!displayedStopReason&&!(trialResult==="trialStarted"&&phase==="running")&&<p className={styles.hint} role="status" data-testid="trial-result">{t(phase==="fault"?"trialEnded":trialResult==="trialStarted"&&phase==="stopped"?"trialStopped":trialResult)}</p>}
+    {!!displayedStopReason&&<p role="status" className={styles.loopError} data-testid="trial-stop-reason">{sharedTrial?t("lastTrial")+" · "+formatTime(sharedTrial.observed_at,language):t("trialEnded")} · {t("vision.reason."+displayedStopReason)}</p>}
+    {phase==="fault"&&!displayedStopReason&&<p role="alert" className={styles.loopError}>{t("loopFaultHint")} · {String(loopState.stop_reason??"")}</p>}
 
-    {(error||readError)&&<p className={styles.loopError} role="alert">{error||readError}</p>}
+    {(visibleError||readError)&&<p className={styles.loopError} role="alert">{t("trialRequestError")} · {visibleError||readError}</p>}
     <div className={styles.driveWorkspace}>
       <div className={styles.loopCamera}><CameraPanel client={client} t={t} language={language} compact analysisRunning={active&&loopState.running===true} analysisCurrent={imageDecision.current&&decision.reason!=="vision_observation_transport_retry"}/></div>
       <div className={styles.loopSidebar}>

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { calibrationAcceptance, calibrationMatches, executionHeadline, previewNotice, calibrationScope, decisionView, freshAnalysisFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, motionPermission, trialBlock } from "../../web-next/lib/loop-controls";
+import { calibrationAcceptance, calibrationMatches, completedTrial, executionHeadline, previewNotice, calibrationScope, decisionView, freshAnalysisFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, motionPermission, trialBlock } from "../../web-next/lib/loop-controls";
 import { featureRows, frameRequested, type RiderStatus } from "../../web-next/lib/model";
 
 test("confirmed stopped goals stay stopped when the last loop file has aged",()=>{
@@ -200,4 +200,17 @@ test("accepted depth trial is available while unsupported runtime still blocks e
 test("latched driving STOP remains a fault after goals are rolled back",()=>{
  assert.equal(loopPhase(true,{mode:"drive",running:false,stale:true,latched:true},{drive:false,observe:false}),"fault");
  assert.equal(loopPhase(true,{mode:"observe",running:true,stale:false,latched:false},{drive:false,observe:true}),"running");
+});
+
+
+test("both panels retain the Pi trial outcome while current observation gives GO",()=>{
+ const last_trial={mode:"drive",running:false,run_id:"failed-drive",observed_at:1792043923,stop_reason:"decision_timeout"};
+ const chrome={mode:"observe",running:true,decision:{state:"clear",vision_action:"go"},last_trial};
+ const embedded={...chrome,last_trial:{...last_trial}};
+ assert.deepEqual(completedTrial(chrome),last_trial);
+ assert.deepEqual(completedTrial(embedded),completedTrial(chrome));
+ assert.equal(decisionView(chrome,{configured:true}).vision,"stop"); // History never grants GO.
+ assert.equal(completedTrial({...chrome,mode:"drive",running:true}),null);
+ assert.equal(completedTrial({...chrome,last_trial:{...last_trial,running:true}}),null);
+ assert.equal(completedTrial({...chrome,last_trial:{mode:"observe",running:false}}),null);
 });

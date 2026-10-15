@@ -188,6 +188,8 @@ export const messages = {
   "vision.reason.navigation_camera_unavailable": ["Pi nie dostarczyło świeżej klatki. STOP.", "Pi did not provide a fresh frame. STOP.", "Pi hat kein aktuelles Bild geliefert. STOP."],
   "vision.reason.navigation_transport_or_input_failed": ["Brak poprawnej odpowiedzi lub obrazu. Pi zatrzymało próbę.", "No valid reply or image. Pi stopped the trial.", "Keine gültige Antwort oder Bild. Pi hat Versuch gestoppt."],
   "vision.reason.decision_invalid_or_expired": ["Odpowiedź nie pasuje do bieżącej klatki albo wygasła. STOP.", "Reply does not match the current frame or expired. STOP.", "Antwort passt nicht zum aktuellen Bild oder ist abgelaufen. STOP."],
+  "lastTrial": ["Ostatnia próba jazdy (zapis Pi)", "Last drive trial (Pi record)", "Letzter Fahrversuch (Pi-Aufzeichnung)"],
+  "trialRequestError": ["Żądanie z tej karty", "Request from this tab", "Anfrage aus diesem Tab"],
   "trialEnded": ["Próba zakończona przez STOP. Powód jest pokazany przy decyzji; ponowna jazda wymaga nowego Testu.", "Trial ended with STOP. Reason is shown beside the decision; driving again requires a new Trial.", "Versuch mit STOP beendet. Grund steht bei der Entscheidung; erneute Fahrt benötigt neuen Versuch."],
   "decisionValidity": ["Ważność odpowiedzi przy odbiorze", "Reply validity when received", "Gültigkeit der Antwort beim Empfang"],
   "vision.reason.decision_budget_exhausted": ["GO dotarło za późno na wykonanie impulsu. Pi pozostało w STOP.", "GO arrived too late to execute a pulse. Pi remained stopped.", "GO kam zu spät für einen Impuls. Pi blieb gestoppt."],

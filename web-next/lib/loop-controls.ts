@@ -128,3 +128,12 @@ export function previewNotice(stale:boolean,selected:string,current:boolean|unde
   if(!stale&&!(selected==="venom"&&current===false))return null;
   return selected==="venom"&&running===false?"previewPausedNotice":"previewDelayedNotice";
 }
+
+
+/** Historical outcome is presentation only; never an authorization for motion. */
+export function completedTrial(state: JsonRecord): JsonRecord | null {
+  if(state.mode==="drive"&&state.running===true)return null;
+  const row=record(state.last_trial);
+  return row.mode==="drive"&&row.running===false&&!!str(row.run_id)
+    &&timestampMs(row.observed_at)!==null&&!!str(row.stop_reason)?row:null;
+}

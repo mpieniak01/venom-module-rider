@@ -246,7 +246,7 @@ export function useRider(section: Section) {
       }
       const result = await mutation(path, request, method, throwOnError); await poll(); return result;
     }
-    catch (error) { const code = errorCode(error); setNotice({ key: code === "pi_operation_timeout" ? "operationUnconfirmed" : "requestFailed", code, tone: "error" }); if (code === "pi_operation_timeout") await poll(); if (throwOnError) throw error; return null; }
+    catch (error) { const code = errorCode(error); if(path!=="/goal/s14_venom_navigation")setNotice({ key: code === "pi_operation_timeout" ? "operationUnconfirmed" : "requestFailed", code, tone: "error" }); if (code === "pi_operation_timeout") await poll(); if (throwOnError) throw error; return null; }
     finally { setBusy(null); }
   }, [makeEnvelope, mutation, poll]);
   const takeManual = useCallback(async (plan: string) => {
