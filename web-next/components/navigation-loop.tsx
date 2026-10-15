@@ -3,6 +3,7 @@ import { Play, Square, RefreshCw } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 import { data, errorCode, formatNumber, formatTime, record, type JsonRecord } from "../lib/model";
 import { calibrationAcceptance, calibrationMatches, calibrationScope, decisionView, executionHeadline, freshPolicyFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, motionPermission, stoppingZone, stoppingZoneValues, trialBlock, trialPreparation, trialPreparationTitle, trialPreparationErrorKey, trialDiagnostics, trialStopReasonKey, trialOutcomeTone, freshObservation } from "../lib/loop-controls";
+import { stopLoopResources } from "../lib/stop-loop";
 import type { RiderClient } from "../lib/use-rider";
 import type { Translator } from "../lib/i18n";
 import { LoopDecision } from "./loop-decision";
@@ -83,7 +84,7 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
   const active=goals.observe===true||goals.drive===true;
   const {cameraStream,setCameraStream}=client;
   useEffect(()=>{
-    if(!active||loopState.running!==true)return;
+    if(stopping.current||!active||loopState.running!==true)return;
     const run=String(loopState.run_id??(goals.drive===true?"drive":"observe"));
     if(displayedRun.current===run)return;
     displayedRun.current=run;
@@ -103,22 +104,23 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
   },[t]);
   const stop=async()=>{
     if(stopping.current)return;
-    stopping.current=true;setOperation("stop");setError("");
+    const trialWasArmed=trialArmed.current;
+    stopping.current=true;trialArmed.current=false;setOperation("stop");setError("");
+    client.setCameraTransition(true);client.setCameraStream(null);
     try {
-      const stoppedMotion=goals.drive===true||trialArmed.current;
+      const stoppedMotion=goals.drive===true||trialWasArmed;
       if(stoppedMotion)await client.command({action:"stop"},true);
       await startTask.current?.catch(()=>undefined);
       const row=await apiFetch<JsonRecord>("/api/v1/rider/navigation/state");
       const actualGoals=record(row.goals);
       if(actualGoals.drive===true&&!stoppedMotion)await client.command({action:"stop"},true);
-      // Stopping analysis alone preserves manual ARM.
-      for(const [key,path] of [["drive","s14_venom_navigation"],["observe","s15_venom_perception"]] as const){
-        if(actualGoals[key]===true)await client.mutate("/goal/"+path,{enabled:false},"POST",true);
-      }
+      // Stopping analysis alone preserves manual ARM; release the explicit S2 reservation too.
+      await stopLoopResources(actualGoals,client.mutate);
       await readState();
+      client.setCameraStream(null);
       setTrialResult("trialStopped");
     } catch(err){failure(err);}
-    finally{stopping.current=false;trialArmed.current=false;setOperation(null);}
+    finally{client.setCameraTransition(false);stopping.current=false;trialArmed.current=false;setOperation(null);}
   };
   const persist=async(values:JsonRecord)=>{
     if(!policy)throw new Error("loop_configuration_unavailable");

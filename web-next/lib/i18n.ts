@@ -214,7 +214,7 @@ export const messages = {
   "trialStarted": ["Próba trwa. Pi rusza po świeżym GO; przeszkoda oznacza postój. STOP lub utrata komunikacji kończy próbę.", "Trial running. Pi moves on fresh GO; an obstacle means a pause. STOP or communication loss ends the trial.", "Versuch läuft. Pi fährt bei aktuellem GO; ein Hindernis bedeutet Pause. STOP oder Verbindungsverlust beendet den Versuch."],
   "trialImageStop": ["Wynik próby: STOP z analizy obrazu. Sterowanie silnikami nie zostało przekazane. Sprawdź strefę i widok podłogi.", "Trial result: image analysis returned STOP. Motor control was not granted. Check the zone and floor view.", "Versuchsergebnis: Bildanalyse ergibt STOP. Motorsteuerung wurde nicht freigegeben. Bereich und Bodensicht prüfen."],
   "trialNoFreshDecision": ["Próba nie ruszyła: brak świeżego GO i poprawnie wyświetlonego obrazu. Sterowanie nie zostało przekazane.", "Trial did not move: no fresh GO and correctly displayed image. Control was not granted.", "Versuch ist nicht gefahren: kein aktuelles GO mit korrekt angezeigtem Bild. Steuerung wurde nicht freigegeben."],
-  "trialStopped": ["Pętla zatrzymana. Ostatni obraz pozostaje oznaczony jako zatrzymana klatka.", "Loop stopped. The last image remains marked as a paused frame.", "Schleife gestoppt. Letztes Bild bleibt als angehaltenes Bild markiert."],
+  "trialStopped": ["Pętla zatrzymana, podgląd zamknięty. Kamera zwolniona przez tę pętlę.", "Loop stopped, preview closed. This loop has released the camera.", "Schleife gestoppt, Vorschau geschlossen. Kamera durch diese Schleife freigegeben."],
   "trialFailed": ["Próba nie została potwierdzona. Powód błędu jest pokazany poniżej.", "Trial was not confirmed. The error reason is shown below.", "Versuch wurde nicht bestätigt. Fehlergrund wird unten angezeigt."],
   "trialActiveMode": ["Próba jazdy prosto", "Forward driving trial", "Vorwärts-Fahrversuch"],
   "trialAnalysisMode": ["Analiza obrazu — bez poleceń ruchu", "Image analysis — no motion commands", "Bildanalyse — ohne Bewegungsbefehle"],
@@ -296,7 +296,7 @@ export const messages = {
   loopPlan: ["Plan krótkiej próby jazdy", "Short driving trial plan", "Plan eines kurzen Fahrversuchs"],
   loopArm: ["Przekaż Venom · 10 s", "Give Venom control · 10 s", "An Venom übergeben · 10 s"],
   loopStart: ["Start wybranego trybu", "Start selected mode", "Ausgewählten Modus starten"],
-  loopStop: ["Zatrzymaj pętlę", "Stop loop", "Schleife stoppen"],
+  loopStop: ["Zatrzymaj pętlę i kamerę", "Stop loop and camera", "Schleife und Kamera stoppen"],
 
   operationUnconfirmed: ["Brak potwierdzenia operacji. Odśwież stan przed ponowną próbą.", "Operation not confirmed. Refresh the state before trying again.", "Vorgang nicht bestätigt. Status vor einem erneuten Versuch aktualisieren."],
   readDiagnostics: ["Odczytaj stan usług", "Read service state", "Dienststatus lesen"],

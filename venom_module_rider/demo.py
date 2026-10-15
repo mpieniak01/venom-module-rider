@@ -538,6 +538,12 @@ def create_app(pi: DemoPi | None = None):
                 },
                 "rider.system",
             )
+        if path == "/svc/frame-distributor.service" and body.get("action") == "stop":
+            return envelope(
+                {"ok": True, "unit": "frame-distributor.service", "action": "stop"},
+                "rider.services",
+                2,
+            )
         if path.startswith("/api/resource/"):
             name = path.split("/")[-1]
             if body:

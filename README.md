@@ -205,9 +205,13 @@ it does not plan a route, estimate distances or steer around obstacles.
   available Pi executor and unchanged settings, the same explicit click saves
   Drive mode, requests timed navigation ARM and starts the loop only after Pi
   confirms authority. There is no additional per-trial confirmation dialog.
-- **Stop loop** cancels a pending trial, stops motion before disabling the drive
-  goal, and retains the last image labelled as paused. Global STOP and manual
-  takeover also cancel a pending trial; neither permits automatic resumption.
+- **Stop loop and camera** cancels a pending trial, stops motion before disabling
+  drive and observation, closes the preview, and releases the camera reservation.
+  Pi confirms hardware capture and the unused frame distributor have stopped.
+  Another task's camera ownership is reported rather than forcibly released.
+  A new explicit observation or drive start prepares the camera again.
+  Global STOP and manual takeover remain separate actions; neither permits
+  automatic resumption.
 
 The decision cards separate the image verdict, the actual Venom-to-Pi reply and
 the executor's reported motion. Floor/confidence percentages, consecutive clear
