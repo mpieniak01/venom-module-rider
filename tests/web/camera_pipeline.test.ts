@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { test } from "node:test";
-import { anchoredPreviewAge, nativePreview, readCameraPipeline } from "../../web-next/lib/camera-pipeline";
+import { anchoredPreviewAge, nativePreview, nativeAnalysisMatches, readCameraPipeline } from "../../web-next/lib/camera-pipeline";
 import { MjpegParser, readMjpeg } from "../../web-next/lib/mjpeg";
 import { previewLifetime, retainedPreview } from "../../web-next/lib/preview-media";
 const fixture = JSON.parse(fs.readFileSync(new URL("../../config/contracts/camera_pipeline_v1.examples.json", import.meta.url), "utf8"));
@@ -69,4 +69,18 @@ test("browser backlog age uses Pi capture differences, never a renewed header ti
   assert.equal(anchoredPreviewAge(source, 10, 160, anchor), 1600);
   assert.equal(anchoredPreviewAge({...source,captured_monotonic_ns:source.captured_monotonic_ns+500e6},10,160,anchor),1100);
   assert.equal(anchoredPreviewAge({...source,camera_session:"new"},10,160,anchor),10);
+});
+
+test("active Pi run preview binds camera source even when request sequence and SHA identifier differ", () => {
+  const source = fixture.source;
+  const reference = Object.fromEntries(["camera_session", "sequence", "transport_epoch", "pipeline_revision", "frame_id", "sha256"].map(key => [key, source[key]]));
+  const analysis = {run_id: "physical-observe", frame_id: "a".repeat(64), sequence: 1, config_revision: 3, state: "obstacle", source: reference};
+  assert.equal(nativeAnalysisMatches(analysis, source), true);
+  for (const key of Object.keys(reference)) {
+    assert.equal(nativeAnalysisMatches({...analysis, source: {...reference, [key]: typeof reference[key] === "number" ? Number(reference[key]) + 1 : "foreign"}}, source), false, key);
+    const missing = {...reference}; delete missing[key];
+    assert.equal(nativeAnalysisMatches({...analysis, source: missing}, source), false, key + " missing");
+  }
+  assert.equal(nativeAnalysisMatches(undefined, source), false);
+  assert.equal(nativeAnalysisMatches({...analysis, source: undefined, frame_id: source.frame_id, sequence: source.sequence}, source), false);
 });

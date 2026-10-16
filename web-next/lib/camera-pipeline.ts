@@ -62,3 +62,11 @@ export function anchoredPreviewAge(source: JsonRecord, ageMs: number, receivedAt
   return Math.max(ageMs, Number(latest.frame_age_ms) + anchor!.roundTripMs + Math.max(0, receivedAt - anchor!.receivedAt)
     - (Number(source.captured_monotonic_ns) - Number(latest.captured_monotonic_ns)) / 1e6);
 }
+
+/** Run sequence and camera sequence are distinct; bind the exact camera reference. */
+export function nativeAnalysisMatches(analysis: JsonRecord | undefined, source: JsonRecord): boolean {
+  if (!analysis) return false;
+  const reference = record(analysis.source);
+  return ["camera_session", "sequence", "transport_epoch", "pipeline_revision", "frame_id", "sha256"].every(key =>
+    reference[key] !== undefined && reference[key] === source[key]);
+}

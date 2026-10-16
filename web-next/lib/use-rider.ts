@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api-client";
 import { getApiBaseUrl } from "@/lib/env";
-import { nativePreview, anchoredPreviewAge } from "./camera-pipeline";
+import { nativePreview, anchoredPreviewAge, nativeAnalysisMatches } from "./camera-pipeline";
 import { useCameraPipeline } from "./use-camera-pipeline";
 import { readMjpeg, type MjpegPart } from "./mjpeg";
 import { readAnalysis } from "./vision-frame";
@@ -377,8 +377,7 @@ export function useRider(section: Section) {
       || source.contract_version !== 1 || !source.camera_session || !Number.isSafeInteger(source.sequence) || Number(source.sequence) < 1
       || headers.get("X-Rider-Frame-Id") !== source.frame_id) throw new Error("stream_source_invalid");
     const analysis = readAnalysis(headers.get("X-Rider-Analysis-Json"));
-    if (headers.get("X-Rider-Source") === "venom" && (!analysis
-      || analysis.frame_id !== source.frame_id || analysis.sequence !== source.sequence)) throw new Error("stream_analysis_mismatch");
+    if (headers.get("X-Rider-Source") === "venom" && !nativeAnalysisMatches(analysis, source)) throw new Error("stream_analysis_mismatch");
     const receivedAt = part.receivedAt;
     if ((previewLifetime({ageMs, receivedAt}) ?? 0) <= 0) throw new Error("stream_source_expired");
     const url = URL.createObjectURL(new Blob([Uint8Array.from(part.bytes)], { type: "image/jpeg" }));

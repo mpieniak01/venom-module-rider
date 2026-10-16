@@ -98,6 +98,8 @@ export function CameraPanel({ client, t, language, compact = false, onObservatio
   const transitioning=selected==="venom"&&client.cameraTransition;
   const previewPolling=client.cameraStream!==null&&client.mediaError!=="visionCameraOff";
   const notice=previewNotice(client.camera?.stale??false,selected,previewPolling,transitioning);
+  const sourceIdentity = client.camera?.analysis && Object.keys(record(client.camera.analysis.source)).length
+    ? record(client.camera.analysis.source) : client.camera?.analysis;
   const streams = client.pipeline.status?.profile.analysis_location === "local"
     ? (["raw", "proc"] as const) : compact ? (["raw", "venom"] as const) : (["raw", "venom", "proc"] as const);
   return <Panel className={compact?styles.cameraEmbedded:""} title={t("camera")} hint={compact?undefined:t("cameraHint")} extra={<Button data-testid="camera-preview-toggle" onClick={() => void chooseStream(client.cameraStream ? null : "raw")} disabled={!client.canMutate||previewBusy}><Camera size={15} />{t(client.cameraStream ? "hidePreview" : "showPreview")}</Button>}>
@@ -108,7 +110,7 @@ export function CameraPanel({ client, t, language, compact = false, onObservatio
     <SampleCapture sourceSession={client.config?.session??null} deviceId={client.config?.device_id??null} frame={client.camera&&client.cameraStream&&displayed?.url===client.camera.url?displayed:null} visible={!!client.cameraStream} t={t}/>
     {selected === "venom" && <p className={styles.hint}>{t("visionLegend")}</p>}
     {client.camera?.visionState && <p className={styles.hint}>{t(client.camera.stale?"loopDecision":"state")}: {t("vision." + client.camera.visionState)} · {client.camera.inferenceMs} ms · <code>{client.camera.visionReason}</code>{client.camera.visionPolicy === "diagnostic_default" && <> · {t("visionDefaultZone")}</>}</p>}
-    {client.camera?.analysis && <p className={styles.small} data-testid="frame-identity">{t("frameSequence")}: {String(client.camera.analysis.sequence)} · {String(client.camera.analysis.frame_id).slice(0,12)} · {t("frameRelativeAge")}: {Math.round(frameAge(client.camera)??0)} ms</p>}
+    {client.camera?.analysis && <p className={styles.small} data-testid="frame-identity">{t("frameSequence")}: {String(sourceIdentity?.sequence)} · {String(sourceIdentity?.frame_id).slice(0,12)} · {t("frameRelativeAge")}: {Math.round(frameAge(client.camera)??0)} ms</p>}
     {client.camera && <div className={styles.meta}><Pill>{t(client.camera.stale?"framePaused":Number(client.camera.recordedAt)>0 ? "frameReplay" : client.camera.knownFreshness ? "frameFresh" : "frameTimeUnknown")}</Pill>{Number(client.camera.recordedAt)>0&&<span>{t("frameRecorded")}: {formatTime(Number(client.camera.recordedAt),language)}</span>}{client.camera.fileAt && <span>{t("frameAt")}: {formatTime(Number(client.camera.fileAt), language)}</span>}{client.camera.source && <span>{t("source")}: {client.camera.source}</span>}</div>}
   </Panel>;
 }
