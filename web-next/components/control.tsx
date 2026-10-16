@@ -5,7 +5,8 @@ import { manualFeedback } from "../lib/manual-feedback";
 import { frameAge } from "../lib/vision-frame";
 import { previewNotice } from "../lib/loop-controls";
 /* eslint-disable @next/next/no-img-element -- Pi binary frames use revocable object URLs. */
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { displayedPreview, previewLifetime } from "../lib/preview-media";
 import { SampleCapture } from "./sample-capture";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Camera, CirclePause, CircleStop } from "lucide-react";
 import { actuatorState, displayValue, finite, formatTime, record, safetyOf, settingsOf, type Direction, type NumericDescriptor } from "../lib/model";
@@ -80,6 +81,16 @@ export function Posture({ client, t, language }: { client: RiderClient; t: Trans
 export function CameraPanel({ client, t, language, compact = false, onObservation, observationDisabled = false, editor }: { client: RiderClient; t: Translator; language: string; compact?: boolean; onObservation?:()=>void; observationDisabled?:boolean; editor?:CorridorEditorProps }) {
   const [imageSize,setImageSize]=useState<[number,number]>([320,240]);
   const [displayed,setDisplayed]=useState<Frame|null>(null);
+  const visible = displayedPreview(client.camera, displayed);
+  useEffect(() => {
+    const frame = displayedPreview(client.camera, displayed);
+    if (!frame || frame.stale) return;
+    const remaining = previewLifetime(frame);
+    if (remaining === null) return;
+    const timer = setTimeout(() => setDisplayed(previous => previous?.url === frame.url
+      ? { ...previous, stale: true, knownFreshness: false } : previous), remaining);
+    return () => clearTimeout(timer);
+  }, [client.camera, displayed]);
   const [previewBusy,setPreviewBusy]=useState(false);
   const [previewFailure,setPreviewFailure]=useState("");
   const chooseStream=async(stream:"raw"|"proc"|"venom"|null)=>{
@@ -98,22 +109,22 @@ export function CameraPanel({ client, t, language, compact = false, onObservatio
   const selected = client.cameraStream ?? "raw";
   const transitioning=selected==="venom"&&client.cameraTransition;
   const previewPolling=client.cameraStream!==null&&client.mediaError!=="visionCameraOff";
-  const notice=previewNotice(client.camera?.stale??false,selected,previewPolling,transitioning);
-  const sourceIdentity = client.camera?.analysis && Object.keys(record(client.camera.analysis.source)).length
-    ? record(client.camera.analysis.source) : client.camera?.analysis;
+  const notice=previewNotice(visible?.stale??client.camera?.stale??false,selected,previewPolling,transitioning);
+  const sourceIdentity = visible?.analysis && Object.keys(record(visible.analysis.source)).length
+    ? record(visible.analysis.source) : visible?.analysis;
   const streams = client.pipeline.status?.profile.analysis_location === "local"
     ? (["raw", "proc"] as const) : compact ? (["raw", "venom"] as const) : (["raw", "venom", "proc"] as const);
   return <Panel className={compact?styles.cameraEmbedded:""} title={t("camera")} hint={compact?undefined:t("cameraHint")} extra={<Button data-testid="camera-preview-toggle" onClick={() => void chooseStream(client.cameraStream ? null : "raw")} disabled={!client.canMutate||previewBusy}><Camera size={15} />{t(client.cameraStream ? "hidePreview" : "showPreview")}</Button>}>
     <CameraPipelineControls client={client} t={t}/>
     <div className={styles.flex} style={{ marginBottom: 14 }}>{streams.map(stream => <Button key={stream} tone={selected === stream ? "primary" : undefined} aria-pressed={selected === stream} onClick={() => void chooseStream(stream)} disabled={!client.canMutate||previewBusy}>{t(stream === "venom" ? "visionVenom" : stream === "proc" ? "visionPi" : stream)}</Button>)}</div>
-    <div className={styles.camera}>{client.camera&&notice&&<div className={transitioning?styles.cameraPaused+" "+styles.cameraTransition:styles.cameraPaused} role="status" data-testid="vision-preview-paused">{t(notice!)}</div>}{client.camera ? <><img data-capture-key={client.camera.captureKey} src={client.camera.url} alt={t("cameraAlt")} onLoad={event=>{setImageSize([event.currentTarget.naturalWidth,event.currentTarget.naturalHeight]);client.markCameraDecoded(event.currentTarget.currentSrc,true);if(client.camera&&event.currentTarget.currentSrc===client.camera.url)setDisplayed(client.camera);}} onError={event=>{client.markCameraDecoded(event.currentTarget.currentSrc,false);setDisplayed(null);}} />{editor&&<CorridorOverlay editor={editor} size={imageSize} t={t}/>}</> : <Empty><Camera size={32} />{t(transitioning?"visionPreviewRestarting":client.mediaError ?? (client.cameraStream ? "frameMissing" : "showPreview"))}{onObservation&&<><p className={styles.hint}>{t("loopPreviewHelp")}</p><Button tone="primary" disabled={observationDisabled} onClick={onObservation}>{t("loopPreparePreview")}</Button></>}</Empty>}</div>
+    <div className={styles.camera}>{client.camera&&notice&&<div className={transitioning?styles.cameraPaused+" "+styles.cameraTransition:styles.cameraPaused} role="status" data-testid="vision-preview-paused">{t(notice!)}</div>}{client.camera ? <><img data-capture-key={client.camera.captureKey} src={client.camera.url} alt={t("cameraAlt")} onLoad={event=>{const {naturalWidth,naturalHeight}=event.currentTarget;setImageSize(previous=>previous[0]===naturalWidth&&previous[1]===naturalHeight?previous:[naturalWidth,naturalHeight]);client.markCameraDecoded(event.currentTarget.currentSrc,true);if(client.camera&&event.currentTarget.currentSrc===client.camera.url)setDisplayed(client.camera);}} onError={event=>{client.markCameraDecoded(event.currentTarget.currentSrc,false);setDisplayed(null);}} />{editor&&<CorridorOverlay editor={editor} size={imageSize} t={t}/>}</> : <Empty><Camera size={32} />{t(transitioning?"visionPreviewRestarting":client.mediaError ?? (client.cameraStream ? "frameMissing" : "showPreview"))}{onObservation&&<><p className={styles.hint}>{t("loopPreviewHelp")}</p><Button tone="primary" disabled={observationDisabled} onClick={onObservation}>{t("loopPreparePreview")}</Button></>}</Empty>}</div>
     {previewFailure&&<p role="alert" className={styles.hint}>{t(previewFailure)}</p>}
     {editor&&<p className={styles.hint} data-testid="sector-draft-hint">{t("sectorDraftHint")}</p>}
-    {selected === "venom" && <VisionSectors frame={client.camera&&displayed?.url===client.camera.url?client.camera:null} t={t}/>}
-    <SampleCapture sourceSession={client.config?.session??null} deviceId={client.config?.device_id??null} frame={client.camera&&client.cameraStream&&displayed?.url===client.camera.url?displayed:null} visible={!!client.cameraStream} t={t}/>
+    {selected === "venom" && <VisionSectors frame={visible} t={t}/>}
+    <SampleCapture sourceSession={client.config?.session??null} deviceId={client.config?.device_id??null} frame={client.cameraStream?visible:null} visible={!!client.cameraStream} t={t}/>
     {selected === "venom" && <p className={styles.hint}>{t("visionLegend")}</p>}
-    {client.camera?.visionState && <p className={styles.hint}>{t(client.camera.stale?"loopDecision":"state")}: {t("vision." + client.camera.visionState)} · {client.camera.inferenceMs} ms · <code>{client.camera.visionReason}</code>{client.camera.visionPolicy === "diagnostic_default" && <> · {t("visionDefaultZone")}</>}</p>}
-    {client.camera?.analysis && <p className={styles.small} data-testid="frame-identity">{t("frameSequence")}: {String(sourceIdentity?.sequence)} · {String(sourceIdentity?.frame_id).slice(0,12)} · {t("frameRelativeAge")}: {Math.round(frameAge(client.camera)??0)} ms · {t("frameAnalysisRevision")}: r{String(client.camera.analysis.config_revision)}</p>}
-    {client.camera && <div className={styles.meta}><Pill>{t(client.camera.stale?"framePaused":Number(client.camera.recordedAt)>0 ? "frameReplay" : client.camera.knownFreshness ? "frameFresh" : "frameTimeUnknown")}</Pill>{Number(client.camera.recordedAt)>0&&<span>{t("frameRecorded")}: {formatTime(Number(client.camera.recordedAt),language)}</span>}{client.camera.fileAt && <span>{t("frameAt")}: {formatTime(Number(client.camera.fileAt), language)}</span>}{client.camera.source && <span>{t("source")}: {client.camera.source}</span>}</div>}
+    {visible?.visionState && <p className={styles.hint}>{t(visible.stale?"loopDecision":"state")}: {t("vision." + visible.visionState)} · {visible.inferenceMs} ms · <code>{visible.visionReason}</code>{visible.visionPolicy === "diagnostic_default" && <> · {t("visionDefaultZone")}</>}</p>}
+    {visible?.analysis && <p className={styles.small} data-testid="frame-identity">{t("frameSequence")}: {String(sourceIdentity?.sequence)} · {String(sourceIdentity?.frame_id).slice(0,12)} · {t("frameRelativeAge")}: {Math.round(frameAge(visible)??0)} ms · {t("frameAnalysisRevision")}: r{String(visible.analysis.config_revision)}</p>}
+    {visible && <div className={styles.meta}><Pill>{t(visible.stale?"framePaused":Number(visible.recordedAt)>0 ? "frameReplay" : visible.knownFreshness ? "frameFresh" : "frameTimeUnknown")}</Pill>{Number(visible.recordedAt)>0&&<span>{t("frameRecorded")}: {formatTime(Number(visible.recordedAt),language)}</span>}{visible.fileAt && <span>{t("frameAt")}: {formatTime(Number(visible.fileAt), language)}</span>}{visible.source && <span>{t("source")}: {visible.source}</span>}</div>}
   </Panel>;
 }

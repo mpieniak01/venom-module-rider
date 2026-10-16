@@ -44,6 +44,32 @@ async (page, fixtures) => {
   const states = () => Promise.all(["left","center","right"].map(side=>sector(side).getAttribute("data-sector-state")));
   await wait(async()=>await sector("left").count()===1 && (await states()).join()==="obstacle,clear,clear","decoded image sectors missing");
   check((await states()).join()==="obstacle,clear,clear","cards borrowed the deliberately conflicting newer loop state");
+  // Observe the intermediate DOM commits as well as painted frames: final-state
+  // assertions alone missed the unavailable/unknown flash on every JPEG load.
+  const stability = await page.evaluate(async () => {
+    const root=document.querySelector('[data-testid="directional-results"]');
+    const image=document.querySelector('[data-testid="camera-preview-toggle"]').closest("section").querySelector("img");
+    const events=[],painted=[];let last="",lastPaint="",running=true,loads=0;
+    const read=()=>({space:root.dataset.sectorSpace,states:[...root.querySelectorAll('[data-sector-state]')].map(e=>e.dataset.sectorState).join(","),height:Math.round(root.getBoundingClientRect().height)});
+    const capture=()=>{const row=read(),key=JSON.stringify(row);if(key!==last){events.push(row);last=key;}};
+    const paint=()=>{if(!running)return;const row=read(),key=JSON.stringify(row);if(key!==lastPaint){painted.push(row);lastPaint=key;}requestAnimationFrame(paint);};
+    const observer=new MutationObserver(capture);
+    observer.observe(root,{attributes:true,childList:true,subtree:true,characterData:true});capture();requestAnimationFrame(paint);
+    let loaded,deadline;
+    try {
+      await new Promise((resolve,reject)=>{
+        loaded=()=>{if(++loads>=8)resolve();};
+        image.addEventListener("load",loaded);
+        deadline=setTimeout(()=>reject(new Error("eight fresh JPEG loads required")),8000);
+      });
+      await new Promise(requestAnimationFrame);capture();
+      return {loads,events,painted};
+    } finally {running=false;observer.disconnect();image.removeEventListener("load",loaded);clearTimeout(deadline);}
+  });
+  for(const row of [...stability.events,...stability.painted])
+    check(row.space==="image"&&row.states==="obstacle,clear,clear","fresh image replacement flashed unknown sector cards");
+  check(new Set(stability.events.map(row=>row.height)).size===1,"sector block jumped during fresh image replacement");
+  scenarios.push({freshReplacementStability:stability});
   for(const width of [390,768,1600]){
     await page.setViewportSize({width,height:1100});
     await page.getByTestId("directional-results").scrollIntoViewIfNeeded();
