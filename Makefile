@@ -38,3 +38,7 @@ DA3_PYTHON ?= data/da3-research/venv/bin/python
 DA3_SDK_PATH ?= data/da3-research/sdk/src
 research-depth:
 	PYTHONPATH=.:$(DA3_SDK_PATH) $(DA3_PYTHON) scripts/compare_depth_models.py $(ARGS)
+
+.PHONY: research-mapping
+research-mapping:
+	PYTHONPATH=$(HOST):. $(PYTHON) -m scripts.mapping_research $(ARGS)

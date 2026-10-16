@@ -222,3 +222,53 @@ def test_reject_changed_source_and_disk_full(tmp_path, monkeypatch):
     monkeypatch.setattr(shutil, "disk_usage", lambda _: SimpleNamespace(free=0))
     with pytest.raises(ValueError, match="mapping_disk_full"):
         research.publish(tmp_path / "full.json", {})
+
+
+def test_cli_limits_are_scoped_and_report_creation_is_explicit(tmp_path, monkeypatch):
+    source = archive(tmp_path, texture=False)
+    output = tmp_path / "derived" / "main.json"
+    calls = []
+    monkeypatch.setattr(
+        research.os, "nice", lambda value: calls.append(("nice", value))
+    )
+    monkeypatch.setattr(
+        research.os,
+        "sched_setaffinity",
+        lambda pid, cpus: calls.append(("affinity", len(cpus))),
+    )
+    monkeypatch.setattr(
+        research.resource, "setrlimit", lambda *args: calls.append(("limit", args))
+    )
+    monkeypatch.setattr(
+        research, "deny_network", lambda: calls.append(("offline", True))
+    )
+    assert research.main(["--archive", str(source), "--output", str(output)]) == 0
+    assert ("offline", True) in calls and ("nice", 10) in calls
+    assert any(row[0] == "affinity" and row[1] <= 2 for row in calls)
+    assert json.loads(output.read_text())["pose"]["state"] == "not_requested"
+
+
+def test_empty_input_and_oversized_source_are_rejected(tmp_path, monkeypatch):
+    source = archive(tmp_path)
+    import hashlib
+
+    from venom_module_rider.samples_archive import canonical
+
+    with zipfile.ZipFile(source) as archive_zip:
+        manifest = json.loads(archive_zip.read("manifest.json"))
+    manifest["samples"] = []
+    check = {
+        key: value
+        for key, value in manifest.items()
+        if key not in {"dataset_revision", "exported_at"}
+    }
+    manifest["dataset_revision"] = hashlib.sha256(canonical(check)).hexdigest()
+    empty = tmp_path / "empty.zip"
+    with zipfile.ZipFile(empty, "w") as archive_zip:
+        archive_zip.writestr("manifest.json", canonical(manifest))
+    with pytest.raises(ValueError, match="mapping_input_limit"):
+        research.load_archive(empty)
+    monkeypatch.setattr(research, "MAX_INPUT_BYTES", 1)
+    monkeypatch.setattr(research, "MAX_REPORT_BYTES", 1)
+    with pytest.raises(ValueError, match="mapping_input_limit"):
+        research.audit(source)

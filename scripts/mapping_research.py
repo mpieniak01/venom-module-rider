@@ -157,6 +157,9 @@ def overlap(images):
 
 def pose_hypothesis(images, *, catalog=None):
     """Retained DA3 Small, official native forward; CPU, no new checkpoint."""
+    selected = images[:5]
+    if len(selected) < 2 or len({image.size for image in selected}) != 1:
+        raise ValueError("mapping_pose_views")
     import numpy as np
     import torch
 
@@ -171,9 +174,6 @@ def pose_hypothesis(images, *, catalog=None):
     start = time.perf_counter()
     candidate = Candidate(profile.backend, profile.model, "cpu", profile.resolution)
     load_ms = (time.perf_counter() - start) * 1000
-    selected = images[:5]
-    if len(selected) < 2 or len({image.size for image in selected}) != 1:
-        raise ValueError("mapping_pose_views")
     start = time.perf_counter()
     assert candidate.processor is not None
     batch, _, _ = candidate.processor(
@@ -258,6 +258,18 @@ def audit(source, *, with_pose=False, catalog=None):
             for row in inputs
         ],
         "code_fingerprint": code_fingerprint(),
+        "parameters": {
+            "orb_features": 600,
+            "ratio_test": 0.75,
+            "ransac_threshold_px": 3.0,
+            "minimum_inliers": 16,
+            "minimum_inlier_fraction": 0.3,
+            "thumbnail_max_side": 640,
+            "pose_max_views": 5,
+            "pose_reference_view": "first",
+            "pose_resolution": 280,
+            "input_transform": "aspect_preserving_thumbnail",
+        },
         "readiness": ready,
         "overlap": matching,
         "panorama": {

@@ -392,3 +392,5 @@ flow, limits, source clocks, local import, API and rollback.
 ## Stored session analysis
 
 The sample library can explicitly analyse stored originals with retained DA2 or DA3 Small profiles, compare immutable runs and export reports while the Pi is disconnected. See [the analysis contract](docs/ANALYSIS_V1.md). Collection and analysis are separate steps; offline results never grant movement permission.
+
+Offline mapping qualification: [geometry research v1](docs/MAPPING_RESEARCH_V1.md).
