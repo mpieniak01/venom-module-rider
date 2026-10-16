@@ -151,3 +151,18 @@ retained processed frames; recovery requires another decoded valid response.
 A standalone result reports host-received age and STOP. This age is a lower bound,
 not a measurement of Pi capture age. Displaying it never qualifies calibration,
 supplies the required Pi-run evidence or grants movement.
+
+
+Standalone readers share one in-flight RAW capture and model call for the same
+device, host session, handoff epoch and policy. Cancelling a browser does not
+cancel work shared with another reader. Module shutdown cancels pending snapshots.
+
+Cached results are selected after Pi metadata reads, then checked again after
+shared inference. A delayed metadata response cannot return a previously selected,
+expired or replaced mask as fresh. The existing 500 ms server cache limit and
+1000 ms browser display limit are unchanged.
+
+A transient vision_busy response may retain the last decoded image only within
+its original display lifetime. Repeated retries cannot renew the image timestamp,
+restore an expired frame, or grant motion. Other camera failures still invalidate
+the live label immediately.

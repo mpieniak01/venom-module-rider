@@ -60,36 +60,52 @@ async def processed_camera(request: Request):
     else:
         cached = loop.preview(client.device.id, corridor=corridor, revision=revision)
     if cached is None:
-        payload, mime, raw_headers = await domain.camera("raw")
-        if mime not in {"image/jpeg", "image/png"}:
-            raise RiderError("vision_input_format", 415)
-        normalized = {key.lower(): value for key, value in raw_headers.items()}
-        if (
-            normalized.get("x-rider-stale") == "true"
-            or normalized.get("x-rider-placeholder") == "true"
-        ):
-            raise RiderError("frame_stale", 409)
-        # Legacy snapshots expose a Pi wall-clock timestamp, not a relative age.
-        # Do not compare clocks on different hosts or grant motion from this path.
-        frame = VisionFrame(
-            protocol_version=1,
-            run_id=uuid.uuid4().hex,
-            frame_id=uuid.uuid4().hex,
-            sequence=1,
-            config_revision=revision,
-            age_ms=0.0,
-            deadline_ms=500,
-            mode="observe",
-            corridor=corridor,
-            perception=PerceptionSettings.model_validate(perception),
-        )
-        result = await loop.decide(
+
+        async def produce():
+            payload, mime, raw_headers = await domain.camera("raw")
+            if mime not in {"image/jpeg", "image/png"}:
+                raise RiderError("vision_input_format", 415)
+            normalized = {key.lower(): value for key, value in raw_headers.items()}
+            if (
+                normalized.get("x-rider-stale") == "true"
+                or normalized.get("x-rider-placeholder") == "true"
+            ):
+                raise RiderError("frame_stale", 409)
+            # Legacy snapshots expose a Pi wall-clock timestamp, not a relative age.
+            # Do not compare clocks on different hosts or grant motion from this path.
+            frame = VisionFrame(
+                protocol_version=1,
+                run_id=uuid.uuid4().hex,
+                frame_id=uuid.uuid4().hex,
+                sequence=1,
+                config_revision=revision,
+                age_ms=0.0,
+                deadline_ms=500,
+                mode="observe",
+                corridor=corridor,
+                perception=PerceptionSettings.model_validate(perception),
+            )
+            result = await loop.decide(
+                client.device.id,
+                frame,
+                payload,
+                with_preview=True,
+                input_ticket=normalized.get("x-rider-capture-key"),
+            )
+
+            return result
+
+        # Separate browsers share RAW retrieval and one model call. Session,
+        # policy and handoff epoch prevent joining another device/configuration.
+        key = (
             client.device.id,
-            frame,
-            payload,
-            with_preview=True,
-            input_ticket=normalized.get("x-rider-capture-key"),
+            getattr(domain, "session", None),
+            getattr(domain, "epoch", None),
+            tuple(corridor),
+            revision,
+            json.dumps(perception, sort_keys=True),
         )
+        result = await loop.share_snapshot(key, produce)
         cached = loop.preview(client.device.id, corridor=corridor, revision=revision)
         if cached is None:
             raise RiderError(result["reason"], 503)

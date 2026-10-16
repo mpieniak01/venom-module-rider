@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { decodePreview, nextPreviewDelay, previewLifetime, previewRequestCurrent } from "../../web-next/lib/preview-media";
+import { decodePreview, nextPreviewDelay, previewLifetime, previewRequestCurrent, retainedPreview } from "../../web-next/lib/preview-media";
 
 test("camera cadence is start-to-start while a slow read never overlaps another request", () => {
   assert.equal(nextPreviewDelay(1000, 1000), 500);
@@ -66,4 +66,24 @@ test("handoff pauses only processed preview and rejects pre-handoff frames after
   for(const [kind,path] of [["camera","/camera/raw"],["camera","/camera/proc"],["face","/face/runtime/frame"]] as const){
     assert.equal(previewRequestCurrent(kind,path,true,0,2),true,path);
   }
+});
+
+
+test("one busy reply keeps the original display frame only until its original expiry", () => {
+  const frame = { ageMs: 50, receivedAt: 1000, stale: false, knownFreshness: true, id: "capture-17" };
+  assert.equal(retainedPreview(frame, true, 1500), frame);
+  assert.equal(previewLifetime(retainedPreview(frame, true, 1500), 1500), 450);
+  const expired = retainedPreview(frame, true, 1950);
+  assert.equal(expired.stale, true);
+  assert.equal(expired.knownFreshness, false);
+  assert.equal(expired.receivedAt, 1000);
+  assert.equal(expired.ageMs, 50);
+  assert.equal(retainedPreview(expired, true, 1951), expired);
+});
+
+test("unknown freshness and hard camera failures never retain a live label", () => {
+  const frame = { ageMs: 50, receivedAt: 1000, stale: false, knownFreshness: true };
+  assert.equal(retainedPreview(frame, false, 1100).stale, true);
+  assert.equal(retainedPreview({ ...frame, knownFreshness: false }, true, 1100).stale, true);
+  assert.equal(retainedPreview({ ...frame, ageMs: NaN }, true, 1100).stale, true);
 });

@@ -46,3 +46,12 @@ export function previewRequestCurrent(
 ): boolean {
   return kind !== "camera" || path !== "/camera/venom" || !transitioning && requestEpoch === currentEpoch;
 }
+
+
+/** Busy retries may keep the original frame, never renew its timestamp or TTL. */
+export function retainedPreview<T extends FrameTiming & { stale: boolean; knownFreshness: boolean }>(
+  previous: T, busyRetry = false, now = performance.now(),
+): T {
+  if (previous.stale || busyRetry && previous.knownFreshness && (previewLifetime(previous, now) ?? 0) > 0) return previous;
+  return { ...previous, stale: true, knownFreshness: false };
+}

@@ -36,6 +36,7 @@ class VisionLoop:
         self.closed = False
         self.previews = OrderedDict()
         self.preview_changed = asyncio.Event()
+        self.snapshot_tasks = {}
 
     def _detect_depth(self, payload, frame):
         if frame.protocol_version == 3 and frame.avoidance.geometry.mode == "ground":
@@ -409,6 +410,25 @@ class VisionLoop:
                 return None
         return None
 
+    async def share_snapshot(self, key, produce):
+        """Share one diagnostic task; cancelled readers do not cancel it."""
+        if self.closed:
+            raise RiderError("module_closed", 503)
+        task = self.snapshot_tasks.get(key)
+        if task is None:
+            if len(self.snapshot_tasks) >= 16:
+                raise RiderError("vision_busy", 429)
+            task = asyncio.create_task(produce())
+            self.snapshot_tasks[key] = task
+            task.add_done_callback(lambda done: self._drain_snapshot(key, done))
+        return await asyncio.shield(task)
+
+    def _drain_snapshot(self, key, task):
+        if self.snapshot_tasks.get(key) is task:
+            self.snapshot_tasks.pop(key)
+        if not task.cancelled():
+            task.exception()
+
     def _drain(self, task):
         if not task.cancelled():
             task.exception()
@@ -422,6 +442,10 @@ class VisionLoop:
         self.runs.clear()
         self.previews.clear()
         self.preview_changed.set()
+        snapshots = list(self.snapshot_tasks.values())
+        self.snapshot_tasks.clear()
+        for task in snapshots:
+            task.cancel()
         pending = [task for task in (self.busy, self.depth_busy) if task is not None]
-        if pending:
-            await asyncio.gather(*pending, return_exceptions=True)
+        if pending or snapshots:
+            await asyncio.gather(*pending, *snapshots, return_exceptions=True)

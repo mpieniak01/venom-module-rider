@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api-client";
 import { getApiBaseUrl } from "@/lib/env";
 import { readAnalysis } from "./vision-frame";
-import { decodePreview, nextPreviewDelay, previewLifetime, previewRequestCurrent } from "./preview-media";
+import { decodePreview, nextPreviewDelay, previewLifetime, previewRequestCurrent, retainedPreview } from "./preview-media";
 import { configForConnection } from "./device-session";
 import { HoldController, readHoldTiming, type MovementIntent } from "./hold-controller";
 import { canRequestArm, commandAccepted, controlIdentity, data, errorCode, faceRunning, featureRows, finite, frameRequested, record, safetyOf, settingsOf, str, type DeviceConfig, type Direction, type JsonRecord, type RiderStatus, type Section } from "./model";
@@ -60,9 +60,9 @@ export function useRider(section: Section) {
     onMode: setManualMode,
     onError: (error) => setNotice({ key: errorCode(error) === "hold_timed_out" ? "holdExpired" : "requestFailed", code: errorCode(error), tone: "error" }),
   }));
-  const replaceFrame = useCallback((kind: "camera" | "face", next: Frame | null, retain = false) => {
+  const replaceFrame = useCallback((kind: "camera" | "face", next: Frame | null, retain = false, busyRetry = false) => {
     const setter = kind === "camera" ? setCamera : setRuntimeFrame;
-    setter(previous => { if (retain && kind === "camera" && !next && previous) return previous.stale ? previous : { ...previous, stale: true, knownFreshness: false }; if (previous) URL.revokeObjectURL(previous.url); return next; });
+    setter(previous => { if (retain && kind === "camera" && !next && previous) return retainedPreview(previous, busyRetry); if (previous) URL.revokeObjectURL(previous.url); return next; });
   }, []);
   const setCameraTransition = useCallback((transitioning: boolean) => {
     if (cameraTransitionRef.current !== transitioning) cameraTransitionEpoch.current += 1;
@@ -82,7 +82,7 @@ export function useRider(section: Section) {
       let code = "";
       try { code = String(record(record(await response.json()).detail).code ?? ""); } catch { /* Non-JSON frame failure. */ }
       if (signal.aborted || !currentPreview() || !frameRequested(kind, path, sectionRef.current, mediaRef.current)) return;
-      replaceFrame(kind, null, kind === "camera");
+      replaceFrame(kind, null, kind === "camera", kind === "camera" && path === "/camera/venom" && response.status === 429 && code === "vision_busy");
       setMediaError(code === "camera_off" ? "visionCameraOff" : code === "vision_busy" ? "visionBusy" : path === "/camera/venom" ? "visionPreviewUnavailable" : "frameMissing");
       return;
     }
