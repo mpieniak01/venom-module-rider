@@ -14,7 +14,11 @@ from .steering import plan as steering_plan
 
 
 class VisionLoop:
-    def __init__(self, detector=None, clock=time.monotonic):
+    def __init__(
+        self, detector=None, clock=time.monotonic, *, samples=None, source_session=None
+    ):
+        self.samples = samples
+        self.source_session = source_session
         self.detector = detector or FloorDetector()
         self.depth_detector = DepthDetector()
         self.clock = clock
@@ -53,7 +57,9 @@ class VisionLoop:
             "physical_clearance": "unverified",
         }
 
-    async def decide(self, device_id, frame, payload, *, with_preview=False):
+    async def decide(
+        self, device_id, frame, payload, *, with_preview=False, input_ticket=None
+    ):
         if self.closed:
             raise RiderError("module_closed", 503)
         if not frame.valid_corridor() or frame.age_ms >= frame.deadline_ms:
@@ -254,6 +260,39 @@ class VisionLoop:
                 progress_delta=planner.get("progress_delta"),
                 pose_resets=planner.get("pose_resets", 0),
             )
+        capture_key = None
+        if self.samples is not None:
+            from .sample_sources import vision
+
+            capture_key = vision(
+                self.samples,
+                device_id,
+                self.source_session()
+                if callable(self.source_session)
+                else self.source_session,
+                frame,
+                payload,
+                elapsed=elapsed,
+                input_ticket=input_ticket,
+                diagnostic=with_preview,
+            )
+            if capture_key:
+                self.samples.frames.annotate_prediction(
+                    capture_key,
+                    {
+                        **{
+                            key: value
+                            for key, value in result.items()
+                            if not key.startswith("_")
+                        },
+                        "model_sha256": model,
+                        "action": action,
+                        "vision_action": vision_action,
+                        "input_frame": frame.model_dump(mode="json"),
+                        "perception_engine": frame.perception.engine,
+                        "inference_ms": round(elapsed, 2),
+                    },
+                )
         image = result.pop("_preview", None)
         if image is not None:
             self.previews[device_id] = (
@@ -264,6 +303,7 @@ class VisionLoop:
                     "frame_id": frame.frame_id,
                     "run_id": frame.run_id,
                     "sequence": frame.sequence,
+                    "capture_key": capture_key,
                     "clear_count": count,
                     "vision_action": vision_action,
                     "model_sha256": model,

@@ -84,6 +84,7 @@ class RiderService:
         self.selection_warning: str | None = None
         self.conversation_invalidator = None
         self.conversation_drainer = None
+        self.samples: Any = None
 
     def config(self):
         return {
@@ -521,7 +522,27 @@ class RiderService:
             "active",
         }:
             raise RiderError("camera_unknown", 503)
-        return await client.image("/camera/" + stream)
+        payload, mime, headers = await client.image("/camera/" + stream)
+        headers = {
+            key: value
+            for key, value in headers.items()
+            if key.lower() != "x-rider-capture-key"
+        }
+        if stream == "raw" and self.samples is not None:
+            from .sample_sources import raw
+
+            key = raw(
+                self.samples,
+                client.device.id,
+                self.session,
+                payload,
+                mime,
+                headers,
+                mode=client.device.mode,
+            )
+            if key:
+                headers["x-rider-capture-key"] = key
+        return payload, mime, headers
 
     async def _cancel_transport_tasks(self):
         tasks = (

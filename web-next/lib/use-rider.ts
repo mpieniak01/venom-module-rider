@@ -11,7 +11,7 @@ import { canRequestArm, commandAccepted, controlIdentity, data, errorCode, faceR
 
 const BASE = "/api/v1/rider";
 export type Notice = { key: string; code?: string; tone: "error" | "success" | "info" };
-export type Frame = { analysis?: JsonRecord; ageMs?: number; receivedAt?: number; ageSource?: string; decoded?: boolean; url: string; stale: boolean; source: string; fileAt: string; id: string; knownFreshness: boolean; visionState: string; visionReason: string; inferenceMs: string; visionPolicy: string; recordedAt: string };
+export type Frame = { captureKey?: string; analysis?: JsonRecord; ageMs?: number; receivedAt?: number; ageSource?: string; decoded?: boolean; url: string; stale: boolean; source: string; fileAt: string; id: string; knownFreshness: boolean; visionState: string; visionReason: string; inferenceMs: string; visionPolicy: string; recordedAt: string };
 import { continuousAvailable, controlChanged, freshControl, navigationAvailable, navigationView, observationClock, retainControl, type ControlClock } from "./navigation";
 export function useRider(section: Section) {
   const [config, setConfig] = useState<DeviceConfig | null>(null);
@@ -100,7 +100,7 @@ export function useRider(section: Section) {
         URL.revokeObjectURL(url); return;
       }
       const expired = kind === "camera" && path === "/camera/venom" && previewLifetime({ageMs,receivedAt}) === 0;
-      replaceFrame(kind, { analysis: readAnalysis(response.headers.get("X-Rider-Analysis-Json")), ageMs, receivedAt, ageSource: response.headers.get("X-Rider-Frame-Age-Source") ?? undefined, decoded: kind === "camera", url, stale: expired, knownFreshness: stale === "false" && !expired, source: response.headers.get("X-Rider-Source") || response.headers.get("X-Face-Source") || "", fileAt: response.headers.get("X-Rider-File-Observed-At") || "", id: response.headers.get("X-Rider-Frame-Id") || "", visionState: response.headers.get("X-Rider-Vision-State") || "", visionReason: response.headers.get("X-Rider-Vision-Reason") || "", inferenceMs: response.headers.get("X-Rider-Vision-Inference-Ms") || "", visionPolicy: response.headers.get("X-Rider-Vision-Policy") || "", recordedAt: response.headers.get("X-Rider-Recorded-At") || "" });
+      replaceFrame(kind, { captureKey: response.headers.get("X-Rider-Capture-Key") ?? undefined, analysis: readAnalysis(response.headers.get("X-Rider-Analysis-Json")), ageMs, receivedAt, ageSource: response.headers.get("X-Rider-Frame-Age-Source") ?? undefined, decoded: kind === "camera", url, stale: expired, knownFreshness: stale === "false" && !expired, source: response.headers.get("X-Rider-Source") || response.headers.get("X-Face-Source") || "", fileAt: response.headers.get("X-Rider-File-Observed-At") || "", id: response.headers.get("X-Rider-Frame-Id") || "", visionState: response.headers.get("X-Rider-Vision-State") || "", visionReason: response.headers.get("X-Rider-Vision-Reason") || "", inferenceMs: response.headers.get("X-Rider-Vision-Inference-Ms") || "", visionPolicy: response.headers.get("X-Rider-Vision-Policy") || "", recordedAt: response.headers.get("X-Rider-Recorded-At") || "" });
       setMediaError(null);
     } catch (error) {
       URL.revokeObjectURL(url);

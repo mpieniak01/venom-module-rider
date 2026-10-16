@@ -199,3 +199,17 @@
 .manualPads { display: flex; flex-wrap: wrap; justify-content: center; gap: 16px; }
 .padLabel { display: block; text-align: center; font-size: 12px; margin-top: 12px; }
 .manualFeedback { display: grid; gap: 6px; padding: 12px; margin: 10px 0; border: 1px solid var(--r-border); border-radius: 12px; font-size: 12px; }
+
+.sampleCapture { padding: 12px 0; border-bottom: 1px solid var(--r-border); font-size: 12px; }
+.samplesGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin: 16px 0; }
+.sampleThumb { display: flex; flex-direction: column; gap: 6px; text-align: left; min-width: 0; padding: 8px; background: var(--ui-surface); border: 1px solid var(--r-border); border-radius: 10px; color: var(--text-primary); cursor: pointer; font: inherit; font-size: 11px; overflow-wrap: anywhere; }
+.sampleThumb[aria-pressed=true] { border-color: var(--r-accent); }
+.sampleThumb img { width: 100%; height: 100px; object-fit: contain; background: #030b14; }
+.sampleEditor { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; border-top: 1px solid var(--r-border); margin-top: 20px; padding-top: 20px; }
+.sampleOriginal { width: 100%; max-height: 380px; object-fit: contain; background: #030b14; }
+@container rider (max-width: 640px) { .sampleEditor { grid-template-columns: minmax(0, 1fr); } }
+
+.sampleEditor > div { min-width: 0; }
+.sampleEditor code { display: block; overflow-wrap: anywhere; margin-top: 8px; }
+.sampleEditor .field { margin-bottom: 12px; }
+.sampleCapture .meta code { overflow-wrap: anywhere; }
