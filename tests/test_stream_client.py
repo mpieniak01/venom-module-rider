@@ -238,3 +238,85 @@ async def test_bootstrap_failure_closes_persistent_http_source_before_reconnect(
         await server.wait_closed()
         for writer in writers:
             writer.close()
+
+
+async def test_cancel_during_response_close_cannot_poison_the_single_http_slot():
+    import asyncio
+
+    from test_stream_contract import native
+
+    entered, release = asyncio.Event(), asyncio.Event()
+    writers, calls = [], [0]
+
+    async def serve(reader, writer):
+        writers.append(writer)
+        try:
+            await reader.readuntil(b"\r\n\r\n")
+            calls[0] += 1
+            frame = native(calls[0])
+            payload = wire(frame.payload, frame.source.model_dump(mode="json"))
+            payload = payload.removesuffix(b"--rider--\r\n")
+            writer.write(
+                b"HTTP/1.1 200 OK\r\n"
+                b"Content-Type: multipart/x-mixed-replace; boundary=rider\r\n"
+                b"Transfer-Encoding: chunked\r\n\r\n"
+                + f"{len(payload):x}\r\n".encode()
+                + payload
+                + b"\r\n"
+            )
+            await writer.drain()
+            await reader.read()
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    class CloseBarrier(httpx.AsyncByteStream):
+        def __init__(self, inner):
+            self.inner = inner
+
+        async def __aiter__(self):
+            async for chunk in self.inner:
+                yield chunk
+
+        async def aclose(self):
+            entered.set()
+            await release.wait()
+            await self.inner.aclose()
+
+    async def response_hook(response):
+        if calls[0] == 1:
+            # Pause the actual pool-owned connection close, after the pool marks
+            # it closed but before it removes the request and frees its slot.
+            pool_stream = response.stream._stream._httpcore_stream
+            pool_stream._stream = CloseBarrier(pool_stream._stream)
+
+    server = await asyncio.start_server(serve, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    client = PiClient(Device("pi", "HTTP cleanup fixture", f"http://127.0.0.1:{port}"))
+    client.media_http.event_hooks["response"] = [response_hook]
+    first, second, closing = client.mjpeg(), None, None
+    try:
+        assert (await anext(first)).source.sequence == 1
+        closing = asyncio.create_task(first.aclose())
+        await asyncio.wait_for(entered.wait(), 1)
+        # Profile teardown may itself be cancelled more than once by its caller.
+        for _ in range(2):
+            closing.cancel()
+            await asyncio.sleep(0)
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await closing
+        second = client.mjpeg()
+        assert (await asyncio.wait_for(anext(second), 1)).source.sequence == 2
+    finally:
+        release.set()
+        if closing is not None:
+            await asyncio.gather(closing, return_exceptions=True)
+        await first.aclose()
+        if second is not None:
+            await second.aclose()
+        await client.close()
+        server.close()
+        await server.wait_closed()
+        for writer in writers:
+            writer.close()

@@ -10,6 +10,7 @@ from contextlib import aclosing, asynccontextmanager
 from dataclasses import dataclass, field, replace
 
 from .age_anchor import SourceAgeAnchor
+from .client import finish_native_cleanup
 from .errors import RiderError
 from .stream_contract import NativeFrame, SourceReference, canonical_jpeg
 
@@ -333,10 +334,17 @@ class NativeStreamHub:
         ]
         for task in tasks:
             task.cancel()
-        if tasks or canonical:
-            await asyncio.gather(*tasks, *canonical, return_exceptions=True)
-        if self.connection is connection:
-            self.connection = None
+        try:
+            if tasks or canonical:
+                # A cancelled profile/receiver request must not send another
+                # cancellation into a reader already releasing its HTTP slot,
+                # nor abandon canonical threads still owned by this generation.
+                await finish_native_cleanup(
+                    asyncio.gather(*tasks, *canonical, return_exceptions=True)
+                )
+        finally:
+            if self.connection is connection:
+                self.connection = None
 
     async def invalidate(self):
         async with self.lock:

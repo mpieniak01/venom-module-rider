@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -132,6 +133,22 @@ def json_timeout(path: str, method: str, stop: bool) -> httpx.Timeout:
         elif method == "GET" and path.startswith("/api/services/"):
             duration = 10.0
     return httpx.Timeout(duration, connect=0.5, pool=0.5)
+
+
+async def finish_native_cleanup(task):
+    """Finish owned cleanup even if its caller is cancelled again, then propagate it."""
+    cancelled = False
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            cancelled = True
+            if task.cancelled():
+                raise
+    result = task.result()
+    if cancelled:
+        raise asyncio.CancelledError
+    return result
 
 
 class PiClient:
@@ -326,12 +343,16 @@ class PiClient:
         from .stream_framing import MultipartJpegParser, boundary_from_type
 
         try:
-            async with self.media_http.stream(
+            request = self.media_http.build_request(
                 "GET",
                 "/api/resource/camera/stream.mjpg",
                 headers={"Accept": "multipart/x-mixed-replace"},
                 timeout=httpx.Timeout(1.0, connect=0.5, pool=0.5),
-            ) as response:
+            )
+            response = await self.media_http.send(request, stream=True)
+            chunks = response.aiter_bytes()
+            reading = None
+            try:
                 if response.is_redirect:
                     raise RiderError("pi_redirect_refused", 502)
                 if response.status_code >= 400:
@@ -339,7 +360,16 @@ class PiClient:
                 parser = MultipartJpegParser(
                     boundary_from_type(response.headers.get("content-type", ""))
                 )
-                async for incoming in response.aiter_bytes():
+                while True:
+                    # Do not deliver Task.cancel into httpcore while it may be
+                    # releasing its pool slot after EOF/network failure. Keep
+                    # just one owned I/O future, never a frame backlog.
+                    reading = asyncio.ensure_future(anext(chunks))
+                    try:
+                        incoming = await asyncio.shield(reading)
+                    except StopAsyncIteration:
+                        break
+                    reading = None
                     for offset in range(0, len(incoming), 16384):
                         chunk = incoming[offset : offset + 16384]
                         for headers, payload in parser.feed(chunk):
@@ -353,6 +383,17 @@ class PiClient:
                             frame.validate_payload()
                             yield frame
                 parser.finish()
+            finally:
+
+                async def release():
+                    try:
+                        await response.aclose()
+                    finally:
+                        if reading is not None:
+                            await asyncio.gather(reading, return_exceptions=True)
+                        await chunks.aclose()
+
+                await finish_native_cleanup(asyncio.create_task(release()))
         except httpx.HTTPError as exc:
             raise RiderError("stream_unavailable", 503) from exc
 
