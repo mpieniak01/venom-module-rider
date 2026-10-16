@@ -703,3 +703,76 @@ async def test_cached_status_timing_is_never_redated_as_a_new_age_anchor():
     )
     assert sum(path == "/api/resource/camera/pipeline" for _, path, _ in pi.calls) == 1
     await domain.close()
+
+
+def test_native_prepare_rechecks_cold_pipeline_and_retires_old_camera_authority(
+    monkeypatch,
+):
+    app, service, pi = fixture(monkeypatch)
+    with TestClient(app) as client:
+        detector = Detector()
+        app.state.rider_vision.detector = detector
+        old_source = warmup(client)
+        old_connection = app.state.rider_stream.connection
+        assert old_connection is not None and not old_connection.closed
+
+        # Direct Pi start/stop changes can happen while the host's previous
+        # active pipeline response is still inside its normal 200 ms cache.
+        pi.pipeline.update(
+            active_profile=None,
+            state="starting",
+            camera_session=None,
+            transport_epoch=3,
+            revision=4,
+        )
+        waiting = client.get(
+            "/api/v1/rider/compute/vision/status?stream=true", headers=AUTH
+        )
+        assert waiting.status_code == 200, waiting.text
+        assert waiting.json()["stream"] == {
+            "ready": False,
+            "latest_source": None,
+            "frame_age_ms": None,
+            "error": "stream_not_ready",
+        }
+        assert old_connection.closed and app.state.rider_stream.connection is None
+
+        pi.pipeline.update(
+            active_profile=PROFILE.copy(), state="active", camera_session="next-camera"
+        )
+        pi.latest = native(session="next-camera", epoch=3, revision=4)
+        ready = warmup(client)
+        assert ready["camera_session"] == "next-camera"
+        assert ready["transport_epoch"] == 3 and ready["pipeline_revision"] == 4
+        assert ready != old_source and pi.opened == 2
+        assert detector.calls == 0 and pi.snapshot_requests == 0
+        assert all(method == "GET" for method, _path, _body in pi.calls)
+
+
+@pytest.mark.parametrize("state", ["stopped", "stopping", "starting", "waiting_frame"])
+def test_native_prepare_reports_pending_without_a_camera_session_or_automatic_start(
+    monkeypatch, state
+):
+    app, service, pi = fixture(monkeypatch)
+    pi.pipeline.update(state=state, active_profile=None, camera_session=None)
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/v1/rider/compute/vision/status?stream=true", headers=AUTH
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["stream"]["ready"] is False
+        assert response.json()["stream"]["latest_source"] is None
+        assert pi.opened == 0 and pi.snapshot_requests == 0
+        assert all(method == "GET" for method, _path, _body in pi.calls)
+
+
+def test_native_prepare_does_not_turn_real_camera_failure_into_pending(monkeypatch):
+    app, service, pi = fixture(monkeypatch)
+    pi.pipeline.update(state="failed", active_profile=None)
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/v1/rider/compute/vision/status?stream=true", headers=AUTH
+        )
+        assert response.status_code == 503
+        assert response.json()["detail"]["code"] == "stream_unavailable"
+        assert pi.opened == 0

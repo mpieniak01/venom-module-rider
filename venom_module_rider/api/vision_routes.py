@@ -20,7 +20,25 @@ async def detector_status(request: Request):
         from .pipeline_routes import native_pipeline
 
         domain, hub = request.app.state.rider, request.app.state.rider_stream
-        pipeline = await native_pipeline(domain, device=authenticate(request))
+        pipeline = await native_pipeline(
+            domain, device=authenticate(request), preparing=True
+        )
+        if pipeline.get("state") == "failed":
+            raise RiderError("stream_unavailable", 503)
+        if pipeline.get("state") not in {"active", "waiting_frame"} or not pipeline.get(
+            "camera_session"
+        ):
+            # A cold producer has no admissible source yet. Retire the previous
+            # authority instead of returning its cached readiness or raising a
+            # fatal HTTP error during the caller's bounded preparation window.
+            await hub.invalidate()
+            result["stream"] = {
+                "ready": False,
+                "latest_source": None,
+                "frame_age_ms": None,
+                "error": "stream_not_ready",
+            }
+            return result
         async with hub.lease(domain, pipeline, keepalive=True) as connection:
             try:
                 await hub.frame(connection, timeout=0.5)

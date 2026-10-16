@@ -49,10 +49,12 @@ async def pipeline_action(request: Request):
     )
 
 
-async def native_pipeline(domain, *, device=None, source=None):
+async def native_pipeline(domain, *, device=None, source=None, preparing=False):
     if device is not None and domain.transport().device.id != device:
         raise RiderError("stream_device_not_selected", 409)
-    pipeline = await domain.pipeline()
+    # Preparation runs before the first RAM capture and must not inherit a
+    # cached status from the preceding camera session. It is not a per-frame poll.
+    pipeline = await domain.pipeline(force=preparing)
     if source is not None and (
         pipeline.get("revision") != source.pipeline_revision
         or pipeline.get("transport_epoch") != source.transport_epoch
@@ -61,7 +63,11 @@ async def native_pipeline(domain, *, device=None, source=None):
         pipeline = await domain.pipeline(force=True)
     if not pipeline.get("supported"):
         raise RiderError("camera_pipeline_unsupported", 503)
-    active = pipeline.get("active_profile") or {}
+    active = (
+        pipeline.get("active_profile")
+        or (pipeline.get("profile") if preparing else {})
+        or {}
+    )
     if active.get("remote_transport") != "mjpeg":
         raise RiderError("stream_not_selected", 409)
     return pipeline
