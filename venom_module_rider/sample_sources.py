@@ -29,37 +29,60 @@ def raw(registry, device_id, source_session, payload, mime, headers, *, mode=Non
     observed = values.get("x-rider-file-observed-at")
     recorded = values.get("x-rider-recorded-at")
     replay = recorded not in {None, "", "0", "0.0"}
-    return offer(
-        registry,
-        device_id,
-        payload,
-        mime,
-        {
-            "source_session": values.get("x-rider-run-id"),
-            "host_device_session": source_session,
-            "device_mode": mode,
-            "frame_id": values.get("x-rider-frame-id"),
-            "run_id": values.get("x-rider-run-id"),
-            "sequence": numeric(values.get("x-rider-sequence")),
-            "source_timestamp": recorded if replay else observed,
-            "recorded_at_header": recorded if replay else None,
-            "timestamp_source": "recorded-at-header"
-            if replay
-            else "pi-file-observed-at"
-            if observed
-            else None,
-            "clock_domain": "device-wall-unsynchronised" if observed else None,
-            "source_age_ms": numeric(values.get("x-rider-frame-age-ms")),
-            "age_source": values.get("x-rider-frame-age-source"),
-            "clock_sync_uncertainty_ms": None,
-            "stale": values.get("x-rider-stale") == "true",
-            "transform": None,
-            "telemetry": None,
-            "commands": None,
-            "association": "unmeasured",
-            "input_kind": "raw",
-        },
-    )
+    context = {
+        "source_session": values.get("x-rider-run-id"),
+        "host_device_session": source_session,
+        "device_mode": mode,
+        "frame_id": values.get("x-rider-frame-id"),
+        "run_id": values.get("x-rider-run-id"),
+        "sequence": numeric(values.get("x-rider-sequence")),
+        "source_timestamp": recorded if replay else observed,
+        "recorded_at_header": recorded if replay else None,
+        "timestamp_source": "recorded-at-header"
+        if replay
+        else "pi-file-observed-at"
+        if observed
+        else None,
+        "clock_domain": "device-wall-unsynchronised" if observed else None,
+        "source_age_ms": numeric(values.get("x-rider-frame-age-ms")),
+        "age_source": values.get("x-rider-frame-age-source"),
+        "clock_sync_uncertainty_ms": None,
+        "stale": values.get("x-rider-stale") == "true",
+        "transform": None,
+        "telemetry": None,
+        "commands": None,
+        "association": "unmeasured",
+        "input_kind": "raw",
+    }
+    descriptor = values.get("x-rider-source-json")
+    if descriptor and len(descriptor.encode()) <= 8192:
+        try:
+            from .stream_contract import SourceDescription
+
+            native = SourceDescription.model_validate_json(descriptor)
+            context.update(
+                source_session=native.camera_session,
+                source_timestamp=str(native.captured_monotonic_ns),
+                timestamp_source="pi-capture-monotonic-ns",
+                clock_domain="pi-monotonic-unsynchronised",
+                transform={
+                    **native.image_transform.model_dump(mode="json"),
+                    "applied_on": "venom",
+                },
+                source_identity=native.reference().model_dump(mode="json"),
+                source_sha256=native.sha256,
+                association="exact-source-reference",
+            )
+            # Two browsers or a subsequent model reference must not create a
+            # new receipt age or evict the same displayed frame's ticket.
+            if registry is not None:
+                key = registry.frames.lookup(device_id, context)
+                if key and registry.frames.get(key).payload == payload:
+                    return key
+        except Exception:
+            # Optional provenance and collection must not break live viewing.
+            pass
+    return offer(registry, device_id, payload, mime, context)
 
 
 def vision(

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import time
 
 import httpx
 
@@ -53,6 +54,7 @@ def expected_contract(path: str):
         "/api/navigation/status": ("rider.navigation_loop", 1),
         "/api/compute/config": ("rider.compute", 1),
         "/api/compute/status": ("rider.compute", 1),
+        "/api/resource/camera/pipeline": ("rider.camera_pipeline", 1),
     }
     if path in exact:
         return exact[path]
@@ -146,6 +148,10 @@ class PiClient:
             **options,
             limits=httpx.Limits(max_connections=2, max_keepalive_connections=1),
         )
+        self.media_http = httpx.AsyncClient(
+            **options,
+            limits=httpx.Limits(max_connections=1, max_keepalive_connections=1),
+        )
         self.closed = False
 
     async def json(
@@ -207,6 +213,19 @@ class PiClient:
                     raise RiderError("unsupported_pi_contract", 502)
                 if not isinstance(payload.get("data"), dict):
                     raise RiderError("invalid_pi_response", 502)
+                if (
+                    path == "/api/resource/camera/pipeline"
+                    and type(meta.get("contract_version")) is int
+                    and (
+                        meta.get("contract_id"),
+                        meta.get("contract_version"),
+                    )
+                    == ("rider.resources", 1)
+                ):
+                    # Legacy resource wildcard routes can return a generic
+                    # camera/resource response for an unknown subresource.
+                    # This is explicit lack of pipeline support, not success.
+                    raise RiderError("camera_pipeline_unsupported", 404)
                 expected = expected_contract(path)
                 if (
                     type(meta.get("contract_version")) is not int
@@ -284,7 +303,46 @@ class PiClient:
         except httpx.HTTPError as exc:
             raise RiderError("pi_unreachable", 503) from exc
 
+    async def mjpeg(self):
+        """One persistent camera reader; opening it never starts the Pi camera."""
+        from pydantic import ValidationError
+
+        from .stream_contract import NativeFrame, SourceDescription
+        from .stream_framing import MultipartJpegParser, boundary_from_type
+
+        try:
+            async with self.media_http.stream(
+                "GET",
+                "/api/resource/camera/stream.mjpg",
+                headers={"Accept": "multipart/x-mixed-replace"},
+                timeout=httpx.Timeout(1.0, connect=0.5, pool=0.5),
+            ) as response:
+                if response.is_redirect:
+                    raise RiderError("pi_redirect_refused", 502)
+                if response.status_code >= 400:
+                    raise RiderError("stream_unavailable", response.status_code)
+                parser = MultipartJpegParser(
+                    boundary_from_type(response.headers.get("content-type", ""))
+                )
+                async for incoming in response.aiter_bytes():
+                    for offset in range(0, len(incoming), 16384):
+                        chunk = incoming[offset : offset + 16384]
+                        for headers, payload in parser.feed(chunk):
+                            try:
+                                source = SourceDescription.model_validate_json(
+                                    headers.get("x-rider-source", "")
+                                )
+                            except (ValueError, ValidationError) as exc:
+                                raise RiderError("stream_invalid_source", 502) from exc
+                            frame = NativeFrame(source, payload, time.monotonic())
+                            frame.validate_payload()
+                            yield frame
+                parser.finish()
+        except httpx.HTTPError as exc:
+            raise RiderError("stream_unavailable", 503) from exc
+
     async def close(self):
         self.closed = True
         await self.http.aclose()
         await self.stop_http.aclose()
+        await self.media_http.aclose()

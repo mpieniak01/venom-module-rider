@@ -15,7 +15,19 @@ router = APIRouter(route_class=RiderRoute)
 @router.get("/compute/vision/status")
 async def detector_status(request: Request):
     authenticate(request)
-    return request.app.state.rider_vision.status()
+    result = request.app.state.rider_vision.status()
+    if request.query_params.get("stream") == "true":
+        from .pipeline_routes import native_pipeline
+
+        domain, hub = request.app.state.rider, request.app.state.rider_stream
+        pipeline = await native_pipeline(domain, device=authenticate(request))
+        async with hub.lease(domain, pipeline, keepalive=True) as connection:
+            try:
+                await hub.frame(connection, timeout=0.5)
+            except RiderError:
+                pass
+            result["stream"] = hub.status(connection)
+    return result
 
 
 @router.post("/compute/vision/decision")
@@ -35,6 +47,74 @@ async def decision(request: Request):
         raise RiderError("vision_invalid_frame", 400) from exc
     body = await bounded_body(request, 512 * 1024)
     return await request.app.state.rider_vision.decide(device, frame, body)
+
+
+@router.post("/compute/vision/decision-reference")
+async def reference_decision(request: Request):
+    from ..stream_contract import ReferenceDecision
+    from .pipeline_routes import native_pipeline, native_ticket, source_headers
+
+    device = authenticate(request)
+    admitted_at = request.app.state.rider_stream.clock()
+    if request.headers.get("Content-Type", "").split(";")[0] != "application/json":
+        raise RiderError("vision_input_format", 415)
+    try:
+        descriptor = ReferenceDecision.model_validate_json(
+            await bounded_body(request, 16384)
+        )
+    except (ValueError, ValidationError) as exc:
+        raise RiderError("vision_invalid_frame", 400) from exc
+    domain, hub, loop = (
+        request.app.state.rider,
+        request.app.state.rider_stream,
+        request.app.state.rider_vision,
+    )
+    pipeline = await native_pipeline(domain, device=device, source=descriptor.source)
+    if (pipeline.get("active_profile") or {}).get("analysis_location") != "venom":
+        raise RiderError("vision_remote_disabled", 409)
+    if (
+        descriptor.source.transport_epoch != pipeline["transport_epoch"]
+        or descriptor.source.pipeline_revision != pipeline["revision"]
+        or descriptor.source.camera_session != pipeline["camera_session"]
+    ):
+        raise RiderError("stream_epoch_changed", 409)
+    frame = descriptor.frame
+    if frame.age_ms >= frame.deadline_ms:
+        raise RiderError("vision_frame_expired", 409)
+    async with hub.lease(domain, pipeline, keepalive=True) as connection:
+        source = await hub.frame(
+            connection,
+            source=descriptor.source,
+            timeout=min(0.3, (frame.deadline_ms - frame.age_ms) / 1000),
+        )
+        canonical = await hub.canonical_frame(connection, source)
+        frame = frame.model_copy(
+            update={
+                "age_ms": max(
+                    frame.age_ms + (hub.clock() - admitted_at) * 1000,
+                    source.age_ms(hub.clock()),
+                )
+            }
+        )
+        if frame.age_ms >= frame.deadline_ms:
+            raise RiderError("vision_frame_expired", 409)
+        result = await loop.decide(
+            device,
+            frame,
+            canonical,
+            input_ticket=native_ticket(
+                domain, source, canonical, source_headers(source, hub.clock())
+            ),
+            source_key=(
+                source.source.identity(),
+                source.source.image_transform.model_dump_json(),
+            ),
+            source_reference=descriptor.source.model_dump(mode="json"),
+        )
+        if connection.closed:
+            loop.previews.pop(device, None)
+            raise RiderError("stream_epoch_changed", 409)
+        return result
 
 
 @router.get("/navigation/config")

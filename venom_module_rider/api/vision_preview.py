@@ -14,6 +14,22 @@ from .vision_routes import loop_goals
 async def processed_camera(request: Request):
     domain = request.app.state.rider
     client = domain.transport()
+    if hasattr(domain, "pipeline"):
+        pipeline = await domain.pipeline()
+        if pipeline.get("supported"):
+            profile = pipeline.get("active_profile") or pipeline.get("profile") or {}
+            if profile.get("analysis_location") != "venom":
+                raise RiderError("vision_remote_disabled", 409)
+            if profile.get("remote_transport") == "mjpeg":
+                from .pipeline_routes import processed_native
+
+                hub = request.app.state.rider_stream
+                async with hub.lease(domain, pipeline, keepalive=True) as connection:
+                    frame = await hub.frame(connection, timeout=0.5)
+                    _frame, image, headers = await processed_native(
+                        request, connection, frame
+                    )
+                    return Response(image, media_type="image/jpeg", headers=headers)
     corridor = (0.35, 0.80, 0.65, 0.95)
     revision = 0
     source = "diagnostic_default"
