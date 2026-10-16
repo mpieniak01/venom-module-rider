@@ -14,8 +14,8 @@ export function useCameraPipeline(section: Section, session: string | undefined,
   const statusRef = useRef(status); statusRef.current = status;
   const locked = useRef(false);
   const readEpoch = useRef(0);
-  const refresh = useCallback(async (signal?: AbortSignal) => {
-    if (locked.current) return;
+  const refresh = useCallback(async (signal?: AbortSignal, recovering = false) => {
+    if (locked.current && !recovering) return;
     const origin = sessionRef.current, epoch = readEpoch.current;
     const started = performance.now();
     const response = await apiFetch<unknown>("/api/v1/rider/camera/pipeline", { signal, cache: "no-store" });
@@ -58,7 +58,8 @@ export function useCameraPipeline(section: Section, session: string | undefined,
     } catch (failure) {
       if (origin === sessionRef.current) {
         setError(errorCode(failure));
-        try { await refresh(); } catch { /* Preserve the operation error on failed refresh. */ }
+        readEpoch.current++;
+        try { await refresh(undefined, true); } catch { /* Preserve the operation error on failed refresh. */ }
         setError(errorCode(failure));
       }
       throw failure;

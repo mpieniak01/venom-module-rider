@@ -184,3 +184,38 @@ def test_wire_dimensions_are_negotiated_but_model_decode_limit_is_explicit():
     )
     with pytest.raises(RiderError, match="stream_input_size"):
         canonical_jpeg(NativeFrame(descriptor, frame.payload, frame.received_mono))
+
+
+@pytest.mark.parametrize(
+    "session", ["zażółć", "session\n", "s\r\nX-Evil: yes", "s name", "s.1"]
+)
+def test_source_identifiers_reject_non_ascii_and_multipart_header_controls(session):
+    with pytest.raises(ValidationError):
+        SourceDescription.model_validate(source(session=session))
+    with pytest.raises(ValidationError):
+        SourceReference.model_validate(
+            {
+                key: value
+                for key, value in source(session=session).items()
+                if key in SourceReference.model_fields
+            }
+        )
+
+
+@pytest.mark.parametrize("session", ["zażółć", "session\n", "s\r\nHeader", "s name"])
+def test_shared_schema_rejects_unsafe_source_identifiers(session):
+    from pathlib import Path
+
+    jsonschema = pytest.importorskip("jsonschema")
+    schema = json.loads(
+        (
+            Path(__file__).parents[1]
+            / "config/contracts/camera_pipeline_v1.schema.json"
+        ).read_text()
+    )
+    for definition in ["source", "reference_source"]:
+        model = {**schema, "$ref": "#/$defs/" + definition}
+        value = source(session=session)
+        if definition == "reference_source":
+            value = {key: value[key] for key in SourceReference.model_fields}
+        assert list(jsonschema.Draft202012Validator(model).iter_errors(value))

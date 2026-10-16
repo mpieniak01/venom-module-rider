@@ -21,7 +21,9 @@ from pydantic import (
 from .errors import RiderError
 from .vision_contract import VisionFrame
 
-Identifier = Annotated[str, Field(min_length=1, max_length=160)]
+Identifier = Annotated[
+    str, Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9_-]+$")
+]
 Counter = Annotated[StrictInt, Field(ge=0, le=2**53 - 1)]
 
 

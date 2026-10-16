@@ -11,5 +11,5 @@ from venom_module_rider.depth_candidates import verify_sdk as _verify_sdk
 
 
 def verify_sdk(sdk):
-    """Keep the research revision override while sharing production validation."""
+    """Override this helper only; Candidate retains the packaged SDK revision pin."""
     return _verify_sdk(sdk, expected_revision=SDK_REVISION)

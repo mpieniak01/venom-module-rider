@@ -100,7 +100,7 @@ export function CameraPanel({ client, t, language, compact = false, onObservatio
     try{
       if(!client.cameraStream) {
         if(client.pipeline.status) {
-          if(client.pipeline.status.state!=="active")await client.pipeline.change("start");
+          if(["stopped","failed"].includes(client.pipeline.status.state))await client.pipeline.change("start");
         } else await client.mutate("/goal/s2_camera_preview",{enabled:true},"POST",true);
       }
       client.setCameraStream(stream);
