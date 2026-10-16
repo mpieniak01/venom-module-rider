@@ -137,3 +137,14 @@ The host serves a generated frontend copy. After module UI edits, run the
 existing host web-next/scripts/prepare-optional-module-node-paths.mjs before
 browser checks. RIDER_TEST_PI_LEASE points tests at the paired Pi source copy;
 tests never contact motor hardware.
+
+### Stable preview updates
+
+The image, L/C/R assessments and capture metadata stay paired until the next JPEG
+has loaded in the visible image element. Loading a new frame does not temporarily
+clear the cards or change their coordinate-space legend. This applies to both
+snapshot polling and native MJPEG.
+
+The displayed frame keeps its original freshness deadline. A failed read or an
+expired frame still shows the existing stale-preview notice and uncertain
+assessments; updates never extend an older frame's validity.

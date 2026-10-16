@@ -9,7 +9,7 @@ async (page, fixtures) => {
   };
   await page.goto("about:blank");
   await page.unroute("**/api/v1/rider/**");
-  let selected="left", nativeIdentity=false, failMedia=false, reads=0;
+  let selected="left", nativeIdentity=false, failMedia=false, nativeTransport=false, reads=0;
   const mutations=[], scenarios=[];
   const detector={configured:true,loaded:true,sha256:"a".repeat(64),purpose:"relative_ground_geometry",drive_supported:true,supported_protocol_versions:[1,2,3]};
   const policy={revision:39,mode:"observe",speed:.1,max_motion_ms:150,decision_budget_ms:300,corridor:[.35,.8,.65,.95],verified:true,calibration_id:"fixture",model_sha256:"a".repeat(64),perception:{engine:"depth_plane",residual_limit:.06,outlier_limit:.005,slope_min:2}};
@@ -26,6 +26,14 @@ async (page, fixtures) => {
     if(path==="/status")return json({connection:{configured:true,status:"online",device_id:"fixture-demo",mode:"demo",session:"fixture-session"},polling:{control_ms:500},errors:{},
       control:{server_time:Date.now()/1000,safety:{state:"DISARMED",owner:null,generation:"fixture",observed_at:Date.now()/1000,stale:false,can_move:false,ready:true}},
       settings:{revision:1,directions:{},values:{},parameter_schema:{}},telemetry:{camera:{on:true}},health:{camera:{on:true}},catalog:{features:[]},logic:{},resources:{},face:{}});
+    if(path==="/camera/pipeline"){
+      if(!nativeTransport)return json({supported:false});
+      const profile={analysis_location:"venom",local_engine:"canny",remote_transport:"mjpeg"};
+      return json({contract_id:"rider.camera_pipeline",contract_version:1,revision:28,profile,active_profile:profile,state:"active",transport_epoch:1,camera_session:"fixture-camera",
+        capabilities:{analysis_locations:["local","venom"],local_engines:["canny"],remote_transports:["snapshots","mjpeg"],stream_drive_supported:true,local_drive_supported:false},
+        effective_stages:{capture:true,hardware_mjpeg:true},error:null,
+        latest_frame:{camera_session:"fixture-camera",transport_epoch:1,pipeline_revision:28,captured_monotonic_ns:Date.now()*1e6,frame_age_ms:20}});
+    }
     if(path.startsWith("/camera/")){
       if(failMedia)return route.abort("failed");
       reads++;
@@ -46,7 +54,7 @@ async (page, fixtures) => {
   check((await states()).join()==="obstacle,clear,clear","cards borrowed the deliberately conflicting newer loop state");
   // Observe the intermediate DOM commits as well as painted frames: final-state
   // assertions alone missed the unavailable/unknown flash on every JPEG load.
-  const stability = await page.evaluate(async () => {
+  const observeStability = targetLoads => page.evaluate(async expectedLoads => {
     const root=document.querySelector('[data-testid="directional-results"]');
     const image=document.querySelector('[data-testid="camera-preview-toggle"]').closest("section").querySelector("img");
     const events=[],painted=[];let last="",lastPaint="",running=true,loads=0;
@@ -58,14 +66,15 @@ async (page, fixtures) => {
     let loaded,deadline;
     try {
       await new Promise((resolve,reject)=>{
-        loaded=()=>{if(++loads>=8)resolve();};
+        loaded=()=>{if(++loads>=expectedLoads)resolve();};
         image.addEventListener("load",loaded);
-        deadline=setTimeout(()=>reject(new Error("eight fresh JPEG loads required")),8000);
+        deadline=setTimeout(()=>reject(new Error("fresh JPEG load count not reached")),8000);
       });
       await new Promise(requestAnimationFrame);capture();
       return {loads,events,painted};
     } finally {running=false;observer.disconnect();image.removeEventListener("load",loaded);clearTimeout(deadline);}
-  });
+  }, targetLoads);
+  const stability = await observeStability(8);
   for(const row of [...stability.events,...stability.painted])
     check(row.space==="image"&&row.states==="obstacle,clear,clear","fresh image replacement flashed unknown sector cards");
   check(new Set(stability.events.map(row=>row.height)).size===1,"sector block jumped during fresh image replacement");
@@ -109,6 +118,55 @@ async (page, fixtures) => {
   await page.setViewportSize({width:1600,height:1100});
   await page.getByTestId("directional-results").scrollIntoViewIfNeeded();
   await page.screenshot({path:"output/playwright/vision-sectors-desktop.png",fullPage:true});
+  // Feed the real multipart parser and native decode path at 20 fps without
+  // a network producer or robot. All control routes remain blocked above.
+  await page.evaluate(media=>{
+    const realFetch=window.fetch.bind(window),encoder=new TextEncoder();
+    const jpeg=Uint8Array.from(atob(media.body),c=>c.charCodeAt(0));
+    const fixture={pause:false,frames:0,connections:0};
+    window.__riderPreviewFixture=fixture;
+    window.fetch=(input,options={})=>{
+      const url=typeof input==="string"?input:input instanceof URL?input.href:input.url;
+      if(!new URL(url,location.href).pathname.endsWith("/api/v1/rider/camera/stream/venom"))return realFetch(input,options);
+      fixture.connections++;
+      let timer,closed=false;
+      const stream=new ReadableStream({
+        start(controller){
+          const stop=()=>{if(closed)return;closed=true;clearInterval(timer);controller.close();};
+          options.signal?.addEventListener("abort",stop,{once:true});
+          const emit=()=>{
+            if(closed||fixture.pause)return;
+            const sequence=++fixture.frames;
+            const source={contract_version:1,camera_session:"fixture-camera",transport_epoch:1,pipeline_revision:28,sequence,
+              frame_id:"native-capture-"+sequence,captured_monotonic_ns:Date.now()*1e6,sha256:"b".repeat(64)};
+            const analysis={run_id:"native-fixture",frame_id:"job-"+sequence,sequence,config_revision:39,state:"clear",
+              sector_space:"image",sectors:media.sectors,source};
+            const headers={"Content-Type":"image/jpeg","Content-Length":jpeg.length,"X-Rider-Stale":"false","X-Rider-Frame-Id":source.frame_id,
+              "X-Rider-Frame-Age-Ms":"20","X-Rider-Source":"venom","X-Rider-Source-Json":JSON.stringify(source),
+              "X-Rider-Analysis-Json":JSON.stringify(analysis),"X-Rider-Vision-State":"clear"};
+            const crlf=String.fromCharCode(13,10);
+            controller.enqueue(encoder.encode("--preview-fixture"+crlf+Object.entries(headers).map(([key,value])=>key+": "+value).join(crlf)+crlf+crlf));
+            controller.enqueue(jpeg);controller.enqueue(Uint8Array.of(13,10));
+          };
+          timer=setInterval(emit,50);emit();
+        },
+        cancel(){closed=true;clearInterval(timer);}
+      });
+      return Promise.resolve(new Response(stream,{headers:{"Content-Type":"multipart/x-mixed-replace; boundary=preview-fixture"}}));
+    };
+  },fixtures.left);
+  nativeTransport=true;
+  await wait(async()=>await page.evaluate(()=>window.__riderPreviewFixture.frames>=4)&&(await states()).join()==="obstacle,clear,clear","native MJPEG did not publish decoded sectors");
+  const nativeStability=await observeStability(32);
+  for(const row of [...nativeStability.events,...nativeStability.painted])
+    check(row.space==="image"&&row.states==="obstacle,clear,clear","native MJPEG replacement flashed unknown sector cards");
+  check(new Set(nativeStability.events.map(row=>row.height)).size===1,"native MJPEG changed the sector block height");
+  const nativeBeforePause=await page.evaluate(()=>{window.__riderPreviewFixture.pause=true;return {...window.__riderPreviewFixture};});
+  await page.getByTestId("vision-preview-paused").waitFor({state:"visible"});
+  await wait(async()=>(await states()).every(state=>state==="unknown"),"paused native stream kept a live sector label");
+  await page.evaluate(()=>{window.__riderPreviewFixture.pause=false;});
+  await wait(async()=>(await states()).join()==="obstacle,clear,clear","native stream did not recover");
+  scenarios.push({nativeMjpeg:{...nativeBeforePause,intervalMs:50,stability:nativeStability,expiryAndRecovery:true}});
   check(mutations.length===0,"observation attempted hardware mutation");
   return {scope:"isolated renderer/JPEG fixture; native frame-vs-job correlation; no physical robot",scenarios,reads,mutations};
 }

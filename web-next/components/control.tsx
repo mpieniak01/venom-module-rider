@@ -81,6 +81,7 @@ export function Posture({ client, t, language }: { client: RiderClient; t: Trans
 export function CameraPanel({ client, t, language, compact = false, onObservation, observationDisabled = false, editor }: { client: RiderClient; t: Translator; language: string; compact?: boolean; onObservation?:()=>void; observationDisabled?:boolean; editor?:CorridorEditorProps }) {
   const [imageSize,setImageSize]=useState<[number,number]>([320,240]);
   const [displayed,setDisplayed]=useState<Frame|null>(null);
+  // The candidate decodes offscreen before the visible img fires its load event.
   const visible = displayedPreview(client.camera, displayed);
   useEffect(() => {
     const frame = displayedPreview(client.camera, displayed);
