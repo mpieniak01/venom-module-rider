@@ -187,6 +187,7 @@ class AutomaticCapture:
             for key in (
                 "id",
                 "session_id",
+                "request_id",
                 "state",
                 "reason",
                 "profile",

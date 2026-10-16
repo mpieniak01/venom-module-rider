@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api-client";
-import { AUTO_BASE, autoIntent, autoStatus, defaultEventProfile, eventNames, type AutoStatus, type EventProfile } from "../lib/automatic";
+import { AUTO_BASE, autoIntent, autoStatus, recoveredAutoEnable, defaultEventProfile, eventNames, type AutoStatus, type EventProfile } from "../lib/automatic";
 import { errorCode, record, str } from "../lib/model";
 import { SAMPLES_BASE, type Collection } from "../lib/samples";
 import { getApiBaseUrl } from "@/lib/env";
@@ -23,6 +23,7 @@ export function AutomaticCapture({collection,sourceSession,t}:{collection:Collec
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
   const epoch=useRef(0);
+  const pendingEnable=useRef<string|null>(null);
   const invalidate=useCallback(()=>++epoch.current,[]);
   useEffect(()=>{
     invalidate();
@@ -33,7 +34,7 @@ export function AutomaticCapture({collection,sourceSession,t}:{collection:Collec
         const row=autoStatus(await apiFetch(AUTO_BASE));
         let items:Record<string,unknown>[]=[];
         if(row.id){const detail=await apiFetch<Record<string,unknown>>(AUTO_BASE+"/runs/"+row.id);items=Array.isArray(detail.events)?detail.events:[];}
-        if(!stopped&&version===epoch.current){setStatus(row);setEvents(items);}
+        if(!stopped&&version===epoch.current){setStatus(row);setEvents(items);if(recoveredAutoEnable(row,pendingEnable.current)){pendingEnable.current=null;setError("");}}
       }catch(err){if(!stopped)setError(errorCode(err));}
       if(!stopped)timer=setTimeout(()=>void poll(),1000);
     };
@@ -45,9 +46,10 @@ export function AutomaticCapture({collection,sourceSession,t}:{collection:Collec
     const intent=autoIntent(collection?.session_id??null,sourceSession,profile,crypto.randomUUID());
     if(!intent)return;
     const version=++epoch.current;
+    pendingEnable.current=intent.body.request_id;
     setBusy(true);setError("");
-    try{const row=autoStatus(await apiFetch(AUTO_BASE,{method:"POST",headers:intent.headers,body:JSON.stringify(intent.body)}));if(version===epoch.current)setStatus(row);}
-    catch(err){setError(errorCode(err));}
+    try{const row=autoStatus(await apiFetch(AUTO_BASE,{method:"POST",headers:intent.headers,body:JSON.stringify(intent.body)}));if(version===epoch.current){setStatus(row);pendingEnable.current=null;}}
+    catch(err){if(version===epoch.current&&pendingEnable.current===intent.body.request_id)setError(errorCode(err));}
     finally{if(version===epoch.current)setBusy(false);}
   };
   const stop=async()=>{

@@ -48,6 +48,7 @@ async page => {
   check(sample.labels.at(-1).author.kind==="auto"&&sample.labels.at(-1).review==="pending","automatic label was promoted to truth");
   check(event.body.confidence===null,"depth confidence was invented");
   check(enables===1,"lost enable response caused duplicate POST");
+  check(await page.getByTestId("automatic-capture").getByRole("alert").count()===0,"recovered enable retained stale HTTP error");
   const autoStateBefore=live.state;
   await page.waitForFunction(()=>!document.querySelector('[data-testid="samples-save"]')?.disabled);
   await page.getByTestId("samples-save").click();

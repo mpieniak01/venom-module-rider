@@ -24,3 +24,7 @@ export function autoIntent(sessionId:string|null,sourceSession:string|null,profi
     ? {body:{session_id:sessionId,request_id:requestId,profile},headers:{"X-Rider-Session":sourceSession}}
     : null;
 }
+
+export function recoveredAutoEnable(status:AutoStatus,requestId:string|null):boolean {
+  return !!requestId && status.request_id===requestId;
+}

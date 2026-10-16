@@ -368,6 +368,7 @@ async def test_api_explicit_start_selection_guard_stop_and_no_actuator_posts(tmp
         )
         assert started.status_code == 200, started.text
         assert started.json()["state"] == "on"
+        assert started.json()["request_id"] == "enable"
         trace = list(pi.trace)
         assert (await client.get(BASE + "/samples/automatic")).json()["state"] == "on"
         assert (
