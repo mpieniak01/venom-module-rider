@@ -12,6 +12,7 @@ from .errors import RiderError
 from .floor_detector import FloorDetector
 from .sector_trend import update as sector_trend
 from .steering import plan as steering_plan
+from .vision_overlay import preview_sectors
 
 
 class VisionLoop:
@@ -295,6 +296,15 @@ class VisionLoop:
             result["sectors"], state["sector_history"] = sector_trend(
                 result["sectors"], history
             )
+        # JPEG annotations use source-space geometry, before command-side mirroring.
+        image_sectors = preview_sectors(result)
+        sector_space = (
+            "projected_paths"
+            if result.get("geometry") == "ground_capsule"
+            else "image"
+            if image_sectors
+            else "unavailable"
+        )
         if frame.protocol_version == 2:
             if frame.avoidance.enabled and depth_mode:
                 prior = dict(previous.get("avoidance") or {}) if previous else {}
@@ -383,6 +393,8 @@ class VisionLoop:
                 image,
                 {
                     **result,
+                    "sectors": image_sectors,
+                    "sector_space": sector_space,
                     "frame_id": frame.frame_id,
                     "run_id": frame.run_id,
                     "sequence": frame.sequence,

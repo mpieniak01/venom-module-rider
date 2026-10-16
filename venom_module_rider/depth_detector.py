@@ -9,7 +9,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .directional import assess_paths, assess_sectors
+from .directional import assess_paths, assess_sectors, sector_regions
+from .vision_overlay import draw_sectors
 
 
 class PerceptionSettings(BaseModel):
@@ -155,21 +156,15 @@ def render_depth(image, depth, assessment, corridor, settings, geometry=None):
     x0, y0, x1, y1 = corridor
     draw = ImageDraw.Draw(preview)
     overlays = assessment.pop("_path_overlay", None)
-    if overlays is not None:
-        for side, points in overlays.items():
-            previous = None
-            for point in points:
-                current = (
-                    (point[0] * image.width, point[1] * image.height) if point else None
-                )
-                if previous is not None and current is not None:
-                    draw.line(
-                        (previous, current),
-                        fill="white" if side == "center" else (80, 170, 255),
-                        width=2,
-                    )
-                previous = current
-    elif geometry is None or geometry.mode == "image":
+    projected = assessment.get("geometry") == "ground_capsule"
+    draw_sectors(
+        draw,
+        image.size,
+        assessment.get("sectors", {}),
+        outlines=overlays,
+        projected=projected,
+    )
+    if not projected and (geometry is None or geometry.mode == "image"):
         reference_y0 = assessment["plane_reference_corridor"][1]
         if reference_y0 < y0:
             # Dashed blue: fitting context, not an additional STOP zone.
@@ -265,11 +260,32 @@ class DepthDetector:
         rgb = np.asarray(image, dtype=np.float32) / 255
         if rgb.mean() < 0.04 or rgb.std() < 0.01:
             # Publish the actual rejected capture, never retain a previous green mask.
+            from PIL import ImageDraw
+
+            projected = geometry is not None and geometry.mode == "ground"
+            sectors = (
+                {}
+                if projected
+                else {
+                    side: {
+                        "state": "unknown",
+                        "corridor": bounds,
+                        "coverage_complete": 0 <= bounds[0] < bounds[2] <= 1,
+                    }
+                    for side, bounds in sector_regions(corridor).items()
+                }
+            )
+            draw = ImageDraw.Draw(image)
+            draw_sectors(draw, image.size, sectors, projected=projected)
+            if not projected:
+                draw_stop_border(draw, (image.height, image.width), corridor)
             stream = io.BytesIO()
             image.save(stream, format="JPEG", quality=85)
             return {
                 "state": "unknown",
                 "reason": "vision_image_quality",
+                "sectors": sectors,
+                **({"geometry": "ground_capsule"} if projected else {}),
                 "drive_supported": True,
                 "distance_measurement": False,
                 "_preview": stream.getvalue(),
