@@ -292,7 +292,7 @@ class VisionLoop:
                 diagnostic=with_preview,
             )
             if capture_key:
-                self.samples.frames.annotate_prediction(
+                self.samples.annotate_prediction(
                     capture_key,
                     {
                         **{
@@ -306,6 +306,10 @@ class VisionLoop:
                         "input_frame": frame.model_dump(mode="json"),
                         "perception_engine": frame.perception.engine,
                         "inference_ms": round(elapsed, 2),
+                        "valid_for_ms": min(
+                            200, max(0, int(frame.deadline_ms - frame.age_ms - elapsed))
+                        ),
+                        "diagnostic": with_preview,
                     },
                 )
         image = result.pop("_preview", None)

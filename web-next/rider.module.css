@@ -221,3 +221,8 @@
 .analysisImage { display: block; width: 100%; height: auto; object-fit: contain; border-radius: 8px; }
 .analysisHash { display: block; overflow-wrap: anywhere; font-size: 11px; margin: 8px 0; }
 @media (max-width: 900px) { .analysisMedia { grid-template-columns: 1fr; } .analysisTable th, .analysisTable td { padding: 6px 4px; } }
+
+.sampleAutomation { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--r-border); }
+.autoSettings { border: 0; min-width: 0; padding: 10px 0; margin: 0; }
+.autoEvents { display: flex; flex-wrap: wrap; gap: 10px 16px; margin: 4px 0 16px; }
+.autoEvents .check { margin: 0; }

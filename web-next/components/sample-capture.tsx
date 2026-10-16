@@ -1,3 +1,4 @@
+import { AutomaticCapture } from "./automatic-capture";
 import { Camera, CircleStop } from "lucide-react";
 import { captureIntent, historicalFrame } from "../lib/samples";
 import { useSamples } from "../lib/use-samples";
@@ -6,7 +7,7 @@ import type { Translator } from "../lib/i18n";
 import { Button, Pill } from "./primitives";
 import styles from "../rider.module.css";
 
-export function SampleCapture({deviceId,frame,visible,t}:{deviceId:string|null;frame:Frame|null;visible:boolean;t:Translator}) {
+export function SampleCapture({sourceSession,deviceId,frame,visible,t}:{sourceSession:string|null;deviceId:string|null;frame:Frame|null;visible:boolean;t:Translator}) {
   const data=useSamples(deviceId,visible);
   const active=data.session?.state==="collecting";
   const pending=["submitting","queued","running","unknown"].includes(data.outcome?.state??"");
@@ -29,6 +30,7 @@ export function SampleCapture({deviceId,frame,visible,t}:{deviceId:string|null;f
       <strong>{t("samples.request."+data.outcome.state)}</strong><code>{data.outcome.id}</code>
       {data.outcome.state==="unknown"&&<><Button onClick={()=>void data.check()}>{t("samples.check")}</Button><Button onClick={data.dismiss}>{t("samples.dismiss")}</Button></>}
     </div>}
+    <AutomaticCapture collection={active?data.session:null} sourceSession={sourceSession} t={t}/>
     {data.error&&<p role="alert" className={styles.hint}>{t("samples.failure")} · <code>{data.error}</code></p>}
   </div>;
 }

@@ -53,6 +53,9 @@ class SamplesRegistry:
         self.deadlines: dict[str, asyncio.TimerHandle] = {}
         self.lease: BinaryIO | None = None
         self.failures = 0
+        from .automatic_capture import AutomaticCapture
+
+        self.automatic = AutomaticCapture(self)
 
     def _open(self):
         if self.closed:
@@ -87,6 +90,7 @@ class SamplesRegistry:
             try:
                 if newly_owned:
                     await self.read(self.store.recover_interrupted)
+                    await self.read(self.automatic.store.recover)
                 self.writer_owners.add(owner)
             except Exception:
                 if not self.active and not self.writer_owners:
@@ -125,6 +129,7 @@ class SamplesRegistry:
             try:
                 if newly_owned:
                     await self.read(self.store.recover_interrupted)
+                    await self.read(self.automatic.store.recover)
                 session = await self.read(
                     self.store.start, request_id, device_id, values
                 )
@@ -197,6 +202,7 @@ class SamplesRegistry:
             self.failures += 1
 
     async def end(self, session_id, *, incomplete=False):
+        await self.automatic.stop("auto_collection_ended", session_id=session_id)
         async with self.operations:
             self._open()
             self.closing.add(session_id)
@@ -361,7 +367,17 @@ class SamplesRegistry:
             },
         }
 
+    def annotate_prediction(self, key, prediction):
+        annotated = self.frames.annotate_prediction(key, prediction)
+        if annotated:
+            try:
+                self.automatic.offer(key)
+            except Exception:
+                self.failures += 1
+        return annotated
+
     async def close(self):
+        await self.automatic.close()
         async with self.operations:
             if self.closed:
                 return
