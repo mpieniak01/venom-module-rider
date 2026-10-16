@@ -1,6 +1,7 @@
 """Independent admission and decision lane, bounded and default STOP."""
 
 import asyncio
+import copy
 import time
 from collections import OrderedDict
 
@@ -11,6 +12,7 @@ from .errors import RiderError
 from .floor_detector import FloorDetector
 from .sector_trend import update as sector_trend
 from .steering import plan as steering_plan
+from .vision_overlay import preview_sectors
 
 
 class VisionLoop:
@@ -36,6 +38,8 @@ class VisionLoop:
         self.closed = False
         self.previews = OrderedDict()
         self.preview_changed = asyncio.Event()
+        self.snapshot_tasks = {}
+        self.inference_cache = OrderedDict()
 
     def _detect_depth(self, payload, frame):
         if frame.protocol_version == 3 and frame.avoidance.geometry.mode == "ground":
@@ -66,8 +70,65 @@ class VisionLoop:
             "physical_clearance": "unverified",
         }
 
+    def _inference_key(self, device_id, frame, source_key):
+        if source_key is None:
+            return None
+        return (
+            device_id,
+            source_key,
+            frame.config_revision,
+            frame.corridor,
+            frame.perception.model_dump_json(),
+            (
+                frame.avoidance.geometry.model_dump_json()
+                if frame.protocol_version == 3
+                else None
+            ),
+        )
+
+    def _cached_inference(self, key):
+        now = self.clock()
+        for identity, (expires, _task) in tuple(self.inference_cache.items()):
+            if now >= expires:
+                self.inference_cache.pop(identity, None)
+        row = self.inference_cache.get(key) if key is not None else None
+        return row[1] if row is not None else None
+
+    def _start_inference(self, key, frame, payload):
+        depth_mode = frame.perception.engine == "depth_plane"
+        task = asyncio.create_task(
+            asyncio.to_thread(
+                self._detect_depth if depth_mode else self.detector.detect,
+                payload,
+                frame if depth_mode else frame.corridor,
+            )
+        )
+        if depth_mode:
+            self.depth_busy = task
+        else:
+            self.busy = task
+        task.add_done_callback(self._drain)
+        if key is not None:
+            # The first receipt fixes expiry. Reusing a result cannot renew it.
+            self.inference_cache[key] = (
+                self.clock() + (frame.deadline_ms - frame.age_ms) / 1000,
+                task,
+            )
+            self.inference_cache.move_to_end(key)
+            while len(self.inference_cache) > 8:
+                self.inference_cache.popitem(last=False)
+        return task
+
     async def decide(
-        self, device_id, frame, payload, *, with_preview=False, input_ticket=None
+        self,
+        device_id,
+        frame,
+        payload,
+        *,
+        with_preview=False,
+        input_ticket=None,
+        source_key=None,
+        source_reference=None,
     ):
         if self.closed:
             raise RiderError("module_closed", 503)
@@ -82,7 +143,11 @@ class VisionLoop:
             for identity, row in self.runs.items()
         ):
             raise RiderError("vision_production_priority", 429)
-        if (self.depth_busy if depth_mode else self.busy) is not None:
+        key = self._inference_key(device_id, frame, source_key)
+        cached_task = self._cached_inference(key)
+        if (
+            self.depth_busy if depth_mode else self.busy
+        ) is not None and cached_task is None:
             raise RiderError("vision_busy", 429)
         identity = (device_id, frame.run_id)
         previous = self.runs.get(identity)
@@ -96,6 +161,13 @@ class VisionLoop:
             frame.perception.model_dump_json(),
             frame.protocol_version,
             frame.avoidance.model_dump_json(),
+            (
+                source_reference.get("camera_session"),
+                source_reference.get("transport_epoch"),
+                source_reference.get("pipeline_revision"),
+            )
+            if source_reference
+            else None,
         )
         if previous and (
             frame.sequence <= previous["sequence"]
@@ -125,25 +197,20 @@ class VisionLoop:
                 # Optional offline scheduling must never break live decisions.
                 self.priority_errors += 1
         selected = self.depth_detector if depth_mode else self.detector
-        if depth_mode:
-            task = asyncio.create_task(
-                asyncio.to_thread(self._detect_depth, payload, frame)
-            )
-        else:
-            task = asyncio.create_task(
-                asyncio.to_thread(self.detector.detect, payload, frame.corridor)
-            )
-        if depth_mode:
-            self.depth_busy = task
-        else:
-            self.busy = task
+        task = cached_task or self._start_inference(key, frame, payload)
         try:
-            result = await asyncio.wait_for(
+            detected = await asyncio.wait_for(
                 asyncio.shield(task), (frame.deadline_ms - frame.age_ms) / 1000
             )
+            # Diagnostic depth arrays are immutable inference outputs; preserve
+            # their exact identity while isolating mutable planner dictionaries.
+            trace = detected.get("_trace_depth")
+            result = copy.deepcopy(
+                detected, memo={id(trace): trace} if trace is not None else {}
+            )
         except Exception:
-            # Detector libraries can also raise KeyError/TypeError. Convert all
-            # inference failures to UNKNOWN; cancellation must still propagate.
+            # A shared task never grants motion when its caller's own source
+            # budget expires. Cancellation still propagates to the caller only.
             result = {
                 "state": "unknown",
                 "reason": "vision_inference_unavailable",
@@ -152,8 +219,6 @@ class VisionLoop:
         finally:
             if task.done():
                 self._drain(task)
-            else:
-                task.add_done_callback(self._drain)
         trace_depth = result.pop("_trace_depth", None)
         if depth_mode and trace_depth is not None:
             # Diagnostic only: exact input of this inference, never another RAW.
@@ -231,6 +296,15 @@ class VisionLoop:
             result["sectors"], state["sector_history"] = sector_trend(
                 result["sectors"], history
             )
+        # JPEG annotations use source-space geometry, before command-side mirroring.
+        image_sectors = preview_sectors(result)
+        sector_space = (
+            "projected_paths"
+            if result.get("geometry") == "ground_capsule"
+            else "image"
+            if image_sectors
+            else "unavailable"
+        )
         if frame.protocol_version == 2:
             if frame.avoidance.enabled and depth_mode:
                 prior = dict(previous.get("avoidance") or {}) if previous else {}
@@ -319,6 +393,8 @@ class VisionLoop:
                 image,
                 {
                     **result,
+                    "sectors": image_sectors,
+                    "sector_space": sector_space,
                     "frame_id": frame.frame_id,
                     "run_id": frame.run_id,
                     "sequence": frame.sequence,
@@ -326,8 +402,11 @@ class VisionLoop:
                     "clear_count": count,
                     "vision_action": vision_action,
                     "model_sha256": model,
+                    **({"source": source_reference} if source_reference else {}),
                     "age_source": (
-                        "host-received"
+                        "pi-send-plus-host-elapsed"
+                        if source_reference
+                        else "host-received"
                         if with_preview
                         else "pi-reported-plus-host-elapsed"
                     ),
@@ -346,7 +425,18 @@ class VisionLoop:
         changed.set()
         return {
             **result,
-            **({"_preview": image} if with_preview and image is not None else {}),
+            **(
+                {
+                    "_preview": image,
+                    "_preview_analysis": {
+                        "sectors": image_sectors,
+                        "sector_space": sector_space,
+                    },
+                }
+                if with_preview and image is not None
+                else {}
+            ),
+            **({"source": source_reference} if source_reference else {}),
             "action": action,
             "vision_action": vision_action,
             "motion_reason": motion_reason,
@@ -409,6 +499,25 @@ class VisionLoop:
                 return None
         return None
 
+    async def share_snapshot(self, key, produce):
+        """Share one diagnostic task; cancelled readers do not cancel it."""
+        if self.closed:
+            raise RiderError("module_closed", 503)
+        task = self.snapshot_tasks.get(key)
+        if task is None:
+            if len(self.snapshot_tasks) >= 16:
+                raise RiderError("vision_busy", 429)
+            task = asyncio.create_task(produce())
+            self.snapshot_tasks[key] = task
+            task.add_done_callback(lambda done: self._drain_snapshot(key, done))
+        return await asyncio.shield(task)
+
+    def _drain_snapshot(self, key, task):
+        if self.snapshot_tasks.get(key) is task:
+            self.snapshot_tasks.pop(key)
+        if not task.cancelled():
+            task.exception()
+
     def _drain(self, task):
         if not task.cancelled():
             task.exception()
@@ -421,7 +530,12 @@ class VisionLoop:
         self.closed = True
         self.runs.clear()
         self.previews.clear()
+        self.inference_cache.clear()
         self.preview_changed.set()
+        snapshots = list(self.snapshot_tasks.values())
+        self.snapshot_tasks.clear()
+        for task in snapshots:
+            task.cancel()
         pending = [task for task in (self.busy, self.depth_busy) if task is not None]
-        if pending:
-            await asyncio.gather(*pending, return_exceptions=True)
+        if pending or snapshots:
+            await asyncio.gather(*pending, *snapshots, return_exceptions=True)

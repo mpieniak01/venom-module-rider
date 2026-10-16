@@ -23,6 +23,7 @@ from . import (
     automatic_routes,
     compute_routes,
     conversation_routes,
+    pipeline_routes,
     samples_routes,
     vision_routes,
 )
@@ -60,6 +61,7 @@ async def lifespan(app):
     import sqlite3
 
     from ..samples_registry import SamplesRegistry, default_root
+    from ..stream_hub import NativeStreamHub
     from ..vision_loop import VisionLoop
 
     samples = getattr(app.state, "rider_samples", None)
@@ -75,6 +77,8 @@ async def lifespan(app):
         }
     app.state.rider_samples = samples
     service.samples = samples
+    app.state.rider_stream = NativeStreamHub()
+    service.media_hub = app.state.rider_stream
     app.state.rider_vision = VisionLoop(
         samples=samples, source_session=lambda: service.session
     )
@@ -113,6 +117,7 @@ async def lifespan(app):
             await app.state.rider_analysis.close()
         if samples is not None:
             await samples.close()
+        await app.state.rider_stream.close()
         await app.state.rider_vision.close()
         await compute.close()
         await service.close()
@@ -190,6 +195,7 @@ router = APIRouter(
 router.include_router(compute_routes.router)
 router.include_router(conversation_routes.router)
 router.include_router(vision_routes.router)
+router.include_router(pipeline_routes.router)
 router.include_router(samples_routes.router)
 router.include_router(analysis_routes.router)
 router.include_router(automatic_routes.router)

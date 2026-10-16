@@ -777,7 +777,11 @@ def test_rejected_dark_capture_replaces_previous_preview_without_model_load():
     )
     assert result["state"] == "unknown"
     assert detector.model is None
-    assert np.asarray(Image.open(io.BytesIO(result["_preview"]))).max() == 0
+    pixels = np.asarray(Image.open(io.BytesIO(result["_preview"])))
+    # The current dark capture remains dark; only new uncertainty labels are bright.
+    assert pixels[24:48, 24:48].max() == 0
+    assert pixels.max() > 100
+    assert all(row["state"] == "unknown" for row in result["sectors"].values())
 
 
 @pytest.mark.parametrize(

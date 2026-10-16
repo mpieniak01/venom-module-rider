@@ -172,11 +172,20 @@ test("experimental geometry never enables a physical trial and changing threshol
  assert.equal(loopSettingsValues(policy,changed).verified,false);
 });
 
-test("running observation with a delayed assessment never claims preview stopped",()=>{
- assert.equal(previewNotice(false,"venom",false,true),"previewDelayedNotice");
- assert.equal(previewNotice(true,"venom",false,true),"previewDelayedNotice");
- assert.equal(previewNotice(true,"venom",false,false),"previewPausedNotice");
- assert.equal(previewNotice(false,"venom",true,true),null);
+test("preview freshness is independent of whether a Pi navigation producer runs",()=>{
+ for(const polling of [false,true]){
+  assert.equal(previewNotice(false,"venom",polling),null);
+  assert.equal(previewNotice(false,"raw",polling),null);
+ }
+ assert.equal(previewNotice(true,"venom",true),"previewDelayedNotice");
+ assert.equal(previewNotice(true,"venom",false),"previewPausedNotice");
+ assert.equal(previewNotice(true,"raw",true),"previewDelayedNotice");
+});
+test("a visible host snapshot never becomes calibration or movement permission",()=>{
+ const frame={decoded:true,stale:false,knownFreshness:true,id:"standalone",fileAt:"",visionState:"clear",visionPolicy:"device_policy",ageMs:50,receivedAt:performance.now(),ageSource:"host-received",analysis:{run_id:"standalone",config_revision:33,state:"clear",vision_action:"stop"}};
+ assert.equal(previewNotice(frame.stale,"venom",true),null);
+ assert.equal(freshAnalysisFrame(frame,"venom"),false);
+ assert.equal(freshPolicyFrame(frame,"venom",{run_id:"standalone"},{revision:33}),false);
 });
 test("operator sees manual ARM and observation as separate from image rejection",()=>{
  const status={control:{safety:{state:"ARMED",owner:"manual"}}} as unknown as RiderStatus;
@@ -487,12 +496,12 @@ test("confirmed ARM-window completion is stopped and neutral; faults remain erro
 
 
 test("preview transition is neutral and model or stale-frame errors remain visible outside it",()=>{
- assert.equal(previewNotice(true,"venom",false,false,true),"visionPreviewRestarting");
- assert.equal(previewNotice(false,"venom",true,true,true),"visionPreviewRestarting");
- assert.equal(previewNotice(true,"venom",false,false,false),"previewPausedNotice");
- assert.equal(previewNotice(true,"venom",false,true,false),"previewDelayedNotice");
- assert.equal(previewNotice(true,"raw",false,false,true),"previewDelayedNotice");
- assert.equal(previewNotice(false,"raw",true,true,true),null);
+ assert.equal(previewNotice(true,"venom",false,true),"visionPreviewRestarting");
+ assert.equal(previewNotice(false,"venom",true,true),"visionPreviewRestarting");
+ assert.equal(previewNotice(true,"venom",false,false),"previewPausedNotice");
+ assert.equal(previewNotice(true,"venom",true,false),"previewDelayedNotice");
+ assert.equal(previewNotice(true,"raw",true,true),"previewDelayedNotice");
+ assert.equal(previewNotice(false,"raw",true,true),null);
  for(const language of ["pl","en","de"] as const)assert.notEqual(translate(language,"visionPreviewRestarting"),"visionPreviewRestarting");
 });
 test("recovery errors clear only after a confirmed fresh observation",()=>{
@@ -519,7 +528,7 @@ test("recovery brackets preview polling and late processed GETs cannot publish o
  assert.ok(client.indexOf("!currentPreview()",dispatch)>dispatch);
  assert.ok(client.indexOf("!currentPreview()",client.indexOf("await decodePreview",dispatch))>dispatch);
  assert.ok(client.includes('cameraStream === "venom" && cameraTransition'));
- assert.ok(client.includes('if (!cameraStream || !["control", "vision"].includes(section) || processedTransition) return;'));
+ assert.ok(client.includes('if (!cameraStream || !["control", "vision"].includes(section) || processedTransition || nativeStreaming || pipelineBusy) return;'));
  assert.ok(client.includes("stale: true, knownFreshness: false"));
 });
 

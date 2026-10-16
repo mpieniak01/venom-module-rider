@@ -179,10 +179,11 @@ export function executionHeadline(state:JsonRecord,goals:JsonRecord,status:Rider
   return "permissionVenomNo";
 }
 
-export function previewNotice(stale:boolean,selected:string,current:boolean|undefined,running:boolean|undefined,transitioning=false):string|null {
+/** Preview transport is independent of the Pi navigation producer and its decision. */
+export function previewNotice(stale:boolean,selected:string,polling:boolean,transitioning=false):string|null {
   if(selected==="venom"&&transitioning)return "visionPreviewRestarting";
-  if(!stale&&!(selected==="venom"&&current===false))return null;
-  return selected==="venom"&&running===false?"previewPausedNotice":"previewDelayedNotice";
+  if(!stale)return null;
+  return polling?"previewDelayedNotice":"previewPausedNotice";
 }
 
 

@@ -14,6 +14,22 @@ from .vision_routes import loop_goals
 async def processed_camera(request: Request):
     domain = request.app.state.rider
     client = domain.transport()
+    if hasattr(domain, "pipeline"):
+        pipeline = await domain.pipeline()
+        if pipeline.get("supported"):
+            profile = pipeline.get("active_profile") or pipeline.get("profile") or {}
+            if profile.get("analysis_location") != "venom":
+                raise RiderError("vision_remote_disabled", 409)
+            if profile.get("remote_transport") == "mjpeg":
+                from .pipeline_routes import processed_native
+
+                hub = request.app.state.rider_stream
+                async with hub.lease(domain, pipeline, keepalive=True) as connection:
+                    frame = await hub.frame(connection, timeout=0.5)
+                    _frame, image, headers = await processed_native(
+                        request, connection, frame
+                    )
+                    return Response(image, media_type="image/jpeg", headers=headers)
     corridor = (0.35, 0.80, 0.65, 0.95)
     revision = 0
     source = "diagnostic_default"
@@ -28,7 +44,6 @@ async def processed_camera(request: Request):
         if exc.status != 404:
             raise
     loop = request.app.state.rider_vision
-    cached = loop.preview(client.device.id, corridor=corridor, revision=revision)
     if source == "device_policy":
         # The producer status is lightweight. Serving a current Pi result must
         # not wait for the full service/ownership graph on every browser read.
@@ -51,39 +66,62 @@ async def processed_camera(request: Request):
             goals = await loop_goals(domain, force=False)
             if any(goals.get(mode) is not False for mode in ("observe", "drive")):
                 raise RiderError("vision_busy", 429)
+            # Metadata reads may outlive the cached frame or admit a newer run.
+            # Choose the latest matching result only after those awaits finish.
+            cached = loop.preview(
+                client.device.id, corridor=corridor, revision=revision
+            )
             if cached is not None and cached[2]["age_source"] != "host-received":
                 cached = None
+    else:
+        cached = loop.preview(client.device.id, corridor=corridor, revision=revision)
     if cached is None:
-        payload, mime, raw_headers = await domain.camera("raw")
-        if mime not in {"image/jpeg", "image/png"}:
-            raise RiderError("vision_input_format", 415)
-        normalized = {key.lower(): value for key, value in raw_headers.items()}
-        if (
-            normalized.get("x-rider-stale") == "true"
-            or normalized.get("x-rider-placeholder") == "true"
-        ):
-            raise RiderError("frame_stale", 409)
-        # Legacy snapshots expose a Pi wall-clock timestamp, not a relative age.
-        # Do not compare clocks on different hosts or grant motion from this path.
-        frame = VisionFrame(
-            protocol_version=1,
-            run_id=uuid.uuid4().hex,
-            frame_id=uuid.uuid4().hex,
-            sequence=1,
-            config_revision=revision,
-            age_ms=0.0,
-            deadline_ms=500,
-            mode="observe",
-            corridor=corridor,
-            perception=PerceptionSettings.model_validate(perception),
-        )
-        result = await loop.decide(
+
+        async def produce():
+            payload, mime, raw_headers = await domain.camera("raw")
+            if mime not in {"image/jpeg", "image/png"}:
+                raise RiderError("vision_input_format", 415)
+            normalized = {key.lower(): value for key, value in raw_headers.items()}
+            if (
+                normalized.get("x-rider-stale") == "true"
+                or normalized.get("x-rider-placeholder") == "true"
+            ):
+                raise RiderError("frame_stale", 409)
+            # Legacy snapshots expose a Pi wall-clock timestamp, not a relative age.
+            # Do not compare clocks on different hosts or grant motion from this path.
+            frame = VisionFrame(
+                protocol_version=1,
+                run_id=uuid.uuid4().hex,
+                frame_id=uuid.uuid4().hex,
+                sequence=1,
+                config_revision=revision,
+                age_ms=0.0,
+                deadline_ms=500,
+                mode="observe",
+                corridor=corridor,
+                perception=PerceptionSettings.model_validate(perception),
+            )
+            result = await loop.decide(
+                client.device.id,
+                frame,
+                payload,
+                with_preview=True,
+                input_ticket=normalized.get("x-rider-capture-key"),
+            )
+
+            return result
+
+        # Separate browsers share RAW retrieval and one model call. Session,
+        # policy and handoff epoch prevent joining another device/configuration.
+        key = (
             client.device.id,
-            frame,
-            payload,
-            with_preview=True,
-            input_ticket=normalized.get("x-rider-capture-key"),
+            getattr(domain, "session", None),
+            getattr(domain, "epoch", None),
+            tuple(corridor),
+            revision,
+            json.dumps(perception, sort_keys=True),
         )
+        result = await loop.share_snapshot(key, produce)
         cached = loop.preview(client.device.id, corridor=corridor, revision=revision)
         if cached is None:
             raise RiderError(result["reason"], 503)

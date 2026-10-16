@@ -13,6 +13,18 @@ export function previewLifetime(frame: FrameTiming | null, now = performance.now
   return age === null ? null : Math.max(0, PREVIEW_MAX_AGE_MS - age);
 }
 
+/** Keep the visible JPEG and its analysis paired while the next image loads.
+ * A new candidate never renews the visible frame's freshness deadline.
+ */
+export function displayedPreview<T extends FrameTiming & { url: string; stale: boolean; knownFreshness: boolean }>(
+  candidate: T | null, displayed: T | null, now = performance.now(),
+): T | null {
+  if (!candidate || !displayed) return null;
+  const visible = candidate.url === displayed.url ? candidate : displayed;
+  if (!candidate.stale && previewLifetime(visible, now) !== 0) return visible;
+  return { ...visible, stale: true, knownFreshness: false };
+}
+
 type Decoder = { src: string; decode: () => Promise<void> };
 
 /** Decode a candidate before replacing the currently visible image and analysis. */
@@ -45,4 +57,13 @@ export function previewRequestCurrent(
   kind: "camera" | "face", path: string, transitioning: boolean, requestEpoch: number, currentEpoch: number,
 ): boolean {
   return kind !== "camera" || path !== "/camera/venom" || !transitioning && requestEpoch === currentEpoch;
+}
+
+
+/** Busy retries may keep the original frame, never renew its timestamp or TTL. */
+export function retainedPreview<T extends FrameTiming & { stale: boolean; knownFreshness: boolean }>(
+  previous: T, busyRetry = false, now = performance.now(),
+): T {
+  if (previous.stale || busyRetry && previous.knownFreshness && (previewLifetime(previous, now) ?? 0) > 0) return previous;
+  return { ...previous, stale: true, knownFreshness: false };
 }

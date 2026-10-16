@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
+import time
+from collections.abc import AsyncGenerator
+from typing import cast
 
 import httpx
 
@@ -24,6 +28,14 @@ IMAGE_HEADERS = {
     "x-rider-stream",
     "x-rider-stale",
     "x-rider-placeholder",
+    "x-rider-source-json",
+    "x-rider-frame-age-ms",
+    "x-rider-frame-age-source",
+    "x-rider-camera-session",
+    "x-rider-sequence",
+    "x-rider-transport-epoch",
+    "x-rider-pipeline-revision",
+    "x-rider-captured-monotonic-ns",
     "x-face-source",
 }
 
@@ -53,6 +65,7 @@ def expected_contract(path: str):
         "/api/navigation/status": ("rider.navigation_loop", 1),
         "/api/compute/config": ("rider.compute", 1),
         "/api/compute/status": ("rider.compute", 1),
+        "/api/resource/camera/pipeline": ("rider.camera_pipeline", 1),
     }
     if path in exact:
         return exact[path]
@@ -124,6 +137,22 @@ def json_timeout(path: str, method: str, stop: bool) -> httpx.Timeout:
     return httpx.Timeout(duration, connect=0.5, pool=0.5)
 
 
+async def finish_native_cleanup(task):
+    """Finish owned cleanup even if its caller is cancelled again, then propagate it."""
+    cancelled = False
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            cancelled = True
+            if task.cancelled():
+                raise
+    result = task.result()
+    if cancelled:
+        raise asyncio.CancelledError
+    return result
+
+
 class PiClient:
     def __init__(self, device: Device, *, transport=None):
         self.device = device
@@ -146,6 +175,10 @@ class PiClient:
             **options,
             limits=httpx.Limits(max_connections=2, max_keepalive_connections=1),
         )
+        self.media_http = httpx.AsyncClient(
+            **options,
+            limits=httpx.Limits(max_connections=1, max_keepalive_connections=1),
+        )
         self.closed = False
 
     async def json(
@@ -166,6 +199,7 @@ class PiClient:
             request_headers["Authorization"] = "Bearer " + token
         binary = body if isinstance(body, bytes) else None
         payload = None if isinstance(body, bytes) else body
+        request_started_mono = time.monotonic()
         try:
             async with client.stream(
                 method,
@@ -207,6 +241,19 @@ class PiClient:
                     raise RiderError("unsupported_pi_contract", 502)
                 if not isinstance(payload.get("data"), dict):
                     raise RiderError("invalid_pi_response", 502)
+                if (
+                    path == "/api/resource/camera/pipeline"
+                    and type(meta.get("contract_version")) is int
+                    and (
+                        meta.get("contract_id"),
+                        meta.get("contract_version"),
+                    )
+                    == ("rider.resources", 1)
+                ):
+                    # Legacy resource wildcard routes can return a generic
+                    # camera/resource response for an unknown subresource.
+                    # This is explicit lack of pipeline support, not success.
+                    raise RiderError("camera_pipeline_unsupported", 404)
                 expected = expected_contract(path)
                 if (
                     type(meta.get("contract_version")) is not int
@@ -238,6 +285,12 @@ class PiClient:
                             **data,
                             "preparation": preparation_identity(data["preparation"]),
                         },
+                    }
+                if method == "GET" and path == "/api/resource/camera/pipeline":
+                    payload = {
+                        **payload,
+                        "_rider_request_started_mono": request_started_mono,
+                        "_rider_response_received_mono": time.monotonic(),
                     }
                 return payload
         except httpx.TimeoutException as exc:
@@ -284,7 +337,70 @@ class PiClient:
         except httpx.HTTPError as exc:
             raise RiderError("pi_unreachable", 503) from exc
 
+    async def mjpeg(self):
+        """One persistent camera reader; opening it never starts the Pi camera."""
+        from pydantic import ValidationError
+
+        from .stream_contract import NativeFrame, SourceDescription
+        from .stream_framing import MultipartJpegParser, boundary_from_type
+
+        try:
+            request = self.media_http.build_request(
+                "GET",
+                "/api/resource/camera/stream.mjpg",
+                headers={"Accept": "multipart/x-mixed-replace"},
+                timeout=httpx.Timeout(1.0, connect=0.5, pool=0.5),
+            )
+            response = await self.media_http.send(request, stream=True)
+            chunks = cast(AsyncGenerator[bytes, None], response.aiter_bytes())
+            reading = None
+            try:
+                if response.is_redirect:
+                    raise RiderError("pi_redirect_refused", 502)
+                if response.status_code >= 400:
+                    raise RiderError("stream_unavailable", response.status_code)
+                parser = MultipartJpegParser(
+                    boundary_from_type(response.headers.get("content-type", ""))
+                )
+                while True:
+                    # Do not deliver Task.cancel into httpcore while it may be
+                    # releasing its pool slot after EOF/network failure. Keep
+                    # just one owned I/O future, never a frame backlog.
+                    reading = asyncio.ensure_future(anext(chunks))
+                    try:
+                        incoming = await asyncio.shield(reading)
+                    except StopAsyncIteration:
+                        break
+                    reading = None
+                    for offset in range(0, len(incoming), 16384):
+                        chunk = incoming[offset : offset + 16384]
+                        for headers, payload in parser.feed(chunk):
+                            try:
+                                source = SourceDescription.model_validate_json(
+                                    headers.get("x-rider-source", "")
+                                )
+                            except (ValueError, ValidationError) as exc:
+                                raise RiderError("stream_invalid_source", 502) from exc
+                            frame = NativeFrame(source, payload, time.monotonic())
+                            frame.validate_payload()
+                            yield frame
+                parser.finish()
+            finally:
+
+                async def release():
+                    try:
+                        await response.aclose()
+                    finally:
+                        if reading is not None:
+                            await asyncio.gather(reading, return_exceptions=True)
+                        await chunks.aclose()
+
+                await finish_native_cleanup(asyncio.create_task(release()))
+        except httpx.HTTPError as exc:
+            raise RiderError("stream_unavailable", 503) from exc
+
     async def close(self):
         self.closed = True
         await self.http.aclose()
         await self.stop_http.aclose()
+        await self.media_http.aclose()

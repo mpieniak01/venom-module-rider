@@ -76,9 +76,8 @@ def run(job, output, *, candidate_factory=None):
     import numpy as np
     from PIL import Image
 
-    from scripts.depth_candidates import Candidate, file_hash
-
     from .analysis_metrics import adjacent, summarize
+    from .depth_candidates import Candidate, file_hash
     from .depth_detector import (
         PerceptionSettings,
         assess_depth,

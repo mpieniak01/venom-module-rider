@@ -135,3 +135,34 @@ the S2 camera reservation, and asks Pi to stop capture and the unused distributo
 Pi enforces resource ownership; another consumer is reported, not forcibly
 released. Starting passive observation or a new explicit trial prepares the
 camera again. Page startup and reconnect never arm or drive.
+
+## Camera preview without navigation
+
+A camera enabled from the Pi panel can be viewed with RAW or Vision Venom.
+Selecting Vision Venom requests host processing; it does not require starting
+the Pi navigation/observation producer, ARM or a driving trial. A fresh decoded
+JPEG remains an available preview while those Pi goals are OFF.
+
+The preview warning follows image expiry, failed media reads, explicit camera
+OFF and stream transitions. A stopped navigation producer alone cannot label a
+fresh preview as stopped. The unchanged one-second display limit still expires
+retained processed frames; recovery requires another decoded valid response.
+
+A standalone result reports host-received age and STOP. This age is a lower bound,
+not a measurement of Pi capture age. Displaying it never qualifies calibration,
+supplies the required Pi-run evidence or grants movement.
+
+
+Standalone readers share one in-flight RAW capture and model call for the same
+device, host session, handoff epoch and policy. Cancelling a browser does not
+cancel work shared with another reader. Module shutdown cancels pending snapshots.
+
+Cached results are selected after Pi metadata reads, then checked again after
+shared inference. A delayed metadata response cannot return a previously selected,
+expired or replaced mask as fresh. The existing 500 ms server cache limit and
+1000 ms browser display limit are unchanged.
+
+A transient vision_busy response may retain the last decoded image only within
+its original display lifetime. Repeated retries cannot renew the image timestamp,
+restore an expired frame, or grant motion. Other camera failures still invalidate
+the live label immediately.

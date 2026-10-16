@@ -85,6 +85,8 @@ class RiderService:
         self.conversation_invalidator = None
         self.conversation_drainer = None
         self.samples: Any = None
+        self.media_hub: Any = None
+        self.pipeline_unavailable_until = 0.0
 
     def config(self):
         return {
@@ -139,6 +141,7 @@ class RiderService:
                 self.cache.clear()
                 self.sequences.clear()
                 self.last_seen = None
+                self.pipeline_unavailable_until = 0.0
                 self.selection_warning = warning
                 return self.config()
             finally:
@@ -501,9 +504,69 @@ class RiderService:
                         )
             raise
 
+    @staticmethod
+    def unsupported_pipeline():
+        return {
+            "supported": False,
+            "error": "camera_pipeline_unsupported",
+            "capabilities": {
+                "analysis_locations": ["venom"],
+                "local_engines": [],
+                "remote_transports": ["snapshots"],
+                "stream_drive_supported": False,
+                "local_drive_supported": False,
+            },
+        }
+
+    async def pipeline(self, *, force=False):
+        if not force and time.monotonic() < self.pipeline_unavailable_until:
+            return self.unsupported_pipeline()
+        try:
+            response = await self.read(
+                "/api/resource/camera/pipeline", 0.2, force=force
+            )
+        except RiderError as exc:
+            if exc.status != 404:
+                raise
+            # A missing capability is not a per-frame polling task. Explicit
+            # operator refresh bypasses this short compatibility memo.
+            self.pipeline_unavailable_until = time.monotonic() + 5.0
+            return self.unsupported_pipeline()
+        self.pipeline_unavailable_until = 0.0
+        status = response["data"]
+        if (
+            status.get("contract_id") != "rider.camera_pipeline"
+            or type(status.get("contract_version")) is not int
+            or status.get("contract_version") != 1
+        ):
+            raise RiderError("unsupported_pi_contract", 502)
+        from .age_anchor import age_anchor
+
+        anchor = age_anchor(
+            status,
+            response.get("_rider_request_started_mono"),
+            response.get("_rider_response_received_mono"),
+        )
+        result = {**status, "supported": True, "_age_anchor": anchor}
+        if self.media_hub is not None:
+            self.media_hub.update_anchor(result)
+        return result
+
+    async def configure_pipeline(self, body, session):
+        self.check_session(session)
+        self.stop_sample_events("auto_source_stopped")
+        media = getattr(self, "media_hub", None)
+        if media is not None:
+            await media.invalidate()
+        result = await self.mutate("/api/resource/camera/pipeline", body, session)
+        return {**result["data"], "supported": True}
+
     async def stop_camera(self, body, session):
         """Retire preview ownership, then stop capture and the unused feed on Pi."""
         self.stop_sample_events("auto_camera_stopped")
+        media = getattr(self, "media_hub", None)
+        if media is not None:
+            await media.invalidate()
         external = False
         try:
             await self.goal("s2_camera_preview", {"enabled": False}, session)
@@ -536,19 +599,44 @@ class RiderService:
         if stream not in {"raw", "proc"}:
             raise RiderError("unknown_stream", 404)
         client = self.transport()
-        camera = self.data(await self.read("/api/resource/camera", 2.0))
-        activity = camera.get("activity") or camera
-        state = activity.get("state") or camera.get("state")
-        enabled = activity.get("on", activity.get("enabled"))
-        if enabled is False or str(state).lower() in {"off", "stopped", "disabled"}:
-            raise RiderError("camera_off", 404)
-        if enabled is not True and str(state).lower() not in {
-            "on",
-            "running",
-            "active",
-        }:
-            raise RiderError("camera_unknown", 503)
-        payload, mime, headers = await client.image("/camera/" + stream)
+        pipeline = await self.pipeline()
+        if (
+            stream == "raw"
+            and pipeline.get("supported")
+            and (pipeline.get("active_profile") or pipeline.get("profile") or {}).get(
+                "remote_transport"
+            )
+            == "mjpeg"
+        ):
+            from .stream_contract import source_headers
+
+            if self.media_hub is None:
+                raise RiderError("stream_unavailable", 503)
+            async with self.media_hub.lease(
+                self, pipeline, keepalive=True
+            ) as connection:
+                frame = await self.media_hub.frame(connection, timeout=0.5)
+                payload = await self.media_hub.canonical_frame(connection, frame)
+                if connection.closed or self.client is not client:
+                    raise RiderError("stream_epoch_changed", 409)
+                if frame.age_ms(self.media_hub.clock()) >= 500:
+                    raise RiderError("frame_stale", 409)
+                mime = "image/jpeg"
+                headers = source_headers(frame, self.media_hub.clock())
+        else:
+            camera = self.data(await self.read("/api/resource/camera", 2.0))
+            activity = camera.get("activity") or camera
+            state = activity.get("state") or camera.get("state")
+            enabled = activity.get("on", activity.get("enabled"))
+            if enabled is False or str(state).lower() in {"off", "stopped", "disabled"}:
+                raise RiderError("camera_off", 404)
+            if enabled is not True and str(state).lower() not in {
+                "on",
+                "running",
+                "active",
+            }:
+                raise RiderError("camera_unknown", 503)
+            payload, mime, headers = await client.image("/camera/" + stream)
         headers = {
             key: value
             for key, value in headers.items()
@@ -584,6 +672,9 @@ class RiderService:
         self.operations.clear()
 
     async def _close_transport(self):
+        media = getattr(self, "media_hub", None)
+        if media is not None:
+            await media.invalidate()
         await self._cancel_transport_tasks()
         if self.client:
             await self.client.close()

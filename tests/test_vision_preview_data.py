@@ -265,3 +265,165 @@ async def test_live_producer_without_cache_cannot_fall_back_to_independent_infer
     with pytest.raises(RiderError, match="vision_busy"):
         await processed_camera(request(domain, loop))
     assert detector.calls == 0 and domain.camera_calls == 0
+
+
+async def test_snapshot_cache_is_rechecked_after_slow_pi_metadata_reads():
+    now = [10.0]
+    detector = Detector()
+    loop = VisionLoop(detector, clock=lambda: now[0])
+    await loop.decide("pi", frame(run="old-snapshot", age=0), b"old", with_preview=True)
+
+    class SlowMetadata(Domain):
+        async def read(self, path, *args, **kwargs):
+            result = await super().read(path, *args, **kwargs)
+            if path.endswith("status"):
+                now[0] += 1.2
+            return result
+
+        async def camera(self, stream):
+            self.camera_calls += 1
+            return b"new-raw", "image/jpeg", {"x-rider-stale": "false"}
+
+    domain = SlowMetadata(active=False)
+    response = await processed_camera(request(domain, loop))
+    assert response.headers["x-rider-frame-id"] != "old-snapshot-1"
+    assert float(response.headers["x-rider-frame-age-ms"]) < 500
+    assert domain.camera_calls == 1 and detector.calls == 2
+
+
+async def test_snapshot_returns_newest_result_published_during_goal_read():
+    now = [10.0]
+    detector = Detector()
+    loop = VisionLoop(detector, clock=lambda: now[0])
+    await loop.decide("pi", frame(run="old-snapshot", age=0), b"old", with_preview=True)
+
+    class UpdatedMetadata(Domain):
+        async def read(self, path, *args, **kwargs):
+            result = await super().read(path, *args, **kwargs)
+            if path == "/api/logic/state":
+                await loop.decide(
+                    "pi", frame(run="new-snapshot", age=0), b"new", with_preview=True
+                )
+            return result
+
+    domain = UpdatedMetadata(active=False)
+    response = await processed_camera(request(domain, loop))
+    assert response.headers["x-rider-frame-id"] == "new-snapshot-1"
+    assert domain.camera_calls == 0 and detector.calls == 2
+
+
+async def test_standalone_browsers_join_one_raw_capture_and_inference():
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    class Snapshot(Domain):
+        async def camera(self, stream):
+            self.camera_calls += 1
+            entered.set()
+            await release.wait()
+            return b"raw", "image/jpeg", {"x-rider-stale": "false"}
+
+    detector, domain = Detector(), Snapshot(active=False)
+    loop = VisionLoop(detector)
+    first = asyncio.create_task(processed_camera(request(domain, loop)))
+    await entered.wait()
+    second = asyncio.create_task(processed_camera(request(domain, loop)))
+    await asyncio.sleep(0)
+    release.set()
+    responses = await asyncio.gather(first, second)
+    assert domain.camera_calls == detector.calls == 1
+    assert (
+        responses[0].headers["x-rider-frame-id"]
+        == responses[1].headers["x-rider-frame-id"]
+    )
+    assert all(r.headers["x-rider-vision-action"] == "stop" for r in responses)
+
+
+async def test_cancelling_one_browser_does_not_cancel_shared_snapshot():
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    class Snapshot(Domain):
+        async def camera(self, stream):
+            self.camera_calls += 1
+            entered.set()
+            await release.wait()
+            return b"raw", "image/jpeg", {"x-rider-stale": "false"}
+
+    detector, domain = Detector(), Snapshot(active=False)
+    loop = VisionLoop(detector)
+    first = asyncio.create_task(processed_camera(request(domain, loop)))
+    await entered.wait()
+    second = asyncio.create_task(processed_camera(request(domain, loop)))
+    await asyncio.sleep(0)
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+    release.set()
+    response = await second
+    assert response.body == b"jpeg-fixture"
+    assert domain.camera_calls == detector.calls == 1
+    assert not loop.snapshot_tasks
+
+
+async def test_module_close_cancels_pending_snapshot_and_releases_readers():
+    entered = asyncio.Event()
+    loop = VisionLoop(Detector())
+
+    async def produce():
+        entered.set()
+        await asyncio.Event().wait()
+
+    reader = asyncio.create_task(loop.share_snapshot(("pi", 1), produce))
+    await entered.wait()
+    await loop.close()
+    with pytest.raises(asyncio.CancelledError):
+        await reader
+    assert not loop.snapshot_tasks
+    with pytest.raises(RiderError, match="module_closed"):
+        await loop.share_snapshot(("pi", 1), produce)
+
+
+async def test_snapshot_failures_are_shared_and_retry_does_not_reuse_failure():
+    loop = VisionLoop(Detector())
+    release = asyncio.Event()
+    calls = 0
+
+    async def produce():
+        nonlocal calls
+        calls += 1
+        await release.wait()
+        raise RiderError("camera_off", 404)
+
+    first = asyncio.create_task(loop.share_snapshot(("pi", 1), produce))
+    second = asyncio.create_task(loop.share_snapshot(("pi", 1), produce))
+    await asyncio.sleep(0)
+    release.set()
+    results = await asyncio.gather(first, second, return_exceptions=True)
+    assert calls == 1
+    assert all(isinstance(r, RiderError) and r.code == "camera_off" for r in results)
+    assert not loop.snapshot_tasks
+    with pytest.raises(RiderError, match="camera_off"):
+        await loop.share_snapshot(("pi", 1), produce)
+    assert calls == 2
+
+
+async def test_different_policy_cannot_join_another_snapshot_and_queue_is_bounded():
+    entered, release = asyncio.Event(), asyncio.Event()
+    loop = VisionLoop(Detector())
+
+    async def produce():
+        entered.set()
+        await release.wait()
+        return "result"
+
+    readers = [
+        asyncio.create_task(loop.share_snapshot(("pi", revision), produce))
+        for revision in range(16)
+    ]
+    await entered.wait()
+    await asyncio.sleep(0)
+    assert len(loop.snapshot_tasks) == 16
+    with pytest.raises(RiderError, match="vision_busy"):
+        await loop.share_snapshot(("pi", 17), produce)
+    release.set()
+    assert await asyncio.gather(*readers) == ["result"] * 16
+    assert not loop.snapshot_tasks

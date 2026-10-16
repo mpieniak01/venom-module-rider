@@ -202,3 +202,59 @@ print('catalog_without_ml_runtime')
     )
     assert result.returncode == 0, result.stderr
     assert "catalog_without_ml_runtime" in result.stdout
+
+
+def test_embedded_host_with_loaded_foreign_scripts_uses_packaged_lazy_depth_adapter(
+    tmp_path,
+):
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    foreign = tmp_path / "host"
+    package = foreign / "scripts"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("HOST_SCRIPTS = True\n")
+    module_root = Path(__file__).resolve().parents[1]
+    code = """
+import scripts
+import sys
+assert scripts.HOST_SCRIPTS
+assert not hasattr(scripts, 'depth_candidates')
+# Runtime/profile imports must stay usable without optional model packages.
+sys.modules['numpy'] = None
+sys.modules['torch'] = None
+sys.modules['transformers'] = None
+from venom_module_rider.analysis_profiles import ProfileCatalog
+from venom_module_rider.depth_candidates import Candidate, file_hash
+from venom_module_rider import analysis_worker
+assert 'da2-default' in ProfileCatalog().profiles()
+assert callable(Candidate) and callable(file_hash) and callable(analysis_worker.run)
+assert 'scripts.depth_candidates' not in sys.modules
+assert scripts.HOST_SCRIPTS
+print('embedded_host_scripts_safe')
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=foreign,
+        env={
+            **os.environ,
+            "PYTHONPATH": os.pathsep.join([str(foreign), str(module_root)]),
+        },
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "embedded_host_scripts_safe" in result.stdout
+
+
+def test_research_cli_uses_the_packaged_candidate_implementation():
+    from scripts import depth_candidates as research
+    from venom_module_rider import depth_candidates as runtime
+
+    assert research.Candidate is runtime.Candidate
+    assert research.file_hash is runtime.file_hash
+    assert research.validate_depth is runtime.validate_depth
+    assert research.CHECKPOINT_HASHES is runtime.CHECKPOINT_HASHES

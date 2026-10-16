@@ -3,20 +3,24 @@
 import math
 
 
+def sector_regions(corridor):
+    """The shared configured layout; these are not measured distances."""
+    x0, y0, x1, y1 = corridor
+    width = x1 - x0
+    return {
+        "left": (x0 - width, y0, x0, y1),
+        "center": corridor,
+        "right": (x1, y0, x1 + width, y1),
+    }
+
+
 def assess_sectors(depth, corridor, coefficients, scale, settings, oriented):
     import numpy as np
 
     h, w = depth.shape
     y, x = np.mgrid[:h, :w]
-    x0, y0, x1, y1 = corridor
-    width = x1 - x0
-    regions = {
-        "left": (x0 - width, y0, x0, y1),
-        "center": corridor,
-        "right": (x1, y0, x1 + width, y1),
-    }
     result = {}
-    for name, bounds in regions.items():
+    for name, bounds in sector_regions(corridor).items():
         left, top, right, bottom = bounds
         complete = 0 <= left < right <= 1
         mask = (x >= left * w) & (x < right * w) & (y >= top * h) & (y < bottom * h)
