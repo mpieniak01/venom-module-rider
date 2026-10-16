@@ -28,7 +28,6 @@ async def processed_camera(request: Request):
         if exc.status != 404:
             raise
     loop = request.app.state.rider_vision
-    cached = loop.preview(client.device.id, corridor=corridor, revision=revision)
     if source == "device_policy":
         # The producer status is lightweight. Serving a current Pi result must
         # not wait for the full service/ownership graph on every browser read.
@@ -51,8 +50,15 @@ async def processed_camera(request: Request):
             goals = await loop_goals(domain, force=False)
             if any(goals.get(mode) is not False for mode in ("observe", "drive")):
                 raise RiderError("vision_busy", 429)
+            # Metadata reads may outlive the cached frame or admit a newer run.
+            # Choose the latest matching result only after those awaits finish.
+            cached = loop.preview(
+                client.device.id, corridor=corridor, revision=revision
+            )
             if cached is not None and cached[2]["age_source"] != "host-received":
                 cached = None
+    else:
+        cached = loop.preview(client.device.id, corridor=corridor, revision=revision)
     if cached is None:
         payload, mime, raw_headers = await domain.camera("raw")
         if mime not in {"image/jpeg", "image/png"}:

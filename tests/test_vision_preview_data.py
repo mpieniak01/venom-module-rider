@@ -265,3 +265,48 @@ async def test_live_producer_without_cache_cannot_fall_back_to_independent_infer
     with pytest.raises(RiderError, match="vision_busy"):
         await processed_camera(request(domain, loop))
     assert detector.calls == 0 and domain.camera_calls == 0
+
+
+async def test_snapshot_cache_is_rechecked_after_slow_pi_metadata_reads():
+    now = [10.0]
+    detector = Detector()
+    loop = VisionLoop(detector, clock=lambda: now[0])
+    await loop.decide("pi", frame(run="old-snapshot", age=0), b"old", with_preview=True)
+
+    class SlowMetadata(Domain):
+        async def read(self, path, *args, **kwargs):
+            result = await super().read(path, *args, **kwargs)
+            if path.endswith("status"):
+                now[0] += 1.2
+            return result
+
+        async def camera(self, stream):
+            self.camera_calls += 1
+            return b"new-raw", "image/jpeg", {"x-rider-stale": "false"}
+
+    domain = SlowMetadata(active=False)
+    response = await processed_camera(request(domain, loop))
+    assert response.headers["x-rider-frame-id"] != "old-snapshot-1"
+    assert float(response.headers["x-rider-frame-age-ms"]) < 500
+    assert domain.camera_calls == 1 and detector.calls == 2
+
+
+async def test_snapshot_returns_newest_result_published_during_goal_read():
+    now = [10.0]
+    detector = Detector()
+    loop = VisionLoop(detector, clock=lambda: now[0])
+    await loop.decide("pi", frame(run="old-snapshot", age=0), b"old", with_preview=True)
+
+    class UpdatedMetadata(Domain):
+        async def read(self, path, *args, **kwargs):
+            result = await super().read(path, *args, **kwargs)
+            if path == "/api/logic/state":
+                await loop.decide(
+                    "pi", frame(run="new-snapshot", age=0), b"new", with_preview=True
+                )
+            return result
+
+    domain = UpdatedMetadata(active=False)
+    response = await processed_camera(request(domain, loop))
+    assert response.headers["x-rider-frame-id"] == "new-snapshot-1"
+    assert domain.camera_calls == 0 and detector.calls == 2
