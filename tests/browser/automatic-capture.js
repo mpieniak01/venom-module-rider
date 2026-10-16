@@ -1,0 +1,71 @@
+// Full UI -> real domain/SQLite flow on an isolated recorded-input Pi fixture.
+async page => {
+  const check=(ok,message)=>{if(!ok)throw new Error(message);};
+  const origin=new URL(page.url());
+  check(["localhost","127.0.0.1"].includes(origin.hostname),"loopback required");
+  const base=origin.origin+"/api/v1/rider";
+  await page.unrouteAll({behavior:"wait"});
+  await page.reload();
+  const config=await(await page.request.get(base+"/config")).json();
+  check(config.devices.length&&config.devices.every(d=>d.mode==="demo"),"fixture-only allowlist required");
+  const headers={"X-Rider-Session":config.session};
+  const posts=[];
+  page.on("request",r=>{if(r.method()==="POST"&&r.url().endsWith("/control"))posts.push(r.postDataJSON());});
+  // Analysis is an existing independent fixture producer. Auto never enables it.
+  await page.request.post(base+"/goal/s15_venom_perception",{headers,data:{enabled:false}});
+  const previous=await(await page.request.get(base+"/navigation/config")).json();
+  const configured=await page.request.post(base+"/navigation/config",{headers,data:{revision:previous.config.revision,values:{perception:{...previous.config.perception,engine:"depth_plane"}}}});
+  check(configured.ok(),"fixture perception setup failed: "+await configured.text());
+  const observe=await page.request.post(base+"/goal/s15_venom_perception",{headers,data:{enabled:true}});
+  check(observe.ok(),"fixture observation failed");
+  const preview=page.getByTestId("camera-preview-toggle");
+  await preview.waitFor({state:"visible"});
+  await page.waitForTimeout(500);
+  if((await preview.innerText()).includes("Pokaż"))await preview.click();
+  await page.getByTestId("samples-start").click();
+  await page.getByTestId("samples-save").waitFor({state:"visible"});
+  await page.getByTestId("automatic-capture").locator("summary").filter({hasText:"Zdarzenia i limity"}).click();
+  await page.getByLabel("Trwałość · liczba klatek",{exact:true}).fill("1");
+  await page.getByLabel("Trwałość · ms",{exact:true}).fill("0");
+  // Model initialization is not an automatic-capture event.
+  await page.waitForTimeout(6000);
+  let enables=0;
+  await page.route("**/api/v1/rider/samples/automatic",async route=>{
+    if(route.request().method()!=="POST")return route.continue();
+    enables++;
+    await route.fetch();await route.abort();
+  });
+  await page.getByTestId("auto-start").click();
+  await page.waitForFunction(()=>document.querySelector('[data-testid="auto-stop"]'),null,{timeout:20000});
+  await page.waitForFunction(()=>/Zapisane: [1-9]/.test(document.querySelector('[data-testid="auto-counts"]')?.textContent??""),null,{timeout:20000});
+  const live=await(await page.request.get(base+"/samples/automatic")).json();
+  const history=await(await page.request.get(base+"/samples/automatic/runs/"+live.id)).json();
+  const event=history.events.find(e=>e.state==="saved");
+  check(!!event,"no durable automatic event");
+  const sample=await(await page.request.get(base+"/samples/items/"+event.sample_id)).json();
+  check(sample.raw.sha256===event.body.source.sha256,"event and RAW differ");
+  check(sample.frame_id===event.body.source.frame_id,"event frame identity differs");
+  check(sample.labels.at(-1).author.kind==="auto"&&sample.labels.at(-1).review==="pending","automatic label was promoted to truth");
+  check(event.body.confidence===null,"depth confidence was invented");
+  check(enables===1,"lost enable response caused duplicate POST");
+  check(await page.getByTestId("automatic-capture").getByRole("alert").count()===0,"recovered enable retained stale HTTP error");
+  const autoStateBefore=live.state;
+  await page.waitForFunction(()=>!document.querySelector('[data-testid="samples-save"]')?.disabled);
+  await page.getByTestId("samples-save").click();
+  await page.waitForFunction(()=>document.querySelector('[data-testid="samples-result"]')?.textContent?.includes("Zapisano w Venomie"));
+  check((await(await page.request.get(base+"/samples/automatic")).json()).state===autoStateBefore,"manual capture cancelled auto mode");
+  await page.getByTestId("auto-stop").click();
+  await page.getByTestId("auto-start").waitFor({state:"visible"});
+  const stopped=await(await page.request.get(base+"/samples/automatic")).json();
+  await page.waitForTimeout(1200);
+  check((await(await page.request.get(base+"/samples/automatic")).json()).saved===stopped.saved,"samples appeared after explicit data stop");
+  check(posts.length===0,"automatic capture armed or moved fixture");
+  await page.setViewportSize({width:390,height:844});
+  check(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2),"mobile overflow");
+  await page.screenshot({path:"output/playwright/259b-auto-mobile.png",fullPage:true});
+  await page.setViewportSize({width:1440,height:1100});
+  await page.screenshot({path:"output/playwright/259b-auto-desktop.png",fullPage:true});
+  await page.getByTestId("samples-end").click();
+  await page.request.post(base+"/goal/s15_venom_perception",{headers,data:{enabled:false}});
+  return {flow:"PASS",requestRecovery:"one POST",exactSource:true,pendingLabel:true,manualAlongside:true,stopBarrier:true,noActuatorPosts:true,saved:stopped.saved,run:live.id};
+}
