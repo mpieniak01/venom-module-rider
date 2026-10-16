@@ -388,3 +388,7 @@ outside Git; Pi does not become an image archive. Collection requires no model o
 ARM and is independent of the motor intent/STOP lane. Browse and label sessions
 with Pi disconnected. See [Sample sessions v1](docs/SAMPLES_V1.md) for operator
 flow, limits, source clocks, local import, API and rollback.
+
+## Stored session analysis
+
+The sample library can explicitly analyse stored originals with retained DA2 or DA3 Small profiles, compare immutable runs and export reports while the Pi is disconnected. See [the analysis contract](docs/ANALYSIS_V1.md). Collection and analysis are separate steps; offline results never grant movement permission.

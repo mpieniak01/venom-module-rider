@@ -5,8 +5,6 @@ import json
 import subprocess
 from pathlib import Path
 
-import numpy as np
-
 MODELS = {
     "da3-small": (
         "depth-anything/DA3-SMALL",
@@ -37,6 +35,8 @@ def file_hash(path):
 
 
 def validate_depth(depth):
+    import numpy as np
+
     array = np.asarray(depth, dtype=np.float32)
     if array.ndim != 2 or min(array.shape) < 32:
         raise ValueError("invalid_depth_shape")
@@ -47,6 +47,7 @@ def validate_depth(depth):
 
 def resize_depth(depth, size):
     """Resize the whole uncropped view to RAW coordinates before scoring."""
+    import numpy as np
     from PIL import Image
 
     depth = validate_depth(depth)

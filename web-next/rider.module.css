@@ -213,3 +213,11 @@
 .sampleEditor code { display: block; overflow-wrap: anywhere; margin-top: 8px; }
 .sampleEditor .field { margin-bottom: 12px; }
 .sampleCapture .meta code { overflow-wrap: anywhere; }
+
+/* Offline reports keep RAW/depth/overlay comparable at the same readable size. */
+.analysisTable { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 12px; }
+.analysisTable th, .analysisTable td { text-align: left; vertical-align: top; padding: 7px 9px; border-bottom: 1px solid rgba(148,163,184,.18); overflow-wrap: anywhere; }
+.analysisMedia { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 14px 0; }
+.analysisImage { display: block; width: 100%; height: auto; object-fit: contain; border-radius: 8px; }
+.analysisHash { display: block; overflow-wrap: anywhere; font-size: 11px; margin: 8px 0; }
+@media (max-width: 900px) { .analysisMedia { grid-template-columns: 1fr; } .analysisTable th, .analysisTable td { padding: 6px 4px; } }

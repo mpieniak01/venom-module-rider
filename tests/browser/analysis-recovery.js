@@ -1,0 +1,38 @@
+async page => {
+  const check=(value,message)=>{if(!value)throw new Error(message)};
+  const origin=new URL(page.url());
+  check(["localhost","127.0.0.1"].includes(origin.hostname),"loopback required");
+  const base=origin.origin+"/api/v1/rider";
+  const config=await(await page.request.get(base+"/config")).json();
+  check(config.devices.every(item=>item.mode==="demo"),"fixture only");
+  const list=await(await page.request.get(base+"/samples/sessions")).json();
+  const session=list.sessions.find(item=>item.policy?.scene_group==="inputs-floor");
+  await page.reload();
+  await page.getByTestId("samples-browser").locator("summary").first().click();
+  await page.getByTestId("samples-session").selectOption(session.session_id);
+  const panel=page.getByTestId("analysis-panel");
+  await panel.locator("summary").filter({hasText:"Parametry analizy"}).click();
+  await panel.getByLabel("Maksymalna liczba klatek",{exact:true}).fill("1");
+  let intent,posts=0;
+  await page.route("**/api/v1/rider/analysis/runs",async route=>{
+    if(route.request().method()!=="POST")return route.continue();
+    intent=route.request().postDataJSON();posts++;
+    await route.fetch();await route.abort();
+  });
+  await page.getByTestId("analysis-start").click();
+  await page.waitForFunction(()=>document.querySelector('[data-testid="analysis-run"]')?.value);
+  await page.reload();
+  await page.getByTestId("samples-browser").locator("summary").first().click();
+  await page.getByTestId("samples-session").selectOption(session.session_id);
+  await page.getByTestId("analysis-run").selectOption((await(await page.request.get(base+"/analysis/requests/"+intent.request_id)).json()).id);
+  await page.waitForFunction(()=>document.querySelector('[data-testid="analysis-status"]')?.textContent?.includes("Ukończono"));
+  check(posts===1,"lost reply/reload re-enqueued analysis");
+  await page.unroute("**/api/v1/rider/analysis/runs");
+  await page.getByTestId("analysis-start").click();
+  await page.getByTestId("analysis-cancel").click();
+  await page.waitForFunction(()=>document.querySelector('[data-testid="analysis-status"]')?.textContent?.includes("Anulowano"));
+  const cancelled=await page.getByTestId("analysis-run").inputValue();
+  const state=await(await page.request.get(base+"/analysis/runs/"+cancelled)).json();
+  check(state.state==="cancelled","cancel only changed UI");
+  return {flow:"PASS",unknownReplyRecovered:true,posts,cancelled,terminalState:state.state};
+}
