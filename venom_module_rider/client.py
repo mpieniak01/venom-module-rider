@@ -7,6 +7,8 @@ import hashlib
 import json
 import os
 import time
+from collections.abc import AsyncGenerator
+from typing import cast
 
 import httpx
 
@@ -350,7 +352,7 @@ class PiClient:
                 timeout=httpx.Timeout(1.0, connect=0.5, pool=0.5),
             )
             response = await self.media_http.send(request, stream=True)
-            chunks = response.aiter_bytes()
+            chunks = cast(AsyncGenerator[bytes, None], response.aiter_bytes())
             reading = None
             try:
                 if response.is_redirect:
