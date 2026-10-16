@@ -142,3 +142,5 @@ Roll back the module code to its recorded parent revision, leaving the sample ro
 intact. The prior module simply does not expose sample routes. Do not delete the
 root or overwrite its SQLite database to roll back. Export sessions before any
 future incompatible migration. This increment introduces schema version 1 only.
+
+Derived analysis files retained by a newer optional feature also count toward the shared byte quota after rolling back to this registry version. Temporary hardlinks count once; unsafe symlinks are rejected. Sources and derived files are never deleted automatically to make room.
