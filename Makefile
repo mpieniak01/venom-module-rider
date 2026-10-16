@@ -39,3 +39,10 @@ DA3_PYTHON ?= data/da3-research/venv/bin/python
 DA3_SDK_PATH ?= data/da3-research/sdk/src
 research-depth:
 	PYTHONPATH=.:$(DA3_SDK_PATH) $(DA3_PYTHON) scripts/compare_depth_models.py $(ARGS)
+
+# Features need only the host runtime; the explicit pose option uses the
+# retained model environment, matching research-depth.
+MAPPING_PYTHON ?= $(if $(filter --pose,$(ARGS)),$(DA3_PYTHON),$(PYTHON))
+.PHONY: research-mapping
+research-mapping:
+	PYTHONPATH=$(HOST):$(DA3_SDK_PATH):. $(MAPPING_PYTHON) -m scripts.mapping_research $(ARGS)
