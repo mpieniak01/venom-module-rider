@@ -776,3 +776,55 @@ def test_native_prepare_does_not_turn_real_camera_failure_into_pending(monkeypat
         assert response.status_code == 503
         assert response.json()["detail"]["code"] == "stream_unavailable"
         assert pi.opened == 0
+
+
+def test_active_native_preview_keeps_camera_source_distinct_from_pi_run_identity(
+    monkeypatch,
+):
+    import hashlib
+
+    app, service, pi = fixture(monkeypatch)
+    pi.latest = native(101)
+    with TestClient(app) as client:
+        detector = Detector()
+        app.state.rider_vision.detector = detector
+        current = warmup(client)
+        pi.running = True
+        for request_sequence, camera_sequence in ((1, 101), (2, 107)):
+            if request_sequence > 1:
+                current = client.portal.call(pi.emit, camera_sequence)
+            # Pi hashes its request input and counts admitted loop cycles. Those
+            # identifiers need not equal sensor frame IDs or camera sequence.
+            request_id = hashlib.sha256(
+                json.dumps(current, sort_keys=True).encode()
+            ).hexdigest()
+            response = client.post(
+                "/api/v1/rider/compute/vision/decision-reference",
+                headers=AUTH,
+                json=descriptor(current, request_sequence, frame_id=request_id),
+            )
+            assert response.status_code == 200, response.text
+            decision = response.json()
+            assert decision["frame_id"] == request_id
+            assert decision["sequence"] == request_sequence
+            assert decision["source"] == current
+
+            preview = client.get("/api/v1/rider/camera/venom")
+            assert preview.status_code == 200, preview.text
+            source = json.loads(preview.headers["x-rider-source-json"])
+            analysis = json.loads(preview.headers["x-rider-analysis-json"])
+            assert source["frame_id"] == f"session-{camera_sequence}"
+            assert source["sequence"] == camera_sequence
+            assert preview.headers["x-rider-frame-id"] == source["frame_id"]
+            assert analysis["source"] == current
+            assert analysis["source"]["frame_id"] == source["frame_id"]
+            assert analysis["source"]["sequence"] == source["sequence"]
+            assert analysis["frame_id"] == request_id
+            assert analysis["sequence"] == request_sequence
+            assert preview.content == jpeg() and detector.calls == request_sequence
+            assert (
+                app.state.rider_vision.runs[("pi", "pi-run")]["sequence"]
+                == request_sequence
+            )
+        assert pi.opened == 1 and pi.snapshot_requests == 0
+        assert all(method == "GET" for method, _path, _body in pi.calls)
