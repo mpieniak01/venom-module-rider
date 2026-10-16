@@ -77,6 +77,11 @@ def copy_export(source, destination):
             os.fsync(stream.fileno())
         # Linking cannot overwrite a destination created concurrently.
         os.link(temporary, destination)
+        directory = os.open(destination.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
         return str(destination)
     finally:
         if temporary is not None:

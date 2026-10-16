@@ -210,3 +210,79 @@ def test_cli_import_browse_label_export_and_no_overwrite(tmp_path, capsys):
     assert main(args) == 1
     assert json.loads(capsys.readouterr().out)["error"] == "samples_export_exists"
     assert output.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["sample", "raw", "labels", "label", "session", "policy", "sample_id", "context"],
+)
+def test_wrong_manifest_types_return_domain_error_before_any_import(tmp_path, field):
+    store, sid = dataset(tmp_path)
+    exported, _ = SampleArchive(store).export(sid)
+    with zipfile.ZipFile(exported) as archive:
+        manifest = json.loads(archive.read("manifest.json"))
+    if field == "sample":
+        manifest["samples"][0] = []
+    elif field == "raw":
+        manifest["samples"][0]["raw"] = []
+    elif field == "labels":
+        manifest["samples"][0]["labels"] = "invalid"
+    elif field == "label":
+        manifest["samples"][0]["labels"] = ["invalid"]
+    elif field == "session":
+        manifest["session"] = []
+    elif field == "policy":
+        manifest["session"]["policy"] = []
+    elif field == "sample_id":
+        manifest["samples"][0]["sample_id"] = []
+    else:
+        manifest["samples"][0]["source_context"] = []
+    with pytest.raises(RiderError, match="samples_import_invalid"):
+        SampleArchive._validate_manifest(manifest)
+    exported.unlink()
+
+
+def test_export_flushes_directory_entry_before_reporting_success(tmp_path, monkeypatch):
+    import os
+
+    from venom_module_rider.samples_cli import copy_export
+
+    source = tmp_path / "source.zip"
+    source.write_bytes(b"original archive")
+    calls = []
+    sync = os.fsync
+
+    def observe(fd):
+        calls.append(stat.S_ISDIR(os.fstat(fd).st_mode))
+        sync(fd)
+
+    monkeypatch.setattr(os, "fsync", observe)
+    target = tmp_path / "saved.zip"
+    assert copy_export(source, target) == str(target)
+    assert calls == [False, True]
+    assert target.read_bytes() == source.read_bytes()
+
+
+async def test_import_waits_for_real_slow_write_without_early_incomplete(
+    tmp_path, monkeypatch
+):
+    import time
+
+    source = tmp_path / "history"
+    source.mkdir()
+    (source / "one.png").write_bytes(frame().payload)
+    registry = SamplesRegistry(tmp_path / "target")
+    persist = registry.store.capture
+
+    def slow_write(*args, **kwargs):
+        time.sleep(7)  # observed filesystem stall exceeds the former ~5 s poll limit
+        return persist(*args, **kwargs)
+
+    monkeypatch.setattr(registry.store, "capture", slow_write)
+    try:
+        session = await SampleImporter(registry).run(source, "slow-import")
+        assert session["state"] == "closed"
+        assert session["counts"] == {"saved": 1}
+        assert len(registry.store.samples(session["session_id"])) == 1
+    finally:
+        await registry.close()

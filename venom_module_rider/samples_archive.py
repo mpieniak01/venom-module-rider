@@ -211,10 +211,24 @@ class SampleArchive:
             or manifest.get("kind") != "rider-sample-session"
             or not isinstance(manifest.get("samples"), list)
             or len(manifest["samples"]) > 1000
+            or not isinstance(manifest.get("session"), dict)
+            or not isinstance(manifest["session"].get("policy", {}), dict)
         ):
             raise RiderError("samples_import_invalid", 400)
         seen = set()
         for sample in manifest["samples"]:
+            if (
+                not isinstance(sample, dict)
+                or not isinstance(sample.get("raw"), dict)
+                or not isinstance(sample.get("sample_id"), str)
+                or re.fullmatch("[a-f0-9]{32}", sample["sample_id"]) is None
+                or not isinstance(sample.get("labels", []), list)
+                or not all(
+                    isinstance(label, dict) for label in sample.get("labels", [])
+                )
+                or not isinstance(sample.get("source_context", {}), dict)
+            ):
+                raise RiderError("samples_import_invalid", 400)
             raw = sample["raw"]
             digest = raw["sha256"]
             if (
@@ -223,7 +237,7 @@ class SampleArchive:
                 or raw["file"] != f"raw/{digest}.bin"
                 or type(raw["bytes"]) is not int
                 or not 0 < raw["bytes"] <= 512 * 1024
-                or raw["format"] not in {"image/jpeg", "image/png"}
+                or raw["format"] not in ("image/jpeg", "image/png")
                 or sample["sample_id"] in seen
             ):
                 raise RiderError("samples_import_invalid", 400)

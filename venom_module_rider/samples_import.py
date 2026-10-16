@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import io
 import json
@@ -231,11 +230,9 @@ class SampleImporter:
                     raise RiderError("samples_import_invalid", 400)
                 job_id = hashlib.sha256(f"{request_id}:{index}".encode()).hexdigest()
                 self.registry.capture(sid, job_id, key, allow_historical=True)
-                for _ in range(1000):
-                    result = await self.registry.request(job_id)
-                    if result["state"] in {"saved", "failed"}:
-                        break
-                    await asyncio.sleep(0.005)
+                # This lookup follows the admitted capture in the same bounded
+                # writer lane. Await actual completion, not a polling deadline.
+                result = await self.registry.read(self.store.request, job_id)
                 if result["state"] != "saved":
                     raise RiderError("samples_import_incomplete", 409)
                 for label in item.get("labels") or []:
