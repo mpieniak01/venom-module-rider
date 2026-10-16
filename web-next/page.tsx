@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Activity, Bot, Boxes, BrainCircuit, CircleStop, RefreshCw, ShieldCheck, SlidersHorizontal, Smile, Wifi, WifiOff, X } from "lucide-react";
 import { useLanguage } from "@/lib/i18n";
 import { useTheme } from "@/lib/theme";
@@ -24,6 +24,34 @@ export default function RiderPage() {
   const { theme } = useTheme();
   const t = useCallback((key: string, replacements?: Record<string, string | number>) => translate(language, key, replacements), [language]);
   const [section, setSection] = useState<Section>("control");
+  const pageRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const page = pageRef.current;
+    // The optional module sits inside the host's main, below its sticky top bar.
+    const hostMain = page?.parentElement?.closest("main");
+    if (!page || !hostMain) return;
+    const header = page.querySelector("header");
+    let observed: Element | null = null;
+    const update = () => {
+      let topBar = hostMain.previousElementSibling;
+      while (topBar && !["sticky", "fixed"].includes(getComputedStyle(topBar).position)) topBar = topBar.previousElementSibling;
+      if (topBar !== observed) {
+        if (observed) observer?.unobserve(observed);
+        observed = topBar;
+        if (observed) observer?.observe(observed);
+      }
+      const offset = topBar ? Math.max(0, Number.parseFloat(getComputedStyle(topBar).top) || 0) + topBar.getBoundingClientRect().height : 0;
+      page.style.setProperty("--rider-sticky-top", `${offset + 8}px`);
+      if (header) page.style.setProperty("--rider-header-height", `${header.getBoundingClientRect().height}px`);
+    };
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    if (header) observer?.observe(header);
+    const layoutObserver = new MutationObserver(update);
+    if (hostMain.parentElement) layoutObserver.observe(hostMain.parentElement, { childList: true });
+    update();
+    window.addEventListener("resize", update);
+    return () => { observer?.disconnect(); layoutObserver.disconnect(); window.removeEventListener("resize", update); page.style.removeProperty("--rider-sticky-top"); page.style.removeProperty("--rider-header-height"); };
+  }, []);
   const client = useRider(section);
   const safety = safetyOf(client.status);
   const connection = client.status?.connection;
@@ -36,7 +64,7 @@ export default function RiderPage() {
   }, [stop]);
   const armToggle = () => void client.command(armed ? { action: "disarm" } : { action: safety.state === "ESTOP" ? "clear_estop" : "arm", operator_consent: true, operator_plan: t("manual"), owner: "manual", arming_mode: "operator" });
   const changeSection = (next: Section) => { client.hold.release(); setSection(next); };
-  return <main className={styles.page} data-testid="rider-page" data-theme={theme}>
+  return <main ref={pageRef} className={styles.page} data-testid="rider-page" data-theme={theme}>
     <header className={styles.header}>
       <div className={styles.brand}><div className={styles.brandIcon}><Bot size={30} /></div><div><h1 className={styles.title}>{t("title")}</h1><p className={styles.subtitle}>{t("subtitle")}</p></div></div>
       <div className={styles.toolbar}>
