@@ -239,7 +239,8 @@ try:
 finally:
     if status is None:
         os.kill(identity,signal.SIGKILL);os.waitpid(identity,0)
-assert status is not None and os.WIFSIGNALED(status) and os.WTERMSIG(status)==signal.SIGKILL
+assert status is not None and os.WIFSIGNALED(status)
+assert os.WTERMSIG(status)==signal.SIGKILL
 print(json.dumps({"paused_orphan_killed":True,"reaped":True}))
 """
     import sys
