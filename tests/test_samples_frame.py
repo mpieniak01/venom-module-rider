@@ -96,3 +96,15 @@ def test_rejected_input_never_retains_memory_or_escapes_producer(
 def test_configuration_has_finite_hard_limits(settings):
     with pytest.raises(ValueError):
         FrameBuffer(**settings)
+
+
+def test_analysis_attaches_to_exact_raw_without_mutating_an_admitted_snapshot():
+    buffer = FrameBuffer()
+    key = buffer.offer("robot", b"raw-original", "image/jpeg", {"frame_id": "one"})
+    queued = buffer.get(key)
+    assert buffer.annotate_prediction(key, {"state": "clear"}) is True
+    assert buffer.get(key).payload == queued.payload
+    assert queued.context().get("prediction") is None
+    assert buffer.get(key).context()["prediction"]["state"] == "clear"
+    assert buffer.annotate_prediction(key, {"invalid": float("nan")}) is False
+    assert buffer.annotate_prediction("expired", {}) is False

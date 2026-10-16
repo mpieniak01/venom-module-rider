@@ -12,7 +12,7 @@ import math
 import time
 import uuid
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from .errors import RiderError
@@ -138,6 +138,22 @@ class FrameBuffer:
         if key not in self.frames:
             raise RiderError("samples_frame_expired", 409)
         return self.frames[key]
+
+    def annotate_prediction(self, key, prediction):
+        """A queued writer retains its earlier immutable metadata snapshot."""
+        try:
+            frame = self.get(key)
+            context = {**frame.context(), "prediction": prediction}
+            encoded = json.dumps(
+                context, allow_nan=False, separators=(",", ":")
+            ).encode()
+            if len(encoded) > MAX_CONTEXT_BYTES:
+                raise ValueError("prediction size")
+            self.frames[key] = replace(frame, context_json=encoded)
+            return True
+        except (RiderError, ValueError, TypeError):
+            self.rejected += 1
+            return False
 
     def lookup(self, device_id, context) -> str | None:
         self.purge()

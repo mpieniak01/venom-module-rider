@@ -77,7 +77,13 @@ async def processed_camera(request: Request):
             corridor=corridor,
             perception=PerceptionSettings.model_validate(perception),
         )
-        result = await loop.decide(client.device.id, frame, payload, with_preview=True)
+        result = await loop.decide(
+            client.device.id,
+            frame,
+            payload,
+            with_preview=True,
+            input_ticket=normalized.get("x-rider-capture-key"),
+        )
         cached = loop.preview(client.device.id, corridor=corridor, revision=revision)
         if cached is None:
             raise RiderError(result["reason"], 503)
@@ -87,6 +93,11 @@ async def processed_camera(request: Request):
         image,
         media_type="image/jpeg",
         headers={
+            **(
+                {"x-rider-capture-key": result["capture_key"]}
+                if result.get("capture_key")
+                else {}
+            ),
             "cache-control": "no-store",
             "x-rider-source": "venom",
             "x-rider-stale": "false",

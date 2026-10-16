@@ -18,7 +18,7 @@ from ..compute import ComputeService
 from ..config import IDENTIFIER, configured_devices
 from ..errors import RiderError
 from ..service import RESOURCE_NAMES, RiderService
-from . import compute_routes, conversation_routes, vision_routes
+from . import compute_routes, conversation_routes, samples_routes, vision_routes
 from .routing import RiderRoute
 from .schemas import Command, GoalAction, ResourceAction, Selection, SettingsPatch
 
@@ -49,9 +49,29 @@ async def lifespan(app):
         engines = DemoEngines(app)
     compute = getattr(app.state, "rider_compute", None) or ComputeService(engines)
     app.state.rider_compute = compute
+    import asyncio
+
+    from ..samples_registry import SamplesRegistry, default_root
     from ..vision_loop import VisionLoop
 
-    app.state.rider_vision = VisionLoop()
+    samples = getattr(app.state, "rider_samples", None)
+    app.state.rider_samples_error = None
+    if samples is None:
+        import sqlite3
+
+        try:
+            samples = await asyncio.to_thread(SamplesRegistry, default_root())
+        except (OSError, sqlite3.Error, RiderError):
+            app.state.rider_samples_error = "samples_storage_unavailable"
+    if samples is not None:
+        samples.device_modes = {
+            key: device.mode for key, device in service.devices.items()
+        }
+    app.state.rider_samples = samples
+    service.samples = samples
+    app.state.rider_vision = VisionLoop(
+        samples=samples, source_session=lambda: service.session
+    )
     default = os.getenv("RIDER_DEFAULT_DEVICE")
     if existing is None:
         await service.restore(default)
@@ -61,6 +81,8 @@ async def lifespan(app):
         provider = getattr(app.state, "rider_conversation", None)
         if provider:
             await provider.close()
+        if samples is not None:
+            await samples.close()
         await app.state.rider_vision.close()
         await compute.close()
         await service.close()
@@ -138,6 +160,7 @@ router = APIRouter(
 router.include_router(compute_routes.router)
 router.include_router(conversation_routes.router)
 router.include_router(vision_routes.router)
+router.include_router(samples_routes.router)
 Session = Annotated[str | None, Header(alias="X-Rider-Session")]
 
 

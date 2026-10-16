@@ -15,6 +15,7 @@ import { Button, Empty, Panel, Pill } from "./components/primitives";
 import { Resources } from "./components/resources";
 import { NavigationLoop } from "./components/navigation-loop";
 import { Compute } from "./components/compute";
+import { SamplesBrowser } from "./components/samples-browser";
 import styles from "./rider.module.css";
 
 const tabs = [{ id: "control", Icon: Bot }, { id: "overview", Icon: Activity }, { id: "calibration", Icon: SlidersHorizontal }, { id: "resources", Icon: Boxes }, { id: "face", Icon: Smile }, { id: "compute", Icon: BrainCircuit }] as const;
@@ -70,6 +71,7 @@ export default function RiderPage() {
         {section === "compute" && <Compute key={connection.session} client={client} t={t} language={language} />}
       </>}
     </div>
+    <SamplesBrowser t={t} language={language}/>
     {!!Object.keys(client.status?.errors ?? {}).length && <details className={styles.details}><summary>{t("partial")}</summary><pre className={styles.pre}>{JSON.stringify(client.status?.errors, null, 2)}</pre></details>}
     {str(connection?.error) && <div className={styles.meta}>{t("state")}: <code>{connection?.error}</code></div>}
   </main>;

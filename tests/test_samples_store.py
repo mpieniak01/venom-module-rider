@@ -152,7 +152,8 @@ def test_explicit_historical_sample_preserves_age_and_source(tmp_path):
     ],
 )
 def test_quota_failure_preserves_existing_sources(tmp_path, limits):
-    store, session = setup(tmp_path, limits=limits)
+    store, session = setup(tmp_path)
+    store.limits = limits
     result = save(store, session, frame())
     assert result["state"] == "failed" and result["error"] == "samples_quota_reached"
     assert not store.samples(session)

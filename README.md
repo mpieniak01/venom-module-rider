@@ -379,3 +379,12 @@ version through the existing deployment procedure. Never reset an active robot
 or delete a branch as a substitute for rollback.
 
 Panel identities provide concurrency ownership within the single-operator control domain. Caller authorization remains the existing module access guard; a panel identity is not a credential or a separate user account.
+
+## Camera sample sessions
+
+Collect the exact visible RAW source next to the camera, with a bounded sequence
+option. Samples, label revisions and ZIP exports live in a durable Venom directory
+outside Git; Pi does not become an image archive. Collection requires no model or
+ARM and is independent of the motor intent/STOP lane. Browse and label sessions
+with Pi disconnected. See [Sample sessions v1](docs/SAMPLES_V1.md) for operator
+flow, limits, source clocks, local import, API and rollback.

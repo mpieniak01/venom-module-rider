@@ -97,6 +97,8 @@ class SampleStore:
                   body TEXT NOT NULL, PRIMARY KEY(sample_id, revision));
                 CREATE INDEX IF NOT EXISTS samples_session
                 ON samples(session_id, ordinal);
+                CREATE INDEX IF NOT EXISTS requests_session
+                ON requests(session_id, state);
                 PRAGMA user_version=1;
             """)
         # A previous crash may have left an uncommitted blob. Count it against
@@ -105,8 +107,12 @@ class SampleStore:
         if recover:
             self.recover_interrupted()
 
+    def refresh_usage(self):
+        self.total_bytes = sum(p.stat().st_size for p in self.blobs.glob("*.bin"))
+
     def recover_interrupted(self):
         """The collection service calls this while holding its process lease."""
+        self.refresh_usage()
         with self.db() as db:
             # Interrupted work never becomes saved on a restart.
             db.execute(
@@ -130,8 +136,27 @@ class SampleStore:
         finally:
             db.close()
 
+    def usage(self):
+        metadata = sum(
+            path.stat().st_size
+            for path in (
+                self.path,
+                Path(str(self.path) + "-wal"),
+                Path(str(self.path) + "-shm"),
+            )
+            if path.exists()
+        )
+        if (self.root / "exports").is_symlink():
+            raise RiderError("samples_root_invalid", 400)
+        exports = sum(
+            path.stat().st_size
+            for path in (self.root / "exports").glob("*.zip")
+            if not path.is_symlink()
+        )
+        return self.total_bytes + metadata + exports
+
     def _space(self, extra=0):
-        if self.total_bytes + extra > self.limits.total_bytes:
+        if self.usage() + extra > self.limits.total_bytes:
             raise RiderError("samples_quota_reached", 507)
         if shutil.disk_usage(self.root).free < self.limits.min_free_bytes + extra:
             raise RiderError("samples_disk_full", 507)
@@ -141,6 +166,7 @@ class SampleStore:
         identifier(device_id)
         policy_json = encode(policy or {"kind": "manual"})
         with self.db() as db:
+            db.execute("BEGIN IMMEDIATE")
             old = db.execute(
                 "SELECT * FROM sessions WHERE request_id=?", (request_id,)
             ).fetchone()
@@ -204,7 +230,8 @@ class SampleStore:
 
     def end(self, session_id, *, incomplete=False):
         with self.db() as db:
-            self._session(db, identifier(session_id))
+            session = self._session(db, identifier(session_id))
+            incomplete = incomplete or bool(session["counts"].get("failed"))
             db.execute(
                 "UPDATE sessions SET state=?, ended=? "
                 "WHERE id=? AND state='collecting'",
@@ -297,6 +324,7 @@ class SampleStore:
         ).hexdigest()
         admitted = self.wall() if admitted_at is None else admitted_at
         with self.db() as db:
+            db.execute("BEGIN IMMEDIATE")
             old = db.execute(
                 "SELECT * FROM requests WHERE id=?", (request_id,)
             ).fetchone()
@@ -335,7 +363,17 @@ class SampleStore:
             if admitted - session["started_at"] > self.limits.session_seconds:
                 raise RiderError("samples_session_expired", 409)
             context = frame.context()
-            historical = context.get("stale") is True or receipt_age_ms > 1000
+            source_age = context.get("source_age_ms")
+            age_lower_bound = receipt_age_ms + (
+                source_age
+                if isinstance(source_age, (int, float)) and source_age > 0
+                else 0
+            )
+            historical = (
+                context.get("stale") is True
+                or age_lower_bound > 1000
+                or bool(context.get("recorded_at_header"))
+            )
             if historical and not allow_historical:
                 raise RiderError("samples_historical_consent_required", 409)
             with self.db() as db:
@@ -349,6 +387,7 @@ class SampleStore:
                 or size + len(frame.payload) > self.limits.session_bytes
             ):
                 raise RiderError("samples_quota_reached", 507)
+            self._space(MAX_CONTEXT_BYTES * 2)
             quality = self.quality(frame)
             sample_id = uuid.uuid4().hex
             manifest = {
@@ -375,6 +414,7 @@ class SampleStore:
                 "received_at": frame.received_at,
                 "admitted_at": admitted,
                 "receipt_age_ms": receipt_age_ms,
+                "age_lower_bound_ms": age_lower_bound,
                 "historical": historical,
                 "transform": context.get("transform"),
                 "calibration": context.get("calibration"),
@@ -435,6 +475,50 @@ class SampleStore:
             ).fetchall()
             return [json.loads(row[0]) for row in rows]
 
+    def page(self, session_id, *, offset=0, limit=24):
+        if (
+            type(offset) is not int
+            or type(limit) is not int
+            or offset < 0
+            or not 1 <= limit <= 50
+        ):
+            raise RiderError("samples_page_invalid", 400)
+        with self.db() as db:
+            session = self._session(db, identifier(session_id))
+            rows = db.execute(
+                "SELECT metadata FROM samples WHERE session_id=? "
+                "ORDER BY ordinal LIMIT ? OFFSET ?",
+                (session_id, limit, offset),
+            ).fetchall()
+            count = db.execute(
+                "SELECT COUNT(*) FROM samples WHERE session_id=?", (session_id,)
+            ).fetchone()[0]
+        items = [
+            {
+                key: value
+                for key, value in json.loads(row[0]).items()
+                if key
+                in {
+                    "sample_id",
+                    "frame_id",
+                    "sequence",
+                    "ordinal",
+                    "raw",
+                    "quality",
+                    "historical",
+                    "received_at",
+                }
+            }
+            for row in rows
+        ]
+        return {
+            "session": session,
+            "samples": items,
+            "total": count,
+            "offset": offset,
+            "limit": limit,
+        }
+
     def sample(self, sample_id):
         with self.db() as db:
             row = db.execute(
@@ -462,21 +546,41 @@ class SampleStore:
             raise RiderError("samples_source_corrupt", 409)
         return payload, metadata["raw"]["format"]
 
-    def label(self, sample_id, values, *, expected_revision, author_kind="operator"):
+    def label(
+        self,
+        sample_id,
+        values,
+        *,
+        expected_revision,
+        author_kind="operator",
+        origin=None,
+    ):
         self.sample(sample_id)
-        body = dict(values)
+        self._space(8192)
+        from pydantic import ValidationError
+
+        from .samples_contract import LabelValues
+
+        try:
+            body = LabelValues.model_validate(values).model_dump()
+        except ValidationError as exc:
+            raise RiderError("samples_label_invalid", 400) from exc
         if author_kind not in {"operator", "auto"}:
             raise RiderError("samples_label_invalid", 400)
         if author_kind == "auto":
             body["review"] = "pending"
         body["author"] = {"kind": author_kind, "id": None}
         body["created_at"] = self.wall()
+        if origin is not None:
+            body["import_origin"] = origin
         with self.db() as db:
             db.execute("BEGIN IMMEDIATE")
             revision = db.execute(
                 "SELECT COALESCE(MAX(revision),0) FROM labels WHERE sample_id=?",
                 (sample_id,),
             ).fetchone()[0]
+            if revision >= 32:
+                raise RiderError("samples_label_limit", 409)
             if revision != expected_revision:
                 raise RiderError("samples_label_conflict", 409)
             body["revision"] = revision + 1
@@ -490,7 +594,8 @@ class SampleStore:
         with self.db() as db:
             return {
                 "schema_version": 1,
-                "bytes": self.total_bytes,
+                "bytes": self.usage(),
+                "source_bytes": self.total_bytes,
                 "max_bytes": self.limits.total_bytes,
                 "free_bytes": shutil.disk_usage(self.root).free,
                 "min_free_bytes": self.limits.min_free_bytes,
