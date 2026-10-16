@@ -153,7 +153,21 @@ class SampleStore:
             for path in (self.root / "exports").glob("*.zip")
             if not path.is_symlink()
         )
-        return self.total_bytes + metadata + exports
+        derived = self.root / "analysis"
+        if derived.is_symlink():
+            raise RiderError("samples_root_invalid", 400)
+        artifact_bytes = 0
+        if derived.is_dir():
+            for path in derived.rglob("*"):
+                if path.is_symlink():
+                    raise RiderError("samples_root_invalid", 400)
+                try:
+                    if path.is_file():
+                        artifact_bytes += path.stat().st_size
+                except FileNotFoundError:
+                    # Atomic writers may unlink their private temporary name.
+                    continue
+        return self.total_bytes + metadata + exports + artifact_bytes
 
     def _space(self, extra=0):
         if self.usage() + extra > self.limits.total_bytes:

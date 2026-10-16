@@ -15,8 +15,16 @@ from .steering import plan as steering_plan
 
 class VisionLoop:
     def __init__(
-        self, detector=None, clock=time.monotonic, *, samples=None, source_session=None
+        self,
+        detector=None,
+        clock=time.monotonic,
+        *,
+        samples=None,
+        source_session=None,
+        priority=None,
     ):
+        self.priority = priority
+        self.priority_errors = 0
         self.samples = samples
         self.source_session = source_session
         self.detector = detector or FloorDetector()
@@ -52,6 +60,7 @@ class VisionLoop:
             ),
             "protocol_version": 1,
             "max_frame_bytes": 512 * 1024,
+            "offline_priority_errors": self.priority_errors,
             "max_deadline_ms": 500,
             "clear_frames_required": 3,
             "physical_clearance": "unverified",
@@ -109,6 +118,12 @@ class VisionLoop:
         self.runs.move_to_end(identity)
         while len(self.runs) > 32:
             self.runs.popitem(last=False)
+        if self.priority is not None:
+            try:
+                self.priority.live()
+            except Exception:
+                # Optional offline scheduling must never break live decisions.
+                self.priority_errors += 1
         selected = self.depth_detector if depth_mode else self.detector
         if depth_mode:
             task = asyncio.create_task(
