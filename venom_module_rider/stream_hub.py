@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from collections import OrderedDict
-from contextlib import asynccontextmanager
+from contextlib import aclosing, asynccontextmanager
 from dataclasses import dataclass, field, replace
 
 from .age_anchor import SourceAgeAnchor
@@ -15,6 +16,7 @@ from .stream_contract import NativeFrame, SourceReference, canonical_jpeg
 MAX_FRAME_AGE_MS = 500
 MAX_REFERENCES = 8
 MAX_READERS = 8
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -182,29 +184,42 @@ class NativeStreamHub:
         backoff = 0.1
         while not self.closed and not connection.closed:
             try:
-                async for frame in connection.client.mjpeg():
-                    if connection.closed:
-                        return
-                    if connection.anchor is None:
-                        # Only bootstrap once when start status preceded the
-                        # first capture. Normal updates reuse profile GETs;
-                        # there is no per-frame status poll.
-                        pipeline = await connection.domain.pipeline(force=True)
-                        self.update_anchor(pipeline)
-                    if self._admit(connection, frame):
-                        backoff = 0.1
+                # async-for alone does not close its suspended async generator
+                # when bootstrap/admission fails or its consumer is cancelled.
+                # Release the one HTTP media slot before any next reader starts.
+                async with aclosing(connection.client.mjpeg()) as incoming:
+                    async for frame in incoming:
+                        if connection.closed:
+                            return
+                        if connection.anchor is None:
+                            # Only bootstrap once when start status preceded the
+                            # first capture. Normal updates reuse profile GETs;
+                            # there is no per-frame status poll.
+                            pipeline = await connection.domain.pipeline(force=True)
+                            self.update_anchor(pipeline)
+                        if self._admit(connection, frame):
+                            backoff = 0.1
                 connection.error = "stream_disconnected"
             except asyncio.CancelledError:
                 raise
             except RiderError as exc:
+                logger.warning(
+                    "Native ingest failed: %s status=%s cause=%s",
+                    exc.code,
+                    exc.status,
+                    type(exc.__cause__).__name__ if exc.__cause__ else "none",
+                )
                 connection.error = exc.code
                 connection.rejected += 1
                 if exc.code == "stream_epoch_changed":
                     connection.frames.clear()
                     self._notify(connection)
                     return
-            except Exception:
+            except Exception as exc:
                 # An optional reader failure cannot leak stale data as ready.
+                logger.warning(
+                    "Native ingest failed: unexpected %s", type(exc).__name__
+                )
                 connection.error = "stream_unavailable"
             connection.frames.clear()
             self._notify(connection)

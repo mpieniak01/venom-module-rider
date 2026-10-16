@@ -137,3 +137,104 @@ async def test_legacy_ram_alias_keeps_capture_metadata_without_changing_source_j
         assert "set-cookie" not in propagated
     finally:
         await client.close()
+
+
+@pytest.mark.parametrize("first_failure", ["http_unreachable", "missing_anchor"])
+async def test_bootstrap_failure_closes_persistent_http_source_before_reconnect(
+    first_failure,
+):
+    import asyncio
+    import time
+    from types import SimpleNamespace
+
+    from test_stream_contract import native
+
+    from venom_module_rider.age_anchor import age_anchor
+    from venom_module_rider.stream_hub import NativeStreamHub
+
+    latest, writers, retained = [None], [], []
+    released = asyncio.Event()
+    connections = 0
+
+    async def serve(reader, writer):
+        nonlocal connections
+        connections += 1
+        number = connections
+        writers.append(writer)
+        try:
+            await reader.readuntil(b"\r\n\r\n")
+            frame = native(number)
+            latest[0] = frame
+            content = wire(frame.payload, frame.source.model_dump(mode="json"))
+            content = content.removesuffix(b"--rider--\r\n")
+            writer.write(
+                b"HTTP/1.1 200 OK\r\n"
+                b"Content-Type: multipart/x-mixed-replace; boundary=rider\r\n"
+                b"Transfer-Encoding: chunked\r\n\r\n"
+                + f"{len(content):x}\r\n".encode()
+                + content
+                + b"\r\n"
+            )
+            await writer.drain()
+            await reader.read()
+        finally:
+            if number == 1:
+                released.set()
+            writer.close()
+            await writer.wait_closed()
+
+    server = await asyncio.start_server(serve, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    client = PiClient(Device("pi", "HTTP pool fixture", f"http://127.0.0.1:{port}"))
+    original = client.mjpeg
+
+    def source():
+        # Retaining a generator (e.g. an exception traceback/diagnostic owner)
+        # must not make HTTP pool release depend on garbage collection.
+        item = original()
+        retained.append(item)
+        return item
+
+    client.mjpeg = source
+    profile = {
+        "contract_id": "rider.camera_pipeline",
+        "contract_version": 1,
+        "state": "active",
+        "camera_session": "session",
+        "transport_epoch": 2,
+        "revision": 3,
+    }
+    bootstraps = 0
+
+    async def pipeline(*, force=False):
+        nonlocal bootstraps
+        bootstraps += 1
+        if bootstraps == 1:
+            if first_failure == "http_unreachable":
+                raise RiderError("pi_unreachable", 503)
+            return dict(
+                profile
+            )  # The Pi status has not published its first source yet.
+        status = {**profile, "latest_frame": latest[0].source.model_dump(mode="json")}
+        status["_age_anchor"] = age_anchor(status, time.monotonic(), time.monotonic())
+        return status
+
+    domain = SimpleNamespace(
+        session="module", transport=lambda: client, pipeline=pipeline
+    )
+    hub = NativeStreamHub()
+    try:
+        async with hub.lease(domain, profile) as connection:
+            frame = await hub.frame(connection, timeout=1.2)
+            assert frame.source.sequence == 2
+            await asyncio.wait_for(released.wait(), 0.2)
+            assert connections == 2 and connection.received == 1
+    finally:
+        await hub.close()
+        for item in retained:
+            await item.aclose()
+        await client.close()
+        server.close()
+        await server.wait_closed()
+        for writer in writers:
+            writer.close()
