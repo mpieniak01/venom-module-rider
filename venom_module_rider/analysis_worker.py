@@ -1,0 +1,278 @@
+"""Owned CPU-only worker. Reads sources, returns derived bytes, never opens SQLite."""
+
+from __future__ import annotations
+
+import base64
+import contextlib
+import ctypes
+import hashlib
+import io
+import json
+import os
+import resource
+import signal
+import sys
+import time
+from pathlib import Path
+
+MAX_MESSAGE = 16 * 1024**2
+
+
+def receive(stream):
+    line = stream.readline(MAX_MESSAGE + 1)
+    if not line or len(line) > MAX_MESSAGE or not line.endswith(b"\n"):
+        raise ValueError("analysis_protocol")
+    result = json.loads(line)
+    if not isinstance(result, dict):
+        raise ValueError("analysis_protocol")
+    return result
+
+
+def emit(stream, message):
+    message["sent_mono"] = time.perf_counter()
+    encoded = json.dumps(message, allow_nan=False, separators=(",", ":")).encode()
+    if len(encoded) > MAX_MESSAGE:
+        raise ValueError("analysis_protocol_size")
+    stream.write(encoded + b"\n")
+    stream.flush()
+    return receive(sys.stdin.buffer)
+
+
+def process_limits(parent):
+    """A paused child also dies on host loss; it never becomes a new daemon."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(1, signal.SIGKILL, 0, 0, 0) != 0 or os.getppid() != parent:
+        raise RuntimeError("analysis_parent_lost")
+    os.nice(10)
+    available = sorted(os.sched_getaffinity(0))
+    os.sched_setaffinity(0, available[:2])
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+
+
+def artifact(name, payload, mime):
+    return {"name": name, "mime": mime, "data": base64.b64encode(payload).decode()}
+
+
+def side_of(assessment):
+    sectors = assessment.get("sectors", {})
+    left = sectors.get("left", {}).get("state") == "obstacle"
+    right = sectors.get("right", {}).get("state") == "obstacle"
+    if left and right:
+        return "both"
+    if left or right:
+        return "left" if left else "right"
+    return (
+        "centre"
+        if assessment["state"] == "obstacle"
+        else "none"
+        if assessment["state"] == "clear"
+        else "unknown"
+    )
+
+
+def run(job, output, *, candidate_factory=None):
+    """Use the retained adapter and exactly the live decoder/geometry/overlay."""
+    emit(output, {"type": "compute", "done": 0, "phase": "loading"})
+    import numpy as np
+    from PIL import Image
+
+    from scripts.depth_candidates import Candidate, file_hash
+
+    from .analysis_metrics import adjacent, summarize
+    from .depth_detector import (
+        PerceptionSettings,
+        assess_depth,
+        decode_payload,
+        render_depth,
+    )
+    from .ground_config import GroundGeometry
+    from .samples_archive import SampleArchive
+
+    context, profile = job["context"], job["profile"]
+    spec, inputs = context["spec"], context["inputs"]
+    settings = PerceptionSettings.model_validate(spec["perception"])
+    geometry = GroundGeometry.model_validate(spec["geometry"])
+    order = context["session"].get("policy", {}).get("order_source", "receipt")
+    if spec["window"] > 1 and (
+        profile["backend"] == "da2"
+        or any(
+            not adjacent(inputs[i - 1], inputs[i], order) for i in range(1, len(inputs))
+        )
+    ):
+        raise ValueError("analysis_window_unverified")
+    for name, expected in context["profile"]["files"].items():
+        if file_hash(Path(profile["model"]) / name) != expected:
+            raise ValueError("analysis_model_hash_mismatch")
+    model = None
+    rows = []
+    images: list = []
+    model_load_ms = None
+    model_metadata = None
+    for index, sample in enumerate(inputs):
+        emit(output, {"type": "compute", "done": index, "phase": "decoding"})
+        timings = {}
+        start = time.perf_counter()
+        raw = sample["raw"]
+        path = SampleArchive.safe_file(
+            Path(job["root"]) / "blobs", raw["sha256"] + ".bin"
+        )
+        payload = path.read_bytes()
+        if (
+            len(payload) != raw["bytes"]
+            or hashlib.sha256(payload).hexdigest() != raw["sha256"]
+        ):
+            raise ValueError("samples_source_corrupt")
+        image = decode_payload(payload)
+        rgb = np.asarray(image, dtype=np.float32) / 255
+        mean, std = float(rgb.mean()), float(rgb.std())
+        quality = mean >= 0.04 and std >= 0.01
+        timings["decode"] = (time.perf_counter() - start) * 1000
+        artifacts = []
+        used_window = 0
+        if not quality and spec["quality_mode"] == "production":
+            assessment = {"state": "unknown", "reason": "vision_image_quality"}
+            images.clear()
+        else:
+            if model is None:
+                emit(output, {"type": "compute", "done": index, "phase": "loading"})
+                import torch
+
+                torch.set_num_threads(spec["threads"])
+                torch.set_num_interop_threads(1)
+                start = time.perf_counter()
+                model = (candidate_factory or Candidate)(
+                    profile["backend"], profile["model"], "cpu", profile["resolution"]
+                )
+                model_load_ms = (time.perf_counter() - start) * 1000
+                model_metadata = model.metadata
+            images = [*images, image][-spec["window"] :]
+            used_window = len(images)
+            emit(output, {"type": "compute", "done": index, "phase": "inference"})
+            start = time.perf_counter()
+            depth = (
+                model.infer(image)
+                if spec["window"] == 1
+                else model.infer_window(images)
+            )
+            timings["inference"] = (time.perf_counter() - start) * 1000
+            emit(output, {"type": "compute", "done": index, "phase": "geometry"})
+            start = time.perf_counter()
+            if geometry.mode == "image":
+                assessment = assess_depth(depth, tuple(spec["corridor"]), settings)
+            else:
+                from .adaptive_ground import assess
+
+                assessment = assess(depth, tuple(spec["corridor"]), settings, geometry)
+            timings["geometry"] = (time.perf_counter() - start) * 1000
+            start = time.perf_counter()
+            overlay = render_depth(image, depth, assessment, spec["corridor"], settings)
+            stream = io.BytesIO()
+            np.save(stream, depth.astype(np.float32), allow_pickle=False)
+            artifacts.append(
+                artifact(
+                    f"{index:04d}-depth.npy",
+                    stream.getvalue(),
+                    "application/octet-stream",
+                )
+            )
+            low, high = np.quantile(depth, [0.01, 0.99])
+            grey = (
+                (np.clip((depth - low) / max(float(high - low), 1e-8), 0, 1)) * 255
+            ).astype(np.uint8)
+            stream = io.BytesIO()
+            Image.fromarray(grey).save(stream, format="PNG")
+            artifacts += [
+                artifact(f"{index:04d}-depth.png", stream.getvalue(), "image/png"),
+                artifact(f"{index:04d}-overlay.jpg", overlay, "image/jpeg"),
+            ]
+            timings["render"] = (time.perf_counter() - start) * 1000
+        row = {
+            "sample_id": sample["sample_id"],
+            "raw_sha256": raw["sha256"],
+            **assessment,
+            "obstacle_side": side_of(assessment),
+            "drive_supported": False,
+            "distance_measurement": False,
+            "image_quality_passed": quality,
+            "image_mean_rgb": mean,
+            "image_std_rgb": std,
+            "rejected_input": not quality and spec["quality_mode"] == "production",
+            "requested_window": spec["window"],
+            "actual_window": used_window,
+            "causal_warmup": 0 < used_window < spec["window"],
+            "timings_ms": timings,
+            "artifact_names": [a["name"] for a in artifacts],
+        }
+        ack = emit(
+            output,
+            {"type": "frame", "done": index + 1, "row": row, "artifacts": artifacts},
+        )
+        row["timings_ms"].update(ack.get("timings_ms", {}))
+        rows.append(row)
+    summary = summarize(inputs, rows, order)
+    report = {
+        "schema_version": 1,
+        "kind": "rider-offline-analysis",
+        "run_id": job["id"],
+        "input_digest": context["input_digest"],
+        "context": context,
+        "summary": summary,
+        "rows": rows,
+        "model": model_metadata,
+        "model_load_ms": model_load_ms,
+        "peak_rss_mib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024,
+        "peak_vram_mib": 0,
+        "device": "cpu",
+        "drive_supported": False,
+        "distance_measurement": False,
+    }
+    emit(output, {"type": "complete", "report": report})
+
+
+def deny_network():
+    """An offline adapter cannot contact the Pi, Hub or any internet endpoint."""
+    import socket
+
+    class OfflineSocket(socket.socket):
+        def connect(self, address):
+            if self.family in {socket.AF_INET, socket.AF_INET6}:
+                raise RuntimeError("analysis_network_denied")
+            return super().connect(address)
+
+        def connect_ex(self, address):
+            if self.family in {socket.AF_INET, socket.AF_INET6}:
+                raise RuntimeError("analysis_network_denied")
+            return super().connect_ex(address)
+
+        def sendto(self, *args):
+            if self.family in {socket.AF_INET, socket.AF_INET6}:
+                raise RuntimeError("analysis_network_denied")
+            return super().sendto(*args)
+
+    socket.__dict__["socket"] = OfflineSocket
+
+
+def main():
+    output = sys.stdout.buffer
+    try:
+        process_limits(int(sys.argv[1]))
+        deny_network()
+        job = receive(sys.stdin.buffer)
+        # Protocol stdout must not contain SDK progress or model diagnostics.
+        with contextlib.redirect_stdout(sys.stderr):
+            run(job, output)
+    except Exception as error:
+        # Do not expose local paths or environment in public errors.
+        code = str(error)
+        if not code.startswith(("analysis_", "samples_", "vision_")) or len(code) > 96:
+            code = "analysis_worker_failed"
+        try:
+            emit(output, {"type": "error", "error": code})
+        except Exception:
+            pass
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

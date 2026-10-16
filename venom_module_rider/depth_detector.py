@@ -121,6 +121,82 @@ def draw_stop_border(draw, shape, corridor):
     draw.rectangle((left - 2, top - 2, right + 2, bottom + 2), outline="white", width=2)
 
 
+def decode_payload(payload):
+    """Decode bounded bytes once, shared by live and stored-frame analysis."""
+    from PIL import Image
+
+    if not payload or len(payload) > 512 * 1024:
+        raise ValueError("vision_image_bounds")
+    with Image.open(io.BytesIO(payload)) as opened:
+        if opened.format not in {"JPEG", "PNG"} or not (
+            32 <= opened.width <= 1280 and 32 <= opened.height <= 720
+        ):
+            raise ValueError("vision_image_bounds")
+        image = opened.convert("RGB")
+    return image
+
+
+def render_depth(image, depth, assessment, corridor, settings, geometry=None):
+    """Render the same geometry overlay in live and offline analysis."""
+    import numpy as np
+    from PIL import Image, ImageDraw
+
+    errors = assessment.pop("_errors")
+    colors = np.full((*depth.shape, 3), (255, 185, 35), dtype=np.uint8)
+    colors[np.isfinite(errors) & (errors <= settings.residual_limit)] = (
+        35,
+        210,
+        100,
+    )
+    colors[np.isfinite(errors) & (errors > settings.residual_limit)] = (240, 60, 65)
+    if assessment["state"] == "unknown":
+        colors[np.isfinite(errors)] = (255, 185, 35)
+    preview = Image.blend(image, Image.fromarray(colors), 0.4)
+    x0, y0, x1, y1 = corridor
+    draw = ImageDraw.Draw(preview)
+    overlays = assessment.pop("_path_overlay", None)
+    if overlays is not None:
+        for side, points in overlays.items():
+            previous = None
+            for point in points:
+                current = (
+                    (point[0] * image.width, point[1] * image.height) if point else None
+                )
+                if previous is not None and current is not None:
+                    draw.line(
+                        (previous, current),
+                        fill="white" if side == "center" else (80, 170, 255),
+                        width=2,
+                    )
+                previous = current
+    elif geometry is None or geometry.mode == "image":
+        reference_y0 = assessment["plane_reference_corridor"][1]
+        if reference_y0 < y0:
+            # Dashed blue: fitting context, not an additional STOP zone.
+            left, right = int(x0 * (image.width - 1)), int(x1 * (image.width - 1))
+            top, bottom = (
+                int(reference_y0 * (image.height - 1)),
+                int(y0 * (image.height - 1)),
+            )
+            for pos in range(left, right, 10):
+                draw.line(
+                    (pos, top, min(pos + 5, right), top),
+                    fill=(80, 170, 255),
+                    width=2,
+                )
+            for side in (left, right):
+                for pos in range(top, bottom, 10):
+                    draw.line(
+                        (side, pos, side, min(pos + 5, bottom)),
+                        fill=(80, 170, 255),
+                        width=2,
+                    )
+        draw_stop_border(draw, depth.shape, corridor)
+    stream = io.BytesIO()
+    preview.save(stream, format="JPEG", quality=85)
+    return stream.getvalue()
+
+
 class DepthDetector:
     def __init__(self):
         self.path = Path(
@@ -184,16 +260,8 @@ class DepthDetector:
     def _detect(self, payload, corridor, settings, geometry=None):
         import numpy as np
         import torch
-        from PIL import Image, ImageDraw
 
-        if not payload or len(payload) > 512 * 1024:
-            raise ValueError("vision_image_bounds")
-        with Image.open(io.BytesIO(payload)) as opened:
-            if opened.format not in {"JPEG", "PNG"} or not (
-                32 <= opened.width <= 1280 and 32 <= opened.height <= 720
-            ):
-                raise ValueError("vision_image_bounds")
-            image = opened.convert("RGB")
+        image = decode_payload(payload)
         rgb = np.asarray(image, dtype=np.float32) / 255
         if rgb.mean() < 0.04 or rgb.std() < 0.01:
             # Publish the actual rejected capture, never retain a previous green mask.
@@ -227,64 +295,10 @@ class DepthDetector:
             from .adaptive_ground import assess
 
             assessment = assess(depth, corridor, settings, geometry)
-        errors = assessment.pop("_errors")
-        colors = np.full((*depth.shape, 3), (255, 185, 35), dtype=np.uint8)
-        colors[np.isfinite(errors) & (errors <= settings.residual_limit)] = (
-            35,
-            210,
-            100,
-        )
-        colors[np.isfinite(errors) & (errors > settings.residual_limit)] = (240, 60, 65)
-        if assessment["state"] == "unknown":
-            colors[np.isfinite(errors)] = (255, 185, 35)
-        preview = Image.blend(image, Image.fromarray(colors), 0.4)
-        x0, y0, x1, y1 = corridor
-        draw = ImageDraw.Draw(preview)
-        overlays = assessment.pop("_path_overlay", None)
-        if overlays is not None:
-            for side, points in overlays.items():
-                previous = None
-                for point in points:
-                    current = (
-                        (point[0] * image.width, point[1] * image.height)
-                        if point
-                        else None
-                    )
-                    if previous is not None and current is not None:
-                        draw.line(
-                            (previous, current),
-                            fill="white" if side == "center" else (80, 170, 255),
-                            width=2,
-                        )
-                    previous = current
-        elif geometry is None or geometry.mode == "image":
-            reference_y0 = assessment["plane_reference_corridor"][1]
-            if reference_y0 < y0:
-                # Dashed blue: fitting context, not an additional STOP zone.
-                left, right = int(x0 * (image.width - 1)), int(x1 * (image.width - 1))
-                top, bottom = (
-                    int(reference_y0 * (image.height - 1)),
-                    int(y0 * (image.height - 1)),
-                )
-                for pos in range(left, right, 10):
-                    draw.line(
-                        (pos, top, min(pos + 5, right), top),
-                        fill=(80, 170, 255),
-                        width=2,
-                    )
-                for side in (left, right):
-                    for pos in range(top, bottom, 10):
-                        draw.line(
-                            (side, pos, side, min(pos + 5, bottom)),
-                            fill=(80, 170, 255),
-                            width=2,
-                        )
-            draw_stop_border(draw, depth.shape, corridor)
-        stream = io.BytesIO()
-        preview.save(stream, format="JPEG", quality=85)
+        preview = render_depth(image, depth, assessment, corridor, settings, geometry)
         return {
             **assessment,
-            "_preview": stream.getvalue(),
+            "_preview": preview,
             "model_sha256": self.digest,
             "_trace_depth": depth,
         }

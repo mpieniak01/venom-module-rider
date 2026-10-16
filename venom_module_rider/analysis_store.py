@@ -19,6 +19,10 @@ MAX_RUNS = 50
 MAX_SNAPSHOT = 8 * 1024**2
 MAX_RUN_BYTES = 256 * 1024**2
 MAX_ARTIFACT_BYTES = 8 * 1024**2
+SUMMARY_COLUMNS = (
+    "id,request_id,session_id,state,created,started,finished,"
+    "cancel_requested,host_task_id,done,total,phase,error,result"
+)
 
 
 def run_id(value):
@@ -44,7 +48,7 @@ class AnalysisStore:
                   fingerprint TEXT NOT NULL, session_id TEXT NOT NULL,
                   state TEXT NOT NULL, created REAL NOT NULL,
                   started REAL, finished REAL,
-                  cancel_requested INTEGER NOT NULL DEFAULT 0,
+                  cancel_requested INTEGER NOT NULL DEFAULT 0, host_task_id TEXT,
                   done INTEGER NOT NULL DEFAULT 0, total INTEGER NOT NULL,
                   phase TEXT NOT NULL, error TEXT, context TEXT NOT NULL,
                   result TEXT NOT NULL DEFAULT '{}');
@@ -54,9 +58,16 @@ class AnalysisStore:
                   PRIMARY KEY(run_id, name));
             """)
 
-    def _row(self, db, identity):
+        with samples.db() as db:
+            if "host_task_id" not in {
+                row[1] for row in db.execute("PRAGMA table_info(analysis_runs)")
+            }:
+                db.execute("ALTER TABLE analysis_runs ADD COLUMN host_task_id TEXT")
+
+    def _row(self, db, identity, *, context=True):
+        columns = "*" if context else SUMMARY_COLUMNS
         row = db.execute(
-            "SELECT * FROM analysis_runs WHERE id=?", (run_id(identity),)
+            f"SELECT {columns} FROM analysis_runs WHERE id=?", (run_id(identity),)
         ).fetchone()
         if row is None:
             raise RiderError("analysis_not_found", 404)
@@ -75,17 +86,28 @@ class AnalysisStore:
             result["context"] = json.loads(row["context"])
         return result
 
-    def get(self, identity):
-        """Read a run even when no Pi or model is available."""
+    def get(self, identity, *, context=True):
+        """Read compact state unless an immutable input snapshot is requested."""
         with self.samples.db() as db:
-            row = self._row(db, identity)
-        return self._decode(row)
+            row = self._row(db, identity, context=context)
+        return self._decode(row, context=context)
+
+    def by_request(self, request_id):
+        identifier(request_id)
+        with self.samples.db() as db:
+            row = db.execute(
+                "SELECT id FROM analysis_runs WHERE request_id=?", (request_id,)
+            ).fetchone()
+        if row is None:
+            raise RiderError("analysis_not_found", 404)
+        return self.get(row["id"], context=False)
 
     def list(self, session_id=None):
         """Return bounded summaries, without inflating all input snapshots."""
         with self.samples.db() as db:
             rows = db.execute(
-                "SELECT * FROM analysis_runs WHERE (? IS NULL OR session_id=?) "
+                f"SELECT {SUMMARY_COLUMNS} FROM analysis_runs "
+                "WHERE (? IS NULL OR session_id=?) "
                 "ORDER BY created DESC LIMIT ?",
                 (session_id, session_id, MAX_RUNS),
             ).fetchall()
@@ -166,10 +188,17 @@ class AnalysisStore:
             )
         return self.get(identity)
 
+    def bind_task(self, identity, task_id):
+        with self.samples.db() as db:
+            db.execute(
+                "UPDATE analysis_runs SET host_task_id=? WHERE id=?",
+                (task_id, run_id(identity)),
+            )
+
     def running(self, identity):
         """Only one transition may claim an un-cancelled queued run."""
         with self.samples.db() as db:
-            self._row(db, identity)
+            self._row(db, identity, context=False)
             changed = db.execute(
                 "UPDATE analysis_runs SET state='running',started=?,phase='loading' "
                 "WHERE id=? AND state='queued' AND cancel_requested=0",
@@ -190,7 +219,7 @@ class AnalysisStore:
         }:
             raise RiderError("analysis_progress_invalid", 400)
         with self.samples.db() as db:
-            row = self._row(db, identity)
+            row = self._row(db, identity, context=False)
             writable = row["state"] == "running" or (
                 row["state"] == "queued"
                 and done == 0
@@ -206,7 +235,7 @@ class AnalysisStore:
     def cancel(self, identity):
         """Request cancellation; running is retained until execution really stops."""
         with self.samples.db() as db:
-            self._row(db, identity)
+            self._row(db, identity, context=False)
             db.execute(
                 "UPDATE analysis_runs SET cancel_requested=1 "
                 "WHERE id=? AND state IN ('queued','running')",
@@ -246,45 +275,51 @@ class AnalysisStore:
             "application/octet-stream",
         }:
             raise RiderError("analysis_artifact_format", 415)
-        row = self.get(identity)
-        if row["state"] != "running" or row["cancel_requested"]:
-            raise RiderError("analysis_not_writable", 409)
-        directory = self.directory(identity)
-        used = sum(p.stat().st_size for p in directory.iterdir() if p.is_file())
-        if used + len(payload) > MAX_RUN_BYTES:
-            raise RiderError("analysis_artifact_quota", 507)
-        self.samples._space(len(payload) + 8192)
-        target = directory / name
-        if target.exists() or target.is_symlink():
-            raise RiderError("analysis_artifact_exists", 409)
-        temporary = None
-        try:
-            with tempfile.NamedTemporaryFile(dir=directory, delete=False) as stream:
-                temporary = stream.name
-                stream.write(payload)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.link(temporary, target)  # atomic no-overwrite publication
-            descriptor = os.open(directory, os.O_RDONLY)
+        with self.samples.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = self._row(db, identity, context=False)
+            if row["state"] != "running" or row["cancel_requested"]:
+                raise RiderError("analysis_not_writable", 409)
+            directory = self.directory(identity)
+            used = sum(p.stat().st_size for p in directory.iterdir() if p.is_file())
+            if used + len(payload) > MAX_RUN_BYTES:
+                raise RiderError("analysis_artifact_quota", 507)
+            self.samples._space(len(payload) + 8192)
+            target = directory / name
+            if target.exists() or target.is_symlink():
+                raise RiderError("analysis_artifact_exists", 409)
+            temporary = None
             try:
-                os.fsync(descriptor)
-            finally:
-                os.close(descriptor)
-            digest = hashlib.sha256(payload).hexdigest()
-            with self.samples.db() as db:
+                with tempfile.NamedTemporaryFile(dir=directory, delete=False) as stream:
+                    temporary = stream.name
+                    stream.write(payload)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.link(temporary, target)  # atomic no-overwrite publication
+                descriptor = os.open(directory, os.O_RDONLY)
+                try:
+                    os.fsync(descriptor)
+                finally:
+                    os.close(descriptor)
+                digest = hashlib.sha256(payload).hexdigest()
                 db.execute(
                     "INSERT INTO analysis_artifacts VALUES (?,?,?,?,?)",
                     (identity, name, digest, len(payload), mime),
                 )
-            return {"name": name, "sha256": digest, "bytes": len(payload), "mime": mime}
-        finally:
-            if temporary is not None:
-                os.unlink(temporary)
+                return {
+                    "name": name,
+                    "sha256": digest,
+                    "bytes": len(payload),
+                    "mime": mime,
+                }
+            finally:
+                if temporary is not None:
+                    os.unlink(temporary)
 
     def artifacts(self, identity):
         """List committed artifacts; an orphan never appears as completed output."""
         with self.samples.db() as db:
-            self._row(db, identity)
+            self._row(db, identity, context=False)
             return [
                 dict(row)
                 for row in db.execute(

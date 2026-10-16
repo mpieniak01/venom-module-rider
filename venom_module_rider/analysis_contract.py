@@ -6,6 +6,7 @@ from pydantic import Field, StrictFloat, StrictInt, field_validator
 
 from .api.schemas import StrictModel
 from .depth_detector import PerceptionSettings
+from .ground_config import GroundGeometry
 from .samples_contract import RecordID, RequestID
 
 
@@ -20,6 +21,7 @@ class AnalysisSpec(StrictModel):
         0.95,
     )
     perception: PerceptionSettings = PerceptionSettings(engine="depth_plane")
+    geometry: GroundGeometry = GroundGeometry(mode="image")
     quality_mode: Literal["production", "model_probe"] = "production"
     window: Literal[1, 3, 5] = 1
     offset: Annotated[StrictInt, Field(ge=0, le=999)] = 0

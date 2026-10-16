@@ -157,13 +157,18 @@ class SampleStore:
         if derived.is_symlink():
             raise RiderError("samples_root_invalid", 400)
         artifact_bytes = 0
+        seen = set()
         if derived.is_dir():
             for path in derived.rglob("*"):
                 if path.is_symlink():
                     raise RiderError("samples_root_invalid", 400)
                 try:
                     if path.is_file():
-                        artifact_bytes += path.stat().st_size
+                        info = path.stat()
+                        inode = (info.st_dev, info.st_ino)
+                        if inode not in seen:
+                            artifact_bytes += info.st_size
+                            seen.add(inode)
                 except FileNotFoundError:
                     # Atomic writers may unlink their private temporary name.
                     continue

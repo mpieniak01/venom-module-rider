@@ -18,7 +18,13 @@ from ..compute import ComputeService
 from ..config import IDENTIFIER, configured_devices
 from ..errors import RiderError
 from ..service import RESOURCE_NAMES, RiderService
-from . import compute_routes, conversation_routes, samples_routes, vision_routes
+from . import (
+    analysis_routes,
+    compute_routes,
+    conversation_routes,
+    samples_routes,
+    vision_routes,
+)
 from .routing import RiderRoute
 from .schemas import Command, GoalAction, ResourceAction, Selection, SettingsPatch
 
@@ -50,6 +56,7 @@ async def lifespan(app):
     compute = getattr(app.state, "rider_compute", None) or ComputeService(engines)
     app.state.rider_compute = compute
     import asyncio
+    import sqlite3
 
     from ..samples_registry import SamplesRegistry, default_root
     from ..vision_loop import VisionLoop
@@ -57,8 +64,6 @@ async def lifespan(app):
     samples = getattr(app.state, "rider_samples", None)
     app.state.rider_samples_error = None
     if samples is None:
-        import sqlite3
-
         try:
             samples = await asyncio.to_thread(SamplesRegistry, default_root())
         except (OSError, sqlite3.Error, RiderError):
@@ -72,6 +77,28 @@ async def lifespan(app):
     app.state.rider_vision = VisionLoop(
         samples=samples, source_session=lambda: service.session
     )
+    app.state.rider_analysis = None
+    if samples is not None:
+        from ..analysis_manager import AnalysisManager
+        from ..analysis_priority import AnalysisPriority
+
+        analysis = None
+        priority = AnalysisPriority(
+            busy=lambda: bool(
+                app.state.rider_vision.busy or app.state.rider_vision.depth_busy
+            )
+        )
+        try:
+            analysis = await asyncio.to_thread(
+                AnalysisManager, samples, priority=priority
+            )
+            await analysis.initialize()
+            app.state.rider_analysis = analysis
+            app.state.rider_vision.priority = priority
+        except (OSError, sqlite3.Error, RiderError):
+            if analysis is not None:
+                await analysis.close()
+            app.state.rider_analysis_error = "analysis_unavailable"
     default = os.getenv("RIDER_DEFAULT_DEVICE")
     if existing is None:
         await service.restore(default)
@@ -81,6 +108,8 @@ async def lifespan(app):
         provider = getattr(app.state, "rider_conversation", None)
         if provider:
             await provider.close()
+        if app.state.rider_analysis is not None:
+            await app.state.rider_analysis.close()
         if samples is not None:
             await samples.close()
         await app.state.rider_vision.close()
@@ -161,6 +190,7 @@ router.include_router(compute_routes.router)
 router.include_router(conversation_routes.router)
 router.include_router(vision_routes.router)
 router.include_router(samples_routes.router)
+router.include_router(analysis_routes.router)
 Session = Annotated[str | None, Header(alias="X-Rider-Session")]
 
 

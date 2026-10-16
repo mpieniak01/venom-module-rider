@@ -47,6 +47,7 @@ class SamplesRegistry:
         self.closed = False
         self.session_requests: dict[str, str] = {}
         self.active: set[str] = set()
+        self.writer_owners: set[str] = set()
         self.closing: set[str] = set()
         self.sequences: dict[str, dict] = {}
         self.deadlines: dict[str, asyncio.TimerHandle] = {}
@@ -76,6 +77,27 @@ class SamplesRegistry:
             fcntl.flock(self.lease, fcntl.LOCK_UN)
             self.lease.close()
             self.lease = None
+
+    async def reserve_writer(self, owner):
+        """Share the existing process lease and IO writer with derived jobs."""
+        async with self.operations:
+            self._open()
+            newly_owned = self.lease is None
+            self._lease()
+            try:
+                if newly_owned:
+                    await self.read(self.store.recover_interrupted)
+                self.writer_owners.add(owner)
+            except Exception:
+                if not self.active and not self.writer_owners:
+                    self._release()
+                raise
+
+    async def release_writer(self, owner):
+        async with self.operations:
+            self.writer_owners.discard(owner)
+            if not self.active and not self.writer_owners:
+                self._release()
 
     def _submit(self, call):
         self._open()
@@ -123,7 +145,7 @@ class SamplesRegistry:
                         )
                 return session
             except Exception:
-                if not self.active:
+                if not self.active and not self.writer_owners:
                     self._release()
                 raise
 
@@ -194,7 +216,7 @@ class SamplesRegistry:
             )
             self.active.discard(session_id)
             self.closing.discard(session_id)
-            if not self.active:
+            if not self.active and not self.writer_owners:
                 self._release()
             return result
 
