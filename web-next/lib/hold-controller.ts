@@ -2,7 +2,7 @@ import type { Direction } from "./model";
 
 export type HoldTiming = { click_threshold_ms: number; hold_renewal_ms: number; hold_timeout_ms: number; request_ttl_ms: number; supported: string[] };
 export type MovementIntent = { direction: Direction; mode: "pulse" | "hold" | "release" };
-type Press = { direction: Direction; pointerId: number; started: number; held: boolean; token: number };
+type Press = { direction: Direction; pointerId: number; started: number; held: boolean; token: number; latched?: boolean };
 export function readHoldTiming(value: unknown): HoldTiming | null {
   if (!value || typeof value !== "object") return null;
   const row = value as Record<string, unknown>;
@@ -25,6 +25,7 @@ export class HoldController {
     canMove: () => boolean;
     send: (intent: MovementIntent, current: () => boolean) => Promise<void>;
     onActive: (direction: Direction | null) => void;
+    onMode?: (mode: "hold" | "continuous" | null) => void;
     onError: (error: unknown) => void;
     now?: () => number;
   }) {}
@@ -35,14 +36,27 @@ export class HoldController {
     const token = ++this.token;
     this.press = { direction, pointerId, started: this.now(), held: false, token };
     this.options.onActive(direction);
+    this.options.onMode?.("hold");
     this.timer = setTimeout(() => this.beginHold(token), timing.click_threshold_ms);
   }
+  toggle(direction: Direction) {
+    if (this.press?.latched && this.press.direction === direction) { this.release(); return; }
+    if (!this.options.timing() || !this.options.canMove()) return;
+    this.clearTimer();
+    const token = ++this.token;
+    this.press = { direction, pointerId: -3, started: this.now(), held: true, token, latched: true };
+    this.options.onActive(direction);
+    this.options.onMode?.("continuous");
+    void this.renew(token);
+  }
+  releasePointer() { if (!this.press?.latched) this.release(); }
   end(pointerId: number) {
     const press = this.press;
     if (!press || press.pointerId !== pointerId) return;
     this.press = null;
     this.clearTimer();
     this.options.onActive(null);
+    this.options.onMode?.(null);
     if (press.held) this.enqueueRelease(press.direction, ++this.token);
     else {
       const token = ++this.token;
@@ -56,10 +70,14 @@ export class HoldController {
     this.press = null;
     this.clearTimer();
     this.options.onActive(null);
+    this.options.onMode?.(null);
     const token = ++this.token;
     if (press?.held) this.enqueueRelease(press.direction, token);
   }
-  cancel() { this.press = null; ++this.token; this.clearTimer(); this.options.onActive(null); }
+  cancel() {
+    this.press = null; ++this.token; this.clearTimer();
+    this.options.onActive(null); this.options.onMode?.(null);
+  }
   private now() { return this.options.now?.() ?? Date.now(); }
   private clearTimer() { if (this.timer) clearTimeout(this.timer); this.timer = null; }
   private beginHold(token: number) {

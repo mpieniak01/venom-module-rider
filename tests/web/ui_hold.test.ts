@@ -121,3 +121,54 @@ test("blur while a pulse awaits state refresh discards it without cancelling que
   controller.start("forward", 1); controller.end(1); await flush(); controller.release(); refreshed?.(); await flush();
   assert.deepEqual(sent, []);
 });
+
+
+test("continuous selection renews for 30 seconds without pointer holding, then toggles off", async t => {
+  const { controller, intents, active } = setup(t);
+  controller.toggle("forward"); await flush();
+  controller.end(15); controller.releasePointer();
+  for (let elapsed = 0; elapsed < 30000; elapsed += timing.hold_renewal_ms) {
+    t.mock.timers.tick(timing.hold_renewal_ms); await flush();
+  }
+  assert.equal(active.at(-1), "forward");
+  assert.ok(intents.length >= 200);
+  assert.ok(intents.every(intent => intent.mode === "hold" && intent.direction === "forward"));
+  controller.toggle("forward"); await flush();
+  assert.equal(intents.at(-1)?.mode, "release");
+  const count = intents.length;
+  t.mock.timers.tick(30000); await flush();
+  assert.equal(intents.length, count); assert.equal(active.at(-1), null);
+});
+
+test("pulse replaces continuous selection permanently and unrelated async work does not cancel it", async t => {
+  const { controller, intents } = setup(t);
+  controller.toggle("forward"); await flush();
+  await Promise.resolve("sample saved");
+  t.mock.timers.tick(timing.hold_renewal_ms); await flush();
+  assert.equal(intents.at(-1)?.mode, "hold");
+  controller.start("right", 1); controller.end(1); await flush();
+  assert.deepEqual(intents.at(-1), { direction: "right", mode: "pulse" });
+  const count = intents.length;
+  t.mock.timers.tick(30000); await flush();
+  assert.equal(intents.length, count);
+});
+
+test("STOP during pending continuous request cannot replay it or its replaced direction", async t => {
+  let finish: (() => void) | undefined;
+  const { controller, intents } = setup(t, async intent => {
+    if (intent.mode === "hold") await new Promise<void>(resolve => { finish = resolve; });
+  });
+  controller.toggle("left"); await flush(); controller.toggle("right");
+  controller.cancel(); finish?.(); await flush();
+  t.mock.timers.tick(30000); await flush();
+  assert.deepEqual(intents, [{ direction: "left", mode: "hold" }]);
+});
+
+test("pointer blur keeps continuous selection; global release stops it", async t => {
+  const { controller, intents } = setup(t);
+  controller.toggle("backward"); await flush(); controller.releasePointer();
+  t.mock.timers.tick(timing.hold_renewal_ms); await flush();
+  assert.equal(intents.at(-1)?.mode, "hold");
+  controller.release(); await flush();
+  assert.equal(intents.at(-1)?.mode, "release");
+});

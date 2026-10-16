@@ -12,13 +12,16 @@ import { canRequestArm, commandAccepted, controlIdentity, data, errorCode, faceR
 const BASE = "/api/v1/rider";
 export type Notice = { key: string; code?: string; tone: "error" | "success" | "info" };
 export type Frame = { analysis?: JsonRecord; ageMs?: number; receivedAt?: number; ageSource?: string; decoded?: boolean; url: string; stale: boolean; source: string; fileAt: string; id: string; knownFreshness: boolean; visionState: string; visionReason: string; inferenceMs: string; visionPolicy: string; recordedAt: string };
-import { controlChanged, freshControl, navigationAvailable, navigationView, observationClock, retainControl, type ControlClock } from "./navigation";
+import { continuousAvailable, controlChanged, freshControl, navigationAvailable, navigationView, observationClock, retainControl, type ControlClock } from "./navigation";
 export function useRider(section: Section) {
   const [config, setConfig] = useState<DeviceConfig | null>(null);
   const [status, setStatus] = useState<RiderStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [panelId] = useState(() => crypto.randomUUID());
+  const [manualMode, setManualMode] = useState<"hold" | "continuous" | null>(null);
+  const [manualRequest, setManualRequest] = useState<JsonRecord | null>(null);
   const [activeDirection, setActiveDirection] = useState<Direction | null>(null);
   const [camera, setCamera] = useState<Frame | null>(null);
   const [runtimeFrame, setRuntimeFrame] = useState<Frame | null>(null);
@@ -47,13 +50,14 @@ export function useRider(section: Section) {
   const abortReads = useCallback(() => { abortRef.current?.abort(); controlAbortRef.current?.abort(); }, []);
   const isConnected = useCallback(() => ["online", "degraded"].includes(statusRef.current?.connection.status ?? ""), []);
   const hasFreshControl = useCallback(() => freshControl(statusRef.current, clockRef.current, Date.now(), statusRef.current?.polling[`${sectionRef.current}_ms`] ?? 0), []);
-  const canNavigate = useCallback(() => motionBlocked.current === 0 && navigationAvailable(statusRef.current), []);
+  const canNavigate = useCallback(() => motionBlocked.current === 0 && navigationAvailable(statusRef.current, panelId), [panelId]);
   const movementReady = canNavigate;
   const [hold] = useState(() => new HoldController({
     timing: () => readHoldTiming(settingsOf(statusRef.current).control_modes),
     canMove: canNavigate,
     send: async (intent: MovementIntent, current: () => boolean) => { await commandRef.current({ action: "move", device_settings: true, ...intent }, current); },
     onActive: setActiveDirection,
+    onMode: setManualMode,
     onError: (error) => setNotice({ key: errorCode(error) === "hold_timed_out" ? "holdExpired" : "requestFailed", code: errorCode(error), tone: "error" }),
   }));
   const replaceFrame = useCallback((kind: "camera" | "face", next: Frame | null, retain = false) => {
@@ -127,7 +131,9 @@ export function useRider(section: Section) {
         next = retainControl(previous, next);
         if (controlChanged(previous, next)) { hold.cancel(); seqRef.current = 0; replaceFrame("camera", null, previous?.connection.session===next.connection.session && previous?.connection.device_id===next.connection.device_id); replaceFrame("face", null); if (previous?.connection.session !== next.connection.session) { mediaRef.current = { camera: null, face: false }; setCameraStream(null); setShowRuntimeFrame(false); } }
         if (!["online", "degraded"].includes(next.connection.status)) { replaceFrame("camera", null); replaceFrame("face", null); }
-        if (next.control && !next.errors.control && !navigationAvailable(next)) hold.cancel();
+        if (next.errors.control) hold.release();
+        if (!["online", "degraded"].includes(next.connection.status) || next.control && !next.errors.control && !navigationAvailable(next, panelId)) hold.cancel();
+        if (previous && settingsOf(previous).revision !== settingsOf(next).revision) hold.cancel();
         if (sessionRef.current && sessionRef.current !== next.connection.session) { hold.cancel(); setNotice({ key: "conflict", tone: "info" }); }
         sessionRef.current = next.connection.session;
         // A command may explicitly refresh control while another view remains visible.
@@ -148,6 +154,7 @@ export function useRider(section: Section) {
         }
       } catch (error) {
         if (abort.signal.aborted) return;
+        hold.release();
         const previous = statusRef.current;
         if (previous) { const offline = { ...previous, connection: { ...previous.connection, status: "offline" as const } }; statusRef.current = offline; setStatus(offline); }
         replaceFrame("camera", null); replaceFrame("face", null);
@@ -156,7 +163,7 @@ export function useRider(section: Section) {
     };
     pending.current = task().finally(() => { pending.current = null; if (controller.current === abort) controller.current = null; });
     return pending.current;
-  }, [fetchFrame, hold, replaceFrame]);
+  }, [fetchFrame, hold, panelId, replaceFrame]);
   const mutation = useCallback(async (path: string, body: JsonRecord = {}, method = "POST", quiet = false): Promise<JsonRecord> => {
     const session = sessionRef.current;
     if ((!session && !(path === "/control" && body.action === "stop")) || (!isConnected() && path !== "/control" && path !== "/config")) throw Object.assign(new Error("offline"), { data: { error: "offline" } });
@@ -179,12 +186,13 @@ export function useRider(section: Section) {
     const timing = readHoldTiming(settings.control_modes);
     const clock = clockRef.current;
     const envelope: JsonRecord = { ...body, request_id: crypto.randomUUID(), source, execution_context: "panel" };
+    if (record(safety.panel_control).version === 1 && (["move", "height", "balance"].includes(action) || action === "arm" && body.owner === "manual")) envelope.panel_id = panelId;
     if (!stopping) {
       seqRef.current = Math.max(seqRef.current, finite(safety.last_seq) ? safety.last_seq : 0) + 1;
       Object.assign(envelope, { generation: safety.generation, seq: seqRef.current, ts: (Date.now() + (clock?.offset ?? 0)) / 1000, ttl_ms: timing?.request_ttl_ms, settings_revision: settings.revision });
     }
     return envelope;
-  }, [hasFreshControl, isConnected]);
+  }, [hasFreshControl, isConnected, panelId]);
   const sendControl = useCallback(async (body: JsonRecord, current: () => boolean = () => true, announce = true): Promise<JsonRecord> => {
     if (!current()) return {};
     const action = str(body.action);
@@ -198,7 +206,16 @@ export function useRider(section: Section) {
     if (!current()) return {};
     if (!stopping && (origin !== controlIdentity(statusRef.current) || revision !== settingsOf(statusRef.current).revision)) throw Object.assign(new Error("stale_control"), { data: { error: "stale_control" } });
     const envelope = makeEnvelope(body);
-    const response = await mutation("/control", envelope, "POST", true);
+    const movement = action === "move";
+    if (movement) setManualRequest({ ...envelope, phase: "pending" });
+    let response: JsonRecord;
+    try {
+      response = await mutation("/control", envelope, "POST", true);
+      if (movement && current()) setManualRequest({ ...envelope, phase: response.pending === true ? "pending" : "accepted" });
+    } catch (error) {
+      if (movement && current()) setManualRequest({ ...envelope, phase: "failed" });
+      throw error;
+    }
     if (announce) setNotice({ key: response.pending === true || record(response.operation).status === "pending" ? "commandPending" : "commandAccepted", tone: "info" });
     return response;
   }, [hasFreshControl, makeEnvelope, mutation, poll]);
@@ -213,11 +230,11 @@ export function useRider(section: Section) {
     finally { if (safetyAction) motionBlocked.current = Math.max(0, motionBlocked.current - 1); setBusy(null); }
   }, [hold, poll, sendControl]);
   const stopManual = useCallback(async () => {
-    if (!canNavigate()) return null;
     motionEpoch.current += 1;
     hold.cancel();
+    if (!navigationAvailable(statusRef.current, panelId)) return null;
     return command({ action: "move", device_settings: true, direction: "forward", mode: "release" });
-  }, [canNavigate, command, hold]);
+  }, [command, hold, panelId]);
   const startNavigationTrial = useCallback(async (plan: string, revision: number) => {
     const origin = sessionRef.current, epoch = motionEpoch.current;
     hold.cancel(); motionBlocked.current += 1; setBusy("trial");
@@ -273,7 +290,7 @@ export function useRider(section: Section) {
       await poll("control", true);
       assertCurrent();
       let safety = safetyOf(statusRef.current);
-      if (safety.state === "ARMED" && safety.owner !== "manual") {
+      if (safety.state === "ARMED" && (safety.owner !== "manual" || record(safety.panel_control).version === 1 && record(safety.panel_control).holder !== panelId)) {
         await command({action:"disarm", owner:safety.owner}, true, true);
         epoch += 1;
         await poll("control", true);
@@ -289,7 +306,7 @@ export function useRider(section: Section) {
       setCameraStream("raw"); await poll();
     } catch(error) { setNotice({ key: "requestFailed", code: errorCode(error), tone: "error" }); }
     finally { setBusy(null); }
-  }, [hold, mutation, poll, command]);
+  }, [hold, mutation, poll, command, panelId]);
   const selectDevice = useCallback(async (device_id: string | null) => {
     motionEpoch.current += 1;
     hold.release(); motionBlocked.current += 1; setBusy("/config");
@@ -305,9 +322,9 @@ export function useRider(section: Section) {
     } catch (error) { setNotice({ key: "requestFailed", code: errorCode(error), tone: "error" }); }
     finally { motionBlocked.current = Math.max(0, motionBlocked.current - 1); setBusy(null); }
   }, [abortReads, hold, mutation, poll, replaceFrame]);
+  useEffect(() => { hold.release(); }, [hold, section]);
   useEffect(() => {
     sectionRef.current = section; mediaRef.current = { camera: cameraStream, face: showRuntimeFrame };
-    hold.release();
     if (!["control", "vision"].includes(section) || !cameraStream) replaceFrame("camera", null);
     if (section !== "face" || !showRuntimeFrame) replaceFrame("face", null);
     let alive = true; let timer: ReturnType<typeof setTimeout> | null = null;
@@ -326,7 +343,7 @@ export function useRider(section: Section) {
     const blur = () => { hold.release(); };
     document.addEventListener("visibilitychange", visibility); window.addEventListener("blur", blur);
     void tick();
-    return () => { alive = false; if (timer) clearTimeout(timer); document.removeEventListener("visibilitychange", visibility); window.removeEventListener("blur", blur); hold.release(); abortReads(); };
+    return () => { alive = false; if (timer) clearTimeout(timer); document.removeEventListener("visibilitychange", visibility); window.removeEventListener("blur", blur); abortReads(); };
   }, [abortReads, cameraStream, hold, poll, replaceFrame, section, showRuntimeFrame]);
   const mediaSession = status?.connection.session;
   const processedTransition = cameraStream === "venom" && cameraTransition;
@@ -358,6 +375,6 @@ export function useRider(section: Section) {
   // ARM always refreshes the fast control endpoint before making its envelope.
   // The latency of a diagnostics view must not prevent that refresh request.
   const canArm = canRequestArm(status);
-  return { config, status, loading, notice, setNotice, busy, activeDirection, canMutate: isConnected(), canArm, canNavigate: canNavigate(), canMove: movementReady(), poll, command, stopManual, startNavigationTrial, currentSession, currentMotionEpoch, currentGeneration, currentCamera, mutate: runMutation, takeManual, selectDevice, hold, camera, cameraStream, setCameraStream, cameraTransition, setCameraTransition, markCameraDecoded, runtimeFrame, showRuntimeFrame, setShowRuntimeFrame, mediaError };
+  return { config, status, loading, notice, setNotice, busy, activeDirection, manualMode, manualRequest, panelId, canContinuous: continuousAvailable(status, panelId), controlFresh: hasFreshControl(), canMutate: isConnected(), canArm, canNavigate: canNavigate(), canMove: movementReady(), poll, command, stopManual, startNavigationTrial, currentSession, currentMotionEpoch, currentGeneration, currentCamera, mutate: runMutation, takeManual, selectDevice, hold, camera, cameraStream, setCameraStream, cameraTransition, setCameraTransition, markCameraDecoded, runtimeFrame, showRuntimeFrame, setShowRuntimeFrame, mediaError };
 }
 export type RiderClient = ReturnType<typeof useRider>;
