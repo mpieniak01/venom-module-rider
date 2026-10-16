@@ -243,3 +243,13 @@
   .toolbar .stop { padding: 9px 16px; min-height: 40px; font-size: 15px; }
   .toolbar .armArmed, .toolbar .armDisarmed { padding: 9px 10px; font-size: 12px; }
 }
+
+.sectorLegend { margin: 10px 0; }
+.sectorGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.sectorCard { min-width: 0; border: 1px solid var(--r-border); border-radius: 8px; padding: 9px; background: var(--surface-overlay-soft); font-size: 12px; }
+.sectorCard b { display: flex; align-items: flex-start; gap: 6px; overflow-wrap: anywhere; }
+.sectorCard p { margin: 6px 0 0; }
+.sectorBadge { display: inline-block; flex-shrink: 0; border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; color: #fff; background: #09121c; }
+.sectorBadge[data-side="left"] { color: #48d3e8; }
+.sectorBadge[data-side="right"] { color: #d6a7ff; }
+@container rider (max-width: 420px) { .sectorGrid { gap: 5px; } .sectorCard { padding: 6px; font-size: 11px; } .sectorCard b { flex-wrap: wrap; } }

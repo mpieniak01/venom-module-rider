@@ -134,3 +134,149 @@ def test_font_fallback_is_bounded_and_cached(monkeypatch):
         assert calls == [1]
     finally:
         _font.cache_clear()
+
+
+@pytest.mark.parametrize("protocol", [2, 3])
+async def test_preview_keeps_image_sides_when_the_command_planner_mirrors_them(
+    protocol,
+):
+    from venom_module_rider.vision_contract import VisionFrame
+    from venom_module_rider.vision_loop import VisionLoop
+
+    class Detector:
+        def detect(self, *_args):
+            rows = sectors()
+            rows["left"]["state"] = "obstacle"
+            return {
+                "state": "obstacle",
+                "reason": "depth_ground_deviation",
+                "sectors": rows,
+                "_preview": b"exact-jpeg",
+            }
+
+        def status(self):
+            return {"sha256": "a" * 64}
+
+    loop = VisionLoop()
+    loop.depth_detector = Detector()
+    frame = VisionFrame.model_validate(
+        {
+            "protocol_version": protocol,
+            "run_id": "run",
+            "frame_id": "capture-7",
+            "sequence": 7,
+            "config_revision": 39,
+            "corridor": ROI,
+            "age_ms": 0.0,
+            "deadline_ms": 300,
+            "mode": "observe",
+            "perception": {"engine": "depth_plane"},
+            "avoidance": {
+                "enabled": True,
+                "protocol_version": protocol,
+                "mirrored": True,
+            },
+        }
+    )
+    result = await loop.decide("fixture", frame, b"fixture-input")
+    assert result["action"] == "stop"
+    assert result["sectors"]["left"]["state"] == "clear"  # Command mapping.
+    cached = loop.preview("fixture", run_id="run")
+    assert cached is not None and cached[1] == b"exact-jpeg"
+    assert cached[2]["sectors"]["left"]["state"] == "obstacle"  # Image mapping.
+    assert cached[2]["sector_space"] == "image"
+    assert cached[2]["frame_id"] == "capture-7"
+
+
+@pytest.mark.parametrize("ground", [False, True])
+def test_quality_rejection_still_labels_unknown_regions_without_loading_model(ground):
+    from venom_module_rider.depth_detector import DepthDetector
+    from venom_module_rider.ground_config import GroundGeometry
+
+    detector = DepthDetector()
+
+    def forbidden():
+        raise AssertionError("Quality rejection must not load a model")
+
+    detector._load = forbidden
+    image = Image.new("RGB", (320, 240), (1, 1, 1))
+    stream = io.BytesIO()
+    image.save(stream, format="PNG")
+    geometry = GroundGeometry() if ground else None
+    result = detector._detect(
+        stream.getvalue(), ROI, PerceptionSettings(engine="depth_plane"), geometry
+    )
+    assert result["state"] == "unknown" and result["reason"] == "vision_image_quality"
+    assert all(row["state"] == "unknown" for row in result["sectors"].values())
+    preview = np.asarray(Image.open(io.BytesIO(result["_preview"])))
+    assert (preview.max(axis=2) > 100).sum() > 100  # Visible uncertainty badges.
+
+
+async def test_projected_metadata_remains_small_in_the_real_preview_response():
+    import json
+    from types import SimpleNamespace
+
+    from test_adaptive_ground import CAMERA, SETTINGS, scene
+
+    from venom_module_rider.api.vision_preview import processed_camera
+    from venom_module_rider.vision_contract import VisionFrame
+    from venom_module_rider.vision_loop import VisionLoop
+
+    class Detector:
+        def detect_ground(self, *_args):
+            from venom_module_rider.adaptive_ground import assess
+
+            image = Image.new("RGB", (128, 96), (80, 80, 80))
+            depth = scene()
+            row = assess(depth, ROI, SETTINGS, CAMERA)
+            row["_preview"] = render_depth(image, depth, row, ROI, SETTINGS, CAMERA)
+            row.pop("_errors", None)
+            return row
+
+        def status(self):
+            return {"sha256": "a" * 64}
+
+    loop = VisionLoop()
+    loop.depth_detector = Detector()
+    frame = VisionFrame.model_validate(
+        {
+            "protocol_version": 3,
+            "run_id": "run",
+            "frame_id": "capture",
+            "sequence": 1,
+            "config_revision": 39,
+            "corridor": ROI,
+            "age_ms": 0.0,
+            "deadline_ms": 300,
+            "mode": "observe",
+            "perception": {"engine": "depth_plane"},
+            "avoidance": {
+                "protocol_version": 3,
+                "enabled": True,
+                "geometry": CAMERA.model_dump(),
+            },
+        }
+    )
+    await loop.decide("fixture", frame, b"fixture")
+
+    class Domain:
+        def transport(self):
+            return SimpleNamespace(device=SimpleNamespace(id="fixture"))
+
+        async def read(self, path, *_args):
+            return (
+                {"data": {"corridor": ROI, "revision": 39}}
+                if path.endswith("config")
+                else {"data": {"running": True, "stale": False, "run_id": "run"}}
+            )
+
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(rider=Domain(), rider_vision=loop))
+    )
+    response = await processed_camera(request)
+    header = response.headers["x-rider-analysis-json"]
+    assert len(header) <= 4096
+    row = json.loads(header)
+    assert row["sector_space"] == "projected_paths"
+    assert set(row["sectors"]) == {"left", "center", "right"}
+    assert "_path_overlay" not in row and "heading_candidates" not in row

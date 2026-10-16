@@ -335,7 +335,6 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
       <div className={styles.loopCamera}><CameraPanel client={client} t={t} language={language} compact editor={editingZone&&draft&&Array.isArray(draft.corridor)?{value:draft.corridor as number[],disabled:goals.drive===true||!!operation,onChange:value=>setDraft({...draft,corridor:value})}:undefined}/></div>
       <div className={styles.loopSidebar}>
         {manual}
-        <div data-testid="directional-results" className={styles.grid}>{(["left","center","right"] as const).map(side=><div className={styles.metric} key={side}><b>{t("sector."+side)}</b><p>{t("vision."+String(imageDecision.current?record(record(decision.sectors)[side]).state??"unknown":"unknown"))}</p></div>)}</div>
         <LoopDecision frame={client.cameraStream==="venom"?client.camera:null} state={loopState} detector={detector} policy={policy} status={client.status} t={t} language={language}/>
       </div>
     </div>

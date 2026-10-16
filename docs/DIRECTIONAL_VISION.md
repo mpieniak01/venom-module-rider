@@ -37,10 +37,31 @@ a clear near guard. Deviating depth points are checked against the capsule as
 well as sampled rays so a thin observed obstacle cannot fall between samples.
 Recesses are blocked at the missing ground intersection.
 
-White preview outlines show the straight capsule; blue outlines show candidate
-side passages. An outline is interrupted outside the camera field of view.
-Incomplete projection remains UNKNOWN. Ground mode replaces the image ROI editor
-with camera/footprint settings; a percentage rectangle is not a physical path.
+The preview labels source-space regions L / C / R. Cyan marks L, white marks
+the central STOP region or straight capsule, and violet marks R. Image mode
+uses the actual adjacent assessment rectangles, not equal image thirds.
+Ground mode labels the actual projected paths; a missing projection is a
+question-mark badge without an invented boundary. Strokes remain interrupted
+outside the camera field of view. Incomplete projection remains UNKNOWN.
+Ground mode replaces the image ROI editor with camera/footprint settings;
+a percentage rectangle is not a physical path.
+
+A question mark also marks quality rejection or incomplete assessment. Outline
+colors identify regions, not permission to move. The pixel mask retains its
+existing green/red/yellow meaning and the dashed-blue ground-fit reference
+remains separate. Quality rejection still skips model loading.
+
+The L/C/R cards immediately below the image describe that decoded frame, not a
+newer navigation-state poll. Expired, undecoded, mismatched or unconfirmed frames
+cannot publish a clear side. JPEG and native MJPEG share the same renderer and
+source correlation. RAW and local PROC do not acquire a Venom assessment.
+
+Preview metadata uses `sector_space=image|projected_paths|unavailable` and a
+bounded `sectors` summary in source-image coordinates, before command mirroring.
+The Pi decision response retains its original planner-side mapping, including
+`avoidance.mirrored`. Robot commands remain in the separate Venom → Pi card.
+The original frame/run/sequence/configuration/source identifiers and preview
+age limit are unchanged; no additional frame retrieval or inference is added.
 
 ## Calibration fields
 
