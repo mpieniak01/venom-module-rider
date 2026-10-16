@@ -135,3 +135,19 @@ the S2 camera reservation, and asks Pi to stop capture and the unused distributo
 Pi enforces resource ownership; another consumer is reported, not forcibly
 released. Starting passive observation or a new explicit trial prepares the
 camera again. Page startup and reconnect never arm or drive.
+
+## Camera preview without navigation
+
+A camera enabled from the Pi panel can be viewed with RAW or Vision Venom.
+Selecting Vision Venom requests host processing; it does not require starting
+the Pi navigation/observation producer, ARM or a driving trial. A fresh decoded
+JPEG remains an available preview while those Pi goals are OFF.
+
+The preview warning follows image expiry, failed media reads, explicit camera
+OFF and stream transitions. A stopped navigation producer alone cannot label a
+fresh preview as stopped. The unchanged one-second display limit still expires
+retained processed frames; recovery requires another decoded valid response.
+
+A standalone result reports host-received age and STOP. This age is a lower bound,
+not a measurement of Pi capture age. Displaying it never qualifies calibration,
+supplies the required Pi-run evidence or grants movement.

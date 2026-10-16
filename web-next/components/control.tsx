@@ -75,7 +75,7 @@ export function Posture({ client, t, language }: { client: RiderClient; t: Trans
     <div className={styles.meta}>{t("state")}: {t(balance.enabled === true ? "on" : balance.enabled === false ? "off" : "unknown")}</div>
   </Panel>;
 }
-export function CameraPanel({ client, t, language, compact = false, onObservation, observationDisabled = false, analysisCurrent, analysisRunning, editor }: { client: RiderClient; t: Translator; language: string; compact?: boolean; onObservation?:()=>void; observationDisabled?:boolean; analysisCurrent?:boolean; analysisRunning?:boolean; editor?:CorridorEditorProps }) {
+export function CameraPanel({ client, t, language, compact = false, onObservation, observationDisabled = false, editor }: { client: RiderClient; t: Translator; language: string; compact?: boolean; onObservation?:()=>void; observationDisabled?:boolean; editor?:CorridorEditorProps }) {
   const [imageSize,setImageSize]=useState<[number,number]>([320,240]);
   const [displayed,setDisplayed]=useState<Frame|null>(null);
   const [previewBusy,setPreviewBusy]=useState(false);
@@ -91,7 +91,8 @@ export function CameraPanel({ client, t, language, compact = false, onObservatio
   };
   const selected = client.cameraStream ?? "raw";
   const transitioning=selected==="venom"&&client.cameraTransition;
-  const notice=previewNotice(client.camera?.stale??false,selected,analysisCurrent,analysisRunning,transitioning);
+  const previewPolling=client.cameraStream!==null&&client.mediaError!=="visionCameraOff";
+  const notice=previewNotice(client.camera?.stale??false,selected,previewPolling,transitioning);
   const streams = compact ? (["raw", "venom"] as const) : (["raw", "venom", "proc"] as const);
   return <Panel className={compact?styles.cameraEmbedded:""} title={t("camera")} hint={compact?undefined:t("cameraHint")} extra={<Button data-testid="camera-preview-toggle" onClick={() => void chooseStream(client.cameraStream ? null : "raw")} disabled={!client.canMutate||previewBusy}><Camera size={15} />{t(client.cameraStream ? "hidePreview" : "showPreview")}</Button>}>
     <div className={styles.flex} style={{ marginBottom: 14 }}>{streams.map(stream => <Button key={stream} tone={selected === stream ? "primary" : undefined} aria-pressed={selected === stream} onClick={() => void chooseStream(stream)} disabled={!client.canMutate||previewBusy}>{t(stream === "venom" ? "visionVenom" : stream === "proc" ? "visionPi" : stream)}</Button>)}</div>

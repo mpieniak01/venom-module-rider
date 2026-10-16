@@ -332,7 +332,7 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
     </div></>}
     {groundActive&&<p className={styles.hint} data-testid="ground-geometry-help">{t("geometryPreviewHelp")}</p>}
     <div className={styles.driveWorkspace}>
-      <div className={styles.loopCamera}><CameraPanel client={client} t={t} language={language} compact editor={editingZone&&draft&&Array.isArray(draft.corridor)?{value:draft.corridor as number[],disabled:goals.drive===true||!!operation,onChange:value=>setDraft({...draft,corridor:value})}:undefined} analysisRunning={active&&loopState.running===true} analysisCurrent={imageDecision.current&&decision.reason!=="vision_observation_transport_retry"}/></div>
+      <div className={styles.loopCamera}><CameraPanel client={client} t={t} language={language} compact editor={editingZone&&draft&&Array.isArray(draft.corridor)?{value:draft.corridor as number[],disabled:goals.drive===true||!!operation,onChange:value=>setDraft({...draft,corridor:value})}:undefined}/></div>
       <div className={styles.loopSidebar}>
         {manual}
         <div data-testid="directional-results" className={styles.grid}>{(["left","center","right"] as const).map(side=><div className={styles.metric} key={side}><b>{t("sector."+side)}</b><p>{t("vision."+String(imageDecision.current?record(record(decision.sectors)[side]).state??"unknown":"unknown"))}</p></div>)}</div>
