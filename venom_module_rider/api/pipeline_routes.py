@@ -193,6 +193,7 @@ async def processed_native(request, connection, incoming):
             )
         )
         image = result.pop("_preview", None)
+        result.update(result.pop("_preview_analysis", {}))
         if image is None:
             raise RiderError(result["reason"], 503)
         elapsed = result["inference_ms"]

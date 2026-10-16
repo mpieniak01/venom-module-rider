@@ -68,8 +68,8 @@ def test_projected_strokes_keep_fov_gaps_and_use_actual_points():
         outlines={"left": points},
         projected=True,
     )
-    assert draw.lines == [((64, 144), (80, 168)), ((256, 168), (288, 192))]
-    assert draw.labels == ["L", "C?", "R?"]
+    assert draw.lines[:2] == [((64, 144), (80, 168)), ((256, 168), (288, 192))]
+    assert sorted(draw.labels) == ["C?", "L", "R?"]
 
 
 def test_absent_projection_cannot_create_a_fake_region():
@@ -77,7 +77,7 @@ def test_absent_projection_cannot_create_a_fake_region():
     draw_sectors(draw, (320, 240), {}, projected=True)
     assert draw.lines == []
     assert len(draw.rectangles) == 3  # Only small availability badges.
-    assert draw.labels == ["L?", "C?", "R?"]
+    assert sorted(draw.labels) == ["C?", "L?", "R?"]
     assert all(box[2] - box[0] < 30 for box, _ in draw.rectangles)
 
 
@@ -280,3 +280,101 @@ async def test_projected_metadata_remains_small_in_the_real_preview_response():
     assert row["sector_space"] == "projected_paths"
     assert set(row["sectors"]) == {"left", "center", "right"}
     assert "_path_overlay" not in row and "heading_candidates" not in row
+
+
+def test_projected_labels_do_not_hide_each_other_for_near_parallel_candidates():
+    draw = Drawing()
+    points = {
+        "left": [(0.49, 0.5), (0.45, 0.9)],
+        "center": [(0.5, 0.5), (0.5, 0.9)],
+        "right": [(0.51, 0.5), (0.55, 0.9)],
+    }
+    rows = {side: {"state": "clear", "coverage_complete": True} for side in points}
+    draw_sectors(draw, (128, 96), rows, outlines=points, projected=True)
+    badges = [box for box, options in draw.rectangles if "fill" in options]
+    assert len(badges) == 3
+    for i, (a, b, c, d) in enumerate(badges):
+        for x, y, z, t in badges[i + 1 :]:
+            assert c < x or a > z or d < y or b > t
+    assert len(draw.lines) > 3  # Displaced badges have leaders to their real path.
+
+
+@pytest.mark.parametrize("active", [False, True])
+def test_native_preview_delivers_identical_annotated_pixels_and_source_sectors(
+    monkeypatch, active
+):
+    import json
+    import time
+
+    from fastapi.testclient import TestClient
+    from test_pipeline_api import AUTH, descriptor, fixture, warmup
+    from test_stream_contract import source
+
+    from venom_module_rider.depth_detector import assess_depth, decode_payload
+    from venom_module_rider.stream_contract import NativeFrame, SourceDescription
+
+    calls = []
+
+    class Detector:
+        def status(self):
+            return {"sha256": "a" * 64}
+
+        def detect(self, payload, corridor, settings):
+            calls.append(payload)
+            image = decode_payload(payload)
+            y, x = np.mgrid[: image.height, : image.width]
+            depth = 1 / np.maximum(
+                0.1 * x / image.width + 3.5 * y / image.height - 2, 0.1
+            )
+            row = assess_depth(depth, corridor, settings)
+            row["_preview"] = render_depth(image, depth, row, corridor, settings)
+            return row
+
+    app, _service, pi = fixture(monkeypatch)
+    original_read = pi.json
+
+    async def read(path, **kwargs):
+        row = await original_read(path, **kwargs)
+        if path == "/api/navigation/config":
+            row["data"]["perception"] = {"engine": "depth_plane"}
+        return row
+
+    pi.json = read
+    payload = io.BytesIO()
+    Image.new("RGB", (320, 240), (80, 80, 80)).save(payload, format="JPEG")
+    raw = payload.getvalue()
+    with TestClient(app) as client:
+        app.state.rider_vision.depth_detector = Detector()
+        fields = source(raw, sequence=101)
+        now = time.monotonic()
+        fields.update(
+            encoded_width=320,
+            encoded_height=240,
+            captured_monotonic_ns=int((now - 0.005) * 1e9),
+        )
+        pi.latest = NativeFrame(SourceDescription.model_validate(fields), raw, now)
+        current = warmup(client)
+        if active:
+            pi.running = True
+            result = client.post(
+                "/api/v1/rider/compute/vision/decision-reference",
+                headers=AUTH,
+                json=descriptor(
+                    current,
+                    frame_id="different-job-id",
+                    perception={"engine": "depth_plane"},
+                ),
+            )
+            assert result.status_code == 200, result.text
+        first = client.get("/api/v1/rider/camera/venom")
+        second = client.get("/api/v1/rider/camera/venom")
+        assert first.status_code == second.status_code == 200
+        assert first.content == second.content
+        assert Image.open(io.BytesIO(first.content)).size == (320, 240)
+        analysis = json.loads(first.headers["x-rider-analysis-json"])
+        assert analysis["sector_space"] == "image"
+        assert analysis["sectors"]["center"]["corridor"] == list(ROI)
+        assert first.headers["x-rider-frame-id"] == current["frame_id"]
+        assert analysis["source"] == current
+        assert len(calls) == 1 and pi.opened == 1 and pi.snapshot_requests == 0
+        assert all(method == "GET" for method, _path, _body in pi.calls)

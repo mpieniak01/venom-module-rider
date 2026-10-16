@@ -425,7 +425,17 @@ class VisionLoop:
         changed.set()
         return {
             **result,
-            **({"_preview": image} if with_preview and image is not None else {}),
+            **(
+                {
+                    "_preview": image,
+                    "_preview_analysis": {
+                        "sectors": image_sectors,
+                        "sector_space": sector_space,
+                    },
+                }
+                if with_preview and image is not None
+                else {}
+            ),
             **({"source": source_reference} if source_reference else {}),
             "action": action,
             "vision_action": vision_action,

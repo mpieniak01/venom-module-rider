@@ -61,7 +61,7 @@ bounded `sectors` summary in source-image coordinates, before command mirroring.
 The Pi decision response retains its original planner-side mapping, including
 `avoidance.mirrored`. Robot commands remain in the separate Venom → Pi card.
 The original frame/run/sequence/configuration/source identifiers and preview
-age limit are unchanged; no additional frame retrieval or inference is added.
+age limit are unchanged; no additional frame retrieval or inference is added. The orange dashed ROI editor is a separate unsaved draft; it does not relabel an already assessed frame.
 
 ## Calibration fields
 

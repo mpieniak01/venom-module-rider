@@ -58,6 +58,6 @@ test("malformed or absent sector metadata cannot borrow the overall clear verdic
 test("region labels and uncertainty explanations are translated in PL EN DE",async()=>{
   const {translate}=await import("../../web-next/lib/i18n");
   for(const language of ["pl","en","de"] as const)
-    for(const key of ["sectorsTitle","sectorsImageLegend","sectorsProjectedLegend","sectorsUnavailable","sectorsHistorical","sectorIncomplete","sectorsDecisionHint",...["left","center","right"].flatMap(side=>["sector."+side,"sector.path."+side])])
+    for(const key of ["sectorDraftHint","frameAnalysisRevision","sectorsTitle","sectorsImageLegend","sectorsProjectedLegend","sectorsUnavailable","sectorsHistorical","sectorIncomplete","sectorsDecisionHint",...["left","center","right"].flatMap(side=>["sector."+side,"sector.path."+side])])
       assert.notEqual(translate(language,key),key);
 });
