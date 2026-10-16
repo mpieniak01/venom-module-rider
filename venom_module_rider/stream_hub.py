@@ -6,8 +6,9 @@ import asyncio
 import time
 from collections import OrderedDict
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
+from .age_anchor import SourceAgeAnchor
 from .errors import RiderError
 from .stream_contract import NativeFrame, SourceReference, canonical_jpeg
 
@@ -20,6 +21,8 @@ MAX_READERS = 8
 class StreamConnection:
     binding: tuple
     client: object
+    domain: object
+    anchor: SourceAgeAnchor | None = None
     readers: int = 0
     last_used: float = 0.0
     hold_until: float = 0.0
@@ -75,13 +78,18 @@ class NativeStreamHub:
                 connection = None
             if connection is None or connection.closed:
                 connection = StreamConnection(
-                    binding=binding, client=domain.transport(), last_used=self.clock()
+                    binding=binding,
+                    client=domain.transport(),
+                    domain=domain,
+                    anchor=pipeline.get("_age_anchor"),
+                    last_used=self.clock(),
                 )
                 self.connection = connection
                 connection.reader = asyncio.create_task(self._read(connection))
                 connection.reaper = asyncio.create_task(self._reap(connection))
             if connection.readers >= MAX_READERS:
                 raise RiderError("stream_busy", 429)
+            self.update_anchor(pipeline)
             connection.readers += 1
             connection.last_used = self.clock()
         try:
@@ -116,6 +124,29 @@ class NativeStreamHub:
             identity, _frame = connection.frames.popitem(last=False)
             connection.canonical.pop(identity, None)
 
+    def update_anchor(self, pipeline):
+        connection, anchor = self.connection, pipeline.get("_age_anchor")
+        if (
+            connection is None
+            or not isinstance(anchor, SourceAgeAnchor)
+            or anchor.authority() != connection.binding[2:]
+            or (
+                connection.anchor is not None
+                and anchor.request_started_mono
+                <= connection.anchor.request_started_mono
+            )
+        ):
+            return
+        connection.anchor = anchor
+        for identity, frame in tuple(connection.frames.items()):
+            age = anchor.upper_age_ms(frame.source, frame.received_mono)
+            if age is not None:
+                connection.frames[identity] = replace(
+                    frame, age_floor_ms=max(frame.age_floor_ms, age)
+                )
+        self._purge(connection)
+        self._notify(connection)
+
     def _admit(self, connection, frame):
         source = frame.source
         expected = connection.binding
@@ -126,6 +157,12 @@ class NativeStreamHub:
         ):
             raise RiderError("stream_epoch_changed", 409)
         frame.validate_payload()
+        if connection.anchor is None:
+            raise RiderError("stream_age_unavailable", 503)
+        age = connection.anchor.upper_age_ms(source, frame.received_mono)
+        if age is None:
+            raise RiderError("stream_epoch_changed", 409)
+        frame = replace(frame, age_floor_ms=max(frame.age_floor_ms, age))
         if source.sequence <= connection.sequence:
             connection.rejected += 1
             return False
@@ -147,6 +184,12 @@ class NativeStreamHub:
                 async for frame in connection.client.mjpeg():
                     if connection.closed:
                         return
+                    if connection.anchor is None:
+                        # Only bootstrap once when start status preceded the
+                        # first capture. Normal updates reuse profile GETs;
+                        # there is no per-frame status poll.
+                        pipeline = await connection.domain.pipeline(force=True)
+                        self.update_anchor(pipeline)
                     if self._admit(connection, frame):
                         backoff = 0.1
                 connection.error = "stream_disconnected"

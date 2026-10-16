@@ -3,53 +3,25 @@
 from __future__ import annotations
 
 import json
-from typing import Annotated, Literal
+from typing import Literal
 
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
-from pydantic import Field, StrictInt, ValidationError, field_validator, model_validator
+from pydantic import ValidationError
 
 from ..errors import RiderError
-from ..stream_contract import SourceReference, StreamModel
+from ..sample_sources import native_ticket
+from ..stream_contract import PipelineAction, SourceReference, source_headers
+from ..stream_contract import PipelineProfile as PipelineProfile
 from .routing import RiderRoute
 
 router = APIRouter(route_class=RiderRoute)
 
 
-class PipelineProfile(StreamModel):
-    analysis_location: Literal["local", "venom"]
-    local_engine: Literal["canny", "ssd", "tflite"]
-    remote_transport: Literal["snapshots", "mjpeg"]
-
-
-class PipelineAction(StreamModel):
-    contract_version: Literal[1]
-    request_id: Annotated[
-        str, Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]{1,128}$")
-    ]
-    expected_revision: Annotated[StrictInt, Field(ge=1)]
-    action: Literal["configure", "start", "stop"]
-    profile: PipelineProfile | None = None
-
-    @field_validator("contract_version", mode="before")
-    @classmethod
-    def strict_version(cls, value):
-        if type(value) is not int:
-            raise ValueError("integer_version_required")
-        return value
-
-    @model_validator(mode="after")
-    def configuration_profile(self):
-        if (self.action == "configure") != (self.profile is not None) or (
-            self.action != "configure" and "profile" in self.model_fields_set
-        ):
-            raise ValueError("profile_required_only_for_configuration")
-        return self
-
-
 @router.get("/camera/pipeline")
 async def pipeline_status(request: Request):
-    return await request.app.state.rider.pipeline(force=True)
+    status = await request.app.state.rider.pipeline(force=True)
+    return {key: value for key, value in status.items() if not key.startswith("_")}
 
 
 @router.post("/camera/pipeline")
@@ -81,37 +53,18 @@ async def native_pipeline(domain, *, device=None, source=None):
     return pipeline
 
 
-def source_headers(frame, now, *, source="pi-camera"):
-    metadata = frame.source.model_dump(mode="json")
-    return {
-        "cache-control": "no-store",
-        "x-rider-source": source,
-        "x-rider-source-json": json.dumps(metadata, separators=(",", ":")),
-        "x-rider-stale": "false",
-        "x-rider-placeholder": "false",
-        "x-rider-camera-session": frame.source.camera_session,
-        "x-rider-transport-epoch": str(frame.source.transport_epoch),
-        "x-rider-pipeline-revision": str(frame.source.pipeline_revision),
-        "x-rider-frame-id": frame.source.frame_id,
-        "x-rider-sequence": str(frame.source.sequence),
-        "x-rider-frame-age-ms": str(round(frame.age_ms(now), 2)),
-        "x-rider-frame-age-source": "pi-send-plus-host-elapsed",
-    }
-
-
-def native_ticket(domain, frame, payload, headers):
-    from ..sample_sources import raw
-
-    client = domain.transport()
-    return raw(
-        getattr(domain, "samples", None),
-        client.device.id,
-        domain.session,
-        payload,
-        "image/jpeg",
-        headers,
-        mode=client.device.mode,
-    )
+async def snapshot_decision_allowed(domain, device):
+    """A late legacy sender cannot bypass the selected Pi's live transport."""
+    selected = getattr(domain, "device", None)
+    if selected is None or selected.id != device or not hasattr(domain, "pipeline"):
+        return
+    pipeline = await domain.pipeline()
+    if pipeline.get("supported"):
+        profile = pipeline.get("active_profile") or pipeline.get("profile") or {}
+        if profile.get("analysis_location") == "local":
+            raise RiderError("vision_remote_disabled", 409)
+        if profile.get("remote_transport") == "mjpeg":
+            raise RiderError("vision_transport_mismatch", 409)
 
 
 def multipart(payload, headers):
@@ -159,9 +112,9 @@ async def processed_native(request, connection, incoming):
         if any(goals.get(mode) is not False for mode in ("observe", "drive")):
             raise RiderError("vision_busy", 429)
         payload = await hub.canonical_frame(connection, incoming)
-        ticket = native_ticket(
-            domain, incoming, payload, source_headers(incoming, hub.clock())
-        )
+        if connection.closed:
+            raise RiderError("stream_epoch_changed", 409)
+        ticket = native_ticket(domain, payload, source_headers(incoming, hub.clock()))
         age = incoming.age_ms(hub.clock())
         if age >= 300:
             raise RiderError("frame_stale", 409)
@@ -277,7 +230,12 @@ async def browser_stream(kind: Literal["raw", "venom"], request: Request):
                         if frame.age_ms(hub.clock()) >= 500:
                             return
                         headers = source_headers(frame, hub.clock())
-                        ticket = native_ticket(domain, frame, payload, headers)
+                        if (
+                            connection.closed
+                            or hub.binding(domain, pipeline) != binding
+                        ):
+                            return
+                        ticket = native_ticket(domain, payload, headers)
                         if ticket:
                             headers["x-rider-capture-key"] = ticket
                     if frame.source.identity() == previous:

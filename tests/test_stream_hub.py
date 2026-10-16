@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 from test_stream_contract import native
 
+from venom_module_rider.age_anchor import age_anchor
 from venom_module_rider.errors import RiderError
 from venom_module_rider.stream_hub import MAX_REFERENCES, NativeStreamHub
 
@@ -44,6 +45,9 @@ def setup(*, clock=None, idle_s=2.0):
         "revision": 3,
     }
     hub = NativeStreamHub(**({"clock": clock} if clock else {}), idle_s=idle_s)
+    now = hub.clock()
+    profile["latest_frame"] = native(now=now).source.model_dump(mode="json")
+    profile["_age_anchor"] = age_anchor(profile, now, now)
     return client, domain, profile, hub
 
 
@@ -63,8 +67,12 @@ async def test_two_panels_share_one_camera_reader_and_cancel_only_their_lease():
             b = asyncio.create_task(hub.frame(second))
             incoming = native()
             await emit(client, incoming)
-            assert await a is incoming
-            assert await b is incoming
+            observed = await a
+            assert await b is observed
+            assert (
+                observed.source == incoming.source
+                and observed.payload == incoming.payload
+            )
             assert client.opened == 1 and first.readers == 2
         assert not first.closed and first.readers == 1
         await emit(client, native(2))
@@ -115,7 +123,7 @@ async def test_reconnect_discards_old_input_and_does_not_accept_replayed_sequenc
     async with hub.lease(domain, profile) as connection:
         one = native()
         await emit(client, one)
-        assert await hub.frame(connection) is one
+        assert (await hub.frame(connection)).source == one.source
         await emit(client, RiderError("stream_disconnected", 503))
         assert not connection.frames
         await asyncio.sleep(0.12)
@@ -133,6 +141,10 @@ async def test_old_epoch_is_rejected_and_new_profile_retires_all_old_consumers()
         assert (await hub.frame(old)).source.sequence == 1
         waiting = asyncio.create_task(hub.frame(old, after=native().source.identity()))
         new_profile = {**profile, "transport_epoch": 3, "camera_session": "new-session"}
+        new_profile["latest_frame"] = native(
+            session="new-session", epoch=3
+        ).source.model_dump(mode="json")
+        new_profile["_age_anchor"] = age_anchor(new_profile, hub.clock(), hub.clock())
         async with hub.lease(domain, new_profile) as current:
             assert old.closed and not old.frames
             with pytest.raises(RiderError, match="stream_unavailable"):

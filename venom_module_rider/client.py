@@ -172,6 +172,7 @@ class PiClient:
             request_headers["Authorization"] = "Bearer " + token
         binary = body if isinstance(body, bytes) else None
         payload = None if isinstance(body, bytes) else body
+        request_started_mono = time.monotonic()
         try:
             async with client.stream(
                 method,
@@ -257,6 +258,12 @@ class PiClient:
                             **data,
                             "preparation": preparation_identity(data["preparation"]),
                         },
+                    }
+                if method == "GET" and path == "/api/resource/camera/pipeline":
+                    payload = {
+                        **payload,
+                        "_rider_request_started_mono": request_started_mono,
+                        "_rider_response_received_mono": time.monotonic(),
                     }
                 return payload
         except httpx.TimeoutException as exc:

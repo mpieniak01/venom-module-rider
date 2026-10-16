@@ -3,6 +3,7 @@
 import asyncio
 import copy
 import json
+import time
 
 import pytest
 from fastapi import FastAPI
@@ -54,10 +55,12 @@ class PiFixture:
         self.frames = asyncio.Queue()
         self.supported = True
         self.running = False
+        self.latest = None
         self.snapshot_requests = 0
 
     async def json(self, path, *, method="GET", body=None, **kwargs):
         self.calls.append((method, path, copy.deepcopy(body)))
+        requested_at = time.monotonic()
         if path == "/api/resource/camera/pipeline":
             if not self.supported:
                 raise RiderError("not_found", 404)
@@ -71,10 +74,27 @@ class PiFixture:
                 if body["action"] == "configure":
                     self.pipeline["profile"] = body["profile"]
                     self.pipeline["revision"] += 1
+                    self.pipeline.update(
+                        active_profile=None, state="stopped", camera_session=None
+                    )
                 elif body["action"] == "stop":
                     self.pipeline.update(state="stopped", active_profile=None)
                 self.pipeline["operation_id"] = body["request_id"]
-            return {"data": copy.deepcopy(self.pipeline)}
+            if self.pipeline["state"] in {"active", "waiting_frame"}:
+                self.latest = self.latest or native(1)
+                metadata = self.latest.source.model_dump(mode="json")
+                metadata["frame_age_ms"] = max(
+                    0, (time.monotonic_ns() - metadata["captured_monotonic_ns"]) / 1e6
+                )
+                self.pipeline["latest_frame"] = metadata
+            else:
+                self.latest = None
+                self.pipeline["latest_frame"] = None
+            return {
+                "data": copy.deepcopy(self.pipeline),
+                "_rider_request_started_mono": requested_at,
+                "_rider_response_received_mono": time.monotonic(),
+            }
         if path == "/api/navigation/config":
             return {
                 "data": {
@@ -107,7 +127,8 @@ class PiFixture:
     async def mjpeg(self):
         self.opened += 1
         try:
-            yield native(1)
+            self.latest = self.latest or native(1)
+            yield self.latest
             while True:
                 frame = await self.frames.get()
                 yield frame
@@ -116,6 +137,7 @@ class PiFixture:
 
     async def emit(self, sequence):
         frame = native(sequence)
+        self.latest = frame
         await self.frames.put(frame)
         await asyncio.sleep(0.01)
         return frame.source.reference().model_dump(mode="json")
@@ -539,3 +561,145 @@ def test_request_identity_pattern_matches_pi_and_contract(monkeypatch):
         )
         assert response.status_code == 400
         assert not any(method == "POST" for method, _path, _body in pi.calls)
+
+
+def test_delayed_binary_and_legacy_preview_cannot_restart_old_inference_after_switch(
+    monkeypatch,
+):
+    app, service, pi = fixture(monkeypatch)
+    snapshots = {**PROFILE, "remote_transport": "snapshots"}
+    pi.pipeline.update(profile=snapshots, active_profile=snapshots)
+    with TestClient(app) as client:
+        detector = Detector()
+        app.state.rider_vision.detector = detector
+        current = native(1).source.reference().model_dump(mode="json")
+        binary_headers = {
+            **AUTH,
+            "Content-Type": "image/jpeg",
+            "X-Rider-Vision": json.dumps(descriptor(current)["frame"]),
+        }
+        before = client.post(
+            "/api/v1/rider/compute/vision/decision",
+            headers=binary_headers,
+            content=jpeg(),
+        )
+        assert before.status_code == 200, before.text
+        assert detector.calls == 1
+        changed = client.post(
+            "/api/v1/rider/camera/pipeline",
+            headers={"X-Rider-Session": service.session},
+            json={
+                "contract_version": 1,
+                "request_id": "native-switch",
+                "expected_revision": 3,
+                "action": "configure",
+                "profile": PROFILE,
+            },
+        )
+        assert changed.status_code == 200
+        delayed = client.post(
+            "/api/v1/rider/compute/vision/decision",
+            headers=binary_headers,
+            content=jpeg(),
+        )
+        assert delayed.status_code == 409
+        assert delayed.json()["detail"]["code"] == "vision_transport_mismatch"
+        legacy_preview = client.get("/api/v1/rider/camera/venom")
+        assert legacy_preview.status_code == 503
+        assert detector.calls == 1 and pi.snapshot_requests == 0
+
+
+def test_local_profile_rejects_binary_vision_but_keeps_explicit_raw_consumer(
+    monkeypatch,
+):
+    app, service, pi = fixture(monkeypatch)
+    pi.pipeline["profile"]["analysis_location"] = "local"
+    pi.pipeline["active_profile"]["analysis_location"] = "local"
+    with TestClient(app) as client:
+        detector = Detector()
+        app.state.rider_vision.detector = detector
+        current = warmup(client)
+        delayed = client.post(
+            "/api/v1/rider/compute/vision/decision",
+            headers={
+                **AUTH,
+                "Content-Type": "image/jpeg",
+                "X-Rider-Vision": json.dumps(descriptor(current)["frame"]),
+            },
+            content=jpeg(),
+        )
+        assert delayed.status_code == 409
+        assert delayed.json()["detail"]["code"] == "vision_remote_disabled"
+        preview = client.get("/api/v1/rider/camera/venom")
+        assert preview.status_code == 409
+        raw = client.get("/api/v1/rider/camera/raw")  # S12/manual explicit source.
+        assert raw.status_code == 200 and raw.content == jpeg()
+        assert detector.calls == 0 and pi.snapshot_requests == 0
+
+
+def test_network_delayed_part_is_stale_despite_small_send_age_and_never_infers(
+    monkeypatch,
+):
+    from venom_module_rider.stream_contract import NativeFrame
+
+    app, service, pi = fixture(monkeypatch)
+    pi.latest = native(2)
+    delayed = native(1)
+    descriptor_source = delayed.source.model_copy(
+        update={
+            "captured_monotonic_ns": time.monotonic_ns() - 350_000_000,
+            "frame_age_ms": 10.0,
+        }
+    )
+    delayed = NativeFrame(descriptor_source, delayed.payload, time.monotonic())
+
+    async def backlogged():
+        yield delayed
+        await asyncio.Event().wait()
+
+    pi.mjpeg = backlogged
+    with TestClient(app) as client:
+        detector = Detector()
+        app.state.rider_vision.detector = detector
+        current = warmup(client)
+        raw = client.get("/api/v1/rider/camera/raw")
+        assert raw.status_code == 200
+        assert float(raw.headers["x-rider-frame-age-ms"]) >= 350
+        assert raw.headers["x-rider-stale"] == "true"
+        assert (
+            raw.headers["x-rider-frame-age-source"]
+            == "pi-status-anchor-plus-host-elapsed"
+        )
+        preview = client.get("/api/v1/rider/camera/venom")
+        assert preview.status_code == 409
+        assert preview.json()["detail"]["code"] == "frame_stale"
+        # Even an erroneously underreported Pi request age cannot bypass the
+        # host anchor's conservative source age.
+        reference = client.post(
+            "/api/v1/rider/compute/vision/decision-reference",
+            headers=AUTH,
+            json=descriptor(current, age_ms=10.0),
+        )
+        assert reference.status_code == 409
+        assert reference.json()["detail"]["code"] == "vision_frame_expired"
+        assert detector.calls == 0 and pi.snapshot_requests == 0
+
+
+async def test_cached_status_timing_is_never_redated_as_a_new_age_anchor():
+    device = Device("pi", "Fixture", "http://127.0.0.1:18880", "device")
+    pi = PiFixture(device)
+    domain = RiderService((device,), client_factory=lambda _device: pi)
+    await domain.select("pi", domain.session)
+    first = await domain.pipeline()
+    anchor = first["_age_anchor"]
+    assert anchor is not None
+    source = pi.latest.source
+    age_before = anchor.upper_age_ms(source, time.monotonic())
+    await asyncio.sleep(0.03)
+    second = await domain.pipeline()
+    assert second["_age_anchor"].request_started_mono == anchor.request_started_mono
+    assert (
+        second["_age_anchor"].upper_age_ms(source, time.monotonic()) >= age_before + 25
+    )
+    assert sum(path == "/api/resource/camera/pipeline" for _, path, _ in pi.calls) == 1
+    await domain.close()

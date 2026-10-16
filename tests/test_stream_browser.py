@@ -191,7 +191,12 @@ async def test_native_raw_photo_saves_exact_displayed_bytes_via_existing_api(tmp
         different = image.getvalue()
         await pi.frames.put(
             NativeFrame(
-                SourceDescription.model_validate(source(different, sequence=2)),
+                SourceDescription.model_validate(
+                    {
+                        **source(different, sequence=2),
+                        "captured_monotonic_ns": time.monotonic_ns() - 5_000_000,
+                    }
+                ),
                 different,
                 time.monotonic(),
             )

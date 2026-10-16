@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 from dataclasses import dataclass
 from typing import Annotated, Literal
@@ -26,6 +27,37 @@ Counter = Annotated[StrictInt, Field(ge=0, le=2**53 - 1)]
 
 class StreamModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
+
+
+class PipelineProfile(StreamModel):
+    analysis_location: Literal["local", "venom"]
+    local_engine: Literal["canny", "ssd", "tflite"]
+    remote_transport: Literal["snapshots", "mjpeg"]
+
+
+class PipelineAction(StreamModel):
+    contract_version: Literal[1]
+    request_id: Annotated[
+        str, Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]{1,128}$")
+    ]
+    expected_revision: Annotated[StrictInt, Field(ge=1)]
+    action: Literal["configure", "start", "stop"]
+    profile: PipelineProfile | None = None
+
+    @field_validator("contract_version", mode="before")
+    @classmethod
+    def strict_version(cls, value):
+        if type(value) is not int:
+            raise ValueError("integer_version_required")
+        return value
+
+    @model_validator(mode="after")
+    def configuration_profile(self):
+        if (self.action == "configure") != (self.profile is not None) or (
+            self.action != "configure" and "profile" in self.model_fields_set
+        ):
+            raise ValueError("profile_required_only_for_configuration")
+        return self
 
 
 class ImageTransform(StreamModel):
@@ -97,12 +129,16 @@ class NativeFrame:
     source: SourceDescription
     payload: bytes
     received_mono: float
+    age_floor_ms: float = 0.0
 
     def age_ms(self, now):
         # frame_age_ms was sampled by Pi immediately before sending this part.
         # This is a conservative local residence measurement, not a network
         # latency claim. Pi validates the full capture-return age itself.
-        age = self.source.frame_age_ms + max(0, now - self.received_mono) * 1000
+        age = (
+            max(self.source.frame_age_ms, self.age_floor_ms)
+            + max(0, now - self.received_mono) * 1000
+        )
         if not math.isfinite(age):
             raise RiderError("frame_stale", 409)
         return age
@@ -159,3 +195,21 @@ def canonical_jpeg(frame: NativeFrame) -> bytes:
         Image.DecompressionBombError,
     ) as exc:
         raise RiderError("stream_invalid_jpeg", 502) from exc
+
+
+def source_headers(frame, now, *, source="pi-camera"):
+    metadata = frame.source.model_dump(mode="json")
+    return {
+        "cache-control": "no-store",
+        "x-rider-source": source,
+        "x-rider-source-json": json.dumps(metadata, separators=(",", ":")),
+        "x-rider-stale": "true" if frame.age_ms(now) >= 300 else "false",
+        "x-rider-placeholder": "false",
+        "x-rider-camera-session": frame.source.camera_session,
+        "x-rider-transport-epoch": str(frame.source.transport_epoch),
+        "x-rider-pipeline-revision": str(frame.source.pipeline_revision),
+        "x-rider-frame-id": frame.source.frame_id,
+        "x-rider-sequence": str(frame.source.sequence),
+        "x-rider-frame-age-ms": str(round(frame.age_ms(now), 2)),
+        "x-rider-frame-age-source": "pi-status-anchor-plus-host-elapsed",
+    }

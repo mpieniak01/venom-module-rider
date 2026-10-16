@@ -46,13 +46,17 @@ async def decision(request: Request):
     except (ValueError, ValidationError) as exc:
         raise RiderError("vision_invalid_frame", 400) from exc
     body = await bounded_body(request, 512 * 1024)
+    from .pipeline_routes import snapshot_decision_allowed
+
+    await snapshot_decision_allowed(request.app.state.rider, device)
     return await request.app.state.rider_vision.decide(device, frame, body)
 
 
 @router.post("/compute/vision/decision-reference")
 async def reference_decision(request: Request):
-    from ..stream_contract import ReferenceDecision
-    from .pipeline_routes import native_pipeline, native_ticket, source_headers
+    from ..sample_sources import native_ticket
+    from ..stream_contract import ReferenceDecision, source_headers
+    from .pipeline_routes import native_pipeline
 
     device = authenticate(request)
     admitted_at = request.app.state.rider_stream.clock()
@@ -88,6 +92,8 @@ async def reference_decision(request: Request):
             timeout=min(0.3, (frame.deadline_ms - frame.age_ms) / 1000),
         )
         canonical = await hub.canonical_frame(connection, source)
+        if connection.closed or domain.transport().device.id != device:
+            raise RiderError("stream_epoch_changed", 409)
         frame = frame.model_copy(
             update={
                 "age_ms": max(
@@ -103,7 +109,7 @@ async def reference_decision(request: Request):
             frame,
             canonical,
             input_ticket=native_ticket(
-                domain, source, canonical, source_headers(source, hub.clock())
+                domain, canonical, source_headers(source, hub.clock())
             ),
             source_key=(
                 source.source.identity(),

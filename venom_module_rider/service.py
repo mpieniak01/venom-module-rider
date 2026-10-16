@@ -540,7 +540,17 @@ class RiderService:
             or status.get("contract_version") != 1
         ):
             raise RiderError("unsupported_pi_contract", 502)
-        return {**status, "supported": True}
+        from .age_anchor import age_anchor
+
+        anchor = age_anchor(
+            status,
+            response.get("_rider_request_started_mono"),
+            response.get("_rider_response_received_mono"),
+        )
+        result = {**status, "supported": True, "_age_anchor": anchor}
+        if self.media_hub is not None:
+            self.media_hub.update_anchor(result)
+        return result
 
     async def configure_pipeline(self, body, session):
         self.check_session(session)
@@ -598,7 +608,7 @@ class RiderService:
             )
             == "mjpeg"
         ):
-            from .api.pipeline_routes import source_headers
+            from .stream_contract import source_headers
 
             if self.media_hub is None:
                 raise RiderError("stream_unavailable", 503)
@@ -607,6 +617,8 @@ class RiderService:
             ) as connection:
                 frame = await self.media_hub.frame(connection, timeout=0.5)
                 payload = await self.media_hub.canonical_frame(connection, frame)
+                if connection.closed or self.client is not client:
+                    raise RiderError("stream_epoch_changed", 409)
                 if frame.age_ms(self.media_hub.clock()) >= 500:
                     raise RiderError("frame_stale", 409)
                 mime = "image/jpeg"

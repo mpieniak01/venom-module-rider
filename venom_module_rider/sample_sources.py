@@ -85,6 +85,19 @@ def raw(registry, device_id, source_session, payload, mime, headers, *, mode=Non
     return offer(registry, device_id, payload, mime, context)
 
 
+def native_ticket(domain, payload, headers):
+    client = domain.transport()
+    return raw(
+        getattr(domain, "samples", None),
+        client.device.id,
+        domain.session,
+        payload,
+        "image/jpeg",
+        headers,
+        mode=client.device.mode,
+    )
+
+
 def vision(
     registry,
     device_id,

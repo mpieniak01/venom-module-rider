@@ -53,11 +53,10 @@ def source(payload=None, *, sequence=1, session="session", epoch=2, revision=3):
 
 def native(sequence=1, *, now=None, **kwargs):
     payload = jpeg()
-    return NativeFrame(
-        SourceDescription.model_validate(source(payload, sequence=sequence, **kwargs)),
-        payload,
-        time.monotonic() if now is None else now,
-    )
+    received = time.monotonic() if now is None else now
+    description = source(payload, sequence=sequence, **kwargs)
+    description["captured_monotonic_ns"] = max(1, int((received - 0.005) * 1e9))
+    return NativeFrame(SourceDescription.model_validate(description), payload, received)
 
 
 @pytest.mark.parametrize(
