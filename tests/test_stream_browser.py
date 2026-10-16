@@ -237,3 +237,72 @@ async def test_native_raw_photo_saves_exact_displayed_bytes_via_existing_api(tmp
         await loop.close()
         await registry.close()
         await domain.close()
+
+
+async def test_slow_policy_reads_select_latest_source_after_io_not_expired_candidate():
+    pi, domain, hub, loop, state = await setup()
+    original_read = domain.read
+    started = asyncio.Event()
+
+    async def read(path, ttl, **kwargs):
+        if path == "/api/navigation/config":
+            started.set()
+            await asyncio.sleep(0.36)
+        return await original_read(path, ttl, **kwargs)
+
+    domain.read = read
+    iterator = (await browser_stream("venom", Browser(state))).body_iterator
+    receiving = asyncio.create_task(anext(iterator))
+    try:
+        await asyncio.wait_for(started.wait(), 1)
+        await asyncio.sleep(0.30)
+        await pi.emit(2)
+        headers, _ = unpack(await asyncio.wait_for(receiving, 1))
+        assert headers["x-rider-frame-id"] == "session-2"
+        assert float(headers["x-rider-frame-age-ms"]) < 300
+        assert loop.detector.calls == 1 and pi.opened == 1
+        assert pi.snapshot_requests == 0
+    finally:
+        receiving.cancel()
+        await asyncio.gather(receiving, return_exceptions=True)
+        await iterator.aclose()
+        await hub.close()
+        await loop.close()
+        await domain.close()
+
+
+async def test_model_warmup_expiry_skips_one_part_without_reconnect_or_fake_freshness():
+    import time
+
+    pi, domain, hub, loop, state = await setup()
+    original_detect = loop.detector.detect
+    warmed = False
+
+    def detect(payload, corridor):
+        nonlocal warmed
+        if not warmed:
+            warmed = True
+            time.sleep(0.35)
+        return original_detect(payload, corridor)
+
+    loop.detector.detect = detect
+    iterator = (await browser_stream("venom", Browser(state))).body_iterator
+    receiving = asyncio.create_task(anext(iterator))
+    try:
+        await asyncio.sleep(0.38)
+        # The expired first inference produced no replay or fabricated part.
+        assert not receiving.done()
+        await pi.emit(2)
+        headers, _ = unpack(await asyncio.wait_for(receiving, 1))
+        assert headers["x-rider-frame-id"] == "session-2"
+        assert float(headers["x-rider-frame-age-ms"]) < 300
+        assert pi.opened == 1 and pi.ended == 0
+        assert loop.detector.calls == 2 and pi.snapshot_requests == 0
+        assert not any(method == "POST" for method, _path, _body in pi.calls)
+    finally:
+        receiving.cancel()
+        await asyncio.gather(receiving, return_exceptions=True)
+        await iterator.aclose()
+        await hub.close()
+        await loop.close()
+        await domain.close()

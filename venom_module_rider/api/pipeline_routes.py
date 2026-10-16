@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Literal
 
 from fastapi import APIRouter, Request
@@ -16,6 +17,19 @@ from ..stream_contract import PipelineProfile as PipelineProfile
 from .routing import RiderRoute
 
 router = APIRouter(route_class=RiderRoute)
+logger = logging.getLogger(__name__)
+
+# Rejected inputs do not end a healthy media subscription. They also do not
+# produce a part: browser freshness keeps aging until a new valid source arrives.
+TRANSIENT_PREVIEW_ERRORS = {
+    "frame_stale",
+    "vision_busy",
+    "vision_frame_expired",
+    "vision_decision_expired",
+    "vision_inference_unavailable",
+    "stream_frame_unavailable",
+    "stream_disconnected",
+}
 
 
 @router.get("/camera/pipeline")
@@ -111,6 +125,10 @@ async def processed_native(request, connection, incoming):
         goals = await loop_goals(domain, force=False)
         if any(goals.get(mode) is not False for mode in ("observe", "drive")):
             raise RiderError("vision_busy", 429)
+        # Status/configuration I/O may outlive the candidate selected by the
+        # receiver. In diagnostic mode choose the latest source AFTER those
+        # awaits; a live Pi result above still pins its exact original source.
+        incoming = await hub.frame(connection, timeout=0.5)
         payload = await hub.canonical_frame(connection, incoming)
         if connection.closed:
             raise RiderError("stream_epoch_changed", 409)
@@ -216,9 +234,11 @@ async def browser_stream(kind: Literal["raw", "venom"], request: Request):
     async def generate():
         async with hub.lease(domain, pipeline) as connection:
             previous = None
+            last_rejection_log = float("-inf")
             while not await request.is_disconnected():
                 if hub.binding(domain, pipeline) != binding:
                     return
+                frame = None
                 try:
                     frame = await hub.frame(connection, after=previous, timeout=0.5)
                     if kind == "venom":
@@ -245,9 +265,35 @@ async def browser_stream(kind: Literal["raw", "venom"], request: Request):
                         continue
                     previous = frame.source.identity()
                     yield multipart(payload, headers)
-                except RiderError:
-                    # End this receiver visibly. A reconnect is a new request,
-                    # never a heartbeat masquerading as a camera frame.
+                except RiderError as exc:
+                    if not connection.closed and exc.code in TRANSIENT_PREVIEW_ERRORS:
+                        # Skip work for this source; do not replay the preceding
+                        # JPEG or reset its age. The ingest continues latest-only.
+                        if frame is not None:
+                            previous = frame.source.identity()
+                        if hub.clock() - last_rejection_log >= 2:
+                            logger.warning(
+                                "Native %s preview skipped source: %s received=%s "
+                                "rejected=%s reconnects=%s",
+                                kind,
+                                exc.code,
+                                connection.received,
+                                connection.rejected,
+                                connection.reconnects,
+                            )
+                            last_rejection_log = hub.clock()
+                        await asyncio.sleep(0.02)
+                        continue
+                    logger.warning(
+                        "Native %s preview ended: %s received=%s rejected=%s "
+                        "reconnects=%s closed=%s",
+                        kind,
+                        exc.code,
+                        connection.received,
+                        connection.rejected,
+                        connection.reconnects,
+                        connection.closed,
+                    )
                     return
 
     import asyncio

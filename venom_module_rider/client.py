@@ -25,6 +25,14 @@ IMAGE_HEADERS = {
     "x-rider-stream",
     "x-rider-stale",
     "x-rider-placeholder",
+    "x-rider-source-json",
+    "x-rider-frame-age-ms",
+    "x-rider-frame-age-source",
+    "x-rider-camera-session",
+    "x-rider-sequence",
+    "x-rider-transport-epoch",
+    "x-rider-pipeline-revision",
+    "x-rider-captured-monotonic-ns",
     "x-face-source",
 }
 

@@ -102,3 +102,38 @@ async def test_read_timeout_is_reported_without_fallback_or_camera_mutation():
         _frames = [frame async for frame in client.mjpeg()]
     assert len(calls) == 1 and calls[0].method == "GET"
     await client.close()
+
+
+async def test_legacy_ram_alias_keeps_capture_metadata_without_changing_source_json():
+    metadata = source()
+    headers = {
+        "Content-Type": "image/jpeg",
+        "X-Rider-Source": "pi-camera",
+        "X-Rider-Source-Json": json.dumps(metadata, separators=(",", ":")),
+        "X-Rider-Frame-Age-Ms": "20.4",
+        "X-Rider-Frame-Age-Source": "capture",
+        "X-Rider-Camera-Session": metadata["camera_session"],
+        "X-Rider-Sequence": str(metadata["sequence"]),
+        "X-Rider-Transport-Epoch": str(metadata["transport_epoch"]),
+        "X-Rider-Pipeline-Revision": str(metadata["pipeline_revision"]),
+        "X-Rider-Captured-Monotonic-Ns": str(metadata["captured_monotonic_ns"]),
+        "Set-Cookie": "private=must-not-leak",
+    }
+    client = PiClient(
+        DEVICE,
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(200, headers=headers, content=jpeg())
+        ),
+    )
+    try:
+        payload, mime, propagated = await client.image("/vision/cam")
+        assert payload == jpeg() and mime == "image/jpeg"
+        assert propagated["x-rider-source"] == "pi-camera"
+        assert json.loads(propagated["x-rider-source-json"]) == metadata
+        assert propagated["x-rider-frame-age-ms"] == "20.4"
+        assert propagated["x-rider-captured-monotonic-ns"] == str(
+            metadata["captured_monotonic_ns"]
+        )
+        assert "set-cookie" not in propagated
+    finally:
+        await client.close()
