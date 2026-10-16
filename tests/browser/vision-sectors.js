@@ -38,7 +38,7 @@ async (page, fixtures) => {
       if(failMedia)return route.abort("failed");
       reads++;
       const f=fixtures[selected],capture="fixture-capture-"+reads;
-      const analysis={run_id:"fixture-observe",frame_id:nativeIdentity?"job-"+reads:capture,sequence:reads,config_revision:39,state:"clear",vision_action:"stop",reason:"depth_plane_candidate",sector_space:f.space,sectors:f.sectors};
+      const analysis={run_id:"oneoff-"+reads,frame_id:nativeIdentity?"job-"+reads:capture,sequence:reads,config_revision:39,state:"clear",vision_action:"stop",reason:"depth_plane_candidate",sector_space:f.space,sectors:f.sectors};
       if(nativeIdentity)analysis.source={frame_id:capture,sequence:1000+reads,camera_session:"fixture-camera"};
       return route.fulfill({contentType:"image/jpeg",body:Buffer.from(f.body,"base64"),headers:{
         "X-Rider-Frame-Id":capture,"X-Rider-Frame-Age-Ms":"20","X-Rider-Frame-Age-Source":"pi-reported-plus-host-elapsed","X-Rider-Stale":"false",
@@ -123,7 +123,7 @@ async (page, fixtures) => {
   await page.evaluate(media=>{
     const realFetch=window.fetch.bind(window),encoder=new TextEncoder();
     const jpeg=Uint8Array.from(atob(media.body),c=>c.charCodeAt(0));
-    const fixture={pause:false,frames:0,connections:0};
+    const fixture={pause:false,frames:0,connections:0,flicker:false};
     window.__riderPreviewFixture=fixture;
     window.fetch=(input,options={})=>{
       const url=typeof input==="string"?input:input instanceof URL?input.href:input.url;
@@ -139,8 +139,11 @@ async (page, fixtures) => {
             const sequence=++fixture.frames;
             const source={contract_version:1,camera_session:"fixture-camera",transport_epoch:1,pipeline_revision:28,sequence,
               frame_id:"native-capture-"+sequence,captured_monotonic_ns:Date.now()*1e6,sha256:"b".repeat(64)};
+            const sectors=fixture.flicker&&sequence%3===0
+              ? {...media.sectors,left:{...media.sectors.left,state:"clear"},right:{...media.sectors.right,state:"obstacle"}}
+              : media.sectors;
             const analysis={run_id:"native-fixture",frame_id:"job-"+sequence,sequence,config_revision:39,state:"clear",
-              sector_space:"image",sectors:media.sectors,source};
+              sector_space:"image",sectors,source};
             const headers={"Content-Type":"image/jpeg","Content-Length":jpeg.length,"X-Rider-Stale":"false","X-Rider-Frame-Id":source.frame_id,
               "X-Rider-Frame-Age-Ms":"20","X-Rider-Source":"venom","X-Rider-Source-Json":JSON.stringify(source),
               "X-Rider-Analysis-Json":JSON.stringify(analysis),"X-Rider-Vision-State":"clear"};
@@ -161,6 +164,24 @@ async (page, fixtures) => {
   for(const row of [...nativeStability.events,...nativeStability.painted])
     check(row.space==="image"&&row.states==="obstacle,clear,clear","native MJPEG replacement flashed unknown sector cards");
   check(new Set(nativeStability.events.map(row=>row.height)).size===1,"native MJPEG changed the sector block height");
+  const pacing=await page.evaluate(async()=>{
+    const root=document.querySelector('[data-testid="directional-results"]'),fixture=window.__riderPreviewFixture;
+    const frames=fixture.frames,start=performance.now(),updates=[];
+    let last=root.dataset.assessmentFrame;
+    const observer=new MutationObserver(()=>{
+      const id=root.dataset.assessmentFrame;
+      if(id!==last){updates.push({at:Math.round(performance.now()-start),id,states:[...root.querySelectorAll('[data-sector-state]')].map(e=>e.dataset.sectorState)});last=id;}
+    });
+    observer.observe(root,{subtree:true,attributes:true,childList:true});fixture.flicker=true;
+    try{await new Promise(resolve=>setTimeout(resolve,3200));}
+    finally{fixture.flicker=false;observer.disconnect();}
+    return {sourceFrames:fixture.frames-frames,updates};
+  });
+  check(pacing.sourceFrames>=40,"native input did not continue while text was sampled");
+  check(pacing.updates.length>=2&&pacing.updates.length<=4,"sector text refreshed more frequently than once per second");
+  for(let i=1;i<pacing.updates.length;i++)check(pacing.updates[i].at-pacing.updates[i-1].at>=750,"sector text sampling timer reset on incoming frames");
+  await wait(async()=>(await states()).join()==="obstacle,clear,clear","sampled text did not return to stable assessment");
+  scenarios.push({textPacing:pacing});
   const nativeBeforePause=await page.evaluate(()=>{window.__riderPreviewFixture.pause=true;return {...window.__riderPreviewFixture};});
   await page.getByTestId("vision-preview-paused").waitFor({state:"visible"});
   await wait(async()=>(await states()).every(state=>state==="unknown"),"paused native stream kept a live sector label");

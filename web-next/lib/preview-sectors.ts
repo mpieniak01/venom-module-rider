@@ -24,3 +24,25 @@ export function previewSectors(frame: SectorFrame | null, now = performance.now(
       marked: space !== "unavailable" && Object.keys(row).length > 0 };
   }) };
 }
+
+export const SECTOR_PRESENTATION_INTERVAL_MS = 1000;
+export type SectorPresentation = {
+  view: ReturnType<typeof previewSectors>;
+  context: string;
+  frameId: string | undefined;
+};
+
+/** Sample readable text only; no sampled result is used for motion or freshness. */
+export function sectorPresentation(
+  previous: SectorPresentation | null, frame: SectorFrame | null,
+  refresh = false, now = performance.now(),
+): SectorPresentation {
+  const view = previewSectors(frame, now);
+  const analysis = record(frame?.analysis), source = record(analysis.source);
+  // Standalone snapshot analysis assigns a new run_id for each JPEG.
+  const context = JSON.stringify([analysis.config_revision, analysis.model_sha256,
+    view.space, source.camera_session, source.pipeline_revision, source.transport_epoch]);
+  // Invalid input or a changed source/policy must never retain a prior clear label.
+  if (previous && previous.context === context && previous.view.current === view.current && (!refresh || !view.current)) return previous;
+  return { view, context, frameId: frame?.id };
+}

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import {test} from "node:test";
-import {previewSectors, type SectorFrame} from "../../web-next/lib/preview-sectors";
+import {previewSectors, sectorPresentation, SECTOR_PRESENTATION_INTERVAL_MS, type SectorFrame} from "../../web-next/lib/preview-sectors";
 
 function frame():SectorFrame {
   return {id:"capture-7",decoded:true,stale:false,knownFreshness:true,ageMs:20,receivedAt:1000,
@@ -60,4 +60,46 @@ test("region labels and uncertainty explanations are translated in PL EN DE",asy
   for(const language of ["pl","en","de"] as const)
     for(const key of ["sectorDraftHint","frameAnalysisRevision","sectorsTitle","sectorsImageLegend","sectorsProjectedLegend","sectorsUnavailable","sectorsHistorical","sectorIncomplete","sectorsDecisionHint",...["left","center","right"].flatMap(side=>["sector."+side,"sector.path."+side])])
       assert.notEqual(translate(language,key),key);
+});
+
+test("rapid fresh captures keep the text sample until the one-second presentation tick",()=>{
+  const original=frame();
+  let sample=sectorPresentation(null,original,false,1040);
+  assert.equal(SECTOR_PRESENTATION_INTERVAL_MS,1000);
+  const initial=sample;
+  for(let i=1;i<=19;i++){
+    const next=frame();next.id="capture-"+(7+i);next.receivedAt=1000+i*50;
+    next.analysis!.frame_id=next.id;next.analysis!.run_id="oneoff-snapshot-"+i;
+    next.analysis!.sectors={left:{state:i%2?"clear":"obstacle",coverage_complete:true}};
+    sample=sectorPresentation(sample,next,false,1040+i*50);
+    assert.equal(sample,initial);
+  }
+  const newest=frame();newest.id="capture-27";newest.analysis!.frame_id=newest.id;
+  newest.receivedAt=2000;newest.analysis!.sectors={left:{state:"clear",coverage_complete:true}};
+  const refreshed=sectorPresentation(sample,newest,true,2040);
+  assert.equal(refreshed.view.rows[0].state,"clear");
+  assert.equal(refreshed.frameId,"capture-27");
+  assert.equal(initial.frameId,"capture-7");
+  assert.equal(initial.view.rows[0].state,"obstacle");
+});
+test("stale or mismatched live input invalidates sampled clear labels without waiting for a tick",()=>{
+  const image=frame();image.analysis!.sectors={center:{state:"clear",coverage_complete:true}};
+  const sampled=sectorPresentation(null,image,false,1040);
+  for(const latest of [null,{...image,stale:true},{...image,knownFreshness:false},{...image,id:"wrong"},image]){
+    const view=sectorPresentation(sampled,latest,false,latest===image?2020:1050).view;
+    assert.equal(view.current,false);
+    assert.ok(view.rows.every(row=>row.state==="unknown"));
+  }
+  const invalid=sectorPresentation(sampled,{...image,stale:true},false,1050);
+  assert.equal(sectorPresentation(invalid,image,false,1060).view.current,true);
+});
+test("model, policy and native camera changes reset presentation immediately",()=>{
+  const sampled=sectorPresentation(null,frame(),false,1040);
+  for(const patch of [{config_revision:40},{model_sha256:"another-model"},{sector_space:"projected_paths"},
+    {source:{frame_id:"capture-7",camera_session:"new-camera",pipeline_revision:28,transport_epoch:3}}]){
+    const next=frame();Object.assign(next.analysis!,patch);
+    next.analysis!.sectors={left:{state:"clear",coverage_complete:true}};
+    const updated=sectorPresentation(sampled,next,false,1050);
+    assert.notEqual(updated,sampled);assert.equal(updated.view.rows[0].state,"clear");
+  }
 });

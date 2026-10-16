@@ -112,7 +112,7 @@ export const messages = {
   sectorsUnavailable: ["Ocena stref dla wyświetlanej klatki jest niedostępna.", "Region assessment is unavailable for the displayed frame.", "Für das sichtbare Bild ist keine Bereichsbewertung verfügbar."],
   sectorsHistorical: ["Stany stref są nieznane: obraz wygasł, nie został potwierdzony lub brak zgodnych metadanych.", "Region states are unknown: the image expired, is unconfirmed, or lacks matching metadata.", "Bereichszustände sind unbekannt: Das Bild ist abgelaufen, unbestätigt oder hat keine passenden Metadaten."],
   sectorIncomplete: ["Niepełna strefa w kadrze", "Incomplete image coverage", "Unvollständige Bildabdeckung"],
-  sectorsDecisionHint: ["Wynik dotyczy tej klatki. Komenda ruchu: „Odpowiedź Venom → Pi”.", "Assessment of this frame. Motion command: “Venom → Pi reply”.", "Bewertung dieses Bildes. Bewegungsbefehl: „Antwort Venom → Pi“."],
+  sectorsDecisionHint: ["Oceny stref odświeżane co 1 s. Bieżąca komenda ruchu: „Odpowiedź Venom → Pi”.", "Region assessments refresh every 1 s. Current motion command: “Venom → Pi reply”.", "Bereichsbewertungen werden jede Sekunde aktualisiert. Aktueller Bewegungsbefehl: „Antwort Venom → Pi“."],
   "sector.path.left": ["Lewy tor w obrazie", "Left path in image", "Linker Pfad im Bild"],
   "sector.path.center": ["Tor na wprost", "Forward path", "Gerader Pfad"],
   "sector.path.right": ["Prawy tor w obrazie", "Right path in image", "Rechter Pfad im Bild"],

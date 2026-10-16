@@ -140,10 +140,13 @@ tests never contact motor hardware.
 
 ### Stable preview updates
 
-The image, L/C/R assessments and capture metadata stay paired until the next JPEG
-has loaded in the visible image element. Loading a new frame does not temporarily
-clear the cards or change their coordinate-space legend. This applies to both
-snapshot polling and native MJPEG.
+The image and capture metadata stay paired until the next JPEG has loaded in the
+visible image element. Each assessment is read only from its decoded source frame.
+The L/C/R text cards sample the latest assessment once per second for readability;
+the image and authoritative motion decision keep their normal cadence. The card
+sample retains its capture identity and is reset immediately for an invalid live
+source or a changed model, camera or policy. A short hint states the one-second
+text cadence. This applies to both snapshot polling and native MJPEG.
 
 The displayed frame keeps its original freshness deadline. A failed read or an
 expired frame still shows the existing stale-preview notice and uncertain
