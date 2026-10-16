@@ -10,13 +10,12 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from scripts.depth_candidates import (
+from .depth_candidates import (
     CHECKPOINT_HASHES,
     SDK_REVISION,
     file_hash,
     verify_sdk,
 )
-
 from .errors import RiderError
 from .samples_archive import canonical
 
