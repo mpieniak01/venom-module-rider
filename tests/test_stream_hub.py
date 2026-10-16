@@ -246,3 +246,91 @@ async def test_failed_peer_reconnect_backoff_is_bounded_and_cancellable(monkeypa
     await asyncio.sleep(0.12)
     assert len(attempts) == count
     await hub.close()
+
+
+async def test_slow_canonical_jobs_remain_bounded_across_expiry_cancel_and_retire(
+    monkeypatch,
+):
+    import threading
+
+    from test_stream_contract import jpeg
+
+    from venom_module_rider import stream_hub
+
+    now = [10.0]
+    client, domain, profile, hub = setup(clock=lambda: now[0])
+    gate, entered = threading.Event(), threading.Event()
+    decoded, lock = [], threading.Lock()
+
+    def slow_decode(frame):
+        with lock:
+            decoded.append(frame.source.sequence)
+        entered.set()
+        if not gate.wait(2):
+            raise RuntimeError("test_decoder_gate_not_released")
+        return jpeg()
+
+    monkeypatch.setattr(stream_hub, "canonical_jpeg", slow_decode)
+    callers, shared, retiring = [], None, None
+    try:
+        async with hub.lease(domain, profile) as connection:
+            first = None
+            for sequence in range(1, MAX_REFERENCES + 1):
+                frame = native(sequence, now=now[0])
+                first = first or frame
+                assert hub._admit(connection, frame)
+                callers.append(
+                    asyncio.create_task(hub.canonical_frame(connection, frame))
+                )
+                await asyncio.sleep(0)
+            assert await asyncio.to_thread(entered.wait, 1)
+            assert len(connection.canonical_jobs) == MAX_REFERENCES
+
+            # Request cancellation does not cancel shared to_thread work.
+            for task in callers:
+                task.cancel()
+            await asyncio.gather(*callers, return_exceptions=True)
+            assert len(connection.canonical_jobs) == MAX_REFERENCES
+            now[0] += 0.6
+            hub._purge(connection)
+            assert not connection.frames and not connection.canonical
+
+            # TTL/LRU churn cannot free admission slots for unfinished work.
+            for sequence in range(MAX_REFERENCES + 1, MAX_REFERENCES * 3 + 1):
+                frame = native(sequence, now=now[0])
+                assert hub._admit(connection, frame)
+                with pytest.raises(RiderError, match="stream_busy"):
+                    await hub.canonical_frame(connection, frame)
+                now[0] += 0.05
+            assert len(connection.frames) <= MAX_REFERENCES
+            assert len(connection.canonical_jobs) == MAX_REFERENCES
+
+            # Even after its cache entry expires, the original source still
+            # shares its existing job instead of creating a ninth decoder.
+            shared = asyncio.create_task(hub.canonical_frame(connection, first))
+            await asyncio.sleep(0)
+            assert (
+                not shared.done() and len(connection.canonical_jobs) == MAX_REFERENCES
+            )
+            changed = connection.changed
+            retiring = asyncio.create_task(hub.invalidate())
+            await asyncio.wait_for(changed.wait(), 1)
+            assert connection.closed and not retiring.done()
+            with pytest.raises(RiderError, match="stream_unavailable"):
+                await hub.canonical_frame(connection, frame)
+
+            gate.set()
+            await asyncio.wait_for(retiring, 1)
+            assert await asyncio.wait_for(shared, 1) == jpeg()
+            assert not connection.canonical_jobs and not connection.canonical
+            assert hub.connection is None and client.closed == client.opened
+            assert sorted(decoded) == list(range(1, MAX_REFERENCES + 1))
+    finally:
+        gate.set()
+        await asyncio.gather(
+            *callers,
+            *([shared] if shared else []),
+            *([retiring] if retiring else []),
+            return_exceptions=True,
+        )
+        await hub.close()

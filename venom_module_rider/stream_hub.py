@@ -28,6 +28,7 @@ class StreamConnection:
     hold_until: float = 0.0
     frames: OrderedDict[tuple, NativeFrame] = field(default_factory=OrderedDict)
     canonical: OrderedDict[tuple, asyncio.Task] = field(default_factory=OrderedDict)
+    canonical_jobs: dict[tuple, asyncio.Task] = field(default_factory=dict)
     changed: asyncio.Event = field(default_factory=asyncio.Event)
     reader: asyncio.Task | None = None
     reaper: asyncio.Task | None = None
@@ -260,14 +261,28 @@ class NativeStreamHub:
         raise RiderError("stream_unavailable", 503)
 
     async def canonical_frame(self, connection, frame):
+        if connection.closed:
+            raise RiderError("stream_unavailable", 503)
         identity = frame.source.identity()
-        task = connection.canonical.get(identity)
+        task = connection.canonical.get(identity) or connection.canonical_jobs.get(
+            identity
+        )
         if task is None:
+            # Cache expiry must not hide an unfinished thread from admission or
+            # teardown. Refuse additional work instead of queueing more sources.
+            if len(connection.canonical_jobs) >= MAX_REFERENCES:
+                raise RiderError("stream_busy", 429)
             task = asyncio.create_task(asyncio.to_thread(canonical_jpeg, frame))
+            connection.canonical_jobs[identity] = task
             connection.canonical[identity] = task
-            task.add_done_callback(
-                lambda done: done.exception() if not done.cancelled() else None
-            )
+
+            def completed(done):
+                if connection.canonical_jobs.get(identity) is done:
+                    del connection.canonical_jobs[identity]
+                if not done.cancelled():
+                    done.exception()
+
+            task.add_done_callback(completed)
             while len(connection.canonical) > MAX_REFERENCES:
                 connection.canonical.popitem(last=False)
         return await asyncio.shield(task)
@@ -291,7 +306,9 @@ class NativeStreamHub:
     async def _retire(self, connection):
         connection.closed = True
         connection.frames.clear()
-        canonical = list(connection.canonical.values())
+        canonical = set(connection.canonical.values()) | set(
+            connection.canonical_jobs.values()
+        )
         connection.canonical.clear()
         self._notify(connection)
         tasks = [
