@@ -13,7 +13,7 @@ the retained DA3 runtime. No installation or new model is performed.
     PYTHONPATH=../..:. ../../.venv/bin/python -m scripts.mapping_research \
       --archive /absolute/session.zip --output /absolute/derived/research/run.json
 
-Add --pose to request the retained da3-small-280 profile. Set RIDER_VISION_ASSETS
+The make research-mapping target selects the host runtime for features and\nthe existing DA3_PYTHON/DA3_SDK_PATH runtime when ARGS contains --pose.\nOverride those locators for an external asset directory; no runtime is installed.\n\nAdd --pose to request the retained da3-small-280 profile. Set RIDER_VISION_ASSETS
 to the existing data asset root and use that profile's Python runtime.
 The resolver and model/SDK hash checks are shared with offline depth analysis.
 DA2 remains the live default; no new live model option is introduced.

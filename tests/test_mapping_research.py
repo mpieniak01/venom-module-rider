@@ -272,3 +272,27 @@ def test_empty_input_and_oversized_source_are_rejected(tmp_path, monkeypatch):
     monkeypatch.setattr(research, "MAX_REPORT_BYTES", 1)
     with pytest.raises(ValueError, match="mapping_input_limit"):
         research.audit(source)
+
+
+def test_make_pose_uses_research_runtime_and_features_do_not_require_it(tmp_path):
+    source = archive(tmp_path, count=1, texture=False)
+    unavailable = tmp_path / "unavailable-python"
+    unavailable.write_text(chr(10).join(["#!/bin/sh", "exit 91", ""]))
+    unavailable.chmod(0o700)
+    for pose in (False, True):
+        output = tmp_path / ("pose.json" if pose else "features.json")
+        command = [
+            "make",
+            "research-mapping",
+            "PYTHON=" + (str(unavailable) if pose else sys.executable),
+            "DA3_PYTHON=" + (sys.executable if pose else str(unavailable)),
+            "DA3_SDK_PATH=" + str(tmp_path / "sdk"),
+            f"ARGS=--archive {source} --output {output}" + (" --pose" if pose else ""),
+        ]
+        result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+        assert result.returncode == 0, result.stdout + result.stderr
+        report = json.loads(output.read_text())
+        if pose:
+            assert report["pose"]["error"] == "mapping_pose_views"
+        else:
+            assert report["pose"]["state"] == "not_requested"
