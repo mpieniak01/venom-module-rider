@@ -57,17 +57,17 @@ export function AutomaticCapture({collection,sourceSession,t}:{collection:Collec
     catch(err){setError(errorCode(err));}
     finally{if(version===epoch.current)setBusy(false);}
   };
-  return <section data-testid="automatic-capture">
+  return <section className={styles.sampleAutomation} data-testid="automatic-capture">
     <div className={styles.flex}><strong>{t("auto.title")}</strong><Pill tone={active?"good":undefined}>{t(active?"auto.on":"auto.off")}</Pill>
       {active?<Button data-testid="auto-stop" disabled={busy} onClick={()=>void stop()}>{t("auto.stop")}</Button>:
         <Button data-testid="auto-start" disabled={busy||!collection||!sourceSession||!profile.events.length} onClick={()=>void start()}>{t("auto.start")}</Button>}
     </div>
     <p className={styles.hint}>{t("auto.hint")}</p>
     {!collection&&<p className={styles.hint}>{t("auto.collectionRequired")}</p>}
-    <details><summary>{t("auto.profile")}</summary>
-      <fieldset disabled={active||busy}>
-        {eventNames.map(name=><label key={name}><input type="checkbox" checked={profile.events.includes(name)} onChange={e=>setProfile(p=>({...p,events:e.target.checked?[...p.events,name]:p.events.filter(n=>n!==name)}))}/>{t("auto.event."+name)}</label>)}
-        <div className={styles.grid}>{fields.map(([name,min,max,step])=><label key={name}>{t("auto.field."+name)}<input aria-label={t("auto.field."+name)} type="number" min={min} max={max} step={step} value={profile[name]} onChange={e=>setProfile(p=>({...p,[name]:Number(e.target.value)}))}/></label>)}</div>
+    <details className={styles.details}><summary>{t("auto.profile")}</summary>
+      <fieldset className={styles.autoSettings} disabled={active||busy}>
+        <div className={styles.autoEvents}>{eventNames.map(name=><label className={styles.check} key={name}><input type="checkbox" checked={profile.events.includes(name)} onChange={e=>setProfile(p=>({...p,events:e.target.checked?[...p.events,name]:p.events.filter(n=>n!==name)}))}/>{t("auto.event."+name)}</label>)}</div>
+        <div className={styles.grid}>{fields.map(([name,min,max,step])=><label className={styles.field} key={name}>{t("auto.field."+name)}<input className={styles.input} aria-label={t("auto.field."+name)} type="number" min={min} max={max} step={step} value={profile[name]} onChange={e=>setProfile(p=>({...p,[name]:Number(e.target.value)}))}/></label>)}</div>
       </fieldset>
       <p className={styles.hint}>{t("auto.noObjectDetector")}</p>
     </details>
