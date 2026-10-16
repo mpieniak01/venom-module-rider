@@ -148,11 +148,11 @@ def test_state_change_scene_threshold_cooldown_and_scene_dedup_are_independent()
     assert first and first.reasons == ("new_scene",)
     assert policy.evaluate(observation(1, 10.1, "obstacle"), 10.1) is None
     assert policy.suppressed == 1
-    # A distinct scene passes after cooldown; state did not change again.
+    # A pending stable transition is retained until cooldown permits saving.
     second = policy.evaluate(
         replace(observation(2, 10.7, "obstacle"), scene_hash=(1 << 32) - 1), 10.7
     )
-    assert second and second.reasons == ("new_scene",)
+    assert second and second.reasons == ("state_change", "new_scene")
     # Return to identical earlier scene/state: no repeated photo.
     assert policy.evaluate(observation(3, 11.3, "clear"), 11.3) is None
     assert policy.deduplicated == 1

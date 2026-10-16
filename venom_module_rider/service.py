@@ -104,6 +104,14 @@ class RiderService:
         selected = restored_device(self.selection_file, self.devices, default)
         await self.select(selected, self.session, persist=False)
 
+    def stop_sample_events(self, reason):
+        if self.samples is not None:
+            try:
+                self.samples.automatic.invalidate(reason)
+            except Exception:
+                # Optional collection must never prevent hardware STOP.
+                self.samples.failures += 1
+
     async def select(self, device_id, session, *, persist=True):
         self.check_session(session)
         if device_id is not None and device_id not in self.devices:
@@ -115,6 +123,7 @@ class RiderService:
                     persist_device(self.selection_file, device_id)
                 return self.config()
             self.switching = True
+            self.stop_sample_events("auto_device_changed")
             try:
                 self.cancel_pending_motion()
                 if self.conversation_drainer:
@@ -322,6 +331,7 @@ class RiderService:
         if not stop:
             self.check_session(session)
         if stop:
+            self.stop_sample_events("auto_global_stop")
             self.cancel_pending_motion()
         elif self.conversation_invalidator:
             self.conversation_invalidator()
@@ -375,6 +385,21 @@ class RiderService:
 
     async def mutate(self, path, body, session, *, method="POST"):
         self.check_session(session)
+        if path == "/api/navigation/config" or (
+            isinstance(body, dict)
+            and (
+                body.get("action") == "stop"
+                and (path == "/api/resource/camera" or path.startswith("/svc/camera-"))
+                or body.get("enabled") is False
+                and path
+                in {
+                    "/api/logic/feature/s14_venom_navigation",
+                    "/api/logic/feature/s15_venom_perception",
+                    "/api/logic/feature/s2_camera_preview",
+                }
+            )
+        ):
+            self.stop_sample_events("auto_source_stopped")
         client = self.transport()
         task = asyncio.create_task(client.json(path, method=method, body=body))
         self.operations.add(task)
@@ -478,6 +503,7 @@ class RiderService:
 
     async def stop_camera(self, body, session):
         """Retire preview ownership, then stop capture and the unused feed on Pi."""
+        self.stop_sample_events("auto_camera_stopped")
         external = False
         try:
             await self.goal("s2_camera_preview", {"enabled": False}, session)

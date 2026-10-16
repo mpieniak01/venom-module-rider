@@ -20,6 +20,7 @@ from ..errors import RiderError
 from ..service import RESOURCE_NAMES, RiderService
 from . import (
     analysis_routes,
+    automatic_routes,
     compute_routes,
     conversation_routes,
     samples_routes,
@@ -191,6 +192,7 @@ router.include_router(conversation_routes.router)
 router.include_router(vision_routes.router)
 router.include_router(samples_routes.router)
 router.include_router(analysis_routes.router)
+router.include_router(automatic_routes.router)
 Session = Annotated[str | None, Header(alias="X-Rider-Session")]
 
 

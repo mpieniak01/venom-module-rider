@@ -219,9 +219,9 @@ class EventSelector:
             >= self.profile.scene_distance_bits
         ):
             reasons.append("new_scene")
-        self.stable_state = item.state
         reasons = [reason for reason in reasons if reason in self.profile.events]
         if not reasons:
+            self.stable_state = item.state
             return None
         if (now - self.last_event) * 1000 < self.profile.cooldown_ms:
             self.suppressed += 1
@@ -239,7 +239,9 @@ class EventSelector:
             for state, scene in self.seen
         ):
             self.deduplicated += 1
+            self.stable_state = item.state
             return None
+        self.stable_state = item.state
         self.seen.append((item.state, item.scene_hash))
         if item.scene_hash is not None:
             self.last_scene = item.scene_hash
