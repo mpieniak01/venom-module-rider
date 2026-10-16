@@ -175,3 +175,30 @@ def test_code_fingerprint_tracks_actual_sources_including_uncommitted_edits(tmp_
     assert first["python_sources"] == 1
     with pytest.raises(RiderError, match="analysis_source_unavailable"):
         code_fingerprint(tmp_path / "not-a-package")
+
+
+def test_profile_catalog_does_not_import_optional_model_runtime():
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    code = """
+import sys
+sys.modules['numpy'] = None
+sys.modules['torch'] = None
+sys.modules['transformers'] = None
+from venom_module_rider.analysis_profiles import ProfileCatalog
+assert 'da2-default' in ProfileCatalog().profiles()
+print('catalog_without_ml_runtime')
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=Path(__file__).resolve().parents[1],
+        env={**os.environ, "PYTHONPATH": "."},
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "catalog_without_ml_runtime" in result.stdout
