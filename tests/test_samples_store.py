@@ -280,3 +280,22 @@ def test_unsupported_schema_and_symlink_storage_fail_without_recovery(tmp_path):
     (root / "blobs").symlink_to(store.blobs, target_is_directory=True)
     with pytest.raises(RiderError, match="samples_root_invalid"):
         SampleStore(root)
+
+
+def test_preserved_derived_files_share_quota_after_analysis_rollback(tmp_path):
+    import os
+
+    store, _session = setup(tmp_path)
+    before = store.usage()
+    directory = store.root / "analysis" / "existing-run"
+    directory.mkdir(parents=True)
+    artifact = directory / "depth.npy"
+    artifact.write_bytes(b"derived" * 1000)
+    assert store.usage() == before + 7000
+    os.link(artifact, directory / "temporary-hardlink")
+    assert store.usage() == before + 7000
+    artifact.unlink()
+    assert store.usage() == before + 7000
+    (directory / "unsafe").symlink_to(tmp_path / "outside")
+    with pytest.raises(RiderError, match="samples_root_invalid"):
+        store.usage()
