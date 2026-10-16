@@ -1,3 +1,4 @@
+import { CameraPipelineControls } from "./camera-pipeline";
 import { CorridorOverlay, type CorridorEditorProps } from "./corridor-overlay";
 import { manualFeedback } from "../lib/manual-feedback";
 import { frameAge } from "../lib/vision-frame";
@@ -84,7 +85,11 @@ export function CameraPanel({ client, t, language, compact = false, onObservatio
     if(!stream){client.setCameraStream(null);setDisplayed(null);return;}
     setPreviewBusy(true);setPreviewFailure("");
     try{
-      if(!client.cameraStream)await client.mutate("/goal/s2_camera_preview",{enabled:true},"POST",true);
+      if(!client.cameraStream) {
+        if(client.pipeline.status) {
+          if(client.pipeline.status.state!=="active")await client.pipeline.change("start");
+        } else await client.mutate("/goal/s2_camera_preview",{enabled:true},"POST",true);
+      }
       client.setCameraStream(stream);
     }catch{setPreviewFailure("requestFailed");}
     finally{setPreviewBusy(false);}
@@ -93,8 +98,10 @@ export function CameraPanel({ client, t, language, compact = false, onObservatio
   const transitioning=selected==="venom"&&client.cameraTransition;
   const previewPolling=client.cameraStream!==null&&client.mediaError!=="visionCameraOff";
   const notice=previewNotice(client.camera?.stale??false,selected,previewPolling,transitioning);
-  const streams = compact ? (["raw", "venom"] as const) : (["raw", "venom", "proc"] as const);
+  const streams = client.pipeline.status?.profile.analysis_location === "local"
+    ? (["raw", "proc"] as const) : compact ? (["raw", "venom"] as const) : (["raw", "venom", "proc"] as const);
   return <Panel className={compact?styles.cameraEmbedded:""} title={t("camera")} hint={compact?undefined:t("cameraHint")} extra={<Button data-testid="camera-preview-toggle" onClick={() => void chooseStream(client.cameraStream ? null : "raw")} disabled={!client.canMutate||previewBusy}><Camera size={15} />{t(client.cameraStream ? "hidePreview" : "showPreview")}</Button>}>
+    <CameraPipelineControls client={client} t={t}/>
     <div className={styles.flex} style={{ marginBottom: 14 }}>{streams.map(stream => <Button key={stream} tone={selected === stream ? "primary" : undefined} aria-pressed={selected === stream} onClick={() => void chooseStream(stream)} disabled={!client.canMutate||previewBusy}>{t(stream === "venom" ? "visionVenom" : stream === "proc" ? "visionPi" : stream)}</Button>)}</div>
     <div className={styles.camera}>{client.camera&&notice&&<div className={transitioning?styles.cameraPaused+" "+styles.cameraTransition:styles.cameraPaused} role="status" data-testid="vision-preview-paused">{t(notice!)}</div>}{client.camera ? <><img data-capture-key={client.camera.captureKey} src={client.camera.url} alt={t("cameraAlt")} onLoad={event=>{setImageSize([event.currentTarget.naturalWidth,event.currentTarget.naturalHeight]);client.markCameraDecoded(event.currentTarget.currentSrc,true);if(client.camera&&event.currentTarget.currentSrc===client.camera.url)setDisplayed(client.camera);}} onError={event=>{client.markCameraDecoded(event.currentTarget.currentSrc,false);setDisplayed(null);}} />{editor&&<CorridorOverlay editor={editor} size={imageSize} t={t}/>}</> : <Empty><Camera size={32} />{t(transitioning?"visionPreviewRestarting":client.mediaError ?? (client.cameraStream ? "frameMissing" : "showPreview"))}{onObservation&&<><p className={styles.hint}>{t("loopPreviewHelp")}</p><Button tone="primary" disabled={observationDisabled} onClick={onObservation}>{t("loopPreparePreview")}</Button></>}</Empty>}</div>
     {previewFailure&&<p role="alert" className={styles.hint}>{t(previewFailure)}</p>}

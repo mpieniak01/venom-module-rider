@@ -1,0 +1,72 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import { test } from "node:test";
+import { anchoredPreviewAge, nativePreview, readCameraPipeline } from "../../web-next/lib/camera-pipeline";
+import { MjpegParser, readMjpeg } from "../../web-next/lib/mjpeg";
+import { previewLifetime, retainedPreview } from "../../web-next/lib/preview-media";
+const fixture = JSON.parse(fs.readFileSync(new URL("../../config/contracts/camera_pipeline_v1.examples.json", import.meta.url), "utf8"));
+const encoder = new TextEncoder();
+const jpeg = new Uint8Array([255, 216, 1, 2, 255, 217]);
+function wire(headers = "", bytes = jpeg) {
+  const before = encoder.encode("--test\r\nContent-Type: image/jpeg\r\nContent-Length: " + bytes.length + "\r\n" + headers + "\r\n");
+  const after = encoder.encode("\r\n--test--\r\n");
+  return new Uint8Array([...before, ...bytes, ...after]);
+}
+test("shared status is producer-owned; inactive transport does not start native readers", () => {
+  const s = readCameraPipeline(fixture.stopped_status);
+  assert.ok(s);
+  assert.equal(nativePreview(s, "raw"), false);
+  const native = {...s, profile: {...s.profile, remote_transport: "mjpeg" as const}};
+  assert.equal(nativePreview(native, "raw"), true);
+  assert.equal(nativePreview(native, "venom"), true);
+  assert.equal(nativePreview(native, "proc"), false);
+  assert.equal(nativePreview({...native, profile: {...native.profile, analysis_location:"local"}}, "raw"), false);
+  assert.equal(readCameraPipeline({supported: false}), null);
+  assert.equal(readCameraPipeline({...fixture.stopped_status, revision: 0}), null);
+});
+test("multipart survives every byte boundary and multiple coalesced parts", () => {
+  const full = wire("X-Rider-Frame-Id: same-source-8\r\n");
+  for (let cut = 1; cut < full.length; cut++) {
+    const parser = new MjpegParser('multipart/x-mixed-replace; boundary="test"');
+    const parts = [...parser.feed(full.slice(0, cut)), ...parser.feed(full.slice(cut))];
+    parser.finish(); assert.equal(parts.length, 1); assert.deepEqual(parts[0].bytes, jpeg);
+    assert.equal(parts[0].headers.get("X-Rider-Frame-Id"), "same-source-8");
+  }
+  const each = wire().slice(0, -10), parser = new MjpegParser("multipart/x-mixed-replace; boundary=test");
+  assert.equal(parser.feed(new Uint8Array([...each, ...wire()])).length, 2);
+});
+test("wire parser rejects truncation, oversized image, duplicate and broken identity headers", () => {
+  const p = new MjpegParser("multipart/x-mixed-replace; boundary=test"); p.feed(wire().slice(0, 65));
+  assert.throws(() => p.finish(), /truncated/);
+  for (const header of ["Content-Length: 6\r\n", "X-Foo: a\r\nX-Foo: b\r\n"])
+    assert.throws(() => new MjpegParser("multipart/x-mixed-replace; boundary=test").feed(wire(header)), /duplicate/);
+  assert.throws(() => new MjpegParser("image/jpeg"), /content_type/);
+  assert.throws(() => new MjpegParser("multipart/x-mixed-replace; boundary=test").feed(encoder.encode("--test\r\nContent-Type: image/jpeg\r\nContent-Length: 9000000\r\n\r\n")), /image_limit/);
+  assert.throws(() => new MjpegParser("multipart/x-mixed-replace; boundary=test").feed(wire("", new Uint8Array([1, 2, 3, 4]))), /jpeg/);
+});
+test("abort cancels a pending stream reader and never presents a partial JPEG", async () => {
+  let cancelled = false, offered = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) { controller.enqueue(wire().slice(0, 20)); },
+    cancel() { cancelled = true; },
+  });
+  const abort = new AbortController();
+  const done = readMjpeg(new Response(stream, {headers: {"Content-Type":"multipart/x-mixed-replace; boundary=test"}}), abort.signal, () => {offered++;});
+  await new Promise(resolve => setImmediate(resolve)); abort.abort(); await done;
+  assert.equal(cancelled, true); assert.equal(offered, 0);
+});
+test("freeze or reconnect retains capture age rather than renewing a green overlay", () => {
+  const frame = {ageMs: 80, receivedAt: 10, stale: false, knownFreshness: true};
+  assert.equal(previewLifetime(frame, 400), 530);
+  const old = retainedPreview(frame, false, 400);
+  assert.equal(old.receivedAt, 10); assert.equal(old.ageMs, 80); assert.equal(old.stale, true);
+  assert.equal(previewLifetime(old, 1100), 0);
+});
+
+test("browser backlog age uses Pi capture differences, never a renewed header timestamp", () => {
+  const source = fixture.source;
+  const anchor = {latest: {...source, frame_age_ms: 1500}, receivedAt: 100, roundTripMs: 40};
+  assert.equal(anchoredPreviewAge(source, 10, 160, anchor), 1600);
+  assert.equal(anchoredPreviewAge({...source,captured_monotonic_ns:source.captured_monotonic_ns+500e6},10,160,anchor),1100);
+  assert.equal(anchoredPreviewAge({...source,camera_session:"new"},10,160,anchor),10);
+});
