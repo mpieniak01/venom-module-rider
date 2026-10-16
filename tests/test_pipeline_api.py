@@ -673,12 +673,12 @@ def test_network_delayed_part_is_stale_despite_small_send_age_and_never_infers(
         preview = client.get("/api/v1/rider/camera/venom")
         assert preview.status_code == 409
         assert preview.json()["detail"]["code"] == "frame_stale"
-        # Even an erroneously underreported Pi request age cannot bypass the
-        # host anchor's conservative source age.
+        # Pi measures this exact capture on its own monotonic clock. A truly
+        # old request stays rejected independently of the preview's upper bound.
         reference = client.post(
             "/api/v1/rider/compute/vision/decision-reference",
             headers=AUTH,
-            json=descriptor(current, age_ms=10.0),
+            json=descriptor(current, age_ms=350.0),
         )
         assert reference.status_code == 409
         assert reference.json()["detail"]["code"] == "vision_frame_expired"

@@ -112,14 +112,26 @@ async def reference_decision(request: Request):
         canonical = await hub.canonical_frame(connection, source)
         if connection.closed or domain.transport().device.id != device:
             raise RiderError("stream_epoch_changed", 409)
-        frame = frame.model_copy(
-            update={
-                "age_ms": max(
-                    frame.age_ms + (hub.clock() - admitted_at) * 1000,
-                    source.age_ms(hub.clock()),
-                )
-            }
+        now = hub.clock()
+        elapsed_ms = max(0.0, (now - admitted_at) * 1000)
+        observed_age_ms = source.source.frame_age_ms + max(
+            0.0, (now - source.received_mono) * 1000
         )
+        # The status anchor includes up to a whole HTTP roundtrip of uncertainty.
+        # Its upper bound protects previews/cache, but is not the Pi's exact TTL.
+        # Match binary decisions: authenticated Pi age plus host processing, and
+        # never ignore time this exact part already spent in the host buffer.
+        # Pi still checks its own capture deadline before accepting/submitting.
+        timing = {
+            "pi_reported_age": round(frame.age_ms, 2),
+            "host_before_inference": round(elapsed_ms, 2),
+            "observed_age": round(observed_age_ms, 2),
+            "upper_age": round(source.age_ms(now), 2),
+        }
+        frame = frame.model_copy(
+            update={"age_ms": max(frame.age_ms + elapsed_ms, observed_age_ms)}
+        )
+        timing["deadline_age"] = round(frame.age_ms, 2)
         if frame.age_ms >= frame.deadline_ms:
             raise RiderError("vision_frame_expired", 409)
         result = await loop.decide(
@@ -138,7 +150,7 @@ async def reference_decision(request: Request):
         if connection.closed:
             loop.previews.pop(device, None)
             raise RiderError("stream_epoch_changed", 409)
-        return result
+        return {**result, "source_timing_ms": timing}
 
 
 @router.get("/navigation/config")
