@@ -44,9 +44,9 @@ CPU measurements on this environment; one run each, not p50/p95 or live latency:
 
 | Input | ORB audit total | Peak RSS | Overlap candidates | DA3 joint forward | DA3 load | DA3 peak RSS |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Floor | 67.63 ms | 61.96 MiB | 5/5 pairs | 1013.26 ms / 5 views | 1015.83 ms | 1137.96 MiB |
-| Box | 57.67 ms | 61.42 MiB | 3/3 pairs | 618.64 ms / 4 views | 945.31 ms | 1104.57 MiB |
-| Near-black | 46.79 ms | 55.92 MiB | 0 pairs; 0 features | N/A: one view | Not loaded | N/A |
+| Floor | 69.08 ms | 62.04 MiB | 5/5 pairs | 928.42 ms / 5 views | 1109.11 ms | 1183.11 MiB |
+| Box | 54.61 ms | 61.33 MiB | 3/3 pairs | 650.60 ms / 4 views | 1000.78 ms | 1104.37 MiB |
+| Near-black | 47.84 ms | 55.99 MiB | 0 pairs; 0 features | N/A: one view | Not loaded | N/A |
 
 ORB found 371–512 features per floor image and 175–276 per box image.
 RANSAC overlap shows shared visual content; it does not prove travelled distance,
