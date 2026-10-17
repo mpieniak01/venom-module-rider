@@ -52,11 +52,12 @@ async page => {
       await page.getByTestId("rider-forward").waitFor();
       await wait(async()=>!await page.getByTestId("rider-refresh").isDisabled(),"fixture not ready");
       const inspect = async () => {
-        const buttons = await page.getByTestId("rider-page").locator("button[data-size]:visible").evaluateAll(nodes => nodes.map(node => ({size:node.dataset.size,height:node.getBoundingClientRect().height,radius:getComputedStyle(node).borderRadius,text:node.textContent,overflow:node.scrollWidth>node.clientWidth+1})));
+        const buttons = await page.getByTestId("rider-page").locator("button[data-size]:visible").evaluateAll(nodes => nodes.map(node => ({size:node.dataset.size,height:node.getBoundingClientRect().height,radius:getComputedStyle(node).borderRadius,shadow:getComputedStyle(node).boxShadow,text:node.textContent,overflow:node.scrollWidth>node.clientWidth+1})));
         for (const button of buttons) {
           check(button.height===(button.size==="large"?44:36),"unexpected action size: "+JSON.stringify(button));
-          check(button.radius==="10px","inconsistent action shape");
+          check(Number.parseFloat(button.radius)>=button.height/2,"action does not use Venom capsule shape");
           check(!button.overflow,"action label clipped: "+button.text);
+          check(button.shadow==="none","unexpected button glow: "+button.text);
         }
         check(await page.getByTestId("rider-stop").isEnabled(),"STOP disabled");
         return buttons.length;

@@ -1,5 +1,6 @@
 import { useEffect, useId, useState, type ButtonHTMLAttributes, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { Button as VenomButton } from "@/components/ui/button";
 import { Info } from "lucide-react";
 import type { NumericDescriptor } from "../lib/model";
 import type { Translator } from "../lib/i18n";
@@ -28,9 +29,9 @@ export function Button({ tone, size = "small", title, children, className = "", 
     return () => { window.removeEventListener("scroll", close, true); window.removeEventListener("resize", close); window.removeEventListener("keydown", key); };
   }, [position]);
   const visible = !!title && !!position && !props.disabled;
-  return <><button type="button" className={`${styles.button} ${size === "large" ? styles.buttonLarge : ""} ${tone ? styles[tone] : ""} ${className}`} data-size={size} title={props.disabled ? title : undefined} aria-describedby={[describedBy, visible ? tooltipId : undefined].filter(Boolean).join(" ") || undefined}
+  return <><VenomButton variant={tone === "danger" ? "danger" : tone === "caution" ? "warning" : tone === "primary" ? "outline" : "secondary"} size={size === "large" ? "md" : "sm"} className={`${styles.button} ${size === "large" ? styles.buttonLarge : ""} ${className}`} data-size={size} title={props.disabled ? title : undefined} aria-describedby={[describedBy, visible ? tooltipId : undefined].filter(Boolean).join(" ") || undefined}
     onMouseEnter={event => { show(event.currentTarget); onMouseEnter?.(event); }} onMouseLeave={event => { setPosition(null); onMouseLeave?.(event); }}
-    onFocus={event => { show(event.currentTarget); onFocus?.(event); }} onBlur={event => { setPosition(null); onBlur?.(event); }} {...props}>{children}</button>
+    onFocus={event => { show(event.currentTarget); onFocus?.(event); }} onBlur={event => { setPosition(null); onBlur?.(event); }} {...props}>{children}</VenomButton>
     {visible && createPortal(<span role="tooltip" id={tooltipId} className={styles.tooltip} style={position!}>{title}</span>, document.body)}</>;
 }
 export function Hint({ children }: { children: ReactNode }) {
