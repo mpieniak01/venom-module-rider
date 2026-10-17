@@ -16,7 +16,7 @@ import { canRequestArm, commandAccepted, controlIdentity, data, errorCode, faceR
 const BASE = "/api/v1/rider";
 export type Notice = { key: string; code?: string; tone: "error" | "success" | "info" };
 export type Frame = { captureKey?: string; analysis?: JsonRecord; ageMs?: number; receivedAt?: number; ageSource?: string; decoded?: boolean; url: string; stale: boolean; source: string; fileAt: string; id: string; knownFreshness: boolean; visionState: string; visionReason: string; inferenceMs: string; visionPolicy: string; recordedAt: string };
-import { continuousAvailable, controlChanged, freshControl, navigationAvailable, navigationView, observationClock, operatorPrioritySupported, retainControl, type ControlClock } from "./navigation";
+import { continuousAvailable, controlChanged, freshControl, navigationAvailable, navigationView, observationClock, operatorPrioritySupported, operatorSessionActive, retainControl, type ControlClock } from "./navigation";
 export function useRider(section: Section) {
   const [config, setConfig] = useState<DeviceConfig | null>(null);
   const [status, setStatus] = useState<RiderStatus | null>(null);
@@ -43,6 +43,8 @@ export function useRider(section: Section) {
   const seqRef = useRef(0);
   const motionBlocked = useRef(0);
   const motionEpoch = useRef(0);
+  const pendingHandoff = useRef<{requestId:string;generation:string;session:string;epoch:number;deadline:number}|null>(null);
+  const pendingResume = useRef<{requestId:string;generation:string}|null>(null);
   const sessionRef = useRef("");
   const sectionRef = useRef(section);
   const mediaRef = useRef<{ camera: "raw" | "proc" | "venom" | null; face: boolean }>({ camera: null, face: false });
@@ -59,6 +61,10 @@ export function useRider(section: Section) {
   const [hold] = useState(() => new HoldController({
     timing: () => readHoldTiming(settingsOf(statusRef.current).control_modes),
     canMove: canNavigate,
+    prepare: (current: () => boolean) => {
+      if (!operatorPrioritySupported(statusRef.current) || !(safetyOf(statusRef.current).owner === "navigation" || pendingResume.current)) return;
+      return commandRef.current({ action:"navigation_pause" }, current).then(() => undefined);
+    },
     send: async (intent: MovementIntent, current: () => boolean) => { await commandRef.current({ action: "move", device_settings: true, ...intent }, current); },
     onActive: setActiveDirection,
     onMode: setManualMode,
@@ -134,7 +140,15 @@ export function useRider(section: Section) {
         const observed = next;
         next = retainControl(previous, next);
         if (controlChanged(previous, next)) {
-          hold.cancel(); seqRef.current = 0;
+          const pending = pendingHandoff.current, nextSafety = safetyOf(next);
+          const ownPending = pending && Date.now() < pending.deadline && pending.epoch === motionEpoch.current
+            && pending.session === next.connection.session && pending.session === previous?.connection.session
+            && nextSafety.state === "ARMED" && nextSafety.owner === "manual" && str(nextSafety.generation)
+            && nextSafety.generation !== pending.generation && record(nextSafety.panel_control).holder === panelId
+            && record(nextSafety.operator_control).operation_id === pending.requestId
+            && record(nextSafety.operator_control).generation === nextSafety.generation;
+          if (!ownPending) hold.cancel();
+          seqRef.current = 0;
           if (previous?.connection.session !== next.connection.session || previous?.connection.device_id !== next.connection.device_id) {
             replaceFrame("camera", null); replaceFrame("face", null);
             mediaRef.current = { camera: null, face: false }; setCameraStream(null); setShowRuntimeFrame(false);
@@ -215,15 +229,21 @@ export function useRider(section: Section) {
     if (["stop","disarm","clear_estop","height","balance","navigation_pause"].includes(action) || action==="arm"&&body.owner!=="navigation" || action==="move"&&body.mode!=="release") motionEpoch.current += 1;
     const origin = controlIdentity(statusRef.current);
     const revision = settingsOf(statusRef.current).revision;
-    const manualIntent = ["move", "height", "balance", "arm", "clear_estop"].includes(str(body.action));
+    const manualIntent = ["move", "height", "balance", "arm", "clear_estop", "navigation_pause"].includes(str(body.action));
     if (!stopping && !manualIntent && !hasFreshControl()) await poll("control", true);
     // Never send an old press after STOP, replacement, device or generation change.
     if (!current()) return {};
     if (!stopping && (origin !== controlIdentity(statusRef.current) || revision !== settingsOf(statusRef.current).revision)) throw Object.assign(new Error("stale_control"), { data: { error: "stale_control" } });
-    const intervene = action === "move" && safetyOf(statusRef.current).owner === "navigation" && operatorPrioritySupported(statusRef.current);
+    const superseding = (action === "move" || action === "navigation_pause")
+      ? pendingResume.current ?? (safetyOf(statusRef.current).owner === "navigation" ? { requestId:str(record(safetyOf(statusRef.current).operator_control).operation_id), generation:str(safetyOf(statusRef.current).generation) } : null)
+      : null;
+    const intervene = action === "move" && operatorPrioritySupported(statusRef.current) && (safetyOf(statusRef.current).owner === "navigation" || !!superseding);
     const interventionEpoch = motionEpoch.current, interventionSession = sessionRef.current;
-    if (intervene) abortReads();
-    const envelope = makeEnvelope(intervene ? { ...body, intervene: true } : body);
+    const adopting = intervene || action === "navigation_pause";
+    if (adopting) abortReads();
+    const envelope = makeEnvelope({ ...body, ...(intervene ? {intervene:true} : {}), ...(superseding ? {supersedes_operation_id:superseding.requestId} : {}) });
+    if (adopting) pendingHandoff.current = {requestId:str(envelope.request_id),generation:str(envelope.generation),session:interventionSession,epoch:interventionEpoch,deadline:Date.now()+Number(envelope.ttl_ms)};
+    if (action === "navigation_resume") pendingResume.current = { requestId:str(envelope.request_id), generation:str(envelope.generation) };
     const movement = action === "move";
     if (movement) setManualRequest({ ...envelope, phase: "pending" });
     let response: JsonRecord;
@@ -232,16 +252,25 @@ export function useRider(section: Section) {
       if (movement && current()) setManualRequest({ ...envelope, phase: response.pending === true ? "pending" : "accepted" });
     } catch (error) {
       if (movement && current()) setManualRequest({ ...envelope, phase: "failed" });
+      if (pendingHandoff.current?.requestId === envelope.request_id) pendingHandoff.current = null;
+      if (action === "navigation_resume" && pendingResume.current?.requestId === envelope.request_id) pendingResume.current = null;
       throw error;
     }
-    if (intervene && current() && interventionEpoch === motionEpoch.current && interventionSession === sessionRef.current) {
+    if (adopting && current() && interventionEpoch === motionEpoch.current && interventionSession === sessionRef.current) {
       const adopted = adoptIntervention(statusRef.current, response, envelope, panelId);
       if (adopted) {
         statusRef.current = adopted; setStatus(adopted);
         const last = safetyOf(adopted).last_seq;
         seqRef.current = finite(last) ? last : Number(envelope.seq);
-      } else hold.cancel();
+        if (pendingResume.current?.requestId === envelope.supersedes_operation_id) pendingResume.current = null;
+      } else {
+        if (pendingHandoff.current?.requestId === envelope.request_id) pendingHandoff.current = null;
+        hold.cancel();
+        throw Object.assign(new Error("operator_intervention_unconfirmed"), {data:{error:"operator_intervention_unconfirmed"}});
+      }
     }
+    if (pendingHandoff.current?.requestId === envelope.request_id) pendingHandoff.current = null;
+    if (action === "navigation_resume" && pendingResume.current?.requestId === envelope.request_id) pendingResume.current = null;
     if (announce) setNotice({ key: response.pending === true || record(response.operation).status === "pending" ? "commandPending" : "commandAccepted", tone: "info" });
     return response;
   }, [abortReads, hasFreshControl, hold, makeEnvelope, mutation, panelId, poll]);
@@ -259,7 +288,7 @@ export function useRider(section: Section) {
   const stopManual = useCallback(async () => {
     motionEpoch.current += 1;
     hold.cancel();
-    if (operatorPrioritySupported(statusRef.current)) return command({ action: "navigation_pause" });
+    if (operatorSessionActive(statusRef.current) || pendingResume.current) return command({ action: "navigation_pause" }, true);
     if (!navigationAvailable(statusRef.current, panelId)) return null;
     return command({ action: "move", device_settings: true, direction: "forward", mode: "release" });
   }, [command, hold, panelId]);
@@ -308,10 +337,11 @@ export function useRider(section: Section) {
     };
     hold.cancel(); setBusy("takeover");
     try {
-      if (operatorPrioritySupported(statusRef.current) && safetyOf(statusRef.current).state === "ARMED") {
+      if (operatorSessionActive(statusRef.current) && safetyOf(statusRef.current).state === "ARMED") {
         await command({ action: "navigation_pause" }, true, true);
         return;
       }
+      if (!operatorPrioritySupported(statusRef.current)) {
       // Keep the preview when handing motor authority back to the operator.
       assertCurrent();
       await mutation("/goal/s2_camera_preview", { enabled: true }, "POST", true);
@@ -319,6 +349,7 @@ export function useRider(section: Section) {
       for (const name of ["s14_venom_navigation", "s15_venom_perception"]) {
         assertCurrent();
         if (goals.some(goal => goal.name === name)) await mutation("/goal/" + name, { enabled: false }, "POST", true);
+      }
       }
       await poll("control", true);
       assertCurrent();

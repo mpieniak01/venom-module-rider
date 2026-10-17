@@ -21,7 +21,7 @@ async page => {
       check(["start","stop"].includes(body.action), "unexpected camera action");
       if (body.action === "stop" && refuseStop) return json({detail:{code:"resource_in_use"}},409);
       cameraOn = body.action === "start";
-      return json({ok:true,data:pipeline()});
+      return json({ok:true,meta:{},data:pipeline()});
     }
     if (path === "/config") return json({devices:[{id:"fixture",label:"Fixture",mode:"demo"}],device_id:"fixture",session:"camera-fixture"});
     if (path === "/status") return json({connection:{configured:true,status:"online",session:"camera-fixture",device_id:"fixture",mode:"demo"},polling:{control_ms:200},errors:{},settings:{revision:1},control:{server_time:Date.now()/1000,safety:{state:"DISARMED",generation:"fixture",owner:null}},health:{},telemetry:{},resources:{},catalog:{features:[]},logic:{},face:{}});
@@ -38,7 +38,7 @@ async page => {
     const power = page.getByTestId("camera-power-toggle"), preview = page.getByTestId("camera-preview-toggle");
     await power.waitFor();
     check(calls.length === 0, "page startup changed resources");
-    await page.getByRole("button",{name:"Surowy obraz",exact:true}).click();
+    await page.getByRole("button",{name:"Obraz surowy",exact:true}).click();
     await wait(() => reads > 0, "raw preview not read");
     await page.getByRole("button",{name:"Wizja Venom",exact:true}).click();
     await preview.click();
@@ -55,6 +55,11 @@ async page => {
     await power.click();
     await wait(() => cameraOn, "camera ON not submitted");
     check(calls.every(call => call.path === "/camera/pipeline"), "camera ON armed or resumed robot");
+    await wait(async () => (await power.innerText()).includes("Wyłącz"), "camera ON status not confirmed");
+    await page.setViewportSize({width:1440,height:1000});
+    await page.screenshot({path:"output/playwright/camera-lifecycle-desktop.png",fullPage:true});
+    await page.setViewportSize({width:390,height:844});
+    await page.screenshot({path:"output/playwright/camera-lifecycle-mobile.png",fullPage:true});
     return {scenarios:["view and hide preserve capture", "foreign consumer remains visibly ON", "explicit OFF confirmed", "ON never arms or resumes"],calls};
   } finally { await page.unroute("**/api/v1/rider/**"); }
 }

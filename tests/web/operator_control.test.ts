@@ -23,3 +23,13 @@ test("pending, rejected, foreign and delayed acknowledgements cannot restore aut
   (previous.control!.safety as JsonRecord).generation="stop-generation";
   assert.equal(adoptIntervention(previous,response,intent,"panel"),null);
 });
+
+test("a newer exact own-transfer observation is preserved when its executed ACK arrives later", () => {
+  const {previous,intent,response}=scenario();
+  intent.action="navigation_pause";
+  (response.ack as JsonRecord).action="navigation_pause";
+  previous.control={server_time:12,safety:{...(response.safety as JsonRecord),operator_control:{version:1,state:"paused",operation_id:intent.request_id,generation:"new"}}};
+  assert.equal(adoptIntervention(previous,response,intent,"panel"),previous);
+  (previous.control.safety as JsonRecord).operator_control={operation_id:"foreign"};
+  assert.equal(adoptIntervention(previous,response,intent,"panel"),null);
+});

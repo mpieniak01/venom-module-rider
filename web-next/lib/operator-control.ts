@@ -4,12 +4,16 @@ import { data, finite, record, safetyOf, str, type JsonRecord, type RiderStatus 
 export function adoptIntervention(previous: RiderStatus | null, response: JsonRecord, intent: JsonRecord, panelId: string): RiderStatus | null {
   if (!previous || response.confirmed !== true || response.pending === true) return null;
   const ack = record(response.ack), safety = record(response.safety), old = safetyOf(previous);
-  if (intent.intervene !== true || intent.panel_id !== panelId || old.owner !== "navigation"
-    || old.generation !== intent.generation || ack.request_id !== intent.request_id
-    || ack.source !== "manual" || ack.action !== "move" || ack.status !== "executed" || ack.accepted !== true
+  const pause = intent.action === "navigation_pause";
+  const observedOwnTransfer = old.state === "ARMED" && old.owner === "manual" && old.generation === ack.generation
+    && record(old.panel_control).holder === panelId && record(old.operator_control).operation_id === intent.request_id;
+  if ((!pause && intent.intervene !== true) || intent.panel_id !== panelId || (old.owner !== "navigation" && !(old.owner === "manual" && (pause || observedOwnTransfer || str(intent.supersedes_operation_id))))
+    || (!observedOwnTransfer && old.generation !== intent.generation) || ack.request_id !== intent.request_id
+    || ack.source !== "manual" || ack.action !== intent.action || ack.status !== "executed" || ack.accepted !== true
     || ack.command_generation !== intent.generation || !str(ack.generation) || ack.generation === intent.generation
     || safety.generation !== ack.generation || safety.state !== "ARMED" || safety.owner !== "manual"
     || record(safety.panel_control).holder !== panelId || !finite(response.server_time)
-    || Number(response.server_time) < Number(data(previous.control).server_time ?? 0)) return null;
+    || (!observedOwnTransfer && Number(response.server_time) < Number(data(previous.control).server_time ?? 0))) return null;
+  if (observedOwnTransfer) return previous;
   return { ...previous, control: { ...data(previous.control), server_time: response.server_time, safety } };
 }

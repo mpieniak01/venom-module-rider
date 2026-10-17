@@ -78,7 +78,7 @@ export function ManualPad({ client, t, language, compact = false }: { client: Ri
           <Icon size={compact ? 20 : 25} />{!compact && <span>{t(direction)}</span>}<span className={styles.small}>{displayValue(record(directions[direction]).speed, speedDescriptor, language)} {speedDescriptor.display_unit ?? ""}</span>
         </button>;
       })}
-      <button type="button" className={`${styles.padCenter} ${styles.padStop}`} style={{ gridRow: 2, gridColumn: 2 }} aria-label={t("stopMotors")} title={t(operatorPrioritySupported(client.status) ? "operatorPauseHint" : "manualStopHint")} data-testid="rider-pad-stop" onClick={() => void client.stopManual()}><CircleStop size={27} /><span>{t("stopShort")}</span></button>
+      <button type="button" className={`${styles.padCenter} ${styles.padStop}`} style={{ gridRow: 2, gridColumn: 2 }} aria-label={t("stopMotors")} title={t(operatorPrioritySupported(client.status) ? "operatorPauseHint" : "manualStopHint")} data-testid="rider-pad-stop" onClick={() => void client.stopManual().catch(() => undefined)}><CircleStop size={27} /><span>{t("stopShort")}</span></button>
     </div>
     <div className={styles.padDetails}>
     <div className={styles.padHelp} id={helpId}>

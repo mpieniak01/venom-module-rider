@@ -5,13 +5,16 @@ export type ControlClock = { offset: number; rtt: number; at: number };
 export function operatorPrioritySupported(status: RiderStatus | null): boolean {
   return record(safetyOf(status).operator_control).version === 1;
 }
+export function operatorSessionActive(status: RiderStatus | null): boolean {
+  return operatorPrioritySupported(status) && ["paused", "qualifying", "active"].includes(str(record(safetyOf(status).operator_control).state));
+}
 /** Buttons accept a new operator intent; Pi still authorizes every command. */
 export function navigationAvailable(status: RiderStatus | null, panelId?: string): boolean {
   const safety = safetyOf(status);
   const panel = record(safety.panel_control);
   const priority = safety.owner === "navigation" && operatorPrioritySupported(status);
   if (panelId && panel.version === 1 && panel.holder !== panelId) return false;
-  if (priority && (!panelId || panel.version !== 1 || panel.holder !== panelId || status?.errors.control || safety.stale === true)) return false;
+  if (priority && (!["online", "degraded"].includes(status?.connection.status ?? "") || !panelId || panel.version !== 1 || panel.holder !== panelId || status?.errors.control || safety.stale === true)) return false;
   return !!status?.connection.configured && status.connection.status !== "unconfigured" && safety.state === "ARMED" && (safety.owner === "manual" || priority) && safety.panel_motion_enabled === true && record(record(safety.capabilities).move).available === true && !!str(safety.generation) && Number.isInteger(settingsOf(status).revision);
 }
 export function freshControl(status: RiderStatus | null, clock: ControlClock | null, now: number, cadence: number): boolean {
