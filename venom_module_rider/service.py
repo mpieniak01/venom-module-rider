@@ -75,6 +75,9 @@ class RiderService:
         self.stops: set[asyncio.Task] = set()
         self.operations: set[asyncio.Task] = set()
         self.last_seen: float | None = None
+        # Passive evidence from existing reads, never a new inventory poller.
+        self.read_observations: dict[str, tuple[float, float, bool]] = {}
+        self.connection_observation: tuple[float, float, str] | None = None
         self.closed = False
         self.epoch = 0
         self.sequences: dict[str, int] = {}
@@ -141,6 +144,8 @@ class RiderService:
                 self.cache.clear()
                 self.sequences.clear()
                 self.last_seen = None
+                self.read_observations.clear()
+                self.connection_observation = None
                 self.pipeline_unavailable_until = 0.0
                 self.selection_warning = warning
                 return self.config()
@@ -214,7 +219,21 @@ class RiderService:
                 raise RiderError("stale_device_session")
             self.cache[path] = (time.monotonic(), payload)
             self.last_seen = time.time()
+            self.read_observations[path] = (self.cache[path][0], self.last_seen, True)
             return copy.deepcopy(payload)
+        except Exception as exc:
+            if session == self.session and epoch == self.epoch:
+                # An HTTP error from Pi still proves contact with the device.
+                reachable = isinstance(exc, RiderError) and exc.code not in {
+                    "pi_unreachable",
+                    "pi_operation_timeout",
+                }
+                self.read_observations[path] = (
+                    time.monotonic(),
+                    time.time(),
+                    reachable,
+                )
+            raise
         finally:
             if task.done() and self.inflight.get(path) is task:
                 self.inflight.pop(path, None)
@@ -227,6 +246,7 @@ class RiderService:
         return data
 
     async def status(self, section="overview"):
+        started = time.monotonic()
         if section not in SECTIONS:
             raise RiderError("unknown_section", 400)
         snapshot: dict[str, Any] = {
@@ -295,6 +315,30 @@ class RiderService:
         connection["last_seen"] = self.last_seen
         if snapshot["errors"]:
             connection["error"] = next(iter(snapshot["errors"].values()))
+        paths = [READS[key][0] for key in keys]
+        paths += ["/api/resource/" + name for name in resource_keys]
+        paths += [
+            "/api/face-studio/" + ("gestures" if name == "library" else "runtime")
+            for name in face_keys
+        ]
+        evidence = [
+            self.read_observations[path]
+            for path in paths
+            if path in self.read_observations
+            and self.read_observations[path][0] >= started
+        ]
+        if evidence:
+            latest = max(evidence, key=lambda row: row[0])
+            previous = self.connection_observation
+            if previous is None or latest[0] > previous[0]:
+                status = (
+                    "online"
+                    if all(row[2] for row in evidence)
+                    else "degraded"
+                    if any(row[2] for row in evidence)
+                    else "offline"
+                )
+                self.connection_observation = (latest[0], latest[1], status)
         return snapshot
 
     async def validate_intent(
@@ -689,5 +733,7 @@ class RiderService:
         self.closed = True
         await self._close_transport()
         self.cache.clear()
+        self.read_observations.clear()
+        self.connection_observation = None
         with suppress(Exception):
             self.device = None

@@ -89,6 +89,14 @@ Retain other installed entries. Set NEXT_PUBLIC_FEATURE_RIDER=true for the UI an
 
 The manifest uses module API 1.0 and minimum core runtime 1.5, which differs from Venom's package version (validated on 1.9). R2/R3 also require the matching conversation-provider and shared AudioEngine companion changes. Pi must provide the negotiated HTTP envelope v1 and the versions listed in [docs/API.md](docs/API.md). Posture descriptors are supplied by the companion Pi change; unsupported capabilities are unavailable in the UI.
 
+## Central integration inventory
+
+The optional read-only 263R hook exposes configured robots and existing cached
+connection evidence to newer Venom cores, without probing or selecting a robot.
+See [Integration observations](docs/INTEGRATION_OBSERVATIONS.md) and
+[opis po polsku](docs/INTEGRATION_OBSERVATIONS_PL.md). Older core/panel behavior
+remains independent of the hook.
+
 ## Device configuration
 
 Configure devices on the **server**, using private environment configuration:
