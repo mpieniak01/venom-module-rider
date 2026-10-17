@@ -179,9 +179,30 @@ class PiClient:
             **options,
             limits=httpx.Limits(max_connections=1, max_keepalive_connections=1),
         )
+        # One urgent operator request leaves the second reserved STOP slot free.
+        self.operator_lane = asyncio.Lock()
         self.closed = False
 
     async def json(
+        self,
+        path: str,
+        *,
+        method="GET",
+        body=None,
+        stop=False,
+        headers=None,
+        priority=False,
+    ) -> dict:
+        if priority:
+            async with self.operator_lane:
+                return await self._json(
+                    path, method=method, body=body, stop=True, headers=headers
+                )
+        return await self._json(
+            path, method=method, body=body, stop=stop, headers=headers
+        )
+
+    async def _json(
         self, path: str, *, method="GET", body=None, stop=False, headers=None
     ) -> dict:
         client = self.stop_http if stop else self.http

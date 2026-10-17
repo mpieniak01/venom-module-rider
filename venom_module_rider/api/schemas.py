@@ -10,6 +10,7 @@ from pydantic import (
     StrictFloat,
     StrictInt,
     field_validator,
+    model_validator,
 )
 
 
@@ -22,7 +23,17 @@ class Selection(StrictModel):
 
 
 class Command(StrictModel):
-    action: Literal["arm", "disarm", "stop", "clear_estop", "move", "height", "balance"]
+    action: Literal[
+        "arm",
+        "disarm",
+        "stop",
+        "clear_estop",
+        "move",
+        "height",
+        "balance",
+        "navigation_pause",
+        "navigation_resume",
+    ]
     panel_id: (
         Annotated[str, Field(strict=True, min_length=1, max_length=128)] | None
     ) = None
@@ -43,6 +54,7 @@ class Command(StrictModel):
     direction: Literal["forward", "backward", "left", "right"] | None = None
     mode: Literal["pulse", "hold", "release"] | None = None
     device_settings: StrictBool | None = None
+    intervene: StrictBool | None = None
     height: StrictInt | None = None
     enabled: StrictBool | None = None
 
@@ -82,6 +94,19 @@ class GoalAction(StrictModel):
 
 
 class NavigationTrialRequest(StrictModel):
+    panel_id: (
+        Annotated[str, Field(strict=True, min_length=1, max_length=128)] | None
+    ) = None
+    operator_control_version: Annotated[StrictInt, Field(ge=1, le=1)] | None = None
+
+    @model_validator(mode="after")
+    def operator_panel(self):
+        if self.operator_control_version is not None and (
+            self.panel_id is None or not self.panel_id.strip()
+        ):
+            raise ValueError("operator_panel_required")
+        return self
+
     request_id: Annotated[str, Field(strict=True, min_length=1, max_length=128)]
     generation: Annotated[str, Field(strict=True, min_length=1, max_length=128)]
     ts: Annotated[StrictFloat, Field(ge=0)]

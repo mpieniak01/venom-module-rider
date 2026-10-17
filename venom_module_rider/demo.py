@@ -97,6 +97,11 @@ class DemoPi:
             self.deadline = 0.0
         return {
             "contract_version": 1,
+            **(
+                {"operator_control": self.navigation.operator_status()}
+                if self.navigation
+                else {}
+            ),
             "remote_decision_deadline_supported": self.navigation is not None,
             "scoped_stop_generation_supported": self.navigation is not None,
             "state": self.state,
@@ -151,7 +156,10 @@ class DemoPi:
             ):
                 return envelope({"error": "stale_stop_generation"}, status=409)
             if self.navigation:
-                self.navigation.halt("operator_stop")
+                if self.navigation.operator_mode:
+                    self.navigation.pause_operator("operator_stop")
+                else:
+                    self.navigation.halt("operator_stop")
             self.state = "DISARMED"
             self.owner = None
             self.panel_id = None
@@ -172,7 +180,20 @@ class DemoPi:
                 or body["ts"] > time.time() + 0.1
             ):
                 return envelope({"error": "expired_command"}, status=409)
-            if action == "clear_estop":
+            if action in {"navigation_pause", "navigation_resume"} or (
+                action == "move" and body.get("intervene") is True
+            ):
+                if self.navigation is None:
+                    return envelope(
+                        {"error": "operator_control_not_available"}, status=409
+                    )
+                try:
+                    self.navigation.operator_command(body)
+                except ValueError as exc:
+                    return envelope({"error": str(exc)}, status=409)
+            if action in {"navigation_pause", "navigation_resume"}:
+                pass
+            elif action == "clear_estop":
                 self.state = "DISARMED"
                 self.generation = uuid.uuid4().hex
                 self.deadline = 0.0
@@ -190,7 +211,15 @@ class DemoPi:
                     self.generation = uuid.uuid4().hex
                     self.deadline = 0.0
                 self.owner = body.get("owner", "manual")
-                self.panel_id = body.get("panel_id") if self.owner == "manual" else None
+                self.panel_id = (
+                    body.get("panel_id")
+                    if (
+                        self.owner == "manual"
+                        or self.navigation
+                        and self.navigation.operator_mode
+                    )
+                    else None
+                )
                 self.arming_deadline = (
                     time.monotonic() + min(float(body.get("lease_s", 10)), 10)
                     if self.owner == "navigation"

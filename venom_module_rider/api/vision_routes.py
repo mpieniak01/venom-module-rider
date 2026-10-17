@@ -258,6 +258,6 @@ async def start_trial(request: Request, body: NavigationTrialRequest):
     # cancellation; a browser or host cannot redate an older start request.
     return await request.app.state.rider.mutate(
         "/api/navigation/trial",
-        body.model_dump(),
+        body.model_dump(exclude_none=True),
         request.headers.get("X-Rider-Session"),
     )
