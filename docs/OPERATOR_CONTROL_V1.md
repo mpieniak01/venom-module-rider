@@ -31,7 +31,11 @@ clears E-Stop, renews a timed lease or replays old movement.
 
 A cold `POST /navigation/trial` opts in by including both
 `operator_control_version: 1` and a nonblank `panel_id`, only after capability
-negotiation. Legacy requests omit these fields. A running opted-in Pi worker
+negotiation. The corresponding opt-in ARM is restricted to navigation owner,
+panel context, timed arming and an explicit finite lease greater than zero and
+no longer than ten seconds. A normal manual/operator ARM remains available
+without opt-in and cannot be converted to navigation by warm resume.
+Legacy requests omit these fields. A running opted-in Pi worker
 advertises `operator_control_version: 1` in `/navigation/state.status`; capability
 alone does not mean a warm resume is available. Older Pi versions keep their
 existing read, preview, control and global STOP contracts; the panel must not

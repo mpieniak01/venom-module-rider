@@ -135,6 +135,10 @@ class ReplayNavigation:
         if body.get("settings_revision") != self.state.controls["revision"]:
             raise ValueError("manual_settings_stale")
         resume = body.get("action") == "navigation_resume"
+        if resume and (
+            self.state.arming_mode != "timed" or self.state.arming_deadline is None
+        ):
+            raise ValueError("operator_timed_consent_required")
         if resume and self.operator_state in {"active", "qualifying"}:
             raise ValueError("navigation_already_active")
         self.operation_origin_generation = self.state.generation if resume else None
@@ -363,7 +367,11 @@ class ReplayNavigation:
                 "execution_context": "panel",
                 "arming_mode": "timed",
                 "lease_s": 10,
-                **({"panel_id": body["panel_id"]} if self.operator_mode else {}),
+                **(
+                    {"panel_id": body["panel_id"], "operator_control_version": 1}
+                    if self.operator_mode
+                    else {}
+                ),
             }
         )
         if reply.status_code != 200:

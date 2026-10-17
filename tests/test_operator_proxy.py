@@ -464,3 +464,117 @@ async def test_demo_exact_pending_resume_can_be_interrupted_before_browser_ack(a
         assert repeated.status_code == 409
     finally:
         await nav.close()
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"owner": "manual", "arming_mode": "operator"},
+        {"owner": "manual"},
+        {"arming_mode": "operator"},
+        {"execution_context": "test"},
+        {"operator_control_version": True},
+        {"lease_s": None},
+        {"lease_s": True},
+        {"lease_s": 0},
+        {"lease_s": -1},
+        {"lease_s": 11},
+        {"lease_s": float("inf")},
+        {"lease_s": float("nan")},
+        {"panel_id": " "},
+    ],
+)
+async def test_demo_optin_arm_requires_explicit_bounded_navigation_consent(changes):
+    nav = ReplayNavigation(b"fixture", Permit, model_sha="a" * 64)
+    pi = DemoPi(navigation=nav)
+    try:
+        request = (
+            command(
+                pi,
+                "arm",
+                panel_id="panel-one",
+                owner="navigation",
+                execution_context="panel",
+                arming_mode="timed",
+                lease_s=10,
+                operator_control_version=1,
+                operator_consent=True,
+                operator_plan="Isolated bounded navigation",
+            )
+            | changes
+        )
+        rejected = pi.control(request)
+        assert rejected.status_code == 409
+        assert pi.state == "DISARMED" and pi.owner is None
+        assert pi.arming_deadline is None and not nav.operator_mode
+    finally:
+        await nav.close()
+
+
+@pytest.mark.parametrize("lease", [0.1, 1, 10])
+async def test_demo_optin_accepts_valid_bounded_navigation_lease(lease):
+    import time
+
+    nav = ReplayNavigation(b"fixture", Permit, model_sha="a" * 64)
+    pi = DemoPi(navigation=nav)
+    try:
+        request = command(
+            pi,
+            "arm",
+            panel_id="panel-one",
+            owner="navigation",
+            execution_context="panel",
+            arming_mode="timed",
+            lease_s=lease,
+            operator_control_version=1,
+            operator_consent=True,
+            operator_plan="Isolated bounded navigation",
+        )
+        accepted = pi.control(request)
+        assert accepted.status_code == 200
+        assert pi.state == "ARMED" and pi.owner == "navigation"
+        assert pi.arming_mode == "timed" and nav.operator_mode
+        assert 0 < pi.arming_deadline - time.monotonic() <= lease
+        assert 0 < pi.safety()["lease_remaining_s"] <= lease
+    finally:
+        await nav.close()
+
+
+async def test_demo_plain_manual_arm_does_not_enable_navigation_resume():
+    nav = ReplayNavigation(b"fixture", Permit, model_sha="a" * 64)
+    pi = DemoPi(navigation=nav)
+    try:
+        arm = command(
+            pi,
+            "arm",
+            panel_id="panel-one",
+            owner="manual",
+            execution_context="panel",
+            arming_mode="operator",
+            operator_consent=True,
+            operator_plan="Manual only",
+        )
+        assert pi.control(arm).status_code == 200
+        assert pi.arming_deadline is None and not nav.operator_mode
+        assert (
+            pi.control(
+                command(pi, "navigation_resume", panel_id="panel-one")
+            ).status_code
+            == 409
+        )
+        assert pi.state == "ARMED" and pi.owner == "manual"
+        assert (
+            pi.control(
+                command(
+                    pi,
+                    "move",
+                    panel_id="panel-one",
+                    direction="forward",
+                    mode="pulse",
+                    device_settings=True,
+                )
+            ).status_code
+            == 200
+        )
+    finally:
+        await nav.close()
