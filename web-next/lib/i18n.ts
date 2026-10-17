@@ -1,5 +1,7 @@
 // Module-owned translations. Every key contains PL, EN and DE by construction.
 export const messages = {
+  workspaceDisarmedOwner: ["nikt — rozbrojony", "none — disarmed", "niemand — deaktiviert"],
+  workspacePermissionUnknown: ["Stan zgody na ruch niepotwierdzony. Sprawdź komunikaty.", "Motion permission is unconfirmed. Check the messages.", "Bewegungsfreigabe unbestätigt. Meldungen prüfen."],
   "workspaceManual": ["Ręcznie", "Manual", "Manuell"],
   "workspaceAutomatic": ["Automat", "Automatic", "Automatik"],
   "workspaceView": ["Widok sterowania", "Control view", "Steuerungsansicht"],
@@ -273,7 +275,7 @@ export const messages = {
   "frameReplay": ["Zapis kamery Pi · odtwarzanie", "Pi camera recording · replay", "Pi-Kameraaufnahme · Wiedergabe"],
   "frameRecorded": ["Czas oryginalnej klatki", "Original frame time", "Zeit des Originalbildes"],
   "takeManual": ["Przejmij ręcznie", "Take manual control", "Manuell übernehmen"],
-  "takeManualHint": ["Zatrzymuje pętlę Venom, uzbraja sterowanie ręczne i zachowuje kamerę.", "Stops the Venom loop, arms manual control and keeps the camera.", "Stoppt die Venom-Schleife, aktiviert manuelle Steuerung und behält die Kamera."],
+  "takeManualHint": ["Zatrzymuje automat, uzbraja ręcznie i włącza podgląd kamery.", "Stops automation, arms manual control and starts camera preview.", "Beendet die Automatik, aktiviert manuelle Steuerung und startet die Kameravorschau."],
   "postureAndTelemetry": ["Postawa, pomiary i historia", "Posture, measurements and history", "Haltung, Messwerte und Verlauf"],
   "loopPhase.fault": ["Pętla zatrzymana przez zabezpieczenie", "Loop stopped by safety guard", "Schleife durch Sicherheit gestoppt"],
   "loopFaultHint": ["Brak zgody na dalszy ruch. Stop kończy próbę; kolejny Start wymaga nowego polecenia operatora.", "Further movement is not authorized. Stop ends the run; another Start requires new operator intent.", "Weitere Bewegung nicht erlaubt. Stop beendet den Versuch; neuer Start benötigt neue Operatorabsicht."],
@@ -517,8 +519,8 @@ export const messages = {
   demo: ["DEMO — symulowane urządzenie. Polecenia i pomiary są fikcyjne.", "DEMO — simulated device. Commands and measurements are fictional.", "DEMO — simuliertes Gerät. Befehle und Messwerte sind fiktiv."],
   offlineHint: ["Ostatni znany stan. Nowe polecenie sprawdzi połączenie; stare polecenia nie są ponawiane.", "Last known state. A new command checks the connection; old commands are not retried.", "Letzter bekannter Status. Ein neuer Befehl prüft die Verbindung; alte Befehle werden nicht wiederholt."],
   demoTag: ["Demo", "Demo", "Demo"],
-  arm: ["ARM · sterowanie ręczne", "ARM · manual control", "ARM · manuelle Steuerung"],
-  disarm: ["ARM · wyłącz zgodę", "ARM · revoke permission", "ARM · Freigabe aufheben"],
+  arm: ["Uzbrój ręcznie", "Arm manual control", "Manuell aktivieren"],
+  disarm: ["Rozbrój", "Disarm", "Deaktivieren"],
   armHint: ["Kliknięcie ARM oznacza Twoją zgodę na ręczne sterowanie. Sprawdź wolną przestrzeń wokół robota.", "Clicking ARM gives your consent to manual control. Check the space around the robot.", "Mit ARM stimmst du der manuellen Steuerung zu. Prüfe den freien Raum um den Roboter."],
   stop: ["STOP", "STOP", "STOP"],
   stopHint: ["Zatrzymaj natychmiast i rozbrój", "Stop immediately and disarm", "Sofort stoppen und entschärfen"],

@@ -228,7 +228,7 @@
 /* Fixed driving geometry: observations scroll; input targets never follow messages. */
 .page[data-section="control"] { height: calc(100dvh - var(--rider-page-top, 210px) - 12px); min-height: 460px; padding-bottom: 0; display: flex; flex-direction: column; }
 .page[data-section="control"] > .header, .page[data-section="control"] > .tabs { flex-shrink: 0; }
-.controlPanel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.controlPanel { overflow-anchor: none; overflow: hidden; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .controlWorkspace { flex: 1; min-height: 0; display: grid; grid-template-rows: 44px minmax(0, 1fr); gap: 10px; }
 .controlModeRow { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; }
 .controlModes { display: flex; gap: 6px; flex-shrink: 0; }
@@ -239,7 +239,7 @@
 .workspaceContent > * { margin-bottom: 14px; }
 .workspaceContent .loopCamera { position: static; padding: 16px; background: var(--bg-panel); border: 1px solid var(--r-border); border-radius: 16px; }
 .workspaceContent .loopToolbar { position: static; }
-.operatorConsole { min-width: 0; min-height: 0; }
+.operatorConsole { overflow-anchor: none; min-width: 0; min-height: 0; }
 .operatorPanel { height: 100%; box-sizing: border-box; padding: 12px; display: grid; grid-template-rows: 42px minmax(0, 1fr) 84px; gap: 8px; }
 .operatorPanel > .panelHeader { height: 42px; margin: 0; flex-wrap: nowrap; gap: 6px; }
 .operatorPanel .panelTitle { font-size: 14px; }
@@ -263,7 +263,7 @@
 .pageFocused { position: fixed; inset: 0; z-index: 1000; max-width: none; margin: 0; padding: 10px; background: var(--bg-base); overflow-y: auto; }
 .pageFocused[data-section="control"] { height: 100dvh; min-height: 0; }
 .pageFocused > .header { top: 0; }
-.page[data-section="control"] .toolbar .pill { width: 170px; height: 28px; box-sizing: border-box; overflow: hidden; text-overflow: ellipsis; display: inline-block; }
+.page[data-section="control"] .toolbar .pill { width: 170px; height: 28px; box-sizing: border-box; overflow: hidden; text-overflow: ellipsis; display: inline-flex; flex-wrap: nowrap; }
 .page[data-section="control"] .toolbar .armArmed, .page[data-section="control"] .toolbar .armDisarmed { width: 178px; height: 42px; min-height: 42px; padding: 8px; white-space: nowrap; }
 @container rider (max-width: 720px) {
   .page .header { padding: 8px; gap: 6px; margin-bottom: 6px; }
@@ -281,13 +281,15 @@
   .tab { padding: 8px; font-size: 12px; }
   .controlModeRow { gap: 6px; }
   .workspaceOwner { font-size: 10px; }
-  .driveWorkspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: 340px minmax(100px, 1fr); gap: 10px; }
+  .driveWorkspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(280px, 1fr) minmax(40px, .8fr); gap: 10px; }
   .operatorConsole { grid-row: 1; }
   .workspaceContent { grid-row: 2; }
   .operatorPanel { grid-template-rows: 38px minmax(0, 1fr) 38px; gap: 4px; padding: 8px; }
   .operatorPanel > .panelHeader { height: 38px; }
-  .operatorPanel .manualPad { grid-template-rows: 36px 184px minmax(0, 1fr); }
-  .operatorPanel .padMode { height: 36px; }
+  .operatorPanel .manualPad { grid-template-rows: 34px 146px minmax(0, 1fr); }
+  .operatorPanel .padMode { height: 34px; }
+  .operatorPanel .padMode select { height: 34px; }
+  .operatorPanel .pad { grid-template-rows: repeat(3, 44px); grid-template-columns: repeat(3, 64px); gap: 4px; margin: 6px 0 0; }
 }
 @media (max-height: 520px) and (min-width: 721px) {
   .pageFocused .driveWorkspace { grid-template-columns: minmax(0, 1fr) 300px; }
@@ -295,4 +297,44 @@
   .pageFocused .operatorPanel > .panelHeader { height: 32px; }
   .pageFocused .operatorPanel .manualPad { grid-template-rows: 34px 150px minmax(0, 1fr); }
   .pageFocused .operatorPanel .pad { grid-template-rows: repeat(3, 44px); grid-template-columns: repeat(3, 60px); gap: 4px; margin: 6px 0 0; }
+}
+
+
+@container rider (min-width: 900px) {
+  .page .header { flex-wrap: nowrap; }
+  .brand { flex: 0 0 140px; }
+  .toolbar { display: grid; grid-template-columns: minmax(160px, 1fr) 120px 38px 178px 104px 38px; gap: 8px; flex: 1; }
+  .environmentSelect { font-size: 10px; gap: 5px; }
+  .environmentSelect select { width: 90px; }
+  .page[data-section="control"] .toolbar .pill { width: 120px; }
+  .toolbar > .button { padding-left: 6px; padding-right: 6px; }
+  .toolbar .stop { width: 104px; padding: 8px; min-height: 44px; height: 44px; font-size: 16px; }
+}
+
+
+/* The host document may scroll when browser focus/anchoring changes. Keep the
+   entire driving surface anchored to its measured host slot, not that scroll. */
+.workspaceFrame { width: 100%; min-width: 0; }
+.page[data-section="control"] { position: fixed; top: var(--rider-page-top, 210px); left: var(--rider-page-left, 0px); width: var(--rider-page-width, 100%); z-index: 40; margin: 0; background: var(--bg-base); }
+.page.pageFocused[data-section="control"] { inset: 0; width: 100%; height: 100dvh; z-index: 1000; }
+
+.workspaceFrame[data-section="control"] { height: calc(100dvh - var(--rider-page-top, 210px) - 12px); min-height: 460px; }
+
+
+@container rider (max-width: 720px) {
+  .toolbar { display: grid; grid-template-columns: 76px minmax(0, 1fr) 34px 34px; grid-template-rows: 34px 36px; gap: 6px; }
+  .environmentSelect { grid-column: 1; grid-row: 1; }
+  .environmentSelect > span { display: none; }
+  .page[data-section="control"] .toolbar .pill { grid-column: 2; grid-row: 1; width: 100%; height: 28px; font-size: 10px; }
+  .toolbar > [data-testid="rider-refresh"] { grid-column: 3; grid-row: 1; }
+  .page[data-section="control"] .toolbar .armArmed, .page[data-section="control"] .toolbar .armDisarmed { grid-column: 1 / 3; grid-row: 2; width: 100%; }
+  .toolbar > .stop { grid-column: 3 / 5; grid-row: 2; width: 100%; padding: 6px; }
+  .toolbar > [data-testid="workspace-expand"] { grid-column: 4; grid-row: 1; }
+}
+
+.operatorConsole .arrow, .operatorConsole .padStop { transition: background-color .15s, border-color .15s, color .15s; }
+
+.page[data-section="control"] .subtitle { display: none; }
+@container rider (max-width: 720px) {
+  .loopCamera .cameraEmbedded .camera { height: min(28dvh, 180px); min-height: 96px; max-height: 180px; }
 }

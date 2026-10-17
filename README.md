@@ -350,9 +350,9 @@ Avoidance is off by default and requires physical acceptance on the actual mount
 
 ## Manual continuous drive
 
-The camera workspace provides **Pulse / hold** and **Continuous drive** pads.
-The latter selects a direction with one click; clicking the same direction or
-using either centre STOP brakes and keeps ARM. A pulse replaces the continuous
+The camera workspace provides one pad with a **Pulse / hold** / **Continuous drive** selector.
+Continuous drive selects a direction with one click; clicking the same direction or
+using the centre STOP brakes and keeps ARM. A pulse replaces the continuous
 selection permanently. Left/right turn in place using Pi's current settings.
 This is manual control and does not use vision obstacle avoidance.
 
@@ -396,3 +396,7 @@ The sample library can explicitly analyse stored originals with retained DA2 or 
 Automatic events use the same sample registry: [Automatic capture v1](docs/AUTOMATIC_CAPTURE_V1.md).
 
 Offline mapping qualification: [geometry research v1](docs/MAPPING_RESEARCH_V1.md).
+
+## Operator workspace
+
+See [control workspace](docs/CONTROL_WORKSPACE.md) for Manual/Automatic views, fixed directional controls, the three STOP meanings and hardware-free layout acceptance.

@@ -274,18 +274,18 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
   const visibleError=diagnostic.requestErrorCovered||preparation?.source==="pi"&&hasPreparationError||errorRun&&sharedTrial?.run_id===errorRun?"":error;
   const sharedRecovery=sharedTrial&&recoveryFailure?.runId===sharedTrial.run_id?recoveryFailure:null;
 
-  const owner = safetyOf(client.status).owner;
+  const safety = safetyOf(client.status);
+  const owner = safety.owner;
   return <section className={styles.controlWorkspace} data-testid="control-workspace">
     <div className={styles.controlModeRow}>
       <div className={styles.controlModes} role="group" aria-label={t("workspaceView")}>
         {(["manual", "automatic"] as const).map(mode => <Button key={mode} data-testid={"workspace-" + mode} aria-pressed={view === mode} tone={view === mode ? "primary" : undefined} onClick={() => setView(mode)}>{t(mode === "manual" ? "workspaceManual" : "workspaceAutomatic")}</Button>)}
       </div>
-      <span className={styles.workspaceOwner} role="status">{t("workspaceOwner")}: <strong>{t(owner === "manual" ? "workspaceManual" : owner === "navigation" ? "workspaceAutomatic" : "workspaceNoOwner")}</strong></span>
+      <span className={styles.workspaceOwner} role="status">{t("workspaceOwner")}: <strong>{t(owner === "manual" ? "workspaceManual" : owner === "navigation" ? "workspaceAutomatic" : safety.state === "DISARMED" ? "workspaceDisarmedOwner" : "workspaceNoOwner")}</strong></span>
     </div>
     <div className={styles.driveWorkspace}>
       <div className={styles.workspaceContent} data-testid="workspace-content" tabIndex={0} role="region" aria-label={t("workspaceObservation")}>
-        <div className={styles.loopCamera}><CameraPanel client={client} t={t} language={language} compact editor={view === "automatic" && editingZone && draft && Array.isArray(draft.corridor) ? {value:draft.corridor as number[],disabled:goals.drive===true||!!operation,onChange:value=>setDraft({...draft,corridor:value})}:undefined}/></div>
-        <div hidden={view !== "automatic"} data-testid="automatic-panel">
+        <div hidden={view !== "automatic"} data-testid="automatic-commands">
           <Panel title={t("loopTitle")} extra={<Button aria-label={t("loopLoad")} disabled={loading||!!operation||!connected} onClick={()=>setRefresh(v=>v+1)}><RefreshCw size={14}/>{t("refresh")}</Button>}>
     <div className={styles.loopStatus} role="status" data-testid="loop-state">
       <Pill tone={phase==="running"?"good":phase==="offline"||phase==="unknown"||phase==="fault"?"warning":undefined}>{t(operation==="stop"?"loopStopping":phase==="fault"?"loopPhase.fault":operation==="check"?"trialChecking":operation==="start"?"loopStarting":"loopPhase."+phase)}</Pill>
@@ -300,6 +300,11 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
       {detector.drive_supported!==false&&<span className={styles.small} data-testid="trial-plan">{String(policy?.speed??"—")} SDK · ≤ {String(policy?.max_motion_ms??"—")} ms</span>}
     </div>
     </div>
+          </Panel>
+        </div>
+        <div className={styles.loopCamera}><CameraPanel client={client} t={t} language={language} compact editor={view === "automatic" && editingZone && draft && Array.isArray(draft.corridor) ? {value:draft.corridor as number[],disabled:goals.drive===true||!!operation,onChange:value=>setDraft({...draft,corridor:value})}:undefined}/></div>
+        <div hidden={view !== "automatic"} data-testid="automatic-panel">
+          <Panel title={t("loopSettings")}>
     <p id="rider-trial-help" className={styles.hint} data-testid="trial-start-help">{t("trialStartHelp")}</p>
     <details className={styles.details} data-testid="loop-observation">
       <summary>{t("observationOptional")}</summary>

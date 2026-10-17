@@ -72,6 +72,7 @@ async (page) => {
       return json({});
     });
     await page.goto("http://localhost:3300/rider");await page.bringToFront();
+    await page.getByTestId("workspace-automatic").click();
     await page.getByTestId("loop-start").waitFor();
     if(mode==="standalone"){
       // Production incident: Pi camera is ON outside Venom; no navigation
