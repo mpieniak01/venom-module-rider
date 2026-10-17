@@ -1,5 +1,17 @@
 // Module-owned translations. Every key contains PL, EN and DE by construction.
 export const messages = {
+  operatorPauseHint: ["Zatrzymuje ruch i pauzuje automat; kamera i analiza pozostają aktywne.", "Stops motion and pauses automatic control; camera and analysis stay active.", "Stoppt die Bewegung und pausiert die Automatik; Kamera und Analyse bleiben aktiv."],
+  operatorTakeoverHint: ["Przejmuje ruch i pozostawia automat w pauzie, bez zmiany kamery i analizy.", "Takes motion control and leaves automatic control paused, preserving camera and analysis.", "Übernimmt die Bewegung und pausiert die Automatik; Kamera und Analyse bleiben aktiv."],
+  operatorResume: ["Wznów automat", "Resume automatic control", "Automatik fortsetzen"],
+  operatorPause: ["Zatrzymaj jazdę", "Pause driving", "Fahrt pausieren"],
+  operatorPaused: ["Automat w pauzie; kamera i analiza pozostają aktywne.", "Automatic control paused; camera and analysis remain active.", "Automatik pausiert; Kamera und Analyse bleiben aktiv."],
+  operatorInterventionReady: ["Strzałki korygują ruch i pozostawiają automat w pauzie.", "Arrows correct motion and leave automatic control paused.", "Pfeiltasten korrigieren die Bewegung und pausieren die Automatik."],
+  "operatorState.idle": ["Automat bez zgody na ruch", "Automatic motion not authorized", "Automatische Bewegung nicht freigegeben"],
+  "operatorState.paused": ["Automat w pauzie", "Automatic control paused", "Automatik pausiert"],
+  "operatorState.qualifying": ["Oczekiwanie na 3 nowe poprawne klatki", "Waiting for 3 new valid frames", "Warten auf 3 neue gültige Bilder"],
+  "operatorState.active": ["Automat steruje", "Automatic control active", "Automatik steuert"],
+  cameraSwitchOff: ["Wyłącz kamerę", "Switch off camera", "Kamera ausschalten"],
+  cameraSwitchOn: ["Włącz kamerę", "Switch on camera", "Kamera einschalten"],
   workspaceDisarmedOwner: ["nikt — rozbrojony", "none — disarmed", "niemand — deaktiviert"],
   workspacePermissionUnknown: ["Stan zgody na ruch niepotwierdzony. Sprawdź komunikaty.", "Motion permission is unconfirmed. Check the messages.", "Bewegungsfreigabe unbestätigt. Meldungen prüfen."],
   "workspaceManual": ["Ręcznie", "Manual", "Manuell"],

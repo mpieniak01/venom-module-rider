@@ -172,3 +172,48 @@ test("pointer blur keeps continuous selection; global release stops it", async t
   controller.release(); await flush();
   assert.equal(intents.at(-1)?.mode, "release");
 });
+
+test("operator pause starts on pointerdown; a released short click waits for its own ACK", async t => {
+  t.mock.timers.enable({apis:["setTimeout"]});
+  let finish!:()=>void, current!:()=>boolean, preparations=0;
+  const intents:MovementIntent[]=[];
+  const controller=new HoldController({timing:()=>timing,canMove:()=>true,prepare:valid=>{preparations++;current=valid;return new Promise<void>(resolve=>{finish=resolve;});},send:async intent=>{intents.push(intent);},onActive:()=>undefined,onError:()=>undefined});
+  controller.start("left",1);
+  assert.equal(preparations,1);assert.equal(intents.length,0);
+  controller.end(1);await flush();assert.equal(current(),true);assert.equal(intents.length,0);
+  finish();await flush();
+  assert.deepEqual(intents,[{direction:"left",mode:"pulse"}]);
+  controller.cancel();
+});
+test("a late pause ACK after TTL or STOP never replays a click", async t => {
+  t.mock.timers.enable({apis:["setTimeout"]});
+  for(const cancelled of [false,true]) {
+    let now=0,finish!:()=>void;
+    const intents:MovementIntent[]=[];
+    const controller=new HoldController({timing:()=>timing,canMove:()=>true,now:()=>now,prepare:()=>new Promise<void>(resolve=>{finish=resolve;}),send:async intent=>{intents.push(intent);},onActive:()=>undefined,onError:()=>undefined});
+    controller.start("forward",1);controller.end(1);await flush();
+    if(cancelled)controller.cancel();else now=timing.request_ttl_ms+1;
+    finish();await flush();assert.equal(intents.length,0);
+  }
+});
+test("hold renews only after confirmed pause while the same gesture remains held", async t => {
+  t.mock.timers.enable({apis:["setTimeout"]});
+  let finish!:()=>void;
+  const intents:MovementIntent[]=[];
+  const controller=new HoldController({timing:()=>timing,canMove:()=>true,prepare:()=>new Promise<void>(resolve=>{finish=resolve;}),send:async intent=>{intents.push(intent);},onActive:()=>undefined,onError:()=>undefined});
+  controller.start("forward",1);t.mock.timers.tick(timing.click_threshold_ms);await flush();assert.equal(intents.length,0);
+  finish();await flush();assert.deepEqual(intents.map(intent=>intent.mode),["hold"]);
+  t.mock.timers.tick(timing.hold_renewal_ms);await flush();controller.end(1);await flush();
+  assert.deepEqual(intents.map(intent=>intent.mode),["hold","hold","release"]);
+});
+
+test("an expired replacement click waiting for an earlier request is never replayed", async t => {
+  t.mock.timers.enable({apis:["setTimeout"]});
+  let now=0,finish!:()=>void;
+  const intents:MovementIntent[]=[];
+  const controller=new HoldController({timing:()=>timing,canMove:()=>true,now:()=>now,prepare:async()=>undefined,send:async intent=>{intents.push(intent);if(intent.direction==="forward")await new Promise<void>(resolve=>{finish=resolve;});},onActive:()=>undefined,onError:()=>undefined});
+  controller.start("forward",1);controller.end(1);await flush();
+  controller.start("left",2);controller.end(2);await flush();
+  now=timing.request_ttl_ms+1;finish();await flush();
+  assert.deepEqual(intents,[{direction:"forward",mode:"pulse"}]);
+});

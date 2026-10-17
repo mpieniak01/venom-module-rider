@@ -2,6 +2,7 @@ import { WifiOff, X } from "lucide-react";
 import type { Translator } from "../lib/i18n";
 import { formatTime, safetyOf, str } from "../lib/model";
 import type { RiderClient } from "../lib/use-rider";
+import { operatorPrioritySupported } from "../lib/navigation";
 import { ManualPad } from "./control";
 import { Button, Panel } from "./primitives";
 import styles from "../rider.module.css";
@@ -20,13 +21,13 @@ export function RiderMessages({ client, t, language }: { client: RiderClient; t:
 export function OperatorConsole({ client, t, language }: { client: RiderClient; t: Translator; language: string }) {
   const safety = safetyOf(client.status);
   const ownsManual = safety.state === "ARMED" && safety.owner === "manual";
-  const reason = client.canNavigate ? "workspaceManualReady" : ownsManual ? "workspaceTakeoverNeeded" : safety.state === "ARMED" ? "workspaceAutomaticOwner" : safety.state === "DISARMED" ? "workspaceArmNeeded" : "workspacePermissionUnknown";
-  return <Panel className={styles.operatorPanel} title={t("manual")} extra={<Button data-testid="takeover-manual" tone="primary" title={t("takeManualHint")} disabled={!client.canArm || !!client.busy} onClick={() => void client.takeManual(t("manual"))}>{t("takeManual")}</Button>}>
+  const reason = client.canNavigate ? (safety.owner === "navigation" ? "operatorInterventionReady" : "workspaceManualReady") : ownsManual ? "workspaceTakeoverNeeded" : safety.state === "ARMED" ? "workspaceAutomaticOwner" : safety.state === "DISARMED" ? "workspaceArmNeeded" : "workspacePermissionUnknown";
+  return <Panel className={styles.operatorPanel} title={t("manual")} extra={<Button data-testid="takeover-manual" tone="primary" title={t(operatorPrioritySupported(client.status) && safety.state === "ARMED" ? "operatorTakeoverHint" : "takeManualHint")} disabled={!client.canArm || !!client.busy && !(operatorPrioritySupported(client.status) && safety.state === "ARMED")} onClick={() => void client.takeManual(t("manual"))}>{t("takeManual")}</Button>}>
     <ManualPad client={client} t={t} language={language} compact/>
     <div className={styles.operatorMessages} data-testid="operator-messages" tabIndex={0} role="region" aria-label={t("workspaceMessages")}>
       <RiderMessages client={client} t={t} language={language}/>
       <p className={styles.hint} role="status">{t(reason)}</p>
-      <p className={styles.hint}>{t("takeManualHint")}</p>
+      <p className={styles.hint}>{t(operatorPrioritySupported(client.status) && safety.state === "ARMED" ? "operatorTakeoverHint" : "takeManualHint")}</p>
     </div>
   </Panel>;
 }

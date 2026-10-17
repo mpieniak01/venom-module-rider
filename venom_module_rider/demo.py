@@ -79,6 +79,7 @@ class DemoPi:
         self.owner = None
         self.panel_id = None
         self.arming_deadline = None
+        self.arming_mode = "operator"
         self.navigation = navigation
         if navigation:
             navigation.attach(self)
@@ -97,6 +98,11 @@ class DemoPi:
             self.deadline = 0.0
         return {
             "contract_version": 1,
+            **(
+                {"operator_control": self.navigation.operator_status()}
+                if self.navigation
+                else {}
+            ),
             "remote_decision_deadline_supported": self.navigation is not None,
             "scoped_stop_generation_supported": self.navigation is not None,
             "state": self.state,
@@ -109,7 +115,7 @@ class DemoPi:
             "panel_control": {"version": 1, "holder": self.panel_id},
             "owner": (self.owner or "manual") if self.state == "ARMED" else None,
             "execution_context": "panel" if self.state == "ARMED" else None,
-            "arming_mode": "operator",
+            "arming_mode": self.arming_mode,
             "generation": self.generation,
             "instance_id": self.instance,
             "last_seq": self.seq,
@@ -122,7 +128,11 @@ class DemoPi:
             "output": {"lx": 0.1 if moving else 0, "az": 0},
             "target": {"lx": 0.1 if moving else 0, "az": 0},
             "last_ack": self.ack,
-            "lease_remaining_s": None,
+            "lease_remaining_s": (
+                max(0.0, self.arming_deadline - time.monotonic())
+                if self.arming_deadline is not None
+                else None
+            ),
             "manual_settings": copy.deepcopy(self.controls),
             "actuators": {"height": self.height, "balance": self.balance},
             "capabilities": {
@@ -151,7 +161,10 @@ class DemoPi:
             ):
                 return envelope({"error": "stale_stop_generation"}, status=409)
             if self.navigation:
-                self.navigation.halt("operator_stop")
+                if self.navigation.operator_mode:
+                    self.navigation.pause_operator("operator_stop")
+                else:
+                    self.navigation.halt("operator_stop")
             self.state = "DISARMED"
             self.owner = None
             self.panel_id = None
@@ -160,10 +173,17 @@ class DemoPi:
             self.generation = uuid.uuid4().hex
             self.seq = -1
         else:
+            supersedes = bool(
+                self.navigation and self.navigation.supersedes_operation(body)
+            )
+            last_seq = (
+                self.navigation.operation_origin_sequence if supersedes else self.seq
+            )
             if (
                 body.get("generation") != self.generation
+                and not supersedes
                 or type(body.get("seq")) is not int
-                or body["seq"] <= self.seq
+                or body["seq"] <= last_seq
             ):
                 return envelope({"error": "stale_generation_or_sequence"}, status=409)
             if (
@@ -172,7 +192,20 @@ class DemoPi:
                 or body["ts"] > time.time() + 0.1
             ):
                 return envelope({"error": "expired_command"}, status=409)
-            if action == "clear_estop":
+            if action in {"navigation_pause", "navigation_resume"} or (
+                action == "move" and body.get("intervene") is True
+            ):
+                if self.navigation is None:
+                    return envelope(
+                        {"error": "operator_control_not_available"}, status=409
+                    )
+                try:
+                    self.navigation.operator_command(body)
+                except ValueError as exc:
+                    return envelope({"error": str(exc)}, status=409)
+            if action in {"navigation_pause", "navigation_resume"}:
+                pass
+            elif action == "clear_estop":
                 self.state = "DISARMED"
                 self.generation = uuid.uuid4().hex
                 self.deadline = 0.0
@@ -185,18 +218,50 @@ class DemoPi:
                     "operator_plan"
                 ):
                     return envelope({"error": "operator_consent_required"}, status=400)
+                opt_in = "operator_control_version" in body
+                if opt_in and not (
+                    self.navigation is not None
+                    and type(body["operator_control_version"]) is int
+                    and body["operator_control_version"] == 1
+                    and body.get("owner") == "navigation"
+                    and body.get("execution_context") == "panel"
+                    and body.get("arming_mode") == "timed"
+                    and isinstance(body.get("panel_id"), str)
+                    and bool(body["panel_id"].strip())
+                    and type(body.get("lease_s")) in (int, float)
+                    and math.isfinite(body["lease_s"])
+                    and 0 < body["lease_s"] <= 10
+                ):
+                    return envelope({"error": "operator_control_invalid"}, status=409)
                 if self.navigation:
                     self.navigation.halt("operator_takeover")
+                    self.navigation.operator_mode = opt_in
                     self.generation = uuid.uuid4().hex
                     self.deadline = 0.0
                 self.owner = body.get("owner", "manual")
-                self.panel_id = body.get("panel_id") if self.owner == "manual" else None
+                self.panel_id = (
+                    body.get("panel_id")
+                    if (
+                        self.owner == "manual"
+                        or self.navigation
+                        and self.navigation.operator_mode
+                    )
+                    else None
+                )
+                self.arming_mode = body.get(
+                    "arming_mode", "timed" if self.owner == "navigation" else "operator"
+                )
                 self.arming_deadline = (
                     time.monotonic() + min(float(body.get("lease_s", 10)), 10)
-                    if self.owner == "navigation"
+                    if self.arming_mode == "timed"
                     else None
                 )
                 self.state = "ARMED"
+                if opt_in and self.navigation:
+                    self.navigation.operation_id = body["request_id"]
+                    self.navigation.operation_origin_generation = self.generation
+                    self.navigation.operation_origin_sequence = body["seq"]
+                    self.navigation.operator_state = "qualifying"
             elif action in {"move", "height", "balance"}:
                 if self.panel_id is not None and body.get("panel_id") != self.panel_id:
                     return envelope({"error": "panel_owner_mismatch"}, status=409)

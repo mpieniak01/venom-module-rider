@@ -9,13 +9,14 @@ import { readMjpeg, type MjpegPart } from "./mjpeg";
 import { readAnalysis } from "./vision-frame";
 import { decodePreview, nextPreviewDelay, previewLifetime, previewRequestCurrent, retainedPreview } from "./preview-media";
 import { configForConnection } from "./device-session";
+import { adoptIntervention } from "./operator-control";
 import { HoldController, readHoldTiming, type MovementIntent } from "./hold-controller";
 import { canRequestArm, commandAccepted, controlIdentity, data, errorCode, faceRunning, featureRows, finite, frameRequested, record, safetyOf, settingsOf, str, type DeviceConfig, type Direction, type JsonRecord, type RiderStatus, type Section } from "./model";
 
 const BASE = "/api/v1/rider";
 export type Notice = { key: string; code?: string; tone: "error" | "success" | "info" };
 export type Frame = { captureKey?: string; analysis?: JsonRecord; ageMs?: number; receivedAt?: number; ageSource?: string; decoded?: boolean; url: string; stale: boolean; source: string; fileAt: string; id: string; knownFreshness: boolean; visionState: string; visionReason: string; inferenceMs: string; visionPolicy: string; recordedAt: string };
-import { continuousAvailable, controlChanged, freshControl, navigationAvailable, navigationView, observationClock, retainControl, type ControlClock } from "./navigation";
+import { continuousAvailable, controlChanged, freshControl, navigationAvailable, navigationView, observationClock, operatorPrioritySupported, operatorSessionActive, retainControl, type ControlClock } from "./navigation";
 export function useRider(section: Section) {
   const [config, setConfig] = useState<DeviceConfig | null>(null);
   const [status, setStatus] = useState<RiderStatus | null>(null);
@@ -42,6 +43,8 @@ export function useRider(section: Section) {
   const seqRef = useRef(0);
   const motionBlocked = useRef(0);
   const motionEpoch = useRef(0);
+  const pendingHandoff = useRef<{requestId:string;generation:string;session:string;epoch:number;deadline:number}|null>(null);
+  const pendingResume = useRef<{requestId:string;generation:string}|null>(null);
   const sessionRef = useRef("");
   const sectionRef = useRef(section);
   const mediaRef = useRef<{ camera: "raw" | "proc" | "venom" | null; face: boolean }>({ camera: null, face: false });
@@ -54,10 +57,14 @@ export function useRider(section: Section) {
   const isConnected = useCallback(() => ["online", "degraded"].includes(statusRef.current?.connection.status ?? ""), []);
   const hasFreshControl = useCallback(() => freshControl(statusRef.current, clockRef.current, Date.now(), statusRef.current?.polling[`${sectionRef.current}_ms`] ?? 0), []);
   const canNavigate = useCallback(() => motionBlocked.current === 0 && navigationAvailable(statusRef.current, panelId), [panelId]);
-  const movementReady = canNavigate;
+  const movementReady = useCallback(() => canNavigate() && safetyOf(statusRef.current).owner === "manual", [canNavigate]);
   const [hold] = useState(() => new HoldController({
     timing: () => readHoldTiming(settingsOf(statusRef.current).control_modes),
     canMove: canNavigate,
+    prepare: (current: () => boolean) => {
+      if (!operatorPrioritySupported(statusRef.current) || !(safetyOf(statusRef.current).owner === "navigation" || pendingResume.current)) return;
+      return commandRef.current({ action:"navigation_pause" }, current).then(() => undefined);
+    },
     send: async (intent: MovementIntent, current: () => boolean) => { await commandRef.current({ action: "move", device_settings: true, ...intent }, current); },
     onActive: setActiveDirection,
     onMode: setManualMode,
@@ -132,7 +139,21 @@ export function useRider(section: Section) {
         const previous = statusRef.current;
         const observed = next;
         next = retainControl(previous, next);
-        if (controlChanged(previous, next)) { hold.cancel(); seqRef.current = 0; replaceFrame("camera", null, previous?.connection.session===next.connection.session && previous?.connection.device_id===next.connection.device_id); replaceFrame("face", null); if (previous?.connection.session !== next.connection.session) { mediaRef.current = { camera: null, face: false }; setCameraStream(null); setShowRuntimeFrame(false); } }
+        if (controlChanged(previous, next)) {
+          const pending = pendingHandoff.current, nextSafety = safetyOf(next);
+          const ownPending = pending && Date.now() < pending.deadline && pending.epoch === motionEpoch.current
+            && pending.session === next.connection.session && pending.session === previous?.connection.session
+            && nextSafety.state === "ARMED" && nextSafety.owner === "manual" && str(nextSafety.generation)
+            && nextSafety.generation !== pending.generation && record(nextSafety.panel_control).holder === panelId
+            && record(nextSafety.operator_control).operation_id === pending.requestId
+            && record(nextSafety.operator_control).generation === nextSafety.generation;
+          if (!ownPending) hold.cancel();
+          seqRef.current = 0;
+          if (previous?.connection.session !== next.connection.session || previous?.connection.device_id !== next.connection.device_id) {
+            replaceFrame("camera", null); replaceFrame("face", null);
+            mediaRef.current = { camera: null, face: false }; setCameraStream(null); setShowRuntimeFrame(false);
+          }
+        }
         if (!["online", "degraded"].includes(next.connection.status)) { replaceFrame("camera", null); replaceFrame("face", null); }
         if (next.errors.control) hold.release();
         if (!["online", "degraded"].includes(next.connection.status) || next.control && !next.errors.control && !navigationAvailable(next, panelId)) hold.cancel();
@@ -186,7 +207,7 @@ export function useRider(section: Section) {
   const makeEnvelope = useCallback((body: JsonRecord, source = "manual"): JsonRecord => {
     const action = str(body.action);
     const stopping = action === "stop" || action === "disarm";
-    const manualIntent = ["move", "height", "balance", "arm", "clear_estop"].includes(action);
+    const manualIntent = ["move", "height", "balance", "arm", "clear_estop", "navigation_pause", "navigation_resume"].includes(action);
     if (!stopping && (manualIntent ? !clockRef.current || !str(safetyOf(statusRef.current).generation) : !isConnected() || !hasFreshControl())) throw Object.assign(new Error("stale_control"), { data: { error: "stale_control" } });
     const current = statusRef.current;
     const safety = safetyOf(current);
@@ -194,7 +215,7 @@ export function useRider(section: Section) {
     const timing = readHoldTiming(settings.control_modes);
     const clock = clockRef.current;
     const envelope: JsonRecord = { ...body, request_id: crypto.randomUUID(), source, execution_context: "panel" };
-    if (record(safety.panel_control).version === 1 && (["move", "height", "balance"].includes(action) || action === "arm" && body.owner === "manual")) envelope.panel_id = panelId;
+    if (record(safety.panel_control).version === 1 && (["move", "height", "balance", "navigation_pause", "navigation_resume"].includes(action) || action === "arm" && body.owner === "manual")) envelope.panel_id = panelId;
     if (!stopping) {
       seqRef.current = Math.max(seqRef.current, finite(safety.last_seq) ? safety.last_seq : 0) + 1;
       Object.assign(envelope, { generation: safety.generation, seq: seqRef.current, ts: (Date.now() + (clock?.offset ?? 0)) / 1000, ttl_ms: timing?.request_ttl_ms, settings_revision: settings.revision });
@@ -205,15 +226,24 @@ export function useRider(section: Section) {
     if (!current()) return {};
     const action = str(body.action);
     const stopping = ["stop", "disarm"].includes(action);
-    if (["stop","disarm","clear_estop","height","balance"].includes(action) || action==="arm"&&body.owner!=="navigation" || action==="move"&&body.mode!=="release") motionEpoch.current += 1;
+    if (["stop","disarm","clear_estop","height","balance","navigation_pause"].includes(action) || action==="arm"&&body.owner!=="navigation" || action==="move"&&body.mode!=="release") motionEpoch.current += 1;
     const origin = controlIdentity(statusRef.current);
     const revision = settingsOf(statusRef.current).revision;
-    const manualIntent = ["move", "height", "balance", "arm", "clear_estop"].includes(str(body.action));
+    const manualIntent = ["move", "height", "balance", "arm", "clear_estop", "navigation_pause"].includes(str(body.action));
     if (!stopping && !manualIntent && !hasFreshControl()) await poll("control", true);
     // Never send an old press after STOP, replacement, device or generation change.
     if (!current()) return {};
     if (!stopping && (origin !== controlIdentity(statusRef.current) || revision !== settingsOf(statusRef.current).revision)) throw Object.assign(new Error("stale_control"), { data: { error: "stale_control" } });
-    const envelope = makeEnvelope(body);
+    const superseding = (action === "move" || action === "navigation_pause")
+      ? pendingResume.current ?? (safetyOf(statusRef.current).owner === "navigation" ? { requestId:str(record(safetyOf(statusRef.current).operator_control).operation_id), generation:str(safetyOf(statusRef.current).generation) } : null)
+      : null;
+    const intervene = action === "move" && operatorPrioritySupported(statusRef.current) && (safetyOf(statusRef.current).owner === "navigation" || !!superseding);
+    const interventionEpoch = motionEpoch.current, interventionSession = sessionRef.current;
+    const adopting = intervene || action === "navigation_pause";
+    if (adopting) abortReads();
+    const envelope = makeEnvelope({ ...body, ...(intervene ? {intervene:true} : {}), ...(superseding ? {supersedes_operation_id:superseding.requestId} : {}) });
+    if (adopting) pendingHandoff.current = {requestId:str(envelope.request_id),generation:str(envelope.generation),session:interventionSession,epoch:interventionEpoch,deadline:Date.now()+Number(envelope.ttl_ms)};
+    if (action === "navigation_resume") pendingResume.current = { requestId:str(envelope.request_id), generation:str(envelope.generation) };
     const movement = action === "move";
     if (movement) setManualRequest({ ...envelope, phase: "pending" });
     let response: JsonRecord;
@@ -222,42 +252,62 @@ export function useRider(section: Section) {
       if (movement && current()) setManualRequest({ ...envelope, phase: response.pending === true ? "pending" : "accepted" });
     } catch (error) {
       if (movement && current()) setManualRequest({ ...envelope, phase: "failed" });
+      if (pendingHandoff.current?.requestId === envelope.request_id) pendingHandoff.current = null;
+      if (action === "navigation_resume" && pendingResume.current?.requestId === envelope.request_id) pendingResume.current = null;
       throw error;
     }
+    if (adopting && current() && interventionEpoch === motionEpoch.current && interventionSession === sessionRef.current) {
+      const adopted = adoptIntervention(statusRef.current, response, envelope, panelId);
+      if (adopted) {
+        statusRef.current = adopted; setStatus(adopted);
+        const last = safetyOf(adopted).last_seq;
+        seqRef.current = finite(last) ? last : Number(envelope.seq);
+        if (pendingResume.current?.requestId === envelope.supersedes_operation_id) pendingResume.current = null;
+      } else {
+        if (pendingHandoff.current?.requestId === envelope.request_id) pendingHandoff.current = null;
+        hold.cancel();
+        throw Object.assign(new Error("operator_intervention_unconfirmed"), {data:{error:"operator_intervention_unconfirmed"}});
+      }
+    }
+    if (pendingHandoff.current?.requestId === envelope.request_id) pendingHandoff.current = null;
+    if (action === "navigation_resume" && pendingResume.current?.requestId === envelope.request_id) pendingResume.current = null;
     if (announce) setNotice({ key: response.pending === true || record(response.operation).status === "pending" ? "commandPending" : "commandAccepted", tone: "info" });
     return response;
-  }, [hasFreshControl, makeEnvelope, mutation, poll]);
+  }, [abortReads, hasFreshControl, hold, makeEnvelope, mutation, panelId, poll]);
   useEffect(() => { commandRef.current = sendControl; }, [sendControl]);
   const command = useCallback(async (body: JsonRecord, throwOnError = false, quiet = false) => {
     const key = str(body.action); if (key !== "move") hold.cancel();
     const safetyAction = ["arm", "clear_estop", "stop", "disarm"].includes(key);
     if (safetyAction) motionBlocked.current += 1;
     setBusy(key);
-    try { if ((key === "arm" || key === "clear_estop") && !clockRef.current) await poll("control", true); const response = await sendControl(body, () => true, !quiet); if (key !== "move") await poll(); return response; }
-    catch (error) { hold.cancel(); setNotice({ key: errorCode(error).includes("stale") ? "staleControl" : "requestFailed", code: errorCode(error), tone: "error" }); if (throwOnError) throw error; return null; }
-    finally { if (safetyAction) motionBlocked.current = Math.max(0, motionBlocked.current - 1); setBusy(null); }
+    const epoch = motionEpoch.current;
+    try { if ((key === "arm" || key === "clear_estop") && !clockRef.current) await poll("control", true); const response = await sendControl(body, () => true, !quiet); if (key !== "move") await poll(undefined, key === "navigation_resume" || key === "navigation_pause"); return response; }
+    catch (error) { if (epoch === motionEpoch.current || key !== "navigation_resume") hold.cancel(); setNotice({ key: errorCode(error).includes("stale") ? "staleControl" : "requestFailed", code: errorCode(error), tone: "error" }); if (throwOnError) throw error; return null; }
+    finally { if (safetyAction) motionBlocked.current = Math.max(0, motionBlocked.current - 1); setBusy(value => value === key ? null : value); }
   }, [hold, poll, sendControl]);
   const stopManual = useCallback(async () => {
     motionEpoch.current += 1;
     hold.cancel();
+    if (operatorSessionActive(statusRef.current) || pendingResume.current) return command({ action: "navigation_pause" }, true);
     if (!navigationAvailable(statusRef.current, panelId)) return null;
     return command({ action: "move", device_settings: true, direction: "forward", mode: "release" });
   }, [command, hold, panelId]);
   const startNavigationTrial = useCallback(async (plan: string, revision: number) => {
     const origin = sessionRef.current, epoch = motionEpoch.current;
-    hold.cancel(); motionBlocked.current += 1; setBusy("trial");
+    const priority = operatorPrioritySupported(statusRef.current);
+    hold.cancel(); if (!priority) motionBlocked.current += 1; setBusy("trial");
     try {
       await poll("control", true);
       if (sessionRef.current !== origin || motionEpoch.current !== epoch || document.hidden) throw new Error("navigation_trial_cancelled");
       const envelope = makeEnvelope({action:"arm"});
       const {seq: _seq, action: _action, ...intent} = envelope;
       void _seq; void _action;
-      const result = await mutation("/navigation/trial", {...intent, config_revision:revision, operator_consent:true, operator_plan:plan}, "POST", true);
+      const result = await mutation("/navigation/trial", {...intent, ...(priority ? {panel_id:panelId,operator_control_version:1} : {}), config_revision:revision, operator_consent:true, operator_plan:plan}, "POST", true);
       if (sessionRef.current !== origin || motionEpoch.current !== epoch) throw new Error("navigation_trial_cancelled");
       await poll("control", true);
       return result;
-    } finally { motionBlocked.current = Math.max(0, motionBlocked.current - 1); setBusy(null); }
-  }, [hold, poll, makeEnvelope, mutation]);
+    } finally { if (!priority) motionBlocked.current = Math.max(0, motionBlocked.current - 1); setBusy(null); }
+  }, [hold, poll, makeEnvelope, mutation, panelId]);
   const currentSession = useCallback(() => sessionRef.current, []);
   const currentMotionEpoch = useCallback(() => motionEpoch.current, []);
   const currentGeneration = useCallback(() => str(safetyOf(statusRef.current).generation), []);
@@ -287,6 +337,11 @@ export function useRider(section: Section) {
     };
     hold.cancel(); setBusy("takeover");
     try {
+      if (operatorSessionActive(statusRef.current) && safetyOf(statusRef.current).state === "ARMED") {
+        await command({ action: "navigation_pause" }, true, true);
+        return;
+      }
+      if (!operatorPrioritySupported(statusRef.current)) {
       // Keep the preview when handing motor authority back to the operator.
       assertCurrent();
       await mutation("/goal/s2_camera_preview", { enabled: true }, "POST", true);
@@ -294,6 +349,7 @@ export function useRider(section: Section) {
       for (const name of ["s14_venom_navigation", "s15_venom_perception"]) {
         assertCurrent();
         if (goals.some(goal => goal.name === name)) await mutation("/goal/" + name, { enabled: false }, "POST", true);
+      }
       }
       await poll("control", true);
       assertCurrent();

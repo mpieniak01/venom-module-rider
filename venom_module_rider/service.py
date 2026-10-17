@@ -375,10 +375,14 @@ class RiderService:
     async def control(self, body: dict, session):
         action = body.get("action")
         stop = action in {"stop", "disarm"}
+        priority = action == "navigation_pause" or (
+            action == "move" and body.get("intervene") is True
+        )
         if not stop:
             self.check_session(session)
         if stop:
             self.stop_sample_events("auto_global_stop")
+        if stop or priority:
             self.cancel_pending_motion()
         elif self.conversation_invalidator:
             self.conversation_invalidator()
@@ -404,6 +408,7 @@ class RiderService:
                 method="POST",
                 body=body,
                 stop=stop,
+                **({"priority": True} if priority else {}),
             )
         )
         self.commands.add(task)
@@ -432,6 +437,7 @@ class RiderService:
 
     async def mutate(self, path, body, session, *, method="POST"):
         self.check_session(session)
+        epoch = self.epoch
         if path == "/api/navigation/config" or (
             isinstance(body, dict)
             and (
@@ -453,6 +459,8 @@ class RiderService:
         try:
             result = await task
             self.check_session(session)
+            if path == "/api/navigation/trial" and epoch != self.epoch:
+                raise RiderError("command_superseded")
             return result
         except asyncio.CancelledError as exc:
             raise RiderError("stale_device_session") from exc
@@ -598,6 +606,10 @@ class RiderService:
 
     async def configure_pipeline(self, body, session):
         self.check_session(session)
+        if body.get("action") == "stop":
+            # Retire host requests before awaiting preview cleanup. Pi performs
+            # the authoritative retirement before its capture teardown.
+            self.cancel_pending_motion()
         self.stop_sample_events("auto_source_stopped")
         media = getattr(self, "media_hub", None)
         if media is not None:

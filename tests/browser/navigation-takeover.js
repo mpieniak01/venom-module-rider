@@ -1,5 +1,7 @@
 // Every Rider request is intercepted. No request can reach a physical robot.
 async (page) => {
+  const base=new URL(page.url()).origin;
+  if(!["localhost","127.0.0.1","[::1]"].includes(new URL(base).hostname))throw new Error("loopback UI required");
   await page.setViewportSize({width:1600,height:1400});
   const check=(ok,message)=>{if(!ok)throw new Error(message);};
   const wait=async(fn,message)=>{const end=Date.now()+6000;while(!await fn()){if(Date.now()>end)throw new Error(message);await new Promise(r=>setTimeout(r,30));}};
@@ -71,7 +73,7 @@ async (page) => {
       }
       return json({});
     });
-    await page.goto("http://localhost:3300/rider");await page.bringToFront();
+    await page.goto(base+"/rider");await page.bringToFront();
     await page.getByTestId("workspace-automatic").click();
     await page.getByTestId("loop-start").waitFor();
     if(mode==="standalone"){
@@ -82,9 +84,8 @@ async (page) => {
       await wait(async()=>await page.locator("img").evaluateAll(images=>images.some(image=>image.complete&&image.naturalWidth>0)),"preview did not decode");
       check(await page.getByTestId("vision-preview-paused").count()===0,"fresh standalone preview incorrectly labelled stopped");
       const beforeBusy=await page.locator("img").first().getAttribute("src");
-      const busyResponse=page.waitForResponse(response=>response.url().includes("/camera/venom")&&response.status()===429);
       previewBusyReplies=1;
-      await busyResponse;
+      await wait(()=>previewBusyReads>=1,"standalone busy response not exercised");
       await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
       check(await page.getByTestId("vision-preview-paused").count()===0,"transient busy falsely expired a still-current preview");
       check(await page.locator("img").first().getAttribute("src")===beforeBusy,"busy reply replaced or redated the original image");
@@ -211,5 +212,6 @@ async (page) => {
     check(!calls.some(c=>c.path==="/control"&&c.body.action!=="stop"),"browser issued actuators directly");
     return {mode,result:"PASS",trialRequests:calls.filter(c=>c.path==="/navigation/trial").length,armCount};
   };
-  return {result:"PASS",scenarios:[await run("standalone"),await run("ground"),await run("editor"),await run("remote"),await run("zone"),await run("positive"),await run("steering"),await run("cancel"),await run("terminal")]};
+  const checked=async mode=>{try{return await run(mode);}catch(error){throw new Error(mode+": "+error.message);}};
+  try { return {result:"PASS",scenarios:[await checked("standalone"),await checked("ground"),await checked("editor"),await checked("remote"),await checked("zone"),await checked("positive"),await checked("steering"),await checked("cancel"),await checked("terminal")]}; } finally { await page.goto("about:blank"); await page.unroute("**/api/v1/rider/**"); }
 }

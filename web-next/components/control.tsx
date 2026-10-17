@@ -1,4 +1,5 @@
 import { VisionSectors } from "./vision-sectors";
+import { operatorPrioritySupported } from "../lib/navigation";
 import { CameraPipelineControls } from "./camera-pipeline";
 import { CorridorOverlay, type CorridorEditorProps } from "./corridor-overlay";
 import { manualFeedback } from "../lib/manual-feedback";
@@ -77,7 +78,7 @@ export function ManualPad({ client, t, language, compact = false }: { client: Ri
           <Icon size={compact ? 20 : 25} />{!compact && <span>{t(direction)}</span>}<span className={styles.small}>{displayValue(record(directions[direction]).speed, speedDescriptor, language)} {speedDescriptor.display_unit ?? ""}</span>
         </button>;
       })}
-      <button type="button" className={`${styles.padCenter} ${styles.padStop}`} style={{ gridRow: 2, gridColumn: 2 }} aria-label={t("stopMotors")} title={t("manualStopHint")} data-testid="rider-pad-stop" onClick={() => void client.stopManual()}><CircleStop size={27} /><span>{t("stopShort")}</span></button>
+      <button type="button" className={`${styles.padCenter} ${styles.padStop}`} style={{ gridRow: 2, gridColumn: 2 }} aria-label={t("stopMotors")} title={t(operatorPrioritySupported(client.status) ? "operatorPauseHint" : "manualStopHint")} data-testid="rider-pad-stop" onClick={() => void client.stopManual().catch(() => undefined)}><CircleStop size={27} /><span>{t("stopShort")}</span></button>
     </div>
     <div className={styles.padDetails}>
     <div className={styles.padHelp} id={helpId}>
@@ -134,13 +135,22 @@ export function CameraPanel({ client, t, language, compact = false, onObservatio
     setPreviewBusy(true);setPreviewFailure("");
     try{
       if(!client.cameraStream) {
-        if(client.pipeline.status) {
-          if(["stopped","failed"].includes(client.pipeline.status.state))await client.pipeline.change("start");
-        } else await client.mutate("/goal/s2_camera_preview",{enabled:true},"POST",true);
+        if (!client.pipeline.status) await client.mutate("/goal/s2_camera_preview",{enabled:true},"POST",true);
       }
       client.setCameraStream(stream);
     }catch{setPreviewFailure("requestFailed");}
     finally{setPreviewBusy(false);}
+  };
+  const power = client.pipeline.status;
+  const cameraOn = !!power && ["active", "starting", "waiting_frame"].includes(power.state);
+  const changePower = async () => {
+    setPreviewFailure("");
+    try {
+      const next = await client.pipeline.change(cameraOn ? "stop" : "start");
+      // A submitted request or a still-active foreign consumer is not OFF.
+      if (next?.state === "stopped") { client.setCameraStream(null); setDisplayed(null); }
+      else if (!cameraOn && next) client.setCameraStream("raw");
+    } catch { setPreviewFailure("pipeline.failure"); }
   };
   const selected = client.cameraStream ?? "raw";
   const transitioning=selected==="venom"&&client.cameraTransition;
@@ -150,7 +160,10 @@ export function CameraPanel({ client, t, language, compact = false, onObservatio
     ? record(visible.analysis.source) : visible?.analysis;
   const streams = client.pipeline.status?.profile.analysis_location === "local"
     ? (["raw", "proc"] as const) : compact ? (["raw", "venom"] as const) : (["raw", "venom", "proc"] as const);
-  return <Panel className={compact?styles.cameraEmbedded:""} title={t("camera")} hint={compact?undefined:t("cameraHint")} extra={<Button data-testid="camera-preview-toggle" onClick={() => void chooseStream(client.cameraStream ? null : "raw")} disabled={!client.canMutate||previewBusy}><Camera size={15} />{t(client.cameraStream ? "hidePreview" : "showPreview")}</Button>}>
+  return <Panel className={compact?styles.cameraEmbedded:""} title={t("camera")} hint={compact?undefined:t("cameraHint")} extra={<div className={styles.flex}>
+      {power && <><span data-testid="camera-power-state"><Pill tone={power.state === "active" ? "good" : "warning"}>{t("pipeline.state." + power.state)}</Pill></span><Button data-testid="camera-power-toggle" tone={cameraOn ? "danger" : undefined} onClick={() => void changePower()} disabled={!client.canMutate||client.pipeline.busy||power.state === "stopping"}>{t(cameraOn ? "cameraSwitchOff" : "cameraSwitchOn")}</Button></>}
+      <Button data-testid="camera-preview-toggle" onClick={() => void chooseStream(client.cameraStream ? null : "raw")} disabled={!client.canMutate||previewBusy}><Camera size={15} />{t(client.cameraStream ? "hidePreview" : "showPreview")}</Button>
+    </div>}>
     <div className={styles.flex} style={{ marginBottom: 14 }}>{streams.map(stream => <Button key={stream} tone={selected === stream ? "primary" : undefined} aria-pressed={selected === stream} onClick={() => void chooseStream(stream)} disabled={!client.canMutate||previewBusy}>{t(stream === "venom" ? "visionVenom" : stream === "proc" ? "visionPi" : stream)}</Button>)}</div>
     <div className={styles.camera}>{client.camera&&notice&&<div className={transitioning?styles.cameraPaused+" "+styles.cameraTransition:styles.cameraPaused} role="status" data-testid="vision-preview-paused">{t(notice!)}</div>}{client.camera ? <><img data-capture-key={client.camera.captureKey} src={client.camera.url} alt={t("cameraAlt")} onLoad={event=>{const {naturalWidth,naturalHeight}=event.currentTarget;setImageSize(previous=>previous[0]===naturalWidth&&previous[1]===naturalHeight?previous:[naturalWidth,naturalHeight]);client.markCameraDecoded(event.currentTarget.currentSrc,true);if(client.camera&&event.currentTarget.currentSrc===client.camera.url)setDisplayed(client.camera);}} onError={event=>{client.markCameraDecoded(event.currentTarget.currentSrc,false);setDisplayed(null);}} />{editor&&<CorridorOverlay editor={editor} size={imageSize} t={t}/>}</> : <Empty><Camera size={32} />{t(transitioning?"visionPreviewRestarting":client.mediaError ?? (client.cameraStream ? "frameMissing" : "showPreview"))}{onObservation&&<><p className={styles.hint}>{t("loopPreviewHelp")}</p><Button tone="primary" disabled={observationDisabled} onClick={onObservation}>{t("loopPreparePreview")}</Button></>}</Empty>}</div>
     {previewFailure&&<p role="alert" className={styles.hint}>{t(previewFailure)}</p>}

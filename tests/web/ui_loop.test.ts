@@ -442,13 +442,14 @@ test("forward driving is the main action; observation is a closed optional secti
  assert.equal(jsxAttribute(start,"tone"),'"primary"');
  assert.ok(jsxByTestId("trial-start-help"));
 });
-test("the deliberate drive handler calls one prepared trial and never races observation or ARM",()=>{
+test("the deliberate drive handler chooses warm resume or prepared trial without observation or ARM",()=>{
  const handler=matchingNodes(navigationSource,node=>ts.isVariableDeclaration(node)&&node.name.getText(navigationSource)==="runTrial")[0];
  assert.ok(handler);
  const calls=matchingNodes(handler,ts.isCallExpression).map(node=>(node as ts.CallExpression).expression.getText(navigationSource));
  assert.equal(calls.filter(call=>call==="client.startNavigationTrial").length,1);
- for(const prerequisite of ["ensureAnalysis","observePreview","client.command","client.mutate"])assert.equal(calls.includes(prerequisite),false,prerequisite);
- assert.equal(/freshPolicyFrame|imageDecision|vision_action|clear_count/.test(handler.getText(navigationSource)),false);
+ for(const prerequisite of ["ensureAnalysis","observePreview","client.mutate"])assert.equal(calls.includes(prerequisite),false,prerequisite);
+ assert.ok(handler.getText(navigationSource).includes('action:"navigation_resume"'));
+ assert.equal(/action:"arm"|freshPolicyFrame|imageDecision|vision_action|clear_count/.test(handler.getText(navigationSource)),false);
  const effects=matchingNodes(navigationSource,node=>ts.isCallExpression(node)&&node.expression.getText(navigationSource)==="useEffect");
  for(const effect of effects){
   const actions=matchingNodes(effect,ts.isCallExpression).map(node=>(node as ts.CallExpression).expression.getText(navigationSource));

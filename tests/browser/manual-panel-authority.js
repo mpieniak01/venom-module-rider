@@ -3,6 +3,8 @@ async page => {
  const check=(ok,reason)=>{if(!ok)throw new Error(reason)};
  const base=new URL(page.url()).origin;
  check(["localhost","127.0.0.1","[::1]"].includes(new URL(base).hostname),"loopback fixture required");
+ await page.goto(base+"/rider");
+ await page.getByTestId("takeover-manual").waitFor();
  const cfg=await(await page.request.get(base+"/api/v1/rider/config")).json();
  check(cfg.devices?.length && cfg.devices.every(d=>d.mode==="demo"),"demo-only allowlist required");
  await page.getByTestId("takeover-manual").click();

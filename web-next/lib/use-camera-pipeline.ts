@@ -55,6 +55,7 @@ export function useCameraPipeline(section: Section, session: string | undefined,
       const next = readCameraPipeline(response);
       if (!next) throw new Error("camera_pipeline_invalid_status");
       statusRef.current = next; setStatus(next); setSupported(true); setError(next.error);
+      return next;
     } catch (failure) {
       if (origin === sessionRef.current) {
         setError(errorCode(failure));

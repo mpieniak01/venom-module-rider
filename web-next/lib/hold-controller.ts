@@ -18,11 +18,13 @@ export class HoldController {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private token = 0;
   private inFlight: Promise<void> = Promise.resolve();
+  private preparation: {token:number;started:number;ready:boolean;submitted:boolean;failed:boolean;promise:Promise<void>} | null = null;
   private sending = false;
   private sendingMode: MovementIntent["mode"] | null = null;
   constructor(private readonly options: {
     timing: () => HoldTiming | null;
     canMove: () => boolean;
+    prepare?: (current: () => boolean) => Promise<void> | void;
     send: (intent: MovementIntent, current: () => boolean) => Promise<void>;
     onActive: (direction: Direction | null) => void;
     onMode?: (mode: "hold" | "continuous" | null) => void;
@@ -37,6 +39,7 @@ export class HoldController {
     this.press = { direction, pointerId, started: this.now(), held: false, token };
     this.options.onActive(direction);
     this.options.onMode?.("hold");
+    this.prepare(token);
     this.timer = setTimeout(() => this.beginHold(token), timing.click_threshold_ms);
   }
   toggle(direction: Direction) {
@@ -47,6 +50,7 @@ export class HoldController {
     this.press = { direction, pointerId: -3, started: this.now(), held: true, token, latched: true };
     this.options.onActive(direction);
     this.options.onMode?.("continuous");
+    this.prepare(token);
     void this.renew(token);
   }
   releasePointer() { if (!this.press?.latched) this.release(); }
@@ -57,9 +61,10 @@ export class HoldController {
     this.clearTimer();
     this.options.onActive(null);
     this.options.onMode?.(null);
-    if (press.held) this.enqueueRelease(press.direction, ++this.token);
+    const token = ++this.token;
+    if (this.preparation?.token === press.token) this.preparation.token = token;
+    if (press.held) this.enqueueRelease(press.direction, token);
     else {
-      const token = ++this.token;
       void this.dispatch({ direction: press.direction, mode: "pulse" }, () => token === this.token && !this.press);
     }
   }
@@ -72,11 +77,28 @@ export class HoldController {
     this.options.onActive(null);
     this.options.onMode?.(null);
     const token = ++this.token;
+    if (this.preparation?.token === press.token) this.preparation.token = token;
     if (press?.held) this.enqueueRelease(press.direction, token);
   }
   cancel() {
-    this.press = null; ++this.token; this.clearTimer();
+    this.press = null; ++this.token; this.preparation = null; this.clearTimer();
     this.options.onActive(null); this.options.onMode?.(null);
+  }
+  private prepare(token: number) {
+    const preparation = {token,started:this.now(),ready:false,submitted:false,failed:false,promise:Promise.resolve()};
+    this.preparation = preparation;
+    const current = () => this.preparation === preparation && this.token === preparation.token;
+    try {
+      const result = this.options.prepare?.(current);
+      if (!result) { preparation.ready = true; return; }
+      preparation.promise = result.catch(error => {
+        preparation.failed = true;
+        if (current()) { this.cancel(); this.options.onError(error); }
+      });
+    } catch (error) {
+      preparation.failed = true;
+      if (current()) { this.cancel(); this.options.onError(error); }
+    }
   }
   private now() { return this.options.now?.() ?? Date.now(); }
   private clearTimer() { if (this.timer) clearTimeout(this.timer); this.timer = null; }
@@ -106,9 +128,21 @@ export class HoldController {
     void this.dispatch({ direction, mode: "release" }, () => this.token === token && !this.press);
   }
   private async dispatch(intent: MovementIntent, valid: () => boolean) {
+    const preparation = this.preparation;
+    if (preparation && !preparation.ready) {
+      await preparation.promise;
+      if (!valid() || preparation.failed || preparation !== this.preparation) return;
+      if (this.now() - preparation.started >= (this.options.timing()?.request_ttl_ms ?? 0)) { this.cancel(); return; }
+      preparation.ready = true;
+    }
     // Replacement waits only for the request already being sent, never for a queue.
     if (this.sending) await this.inFlight;
     if (!valid()) return;
+    // Fresh envelope timestamps cannot make a queued, expired gesture current.
+    if (preparation && !preparation.submitted) {
+      if (preparation !== this.preparation || this.now() - preparation.started >= (this.options.timing()?.request_ttl_ms ?? 0)) { this.cancel(); return; }
+      preparation.submitted = true;
+    }
     this.sending = true;
     this.sendingMode = intent.mode;
     const sentToken = this.token;

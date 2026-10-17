@@ -84,6 +84,87 @@ class ReplayNavigation:
         self.http = httpx.AsyncClient(trust_env=False, follow_redirects=False)
         self.motion_generation: str | None = None
         self.trial_requests: list[str] = []
+        self.operator_mode = False
+        self.operator_state = "idle"
+        self.operator_reason = "not_started"
+        self.operation_id = None
+        self.operation_origin_generation = None
+        self.operation_origin_sequence = -1
+
+    def operator_status(self):
+        return {
+            "version": 1,
+            "state": self.operator_state,
+            "operation_id": self.operation_id,
+            "generation": self.state.generation,
+            "reason": self.operator_reason,
+        }
+
+    def supersedes_operation(self, body):
+        return (
+            self.operator_mode
+            and self.state.state == "ARMED"
+            and self.state.owner == "navigation"
+            and self.operator_state in {"qualifying", "active"}
+            and isinstance(self.operation_id, str)
+            and body.get("supersedes_operation_id") == self.operation_id
+            and body.get("generation")
+            in {self.state.generation, self.operation_origin_generation}
+            and body.get("panel_id") == self.state.panel_id
+            and self.state.panel_id is not None
+            and body.get("source") == "manual"
+            and body.get("execution_context") == "panel"
+            and (
+                body.get("action") == "navigation_pause"
+                or (body.get("action") == "move" and body.get("intervene") is True)
+            )
+        )
+
+    def operator_command(self, body):
+        """In-memory copy of the negotiated Pi boundary; never calls hardware."""
+        if not self.operator_mode or not self.status.get("running"):
+            raise ValueError("operator_control_not_available")
+        if "supersedes_operation_id" in body and not self.supersedes_operation(body):
+            raise ValueError("navigation_operation_stale")
+        if not body.get("panel_id"):
+            raise ValueError("operator_panel_required")
+        if body["panel_id"] != self.state.panel_id:
+            raise ValueError("panel_owner_mismatch")
+        safety = self.state.safety()
+        if safety["state"] != "ARMED":
+            raise ValueError("motion_disarmed")
+        if body.get("settings_revision") != self.state.controls["revision"]:
+            raise ValueError("manual_settings_stale")
+        resume = body.get("action") == "navigation_resume"
+        if resume and (
+            self.state.arming_mode != "timed" or self.state.arming_deadline is None
+        ):
+            raise ValueError("operator_timed_consent_required")
+        if resume and self.operator_state in {"active", "qualifying"}:
+            raise ValueError("navigation_already_active")
+        self.operation_origin_generation = self.state.generation if resume else None
+        self.operation_origin_sequence = body["seq"] if resume else -1
+        self.state.deadline = 0.0
+        self.state.generation = uuid.uuid4().hex
+        self.state.owner = "navigation" if resume else "manual"
+        # Preserve the original timed deadline; this operation never ARM/renews.
+        self.operator_state = "qualifying" if resume else "paused"
+        self.operator_reason = (
+            "clear_frames_pending" if resume else "operator_intervention"
+        )
+        self.operation_id = body.get("request_id")
+        self.status.update(
+            paused=not resume,
+            simulated_moving=False,
+            observed_at=time.time(),
+            generation=self.state.generation,
+            operator_control_version=1,
+        )
+
+    def pause_operator(self, reason):
+        self.operator_state = "paused"
+        self.operator_reason = reason
+        self.status.update(paused=True, simulated_moving=False, stop_reason=reason)
 
     def attach(self, state):
         self.state = state
@@ -261,6 +342,7 @@ class ReplayNavigation:
         if not self.policy["verified"] or not self.policy["calibration_id"]:
             raise ValueError("navigation_validation_required")
         self.trial_requests = [*self.trial_requests[-63:], body["request_id"]]
+        self.operator_mode = body.get("operator_control_version") == 1
         self.halt("operator_trial_prepare")
         self.state.goals["s2_camera_preview"] = True
         self.state.camera_on = True
@@ -286,6 +368,11 @@ class ReplayNavigation:
                 "execution_context": "panel",
                 "arming_mode": "timed",
                 "lease_s": 10,
+                **(
+                    {"panel_id": body["panel_id"], "operator_control_version": 1}
+                    if self.operator_mode
+                    else {}
+                ),
             }
         )
         if reply.status_code != 200:
@@ -349,13 +436,28 @@ class ReplayNavigation:
                 "actuation": False,
             },
         }
-        self.task = asyncio.create_task(self.run(policy, run))
+        if self.operator_mode:
+            self.operator_state = "qualifying"
+            self.operator_reason = "clear_frames_pending"
+            self.status["operator_control_version"] = 1
+            self.task = asyncio.create_task(self.run_operator(policy, run))
+        else:
+            self.task = asyncio.create_task(self.run(policy, run))
         if mode == "drive":
             self.watchdog = asyncio.create_task(self.watch())
 
     async def watch(self):
         while self.status["running"]:
+            if self.operator_mode and self.operator_state == "paused":
+                await asyncio.sleep(0.01)
+                continue
             if not self.lease.tick():
+                if self.operator_mode:
+                    self.operator_state = "paused"
+                    self.operator_reason = self.lease.reason
+                    self.status.update(paused=True, simulated_moving=False)
+                    await asyncio.sleep(0.01)
+                    continue
                 self.status.update(
                     running=False,
                     latched=True,
@@ -365,6 +467,98 @@ class ReplayNavigation:
                 )
                 return
             await asyncio.sleep(0.01)
+
+    async def run_operator(self, policy, run):
+        """Keep one replay producer alive while motion authorization changes."""
+        sequence = 0
+        previous_drive = True
+        try:
+            while self.status["running"]:
+                safety = self.state.safety()
+                generation = safety["generation"]
+                drive = (
+                    self.operator_state in {"qualifying", "active"}
+                    and safety["state"] == "ARMED"
+                    and safety["owner"] == "navigation"
+                )
+                if not drive and self.operator_state in {"qualifying", "active"}:
+                    self.pause_operator("motion_disarmed")
+                if not drive and self.operator_state in {"qualifying", "active"}:
+                    self.pause_operator("motion_disarmed")
+                if generation != self.motion_generation or drive != previous_drive:
+                    previous_drive = drive
+                    run = uuid.uuid4().hex
+                    self.motion_generation = generation
+                    self.lease = self.lease_factory(
+                        policy,
+                        run,
+                        self.drive,
+                        self.brake,
+                        self.clock,
+                        pause=lambda duration: self.drive(0.0, duration),
+                    )
+                    self.status.update(run_id=run, generation=generation)
+                sequence += 1
+                capture = self.clock()
+                frame_id = hashlib.sha256(
+                    self.payload + str(sequence).encode()
+                ).hexdigest()
+                meta = VisionFrame(
+                    protocol_version=1,
+                    run_id=run,
+                    frame_id=frame_id,
+                    sequence=sequence,
+                    config_revision=policy["revision"],
+                    age_ms=0.0,
+                    deadline_ms=policy["decision_budget_ms"],
+                    mode="drive" if drive else "observe",
+                    corridor=tuple(policy["corridor"]),
+                    **{
+                        key: policy[key]
+                        for key in (
+                            "verified",
+                            "calibration_id",
+                            "model_sha256",
+                            "perception",
+                        )
+                    },
+                )
+                try:
+                    if self.drop_link:
+                        raise TimeoutError("replay_link_dropped")
+                    decision = await self.request(meta.model_dump(), self.payload)
+                except Exception:
+                    if drive:
+                        self.lease.halt("replay_transport_failed")
+                    self.operator_state = "paused"
+                    self.operator_reason = "replay_transport_failed"
+                    self.status.update(paused=True, simulated_moving=False)
+                    await asyncio.sleep(0.2)
+                    continue
+                # An old asynchronous result cannot seize new manual authority.
+                if generation != self.state.generation:
+                    continue
+                accepted = (
+                    self.lease.accept(decision, frame_id, sequence, capture)
+                    if drive
+                    else False
+                )
+                if drive and not self.lease.latched and accepted:
+                    self.operator_state = "active"
+                    self.operator_reason = "clear_frames_ready"
+                elif drive and self.lease.latched:
+                    self.operator_state = "paused"
+                    self.operator_reason = self.lease.reason
+                self.status.update(
+                    decision=decision,
+                    observed_at=time.time(),
+                    paused=self.operator_state == "paused",
+                    simulated_moving=accepted,
+                    stop_reason=self.operator_reason,
+                )
+                await asyncio.sleep(0.03 if drive else 0.2)
+        except asyncio.CancelledError:
+            raise
 
     async def run(self, policy, run):
         sequence = 0
