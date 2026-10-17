@@ -98,7 +98,12 @@ def _resource(device: Device, service: Any, selected: bool, now: float) -> dict:
     if evidence is None:
         return row
     mono, wall, status = evidence
-    if not math.isfinite(mono) or not math.isfinite(wall) or wall <= 0:
+    if (
+        status not in {"online", "offline", "degraded"}
+        or not math.isfinite(mono)
+        or not math.isfinite(wall)
+        or wall <= 0
+    ):
         return row
     try:
         observed_at = _utc(wall)
@@ -170,8 +175,8 @@ async def observe_integration(app: Any) -> dict:
         }.get(selected["state"], "unknown")
         if (
             service
-            and service.connection_observation
-            and service.connection_observation[2] == "degraded"
+            and (evidence := _evidence(service)) is not None
+            and evidence[2] == "degraded"
             and selected["state"] == "connected"
         ):
             result["connectivity"] = "degraded"

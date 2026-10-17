@@ -344,8 +344,11 @@ async def _cached(payload):
     return copy.deepcopy(payload)
 
 
-async def test_direct_existing_read_can_update_contact_after_cached_failure(service):
-    observe(service, "offline", age=10)
+@pytest.mark.parametrize("previous", ["offline", "degraded"])
+async def test_direct_existing_read_can_update_contact_after_cached_failure(
+    service, previous
+):
+    observe(service, previous, age=10)
     service.client = SimpleNamespace(
         json=AsyncMock(return_value={"data": {}, "meta": {}})
     )
@@ -353,6 +356,7 @@ async def test_direct_existing_read_can_update_contact_after_cached_failure(serv
     result = await observe_integration(app_for(service))
     assert result["resources"][0]["state"] == "connected"
     assert result["resources"][0]["source"] == "device_cache"
+    assert result["connectivity"] == "ok"
 
 
 async def test_selection_and_close_retire_previous_device_observations(service):
@@ -389,7 +393,7 @@ async def test_new_core_loader_normalizes_resource_identity_and_preserves_metada
     )
     await apply_module_observations(app, [item])
     assert item.resources_complete and item.resource_count == 2
-    assert item.active_resource_count == 0 and item.connectivity.value == "down"
+    assert item.active_resource_count is None and item.connectivity.value == "down"
     assert item.resources[0].id.startswith("module:rider:")
     assert (
         item.resources[0].selected and item.resources[0].configuration == "configured"
@@ -464,3 +468,9 @@ def test_manifest_hook_is_opt_in_and_router_import_does_not_load_it():
     assert callable(
         importlib.import_module("venom_module_rider.integrations").observe_integration
     )
+
+
+async def test_unknown_cached_connection_state_never_looks_connected(service):
+    service.connection_observation = (time.monotonic(), time.time(), "unexpected")
+    row = (await observe_integration(app_for(service)))["resources"][0]
+    assert row["state"] == "unverified" and row["observed_at"] is None
