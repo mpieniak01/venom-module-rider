@@ -9,7 +9,7 @@ async page => {
     while (!await fn()) { check(Date.now() < end, message); await new Promise(resolve => setTimeout(resolve, 40)); }
   };
   const calls = [];
-  let cameraOn = true, refuseStop = false, reads = 0;
+  let cameraOn = true, refuseStop = false, reads = 0, pipelineUnavailable = true;
   const profile = {analysis_location:"venom", local_engine:"canny", remote_transport:"snapshots"};
   const pipeline = () => ({contract_id:"rider.camera_pipeline",contract_version:1,revision:1,profile,active_profile:cameraOn?profile:null,state:cameraOn?"active":"stopped",transport_epoch:1,camera_session:cameraOn?"fixture-camera":null,capabilities:{analysis_locations:["venom","local"],local_engines:["canny"],remote_transports:["snapshots"]},effective_stages:{capture:cameraOn},error:null});
   await page.route("**/api/v1/rider/**", async route => {
@@ -25,7 +25,7 @@ async page => {
     }
     if (path === "/config") return json({devices:[{id:"fixture",label:"Fixture",mode:"demo"}],device_id:"fixture",session:"camera-fixture"});
     if (path === "/status") return json({connection:{configured:true,status:"online",session:"camera-fixture",device_id:"fixture",mode:"demo"},polling:{control_ms:200},errors:{},settings:{revision:1},control:{server_time:Date.now()/1000,safety:{state:"DISARMED",generation:"fixture",owner:null}},health:{},telemetry:{},resources:{},catalog:{features:[]},logic:{},face:{}});
-    if (path === "/camera/pipeline") return json(pipeline());
+    if (path === "/camera/pipeline") return pipelineUnavailable ? json({detail:{code:"fixture_unavailable"}},503) : json(pipeline());
     if (path.startsWith("/navigation/")) return json({config:{revision:1,mode:"observe"},status:{running:true,mode:"observe",stale:false},goals:{observe:true,drive:false},runtime:{known:true,observe:true,drive:true},detector:{configured:false}});
     if (path.startsWith("/camera/")) {
       reads++;
@@ -37,6 +37,18 @@ async page => {
     await page.goto(base + "/rider");
     const power = page.getByTestId("camera-power-toggle"), preview = page.getByTestId("camera-preview-toggle");
     await power.waitFor();
+    check(await power.isVisible() && await power.isDisabled(), "missing pipeline hid or enabled camera control");
+    check((await power.innerText()).includes("Wyłącz"), "missing pipeline lost OFF control");
+    await wait(async () => (await power.getAttribute("title") || "").includes("odczytać"), "read failure explanation absent");
+    pipelineUnavailable = false;
+    await wait(async () => !await power.isDisabled(), "camera control did not recover");
+    await page.getByRole("tab",{name:"Pomiary",exact:true}).click();
+    pipelineUnavailable = true;
+    await page.getByRole("tab",{name:"Sterowanie",exact:true}).click();
+    check(await power.isVisible(), "returning to control hid camera power");
+    await wait(async () => await power.isDisabled(), "stale camera action remained enabled");
+    pipelineUnavailable = false;
+    await wait(async () => !await power.isDisabled(), "camera control did not recover after tab change");
     check(calls.length === 0, "page startup changed resources");
     await page.getByRole("button",{name:"Obraz surowy",exact:true}).click();
     await wait(() => reads > 0, "raw preview not read");
@@ -60,6 +72,6 @@ async page => {
     await page.screenshot({path:"output/playwright/camera-lifecycle-desktop.png",fullPage:true});
     await page.setViewportSize({width:390,height:844});
     await page.screenshot({path:"output/playwright/camera-lifecycle-mobile.png",fullPage:true});
-    return {scenarios:["view and hide preserve capture", "foreign consumer remains visibly ON", "explicit OFF confirmed", "ON never arms or resumes"],calls};
+    return {scenarios:["OFF stays visible during unavailable pipeline and tab changes", "view and hide preserve capture", "foreign consumer remains visibly ON", "explicit OFF confirmed", "ON never arms or resumes"],calls};
   } finally { await page.unroute("**/api/v1/rider/**"); }
 }
