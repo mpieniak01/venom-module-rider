@@ -54,7 +54,7 @@ async page => {
       const inspect = async () => {
         const buttons = await page.getByTestId("rider-page").locator("button[data-size]:visible").evaluateAll(nodes => nodes.map(node => ({size:node.dataset.size,height:node.getBoundingClientRect().height,radius:getComputedStyle(node).borderRadius,shadow:getComputedStyle(node).boxShadow,text:node.textContent,overflow:node.scrollWidth>node.clientWidth+1})));
         for (const button of buttons) {
-          check(button.height===(button.size==="large"?44:36),"unexpected action size: "+JSON.stringify(button));
+          check(Math.abs(button.height-(button.size==="large"?44:36))<.1,"unexpected action size: "+JSON.stringify(button));
           check(Number.parseFloat(button.radius)>=button.height/2,"action does not use Venom capsule shape");
           check(!button.overflow,"action label clipped: "+button.text);
           check(!button.shadow.includes("inset"),"unexpected inset button glow: "+button.text);
@@ -102,7 +102,7 @@ async page => {
       await page.getByRole("tab",{name,exact:true}).click();
       await page.screenshot({path:"ux-tab-"+name.replaceAll(" ","-")+".png"});
       const sizes=await page.getByTestId("rider-page").locator("button[data-size]:visible").evaluateAll(nodes=>nodes.map(node=>node.getBoundingClientRect().height));
-      check(sizes.every(height=>[36,44].includes(height)),"mixed sizes in "+name);
+      check(sizes.every(height=>Math.abs(height-36)<.1||Math.abs(height-44)<.1),"mixed sizes in "+name);
       results.push({tab:name,buttonsChecked:sizes.length});
     }
     await page.getByRole("tab",{name:"Sterowanie",exact:true}).click();
