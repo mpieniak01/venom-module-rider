@@ -5,7 +5,7 @@ import { canSelectExecutor, computeAge, computeError, computeQuality, computeSta
 import { formatNumber, record, str, type JsonRecord } from "../lib/model";
 import type { Translator } from "../lib/i18n";
 import type { RiderClient } from "../lib/use-rider";
-import { Button, Details, Empty, Field, Panel, Pill } from "./primitives";
+import { Button, Details, Empty, Field, Panel, Pill, Select } from "./primitives";
 import styles from "../rider.module.css";
 import { Conversation } from "./conversation";
 
@@ -47,7 +47,7 @@ export function Compute({ client, t, language }: { client: ComputeClient; t: Tra
   return <div className={styles.stack}>
     <Conversation client={client} t={t} />
     <Panel title={t("computeExecutor")} hint={t("computeExecutorHint")} extra={<Link className={styles.button} href="/models"><BrainCircuit size={15} />{t("computeModels")}</Link>}>
-      {view.configured ? <><div className={styles.fieldRow}><Field label={t("computeExecutor")}><select className={styles.select} value={selected} disabled={!client.canMutate || applying || !!client.busy} onChange={event => setDraft({ identity: view.identity, value: event.target.value })}><option value="">{t("computeDisabled")}</option>{view.executors.map(executor => <option key={str(executor.id)} value={str(executor.id)} disabled={executor.credential_configured !== true}>{str(executor.id)}{executor.credential_configured !== true ? ` · ${t("computeNotConfigured")}` : ""}</option>)}</select></Field><Button tone="primary" disabled={!client.canMutate || applying || !!client.busy || !changed || !canSelectExecutor(view, selected)} onClick={() => void apply()}>{t("apply")}</Button></div><div className={styles.meta}><span>{t("computeSelected")}: {view.selected || t("computeDisabled")}</span><span>{t("computeRevision")}: {formatNumber(view.revision, language, 0)}</span></div></> : <Empty>{t("computeNotConfigured")}</Empty>}
+      {view.configured ? <><div className={styles.fieldRow}><Field label={t("computeExecutor")}><Select value={selected} disabled={!client.canMutate || applying || !!client.busy} onChange={event => setDraft({ identity: view.identity, value: event.target.value })}><option value="">{t("computeDisabled")}</option>{view.executors.map(executor => <option key={str(executor.id)} value={str(executor.id)} disabled={executor.credential_configured !== true}>{str(executor.id)}{executor.credential_configured !== true ? ` · ${t("computeNotConfigured")}` : ""}</option>)}</Select></Field><Button tone="primary" disabled={!client.canMutate || applying || !!client.busy || !changed || !canSelectExecutor(view, selected)} onClick={() => void apply()}>{t("apply")}</Button></div><div className={styles.meta}><span>{t("computeSelected")}: {view.selected || t("computeDisabled")}</span><span>{t("computeRevision")}: {formatNumber(view.revision, language, 0)}</span></div></> : <Empty>{t("computeNotConfigured")}</Empty>}
       <ErrorLabel code={view.error} t={t} />
     </Panel>
     <Panel title={t("computeCapabilities")} hint={t("computeCapabilitiesHint")} extra={<span className={styles.small}>{t("computeRunning")}: {t(view.queue.running === true ? "yes" : view.queue.running === false ? "no" : "unknown")} · {t("computePending")}: {formatNumber(view.queue.pending, language, 0)}</span>}>

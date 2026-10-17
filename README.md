@@ -425,3 +425,21 @@ native title. Tips do not intercept emergency Escape or pointer input.
 scenario against an isolated loopback demo. It mocks every Rider request and
 checks the two sizes, responsive geometry, tips, tab styles and emergency Escape.
 Run it alongside `control-workspace.js`; `make check-web` validates its syntax.
+
+### Form controls across Rider tabs
+
+Use `Input`, `Select`, `Textarea`, `Checkbox`, `Range` and `Field` from the module
+primitives for every form. `Input` wraps Venom's shared input; the native select,
+checkbox and slider preserve existing browser events, option values, producer
+bounds and fieldset semantics. All fields share theme colors, 36 px height,
+4 px corners, labels, focus and disabled/error states. Text areas grow vertically.
+Keep action buttons on the existing shared Venom button wrapper; direction pads,
+tabs and selectable media cards retain their specialized interaction geometry.
+
+`tests/browser/form-consistency.js` checks populated forms on a demo-only host:
+all six tabs, expanded automatic/camera settings, face controls and sample labels.
+It verifies native draft events, producer minimums, fieldset disabling, field
+geometry, accessible labels and light/dark colors at desktop and phone widths.
+Every Rider mutation is rejected; sample-library GETs are fixtures. Run with
+Playwright CLI `run-code --filename` alongside the existing control-workspace,
+camera-lifecycle and ui-consistency scenarios.

@@ -13,7 +13,7 @@ import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Camera, CirclePause, CircleS
 import { actuatorState, displayValue, finite, formatTime, record, safetyOf, settingsOf, type Direction, type NumericDescriptor } from "../lib/model";
 import type { Translator } from "../lib/i18n";
 import type { Frame, RiderClient } from "../lib/use-rider";
-import { Button, Empty, Field, Panel, Pill } from "./primitives";
+import { Button, Empty, Field, Panel, Pill, Range, Select } from "./primitives";
 import styles from "../rider.module.css";
 
 const arrows = [
@@ -48,10 +48,10 @@ export function ManualPad({ client, t, language, compact = false }: { client: Ri
   return <div className={styles.manualPad} data-testid="manual-pad" data-mode={mode}>
     <label className={styles.padMode}>
       <span>{t("manualDrivingMode")}</span>
-      <select value={mode} data-testid="rider-manual-mode" onChange={event => chooseMode(event.target.value as "pulse" | "continuous")}>
+      <Select value={mode} data-testid="rider-manual-mode" onChange={event => chooseMode(event.target.value as "pulse" | "continuous")}>
         <option value="pulse">{t("pulsePad")}</option>
         <option value="continuous">{t("continuousPad")}</option>
-      </select>
+      </Select>
     </label>
     <div className={styles.pad} role="group" aria-label={t("manual")} aria-describedby={helpId} data-mode={mode}>
       {arrows.map(({ direction, row, column, Icon }) => {
@@ -108,7 +108,7 @@ export function Posture({ client, t, language }: { client: RiderClient; t: Trans
   const capabilities = record(safetyOf(client.status).capabilities);
   const heightAvailable = record(capabilities.height).available !== false && descriptor.type === "integer" && finite(descriptor.minimum) && finite(descriptor.maximum);
   return <Panel title={t("posture")}>
-    {heightAvailable && height !== undefined ? <><Field label={`${t("height")} · ${descriptor.display_unit ?? descriptor.unit ?? ""}`}><div className={`${styles.flex} ${styles.space}`}><input className={styles.range} type="range" min={descriptor.minimum} max={descriptor.maximum} step={descriptor.step} value={height} onChange={event => setDraftHeight(Number(event.target.value))} disabled={!client.canMutate} /><strong>{displayValue(height, descriptor, language)}</strong></div></Field><p className={styles.hint}>{t("heightHint")}</p><div className={`${styles.flex} ${styles.space}`}><span className={styles.small}>{t("heightTarget")}: {displayValue(target.value, descriptor, language)} {descriptor.display_unit} · {formatTime(target.ts, language)}</span><Button disabled={!client.canMove || client.busy === "height" || !finite(height)} onClick={() => void client.command({ action: "height", height })}>{t("apply")}</Button></div></> : <Empty>{t("unavailable")}</Empty>}
+    {heightAvailable && height !== undefined ? <><Field label={`${t("height")} · ${descriptor.display_unit ?? descriptor.unit ?? ""}`}><div className={`${styles.flex} ${styles.space}`}><Range type="range" min={descriptor.minimum} max={descriptor.maximum} step={descriptor.step} value={height} onChange={event => setDraftHeight(Number(event.target.value))} disabled={!client.canMutate} /><strong>{displayValue(height, descriptor, language)}</strong></div></Field><p className={styles.hint}>{t("heightHint")}</p><div className={`${styles.flex} ${styles.space}`}><span className={styles.small}>{t("heightTarget")}: {displayValue(target.value, descriptor, language)} {descriptor.display_unit} · {formatTime(target.ts, language)}</span><Button disabled={!client.canMove || client.busy === "height" || !finite(height)} onClick={() => void client.command({ action: "height", height })}>{t("apply")}</Button></div></> : <Empty>{t("unavailable")}</Empty>}
     <div className={styles.rule} />
     <div className={`${styles.flex} ${styles.space}`}><div><strong style={{ fontSize: 13 }}>{t("balance")}</strong><p className={styles.hint} style={{ marginBottom: 0 }}>{t("balanceHint")}</p></div><Button aria-pressed={balance.enabled === true} disabled={!client.canMove || (balanceDescriptor.type !== "boolean" || record(capabilities.balance).available === false) || client.busy === "balance"} onClick={() => void client.command({ action: "balance", enabled: balance.enabled !== true })}>{t(balance.enabled === true ? "disable" : "enable")}</Button></div>
     <div className={styles.meta}>{t("state")}: {t(balance.enabled === true ? "on" : balance.enabled === false ? "off" : "unknown")}</div>
