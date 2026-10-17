@@ -1,7 +1,8 @@
-import { useEffect, useId, useState, type ButtonHTMLAttributes, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useId, useState, type ButtonHTMLAttributes, type CSSProperties, type InputHTMLAttributes, type SelectHTMLAttributes, type TextareaHTMLAttributes, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Button as VenomButton } from "@/components/ui/button";
 import { Info } from "lucide-react";
+import { Input as VenomInput } from "@/components/ui/input";
 import type { NumericDescriptor } from "../lib/model";
 import type { Translator } from "../lib/i18n";
 import styles from "../rider.module.css";
@@ -41,12 +42,32 @@ export function Pill({ children, tone }: { children: ReactNode; tone?: "good" | 
   return <span className={`${styles.pill} ${tone === "good" ? styles.pillGood : tone === "warning" ? styles.pillWarning : tone === "danger" ? styles.pillDanger : ""}`}>{children}</span>;
 }
 export function Field({ label, children }: { label: string; children: ReactNode }) { return <label className={styles.field}><span>{label}</span>{children}</label>; }
+/** Theme-aware Venom input; native attributes and change events are preserved. */
+export function Input({ className = "", ...props }: InputHTMLAttributes<HTMLInputElement>) {
+  return <VenomInput className={`${styles.formControl} ${className}`} data-rider-control="input" {...props}/>;
+}
+/** Keep native option values, disabled options and keyboard selection semantics. */
+export function Select({ className = "", ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
+  return <select className={`${styles.formControl} ${styles.formSelect} ${className}`} data-rider-control="select" {...props}/>;
+}
+/** Multiline counterpart of the same field, with a resizable text area. */
+export function Textarea({ className = "", rows = 3, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  return <textarea className={`${styles.formControl} ${styles.formTextarea} ${className}`} data-rider-control="textarea" rows={rows} {...props}/>;
+}
+/** Preserve checked/change and native fieldset-disabled behavior. */
+export function Checkbox({ className = "", ...props }: InputHTMLAttributes<HTMLInputElement>) {
+  return <input className={`${styles.formCheckbox} ${className}`} data-rider-control="checkbox" {...props} type="checkbox"/>;
+}
+/** One shared range appearance without changing units or producer bounds. */
+export function Range({ className = "", ...props }: InputHTMLAttributes<HTMLInputElement>) {
+  return <input className={`${styles.formRange} ${className}`} data-rider-control="range" {...props} type="range"/>;
+}
 export function NumberField({ label, value, descriptor, onChange, disabled }: { label: string; value: number; descriptor: NumericDescriptor; onChange: (value: number) => void; disabled?: boolean }) {
   const factor = descriptor.display_factor ?? 1;
   const min = descriptor.minimum === undefined ? undefined : descriptor.minimum * factor;
   const max = descriptor.maximum === undefined ? undefined : descriptor.maximum * factor;
   const step = (descriptor.step ?? 10 ** -(descriptor.display_precision ?? 2) / factor) * factor;
-  return <Field label={`${label}${descriptor.display_unit ? ` · ${descriptor.display_unit}` : ""}`}><input className={styles.input} type="number" value={Number.isFinite(value) ? Number((value * factor).toFixed(6)) : ""} min={min} max={max} step={step} onChange={event => onChange(event.target.value === "" ? Number.NaN : Number(event.target.value) / factor)} disabled={disabled} /></Field>;
+  return <Field label={`${label}${descriptor.display_unit ? ` · ${descriptor.display_unit}` : ""}`}><Input type="number" value={Number.isFinite(value) ? Number((value * factor).toFixed(6)) : ""} min={min} max={max} step={step} onChange={event => onChange(event.target.value === "" ? Number.NaN : Number(event.target.value) / factor)} disabled={disabled} /></Field>;
 }
 export function Details({ value, t }: { value: unknown; t: Translator }) { return <details className={styles.details}><summary>{t("details")}</summary><pre className={styles.pre}>{JSON.stringify(value, null, 2)}</pre></details>; }
 export function Empty({ children }: { children: ReactNode }) { return <div className={styles.empty}>{children}</div>; }

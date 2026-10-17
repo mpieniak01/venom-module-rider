@@ -11,7 +11,7 @@ import { Calibration } from "./components/calibration";
 import { Posture } from "./components/control";
 import { FaceStudio } from "./components/face";
 import { Measurements, RequestHistory, SensorMetrics } from "./components/measurements";
-import { Button, Empty, Panel, Pill } from "./components/primitives";
+import { Button, Empty, Panel, Pill, Select } from "./components/primitives";
 import { Resources } from "./components/resources";
 import { NavigationLoop } from "./components/navigation-loop";
 import { Compute } from "./components/compute";
@@ -95,13 +95,13 @@ export default function RiderPage() {
     <header className={styles.header}>
       <div className={styles.brand}><div className={styles.brandIcon}><Bot size={30} /></div><div><h1 className={styles.title}>{t("title")}</h1><p className={styles.subtitle}>{t("subtitle")}</p></div></div>
       <div className={styles.toolbar}>
-        <label className={styles.environmentSelect}><span>{t("environment")}</span><select aria-label={t("environment")} title={t("environmentHint")} data-testid="rider-environment" className={styles.select} value={client.config?.device_id ?? ""} disabled={!client.config || !!client.busy} onChange={event => void client.selectDevice(event.target.value || null)}>
+        <label className={styles.environmentSelect}><span>{t("environment")}</span><Select aria-label={t("environment")} title={t("environmentHint")} data-testid="rider-environment" value={client.config?.device_id ?? ""} disabled={!client.config || !!client.busy} onChange={event => void client.selectDevice(event.target.value || null)}>
           <option value="">{t("selectDevice")}</option>
           {(["demo", "device"] as const).map(mode => {
             const devices = client.config?.devices.filter(device => device.mode === mode) ?? [];
             return devices.length ? devices.map(device => <option key={device.id} value={device.id}>{t(mode === "demo" ? "environmentDemo" : "environmentProd")}{devices.length > 1 ? ` · ${device.label}` : ""}</option>) : <option key={mode} disabled value={`unavailable-${mode}`}>{t(mode === "demo" ? "environmentDemo" : "environmentProd")} · {t("notConfigured")}</option>;
           })}
-        </select></label>
+        </Select></label>
         <Pill tone={client.canMutate ? "good" : "warning"}>{client.canMutate ? <Wifi size={12} /> : <WifiOff size={12} />}{t(connection?.status ?? "unknown")}</Pill>
         <Button data-testid="rider-refresh" aria-label={t("refresh")} title={t("refresh")} onClick={() => void client.poll()} disabled={client.loading}><RefreshCw size={15} /></Button>
         <Button size="large" className={armed ? styles.armArmed : styles.armDisarmed} title={t("armHint")} aria-pressed={armed} disabled={(!armed && !client.canArm) || !!client.busy} onClick={armToggle} data-testid="rider-arm"><ShieldCheck size={17} />{t(armed ? "disarm" : safety.state === "ESTOP" ? "clearStop" : "arm")}</Button>

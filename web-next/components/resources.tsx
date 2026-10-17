@@ -4,7 +4,7 @@ import { Boxes, FileText } from "lucide-react";
 import { data, errorCode, featureRows, formatTime, record, rows, str, type JsonRecord } from "../lib/model";
 import type { Translator } from "../lib/i18n";
 import type { RiderClient } from "../lib/use-rider";
-import { Button, Details, Empty, Field, Panel, Pill } from "./primitives";
+import { Button, Details, Empty, Field, Panel, Pill, Select } from "./primitives";
 import styles from "../rider.module.css";
 
 function Goal({ goal, client, t }: { goal: JsonRecord; client: RiderClient; t: Translator }) {
@@ -17,7 +17,7 @@ function Goal({ goal, client, t }: { goal: JsonRecord; client: RiderClient; t: T
   const invoke = () => void client.mutate(`/goal/${encodeURIComponent(name)}`, { enabled: !active, ...(optionField ? { options: { [optionField]: selected } } : {}) });
   return <div className={styles.goalCard}><div className={`${styles.flex} ${styles.space}`}><span className={styles.goalTitle}>{t(name)}</span><Pill tone={goal.active === true ? "good" : undefined}>{t(goal.active === true ? "active" : "inactive")}</Pill></div>
     {goal.can_move === true && <Pill tone="warning">{t("canMove")}</Pill>}
-    {optionField && <Field label={t("options")}><select className={styles.select} value={selected} disabled={active || !client.canMutate || !!client.busy} onChange={event => setOption(event.target.value)}>{rows(schema.choices).map(choice => <option key={str(choice.value)} value={str(choice.value)}>{t(`option.${str(choice.value)}`)}</option>)}</select></Field>}
+    {optionField && <Field label={t("options")}><Select value={selected} disabled={active || !client.canMutate || !!client.busy} onChange={event => setOption(event.target.value)}>{rows(schema.choices).map(choice => <option key={str(choice.value)} value={str(choice.value)}>{t(`option.${str(choice.value)}`)}</option>)}</Select></Field>}
     <div className={`${styles.flex} ${styles.space}`}><span className={styles.small}>{t("state")}: <code>{str(goal.state ?? goal.status) || "—"}</code></span><Button tone={active ? undefined : "primary"} disabled={!client.canMutate || !!client.busy || !allowed} onClick={invoke}>{t(active ? "disable" : "enable")}</Button></div>
     {!allowed && <span className={styles.small}>{t("unavailable")} · <code>{str(permission.reason ?? goal.start_unavailable_reason)}</code></span>}
     <Details value={goal} t={t} />
@@ -70,6 +70,6 @@ export function Resources({ client, t, language }: { client: RiderClient; t: Tra
     <Panel title={t("services")} extra={<Button disabled={!client.canMutate || reading} onClick={() => void readDiagnostics()}>{t("readDiagnostics")}</Button>}>
       {diagnostics && <><div className={styles.tableWrap}><table className={styles.table}><thead><tr><th>{t("unit")}</th><th>{t("state")}</th><th>{t("owner")}</th></tr></thead><tbody>{rows(diagnostics.nodes ?? diagnostics.services).map((node, index) => <tr key={str(node.unit ?? node.name ?? node.id) || index}><td>{str(node.unit ?? node.name ?? node.id) || "—"}</td><td>{str(record(node.state).active_state ?? record(node.state).active ?? node.status) || "—"}</td><td>{str(node.motion_owner ?? node.owner) || "—"}</td></tr>)}</tbody></table></div><Details value={diagnostics} t={t} /></>}
     </Panel>
-    <Panel title={t("logs")}><div className={styles.fieldRow}><Field label={t("logs")}><select className={styles.select} value={selectedUnit} onChange={event => { setUnit(event.target.value); setLogs(null); }}>{knownUnits.map(name => <option key={name} value={name}>{name}</option>)}</select></Field><Button disabled={!client.canMutate || !selectedUnit || reading} onClick={() => void readLogs()}><FileText size={15} />{t("readLogs")}</Button></div>{logText ? <pre className={styles.pre} style={{ marginTop: 16 }}>{logText}</pre> : <Empty>{t("noLogs")}</Empty>}</Panel>
+    <Panel title={t("logs")}><div className={styles.fieldRow}><Field label={t("logs")}><Select value={selectedUnit} onChange={event => { setUnit(event.target.value); setLogs(null); }}>{knownUnits.map(name => <option key={name} value={name}>{name}</option>)}</Select></Field><Button disabled={!client.canMutate || !selectedUnit || reading} onClick={() => void readLogs()}><FileText size={15} />{t("readLogs")}</Button></div>{logText ? <pre className={styles.pre} style={{ marginTop: 16 }}>{logText}</pre> : <Empty>{t("noLogs")}</Empty>}</Panel>
   </div>;
 }

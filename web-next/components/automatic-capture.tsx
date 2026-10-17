@@ -7,7 +7,7 @@ import { errorCode, record, str } from "../lib/model";
 import { SAMPLES_BASE, type Collection } from "../lib/samples";
 import { getApiBaseUrl } from "@/lib/env";
 import type { Translator } from "../lib/i18n";
-import { Button, Pill } from "./primitives";
+import { Button, Checkbox, Input, Pill } from "./primitives";
 import styles from "../rider.module.css";
 
 const fields: [Exclude<keyof EventProfile,"events">,number,number,number][]=[
@@ -68,8 +68,8 @@ export function AutomaticCapture({collection,sourceSession,t}:{collection:Collec
     {!collection&&<p className={styles.hint}>{t("auto.collectionRequired")}</p>}
     <details className={styles.details}><summary>{t("auto.profile")}</summary>
       <fieldset className={styles.autoSettings} disabled={active||busy}>
-        <div className={styles.autoEvents}>{eventNames.map(name=><label className={styles.check} key={name}><input type="checkbox" checked={profile.events.includes(name)} onChange={e=>setProfile(p=>({...p,events:e.target.checked?[...p.events,name]:p.events.filter(n=>n!==name)}))}/>{t("auto.event."+name)}</label>)}</div>
-        <div className={styles.grid}>{fields.map(([name,min,max,step])=><label className={styles.field} key={name}>{t("auto.field."+name)}<input className={styles.input} aria-label={t("auto.field."+name)} type="number" min={min} max={max} step={step} value={profile[name]} onChange={e=>setProfile(p=>({...p,[name]:Number(e.target.value)}))}/></label>)}</div>
+        <div className={styles.autoEvents}>{eventNames.map(name=><label className={styles.check} key={name}><Checkbox type="checkbox" checked={profile.events.includes(name)} onChange={e=>setProfile(p=>({...p,events:e.target.checked?[...p.events,name]:p.events.filter(n=>n!==name)}))}/>{t("auto.event."+name)}</label>)}</div>
+        <div className={styles.grid}>{fields.map(([name,min,max,step])=><label className={styles.field} key={name}>{t("auto.field."+name)}<Input aria-label={t("auto.field."+name)} type="number" min={min} max={max} step={step} value={profile[name]} onChange={e=>setProfile(p=>({...p,[name]:Number(e.target.value)}))}/></label>)}</div>
       </fieldset>
       <p className={styles.hint}>{t("auto.noObjectDetector")}</p>
     </details>

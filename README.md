@@ -425,3 +425,13 @@ native title. Tips do not intercept emergency Escape or pointer input.
 scenario against an isolated loopback demo. It mocks every Rider request and
 checks the two sizes, responsive geometry, tips, tab styles and emergency Escape.
 Run it alongside `control-workspace.js`; `make check-web` validates its syntax.
+
+### Form controls across Rider tabs
+
+Use `Input`, `Select`, `Textarea`, `Checkbox`, `Range` and `Field` from the module
+primitives for every form. `Input` wraps Venom's shared input; the native select,
+checkbox and slider preserve existing browser events, option values, producer
+bounds and fieldset semantics. All fields share theme colors, 36 px height,
+6 px corners, labels, focus and disabled/error states. Text areas grow vertically.
+Keep action buttons on the existing shared Venom button wrapper; direction pads,
+tabs and selectable media cards retain their specialized interaction geometry.

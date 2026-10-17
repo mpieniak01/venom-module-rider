@@ -11,7 +11,7 @@
 .buttonLarge > svg { width: 18px; height: 18px; }
 .button:not(button) { gap: 8px; padding: 0 14px; font-size: 12px; font-weight: 500; border: 1px solid var(--button-secondary-border); border-radius: 999px; color: var(--button-secondary-text); background: var(--button-secondary-bg); }
 .button:not(button):hover { background: var(--button-secondary-hover); }
-.button:focus-visible, .input:focus-visible, .select:focus-visible, .tab:focus-visible, .arrow:focus-visible, .padStop:focus-visible { outline: 3px solid var(--secondary); outline-offset: 3px; }
+.button:focus-visible, .tab:focus-visible, .arrow:focus-visible, .padStop:focus-visible { outline: 3px solid var(--secondary); outline-offset: 3px; }
 .stop { font-weight: 800; letter-spacing: 1px; }
 .tooltip { position: fixed; z-index: 2100; box-sizing: border-box; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--ui-border-strong, #64748b); background: var(--bg-base, #14202b); color: var(--text-primary, #f1f5f9); box-shadow: 0 6px 24px #0004; font: 12px/1.6 system-ui, sans-serif; overflow-wrap: anywhere; pointer-events: none; }
 .help { display: flex; align-items: start; gap: 8px; padding: 10px 12px; border: 1px solid var(--tone-info-border); border-radius: var(--r-radius); background: var(--tone-info-bg); color: var(--tone-info-text); }
@@ -37,12 +37,17 @@
 .pillGood { color: var(--badge-success-text); border-color: var(--badge-success-border); background: var(--badge-success-bg); }
 .pillWarning { color: var(--badge-warning-text); border-color: var(--badge-warning-border); background: var(--badge-warning-bg); }
 .pillDanger { color: var(--badge-danger-text); border-color: var(--badge-danger-border); background: var(--badge-danger-bg); }
-.field { display: flex; flex-direction: column; min-width: 0; gap: 7px; font-size: 12px; color: var(--r-muted); }
-.input, .select { width: 100%; min-height: var(--r-button-small); padding: 8px 10px; border: 1px solid var(--r-border); border-radius: 9px; background: var(--ui-surface); color: var(--text-primary); font: inherit; font-size: 13px; }
-.select option { background: var(--bg-panel); color: var(--text-primary); }
-.input:disabled, .select:disabled { opacity: .5; }
-.inputInvalid { border-color: var(--danger); }
-.range { width: 100%; accent-color: var(--r-accent); cursor: pointer; }
+.field { font-weight: 500; display: flex; flex-direction: column; min-width: 0; gap: 7px; font-size: 12px; color: var(--r-muted); }
+.formControl { box-sizing: border-box; display: block; width: 100%; min-width: 0; height: 36px; min-height: 36px; padding: 6px 12px; border: 1px solid var(--ui-border); border-radius: 6px; background: var(--ui-surface); color: var(--text-primary); font: inherit; font-size: 14px; line-height: 20px; box-shadow: none; transition: border-color .15s, box-shadow .15s; }
+.formControl::placeholder { color: var(--ui-muted); }
+.formControl:focus-visible, .formCheckbox:focus-visible, .formRange:focus-visible { outline: 2px solid var(--r-accent); outline-offset: 2px; box-shadow: none; }
+.formControl:disabled, .formCheckbox:disabled, .formRange:disabled { opacity: .5; cursor: not-allowed; }
+.formControl[aria-invalid=true], .formControl:user-invalid, .inputInvalid { border-color: var(--tone-danger-border); }
+.formSelect { padding-right: 8px; }
+.formSelect option { background: var(--bg-base); color: var(--text-primary); }
+.formTextarea { height: auto; min-height: 84px; resize: vertical; }
+.formCheckbox { flex-shrink: 0; width: 16px; height: 16px; margin: 0; accent-color: var(--r-accent); cursor: pointer; }
+.formRange { width: 100%; height: 20px; accent-color: var(--r-accent); cursor: pointer; }
 .fieldRow { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; }
 .fieldRow > .field { flex: 1; min-width: 130px; }
 .rule { height: 1px; background: var(--r-border); margin: 20px 0; }
@@ -75,14 +80,14 @@
 .table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .table th { text-align: left; color: var(--ui-muted); font-weight: 500; padding: 10px; border-bottom: 1px solid var(--r-border); }
 .table td { padding: 10px; border-bottom: 1px solid var(--r-border); vertical-align: top; }
-.table .input { min-width: 72px; }
+.table .formControl { min-width: 72px; }
 .table td:first-child { white-space: nowrap; }
 .details { font-size: 12px; color: var(--ui-muted); margin-top: 16px; }
 .details summary { cursor: pointer; padding: 8px 0; }
 .pre { max-height: 300px; overflow: auto; padding: 12px; border-radius: 10px; border: 1px solid var(--r-border); background: var(--surface-overlay-soft); color: var(--text-secondary); white-space: pre-wrap; word-break: break-word; font-size: 11px; line-height: 1.6; }
 .resource { display: flex; flex-direction: column; gap: 13px; }
 .check { display: inline-flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 12px; }
-.check input { accent-color: var(--r-accent); width: 15px; height: 15px; }
+
 .goalCard { display: flex; flex-direction: column; gap: 12px; border: 1px solid var(--r-border); background: var(--surface-overlay-soft); border-radius: 13px; padding: 17px; }
 .goalTitle { font-weight: 600; font-size: 14px; }
 .faceGrid { min-width: 0; display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 20px; align-items: start; }
@@ -96,7 +101,7 @@
 .space { justify-content: space-between; }
 .track { display: grid; grid-template-columns: repeat(4, minmax(55px, 1fr)) minmax(90px, 1fr) auto; align-items: end; gap: 8px; padding: 10px 0; }
 @media (max-width: 1100px) { .header { flex-wrap: wrap; } .grid3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .subtitle { max-width: 240px; } }
-@media (max-width: 760px) { .page { padding: 12px 12px 60px; } .header { border-radius: 14px; padding: 13px; gap: 14px; } .toolbar { width: 100%; } .toolbar .select { max-width: none; } .grid, .grid3 { grid-template-columns: minmax(0, 1fr); } .panel { padding: 17px; } .faceGrid { grid-template-columns: 1fr; } .gestureList { max-height: 170px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); } .track { grid-template-columns: repeat(2, minmax(55px, 1fr)); } .title { font-size: 24px; } .tab { padding: 12px; } }
+@media (max-width: 760px) { .page { padding: 12px 12px 60px; } .header { border-radius: 14px; padding: 13px; gap: 14px; } .toolbar { width: 100%; } .toolbar .formControl { max-width: none; } .grid, .grid3 { grid-template-columns: minmax(0, 1fr); } .panel { padding: 17px; } .faceGrid { grid-template-columns: 1fr; } .gestureList { max-height: 170px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); } .track { grid-template-columns: repeat(2, minmax(55px, 1fr)); } .title { font-size: 24px; } .tab { padding: 12px; } }
 @media (prefers-reduced-motion: reduce) { .button { transition: none; } }
 .armArmed { background: var(--tone-success-bg); border-color: var(--tone-success-border); color: var(--tone-success-text); }
 .armDisarmed { background: var(--btn-warning-bg); border-color: var(--btn-warning-border); color: var(--btn-warning-text); }
@@ -246,7 +251,7 @@
 .manualPad { min-width: 0; }
 .padMode { display: flex; gap: 8px; align-items: center; min-width: 0; font-size: 12px; height: 40px; }
 .padMode > span { flex-shrink: 0; }
-.padMode select { min-width: 0; flex: 1; height: 36px; padding: 5px 8px; border: 1px solid var(--r-border); border-radius: 8px; background: var(--ui-surface); color: var(--text-primary); font: inherit; }
+.padMode .formControl { flex: 1; padding: 6px 8px; font-size: 12px; }
 .padDetails { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .padHelp .hint { margin: 4px 0 8px; }
 .operatorPanel .manualPad { display: grid; grid-template-rows: 40px 190px minmax(0, 1fr); height: 100%; min-height: 0; }
@@ -285,9 +290,9 @@
   .workspaceContent { grid-row: 2; }
   .operatorPanel { grid-template-rows: var(--r-button-large) minmax(0, 1fr) 38px; gap: 4px; padding: 8px; }
   .operatorPanel > .panelHeader { height: var(--r-button-large); }
-  .operatorPanel .manualPad { grid-template-rows: 34px 146px minmax(0, 1fr); }
-  .operatorPanel .padMode { height: 34px; }
-  .operatorPanel .padMode select { height: 34px; }
+  .operatorPanel .manualPad { grid-template-rows: 36px 146px minmax(0, 1fr); }
+  .operatorPanel .padMode { height: 36px; }
+
   .operatorPanel .pad { grid-template-rows: repeat(3, 44px); grid-template-columns: repeat(3, 64px); gap: 4px; margin: 6px 0 0; }
 }
 @media (max-height: 520px) and (min-width: 721px) {

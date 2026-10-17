@@ -6,7 +6,7 @@ import { errorCode, formatTime, record, str, type JsonRecord } from "../lib/mode
 import { SAMPLES_BASE, type Collection, type Sample, type SamplePage } from "../lib/samples";
 import type { Translator } from "../lib/i18n";
 import { AnalysisPanel } from "./analysis-panel";
-import { Button, Details, Empty, Field, Panel } from "./primitives";
+import { Button, Details, Empty, Field, Input, Panel, Select, Textarea } from "./primitives";
 import styles from "../rider.module.css";
 
 const emptyLabel={class_name:"",scene:"",expected_state:"unknown",obstacle_side:"unknown",review:"pending",note:""};
@@ -62,12 +62,12 @@ function SampleLibrary({t,language}:{t:Translator;language:string}) {
     finally{setWriting(false);}
   };
   const source=(id:string)=>getApiBaseUrl()+SAMPLES_BASE+"/items/"+id+"/original";
-  const enumField=(key:"expected_state"|"obstacle_side"|"review",values:string[])=> <Field label={t("samples.label."+key)}><select aria-label={t("samples.label."+key)} className={styles.select} value={label[key]} onChange={event=>setLabel(previous=>({...previous,[key]:event.target.value}))}>{values.map(value=><option key={value} value={value}>{t("samples.value."+value)}</option>)}</select></Field>;
+  const enumField=(key:"expected_state"|"obstacle_side"|"review",values:string[])=> <Field label={t("samples.label."+key)}><Select aria-label={t("samples.label."+key)} value={label[key]} onChange={event=>setLabel(previous=>({...previous,[key]:event.target.value}))}>{values.map(value=><option key={value} value={value}>{t("samples.value."+value)}</option>)}</Select></Field>;
   const latest=record((Array.isArray(sample?.labels)?sample.labels:[]).at(-1));
   const qualityText=(quality:JsonRecord)=>Array.isArray(quality.flags)&&quality.flags.length?quality.flags.map(flag=>t("samples.quality."+String(flag))).join(", "):t("samples.quality.unflagged");
   return <Panel title={t("samples.library")} hint={t("samples.libraryHint")} extra={<Button data-testid="samples-refresh" onClick={()=>{void refresh();setUpdated(value=>value+1);}}>{t("refresh")}</Button>}>
     {error&&<p role="alert">{t("samples.failure")} · <code>{error}</code></p>}
-    <Field label={t("samples.session")}><select className={styles.select} data-testid="samples-session" value={selected} onChange={event=>{inspectEpoch.current++;setSelected(event.target.value);setOffset(0);setPage(null);setSample(null);}}><option value="">{t("samples.choose")}</option>{sessions.map(row=><option key={row.session_id} value={row.session_id}>{formatTime(row.started_at,language)} · {row.source_device_id} · {t("samples.session."+row.state)} · {row.counts.saved??0} · {row.session_id.slice(0,8)}</option>)}</select></Field>
+    <Field label={t("samples.session")}><Select data-testid="samples-session" value={selected} onChange={event=>{inspectEpoch.current++;setSelected(event.target.value);setOffset(0);setPage(null);setSample(null);}}><option value="">{t("samples.choose")}</option>{sessions.map(row=><option key={row.session_id} value={row.session_id}>{formatTime(row.started_at,language)} · {row.source_device_id} · {t("samples.session."+row.state)} · {row.counts.saved??0} · {row.session_id.slice(0,8)}</option>)}</Select></Field>
     {page&&<>
       <p className={styles.meta}>{t("samples.savedCount")}: {page.total} · {t("samples.request.failed")}: {page.session.counts.failed??0}</p>
       <div className={styles.samplesGrid}>{page.samples.map((item:Sample)=><button type="button" key={item.sample_id} data-testid="sample-thumbnail" className={styles.sampleThumb} disabled={writing} aria-pressed={sample?.sample_id===item.sample_id} onClick={()=>void inspect(item.sample_id)}><img src={source(item.sample_id)} alt={t("samples.original")} loading="lazy"/><span>#{String(item.ordinal)} · {String(item.frame_id??"—").slice(0,12)}</span>{Array.isArray(item.quality.flags)&&item.quality.flags.length>0&&<span>{t("samples.quality")}: {qualityText(item.quality)}</span>}</button>)}</div>
@@ -79,10 +79,10 @@ function SampleLibrary({t,language}:{t:Translator;language:string}) {
       <div><img className={styles.sampleOriginal} src={source(str(sample.sample_id))} alt={t("samples.original")}/><a className={styles.button} href={source(str(sample.sample_id))} download>{t("samples.original")}</a><p className={styles.small}>{t("samples.quality")}: {qualityText(record(sample.quality))}</p><code className={styles.small}>{str(record(sample.raw).sha256)}</code></div>
       <div><p className={styles.hint}>{t("samples.labelHint")}</p>
         <p className={styles.meta}>{t("samples.labelAuthor")}: {t("samples.author."+(str(record(latest.author).kind)||"unknown"))} · {t("samples.revision")}: {revision}</p>
-        <Field label={t("samples.label.class")}><input className={styles.input} value={label.class_name} maxLength={128} onChange={event=>setLabel(previous=>({...previous,class_name:event.target.value}))}/></Field>
-        <Field label={t("samples.label.scene")}><input className={styles.input} value={label.scene} maxLength={128} onChange={event=>setLabel(previous=>({...previous,scene:event.target.value}))}/></Field>
+        <Field label={t("samples.label.class")}><Input value={label.class_name} maxLength={128} onChange={event=>setLabel(previous=>({...previous,class_name:event.target.value}))}/></Field>
+        <Field label={t("samples.label.scene")}><Input value={label.scene} maxLength={128} onChange={event=>setLabel(previous=>({...previous,scene:event.target.value}))}/></Field>
         <div className={styles.grid}>{enumField("expected_state",["unknown","clear","obstacle"])}{enumField("obstacle_side",["unknown","none","left","right","centre","both"])}{enumField("review",["pending","approved","rejected"])}</div>
-        <Field label={t("samples.label.note")}><textarea className={styles.input} value={label.note} maxLength={1024} onChange={event=>setLabel(previous=>({...previous,note:event.target.value}))}/></Field>
+        <Field label={t("samples.label.note")}><Textarea value={label.note} maxLength={1024} onChange={event=>setLabel(previous=>({...previous,note:event.target.value}))}/></Field>
         <Button data-testid="sample-label-save" tone="primary" disabled={writing} onClick={()=>void save()}>{t("samples.saveLabel")}</Button>
         <Details value={sample} t={t}/>
       </div>
