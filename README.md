@@ -411,7 +411,9 @@ See [control workspace](docs/CONTROL_WORKSPACE.md) for Manual/Automatic views, f
 
 ### Panel action styles
 
-The Rider panel uses two shared action sizes: small (36 px) for tools and large
+The Rider panel wraps Venom’s shared `components/ui/button` component, including
+its standard variants and capsule shape, without a custom inset selection shadow.
+It uses two shared action sizes: small (36 px) for tools and large
 (44 px) for operator commands. Direction keys retain their fixed spatial pad and
 at least 44 px height. Use the shared `Button`, `Pill` and `Panel` primitives
 for consistent shapes, status colors and contextual help. Emergency STOP stays

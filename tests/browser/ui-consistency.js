@@ -57,7 +57,7 @@ async page => {
           check(button.height===(button.size==="large"?44:36),"unexpected action size: "+JSON.stringify(button));
           check(Number.parseFloat(button.radius)>=button.height/2,"action does not use Venom capsule shape");
           check(!button.overflow,"action label clipped: "+button.text);
-          check(button.shadow==="none","unexpected button glow: "+button.text);
+          check(!button.shadow.includes("inset"),"unexpected inset button glow: "+button.text);
         }
         check(await page.getByTestId("rider-stop").isEnabled(),"STOP disabled");
         return buttons.length;
