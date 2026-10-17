@@ -20,7 +20,9 @@ MAX_OBSERVATION_AGE_S = 60.0
 MAX_RESOURCES = 64
 SUPPORTED_CAPABILITIES = ("manual_control", "camera", "vision", "samples", "navigation")
 _PRIVATE_LABEL = re.compile(
-    r"https?://|@|(?:\d{1,3}\.){3}\d{1,3}|bearer|token|password|secret|[\[\]\x00-\x1f]",
+    r"[a-z][a-z0-9+.-]*://|@|(?:\d{1,3}\.){3}\d{1,3}|"
+    r"(?:[0-9a-f]{0,4}:){2,}[0-9a-f]{0,4}|"
+    r"bearer|token|password|secret|[\[\]\x00-\x1f]",
     re.IGNORECASE,
 )
 
@@ -40,15 +42,25 @@ def _evidence(service: Any):
     if service is None or service.closed or service.switching:
         return None
     observed = service.connection_observation
-    # Direct reads (for example the existing camera pipeline panel) can prove
-    # contact without status(). Only real cache evidence anchors their age.
-    reads = list(service.read_observations.values())
-    successes = [row for row in reads if row[2]]
-    if successes:
-        mono, wall, _ = max(successes, key=lambda row: row[0])
-        if observed is None or mono > observed[0]:
-            return mono, wall, "online"
-    return observed
+    # Direct ordinary reads also invalidate previous evidence on failure. Do not
+    # issue a read, renew a cached hit, or hide a failure behind old successes.
+    reads = [
+        row
+        for row in service.read_observations.values()
+        if observed is None or row[0] > observed[0]
+    ]
+    if not reads:
+        return observed
+    mono, wall, _ = max(reads, key=lambda row: row[0])
+    recent = [row for row in reads if mono - row[0] <= MAX_OBSERVATION_AGE_S]
+    status = (
+        "online"
+        if all(row[2] for row in recent)
+        else "degraded"
+        if any(row[2] for row in recent)
+        else "offline"
+    )
+    return mono, wall, status
 
 
 def _data(payload: Any) -> dict:

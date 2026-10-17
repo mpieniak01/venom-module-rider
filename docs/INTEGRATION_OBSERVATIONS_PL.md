@@ -40,7 +40,9 @@ ostatni udany kontakt i błędy go nie odświeżają. Wiek jest liczony zegarem
 monotonicznym hosta. Po 60 sekundach stan przechodzi w `stale`, a łączność w
 `unknown`. Sama konfiguracja nigdy nie daje stanu online. Demo jest jawne:
 `mode=demo` i `demo_observation` nie potwierdzają działania fizycznego robota.
-Mieszany wynik świeżych odczytów jest zdegradowany.
+Mieszany wynik świeżych odczytów jest zdegradowany. Dotyczy to również
+bezpośrednich odczytów istniejącego serwisu: ich nowszy błąd unieważnia
+poprzednie online, nawet bez wywołania agregacji `status()`.
 
 Standardowa konfiguracja dopuszcza maksymalnie 16 urządzeń. Adapter dodatkowo
 ogranicza wstrzyknięty serwis do 64 wpisów; ucięta lista jest niepełna.

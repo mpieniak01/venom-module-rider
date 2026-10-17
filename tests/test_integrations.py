@@ -474,3 +474,57 @@ async def test_unknown_cached_connection_state_never_looks_connected(service):
     service.connection_observation = (time.monotonic(), time.time(), "unexpected")
     row = (await observe_integration(app_for(service)))["resources"][0]
     assert row["state"] == "unverified" and row["observed_at"] is None
+
+
+async def test_direct_failed_read_invalidates_previous_online_without_status(service):
+    from venom_module_rider.errors import RiderError
+
+    observe(service, "online", age=10)
+    previous = service.connection_observation
+    service.client = SimpleNamespace(
+        json=AsyncMock(side_effect=RiderError("pi_unreachable", 503))
+    )
+    with pytest.raises(RiderError):
+        await service.read("/healthz", 0)
+    result = await observe_integration(app_for(service))
+    assert result["resources"][0]["state"] == "offline"
+    assert result["connectivity"] == "down"
+    assert result["resources"][0]["reason_code"] == "device_offline"
+    assert service.connection_observation == previous  # Provider is read-only.
+    stamp = result["resources"][0]["observed_at"]
+    assert (
+        stamp
+        == (await observe_integration(app_for(service)))["resources"][0]["observed_at"]
+    )
+
+
+async def test_mixed_direct_read_evidence_reports_degraded_without_status(service):
+    now, wall = time.monotonic(), time.time()
+    service.read_observations = {
+        "/healthz": (now - 2, wall - 2, True),
+        "/api/control/state": (now - 1, wall - 1, False),
+    }
+    result = await observe_integration(app_for(service))
+    assert result["connectivity"] == "degraded"
+    assert result["resources"][0]["state"] == "connected"
+    assert datetime.fromisoformat(
+        result["resources"][0]["observed_at"]
+    ).timestamp() == pytest.approx(wall - 1)
+    service.read_observations["/healthz"] = (now - 70, wall - 70, True)
+    assert (await observe_integration(app_for(service)))["connectivity"] == "down"
+
+
+@pytest.mark.parametrize(
+    "label",
+    [
+        "ssh://private.internal",
+        "2001:db8::1",
+        "http://internal.local",
+        "device@example.invalid",
+    ],
+)
+async def test_pasted_addresses_are_not_exported_as_labels(service, label):
+    device = Device("one", label, "https://private.invalid")
+    service.devices["one"] = service.device = device
+    row = (await observe_integration(app_for(service)))["resources"][0]
+    assert row["label"] == "Rider-Pi"

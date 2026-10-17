@@ -41,7 +41,9 @@ not renewed on failures. Age is measured using the host monotonic clock.
 Evidence older than 60 seconds becomes `stale`; connectivity then becomes
 `unknown`. Missing evidence never becomes online from configuration alone.
 Demo resources retain `mode=demo` and `demo_observation`; this is not physical
-hardware acceptance. A mixed fresh status result is reported as degraded.
+hardware acceptance. Mixed fresh read evidence is reported as degraded. This includes direct
+existing service reads: a newer failure invalidates previous online evidence
+even when no aggregated `status()` call follows.
 
 The normal configuration permits up to 16 devices. The hook also bounds any
 injected service inventory to 64 entries; truncation is explicitly incomplete.
