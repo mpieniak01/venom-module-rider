@@ -408,3 +408,18 @@ Offline mapping qualification: [geometry research v1](docs/MAPPING_RESEARCH_V1.m
 ## Operator workspace
 
 See [control workspace](docs/CONTROL_WORKSPACE.md) for Manual/Automatic views, fixed directional controls, the three STOP meanings and hardware-free layout acceptance.
+
+### Panel action styles
+
+The Rider panel uses two shared action sizes: small (36 px) for tools and large
+(44 px) for operator commands. Direction keys retain their fixed spatial pad and
+at least 44 px height. Use the shared `Button`, `Pill` and `Panel` primitives
+for consistent shapes, status colors and contextual help. Emergency STOP stays
+red; camera power and automatic pause use the warning tone. Button `title` help
+is available on hover and keyboard focus, with disabled controls retaining the
+native title. Tips do not intercept emergency Escape or pointer input.
+
+`tests/browser/ui-consistency.js` is a Playwright CLI `run-code --filename`
+scenario against an isolated loopback demo. It mocks every Rider request and
+checks the two sizes, responsive geometry, tips, tab styles and emergency Escape.
+Run it alongside `control-workspace.js`; `make check-web` validates its syntax.

@@ -14,7 +14,7 @@ export function Button({ tone, size = "small", title, children, className = "", 
   const [position, setPosition] = useState<CSSProperties | null>(null);
   const show = (target: HTMLButtonElement) => {
     if (!title || props.disabled) return;
-    const rect = target.getBoundingClientRect();
+    const rect = (target.closest("header") ?? target).getBoundingClientRect();
     const width = Math.min(320, window.innerWidth - 24);
     setPosition({ width, left: Math.max(12, Math.min(rect.left + rect.width / 2 - width / 2, window.innerWidth - width - 12)), ...(rect.bottom + 140 > window.innerHeight ? { bottom: window.innerHeight - rect.top + 8 } : { top: rect.bottom + 8 }) });
   };

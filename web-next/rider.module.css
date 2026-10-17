@@ -19,7 +19,7 @@
 .caution:hover:not(:disabled) { background: var(--badge-warning-bg); border-color: var(--badge-warning-text); }
 .stop { font-weight: 850; letter-spacing: 1px; box-shadow: 0 0 0 3px #dd23441a; }
 .danger:hover:not(:disabled) { background: #bd1536; border-color: #f04e69; }
-.tooltip { position: fixed; z-index: 2100; box-sizing: border-box; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--ui-border-strong, #64748b); background: var(--bg-panel, #14202b); color: var(--text-primary, #f1f5f9); box-shadow: 0 6px 24px #0004; font: 12px/1.6 system-ui, sans-serif; overflow-wrap: anywhere; pointer-events: none; }
+.tooltip { position: fixed; z-index: 2100; box-sizing: border-box; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--ui-border-strong, #64748b); background: var(--bg-base, #14202b); color: var(--text-primary, #f1f5f9); box-shadow: 0 6px 24px #0004; font: 12px/1.6 system-ui, sans-serif; overflow-wrap: anywhere; pointer-events: none; }
 .help { display: flex; align-items: start; gap: 8px; padding: 10px 12px; border: 1px solid var(--tone-info-border); border-radius: var(--r-radius); background: var(--tone-info-bg); color: var(--tone-info-text); }
 .help > svg { flex-shrink: 0; margin-top: 2px; }
 .help > span { min-width: 0; }
@@ -63,6 +63,7 @@
 .padStop:not(:disabled):hover, .padStop:focus-visible { background: #bd1536; outline: 2px solid var(--r-danger); outline-offset: 2px; }
 .padStatus { display: flex; justify-content: center; gap: 10px; min-height: 30px; }
 .camera { position: relative; display: grid; place-items: center; min-height: 260px; aspect-ratio: 4/3; overflow: hidden; background: #030b14; color: #a0aec0; border-radius: 12px; border: 1px solid var(--r-border); }
+.camera .empty { color: #a0aec0; }
 .camera img { width: 100%; height: 100%; object-fit: contain; }
 .empty { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 30px; color: var(--ui-muted); font-size: 13px; text-align: center; }
 .meta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; color: var(--ui-muted); font-size: 11px; overflow-wrap: anywhere; }
