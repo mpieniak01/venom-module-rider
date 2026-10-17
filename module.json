@@ -11,7 +11,8 @@
       "storage_mode": "core_prefixed",
       "mutation_guard": "core_environment_policy",
       "state_files": []
-    }
+    },
+    "integration_provider_import": "venom_module_rider.integrations:observe_integration"
   },
   "frontend": {
     "nav_path": "/rider",
