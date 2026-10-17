@@ -7,7 +7,7 @@ import unicodedata
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from semantic_kernel.functions import kernel_function
+from venom_core.execution.agent_contracts import tool_function as kernel_function
 from venom_core.services.conversation_providers import current_conversation_context
 
 from .errors import RiderError
