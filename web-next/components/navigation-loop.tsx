@@ -313,8 +313,8 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
     </div>
     <div className={styles.loopToolbar}>
     <div className={styles.loopActions}>
-      <Button tone="primary" data-testid="loop-start" title={t("trialSimpleHelp")} aria-describedby={trialUnavailable?"rider-trial-help rider-trial-block":"rider-trial-help"} disabled={!!trialUnavailable||!!operation||!!client.busy||loading||automaticActive} onClick={()=>void runTrial()}><Play size={18}/>{t(priority&&loopState.operator_control_version===1&&loopState.running===true?"operatorResume":record(policy?.avoidance).enabled===true?"avoidanceTrialRun":"trialRun")}</Button>
-      <Button tone="danger" data-testid="loop-stop" disabled={!connected||operation==="stop"||!priority&&operation==="save"} onClick={()=>void stop()}><Square size={18}/>{t(operation==="stop"?"loopStopping":priority?"operatorPause":"loopStop")}</Button>
+      <Button size="large" tone="primary" data-testid="loop-start" title={t("trialSimpleHelp")} aria-describedby={trialUnavailable?"rider-trial-help rider-trial-block":"rider-trial-help"} disabled={!!trialUnavailable||!!operation||!!client.busy||loading||automaticActive} onClick={()=>void runTrial()}><Play size={18}/>{t(priority&&loopState.operator_control_version===1&&loopState.running===true?"operatorResume":record(policy?.avoidance).enabled===true?"avoidanceTrialRun":"trialRun")}</Button>
+      <Button size="large" tone="caution" data-testid="loop-stop" title={t(priority ? "operatorPauseHint" : "loopStop")} disabled={!connected||operation==="stop"||!priority&&operation==="save"} onClick={()=>void stop()}><Square size={18}/>{t(operation==="stop"?"loopStopping":priority?"operatorPause":"loopStop")}</Button>
       {detector.drive_supported!==false&&<span className={styles.small} data-testid="trial-plan">{String(policy?.speed??"—")} SDK · ≤ {String(policy?.max_motion_ms??"—")} ms</span>}
     </div>
     </div>
