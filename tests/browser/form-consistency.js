@@ -24,6 +24,7 @@ async page => {
     for(const field of fields){
       check(field.kind,"unshared form control in "+tab);
       check(field.labelled,"unlabelled control in "+tab+": "+JSON.stringify(field));
+      check(field.color!==field.bg,"unreadable field in "+tab);
       if(["input","select"].includes(field.kind)){
         check(Math.abs(field.height-36)<.1,"mixed field heights: "+JSON.stringify(field));
         check(field.radius==="4px","mixed field shape: "+JSON.stringify(field));
@@ -44,12 +45,21 @@ async page => {
       await page.getByTestId("workspace-automatic").click();
       await page.getByTestId("workspace-content").locator("details").evaluateAll(nodes=>nodes.filter(node=>node.querySelector("input,select,textarea")).forEach(node=>{node.open=true;}));
       await inspect("Automat and camera settings "+viewport.width);
+      const fieldset=page.getByTestId("workspace-content").locator("fieldset").first();
+      if(await fieldset.count()) {
+        await fieldset.evaluate(node=>{node.disabled=true;});
+        const children=fieldset.locator("input,select,textarea");
+        for(let i=0;i<await children.count();i++)check(await children.nth(i).isDisabled(),"fieldset disabled semantics lost");
+        await fieldset.evaluate(node=>{node.disabled=false;});
+      }
       for(const tab of ["Pomiary","Kalibracja","Cele i zasoby","Face Studio","Percepcja"]){
         await page.getByRole("tab",{name:tab,exact:true}).click();
         if(tab==="Kalibracja"){
           const field=page.getByTestId("rider-page").locator('input[type="number"]').first();
           await field.waitFor();
-          const original=await field.inputValue();await field.fill("");check(await field.inputValue()==="","number field cannot be cleared");await field.fill(original);
+          const original=await field.inputValue();await field.fill("");check(await field.inputValue()==="","number field cannot be cleared");await field.fill("-1");
+          check(await field.evaluate(node=>node.validity.rangeUnderflow),"producer minimum lost");
+          await field.fill(original);
         }
         if(tab==="Face Studio"){
           const name=page.getByTestId("rider-page").locator('input[data-rider-control="input"]').first();
