@@ -1,13 +1,40 @@
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { useEffect, useId, useState, type ButtonHTMLAttributes, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { Info } from "lucide-react";
 import type { NumericDescriptor } from "../lib/model";
 import type { Translator } from "../lib/i18n";
 import styles from "../rider.module.css";
 
 export function Panel({ title, hint, extra, children, className = "" }: { title: string; hint?: string; extra?: ReactNode; children: ReactNode; className?: string }) {
-  return <section className={`${styles.panel} ${className}`}><div className={styles.panelHeader}><h2 className={styles.panelTitle}>{title}</h2>{extra}</div>{hint && <p className={styles.hint}>{hint}</p>}{children}</section>;
+  return <section className={`${styles.panel} ${className}`}><div className={styles.panelHeader}><h2 className={styles.panelTitle}>{title}</h2>{extra}</div>{hint && <Hint>{hint}</Hint>}{children}</section>;
 }
-export function Button({ tone, children, className = "", ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { tone?: "primary" | "danger" }) {
-  return <button type="button" className={`${styles.button} ${tone ? styles[tone] : ""} ${className}`} {...props}>{children}</button>;
+/** Two action sizes; tooltips add no wrapper or hit target around the button. */
+export function Button({ tone, size = "small", title, children, className = "", onMouseEnter, onMouseLeave, onFocus, onBlur, "aria-describedby": describedBy, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { tone?: "primary" | "danger" | "caution"; size?: "small" | "large" }) {
+  const tooltipId = useId();
+  const [position, setPosition] = useState<CSSProperties | null>(null);
+  const show = (target: HTMLButtonElement) => {
+    if (!title || props.disabled) return;
+    const rect = target.getBoundingClientRect();
+    const width = Math.min(320, window.innerWidth - 24);
+    setPosition({ width, left: Math.max(12, Math.min(rect.left + rect.width / 2 - width / 2, window.innerWidth - width - 12)), ...(rect.bottom + 140 > window.innerHeight ? { bottom: window.innerHeight - rect.top + 8 } : { top: rect.bottom + 8 }) });
+  };
+  useEffect(() => {
+    if (!position) return;
+    const close = () => setPosition(null);
+    const key = (event: KeyboardEvent) => { if (event.key === "Escape") close(); };
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    window.addEventListener("keydown", key);
+    return () => { window.removeEventListener("scroll", close, true); window.removeEventListener("resize", close); window.removeEventListener("keydown", key); };
+  }, [position]);
+  const visible = !!title && !!position && !props.disabled;
+  return <><button type="button" className={`${styles.button} ${size === "large" ? styles.buttonLarge : ""} ${tone ? styles[tone] : ""} ${className}`} data-size={size} title={props.disabled ? title : undefined} aria-describedby={[describedBy, visible ? tooltipId : undefined].filter(Boolean).join(" ") || undefined}
+    onMouseEnter={event => { show(event.currentTarget); onMouseEnter?.(event); }} onMouseLeave={event => { setPosition(null); onMouseLeave?.(event); }}
+    onFocus={event => { show(event.currentTarget); onFocus?.(event); }} onBlur={event => { setPosition(null); onBlur?.(event); }} {...props}>{children}</button>
+    {visible && createPortal(<span role="tooltip" id={tooltipId} className={styles.tooltip} style={position!}>{title}</span>, document.body)}</>;
+}
+export function Hint({ children }: { children: ReactNode }) {
+  return <p className={`${styles.hint} ${styles.help}`}><Info size={16} aria-hidden="true"/><span>{children}</span></p>;
 }
 export function Pill({ children, tone }: { children: ReactNode; tone?: "good" | "warning" | "danger" }) {
   return <span className={`${styles.pill} ${tone === "good" ? styles.pillGood : tone === "warning" ? styles.pillWarning : tone === "danger" ? styles.pillDanger : ""}`}>{children}</span>;
