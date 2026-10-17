@@ -437,6 +437,7 @@ class ReplayNavigation:
     async def run_operator(self, policy, run):
         """Keep one replay producer alive while motion authorization changes."""
         sequence = 0
+        previous_drive = True
         try:
             while self.status["running"]:
                 safety = self.state.safety()
@@ -448,7 +449,10 @@ class ReplayNavigation:
                 )
                 if not drive and self.operator_state in {"qualifying", "active"}:
                     self.pause_operator("motion_disarmed")
-                if generation != self.motion_generation:
+                if not drive and self.operator_state in {"qualifying", "active"}:
+                    self.pause_operator("motion_disarmed")
+                if generation != self.motion_generation or drive != previous_drive:
+                    previous_drive = drive
                     run = uuid.uuid4().hex
                     self.motion_generation = generation
                     self.lease = self.lease_factory(

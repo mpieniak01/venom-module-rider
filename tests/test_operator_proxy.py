@@ -328,3 +328,39 @@ async def test_demo_rejects_warm_authority_errors(changes, expected):
         assert expected in response.body.decode()
     finally:
         await nav.close()
+
+
+async def test_demo_expired_lease_keeps_observation_without_rearming():
+    import time
+
+    frames = []
+
+    async def request(meta, _):
+        frames.append(meta)
+        return {"state": "unknown", "action": "stop"}
+
+    nav = ReplayNavigation(b"fixture", Permit, model_sha="a" * 64, request=request)
+    pi = DemoPi(navigation=nav)
+    nav.policy.update(verified=True, calibration_id="demo-only", model_sha256="a" * 64)
+    try:
+        await nav.start_trial(
+            body(
+                generation=pi.generation,
+                config_revision=nav.policy["revision"],
+                settings_revision=pi.controls["revision"],
+                panel_id="panel-one",
+                operator_control_version=1,
+            )
+        )
+        task = nav.task
+        first_run = nav.status["run_id"]
+        pi.arming_deadline = time.monotonic() - 1
+        await asyncio.sleep(0.03)
+        assert frames[-1]["mode"] == "observe"
+        assert frames[-1]["run_id"] != first_run
+        assert nav.task is task and not task.done() and pi.camera_on
+        assert pi.state == "DISARMED" and nav.operator_state == "paused"
+        refused = pi.control(command(pi, "navigation_resume", panel_id="panel-one"))
+        assert refused.status_code == 409 and pi.state == "DISARMED"
+    finally:
+        await nav.close()
