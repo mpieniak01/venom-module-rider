@@ -528,3 +528,30 @@ async def test_pasted_addresses_are_not_exported_as_labels(service, label):
     service.devices["one"] = service.device = device
     row = (await observe_integration(app_for(service)))["resources"][0]
     assert row["label"] == "Rider-Pi"
+
+
+@pytest.mark.parametrize(
+    ("code", "status", "connected"),
+    [
+        ("camera_pipeline_unsupported", 404, True),
+        ("navigation_config_unsupported", 404, True),
+        ("unauthorized", 401, True),
+        ("pi_unreachable", 503, False),
+        ("pi_operation_timeout", 504, False),
+    ],
+)
+async def test_direct_http_error_proves_contact_but_transport_failure_does_not(
+    service, code, status, connected
+):
+    from venom_module_rider.errors import RiderError
+
+    observe(service, "online", age=10)
+    service.client = SimpleNamespace(
+        json=AsyncMock(side_effect=RiderError(code, status))
+    )
+    with pytest.raises(RiderError, match=code):
+        await service.read("/api/resource/camera/pipeline", 0)
+    result = await observe_integration(app_for(service))
+    assert result["connectivity"] == ("ok" if connected else "down")
+    assert result["resources"][0]["state"] == ("connected" if connected else "offline")
+    assert service.read_observations["/api/resource/camera/pipeline"][2] is connected

@@ -221,9 +221,18 @@ class RiderService:
             self.last_seen = time.time()
             self.read_observations[path] = (self.cache[path][0], self.last_seen, True)
             return copy.deepcopy(payload)
-        except Exception:
+        except Exception as exc:
             if session == self.session and epoch == self.epoch:
-                self.read_observations[path] = (time.monotonic(), time.time(), False)
+                # An HTTP error from Pi still proves contact with the device.
+                reachable = isinstance(exc, RiderError) and exc.code not in {
+                    "pi_unreachable",
+                    "pi_operation_timeout",
+                }
+                self.read_observations[path] = (
+                    time.monotonic(),
+                    time.time(),
+                    reachable,
+                )
             raise
         finally:
             if task.done() and self.inflight.get(path) is task:
