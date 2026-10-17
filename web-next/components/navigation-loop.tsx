@@ -3,6 +3,7 @@ import { Play, Square, RefreshCw } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 import { data, errorCode, formatNumber, formatTime, record, safetyOf, type JsonRecord } from "../lib/model";
 import { calibrationAcceptance, calibrationMatches, calibrationScope, decisionView, executionHeadline, freshPolicyFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, motionPermission, stoppingZone, stoppingZoneValues, trialBlock, trialPreparation, trialPreparationTitle, trialPreparationErrorKey, trialDiagnostics, trialStopReasonKey, trialOutcomeTone, freshObservation } from "../lib/loop-controls";
+import { operatorPrioritySupported } from "../lib/navigation";
 import { stopLoopResources } from "../lib/stop-loop";
 import type { RiderClient } from "../lib/use-rider";
 import type { Translator } from "../lib/i18n";
@@ -112,8 +113,15 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
     const manualWasActive=client.canNavigate||!!client.activeDirection;
     client.hold.cancel();
     stopping.current=true;trialArmed.current=false;setOperation("stop");setError("");
-    client.setCameraTransition(true);client.setCameraStream(null);
+    const priority = operatorPrioritySupported(client.status);
+    if (!priority) { client.setCameraTransition(true);client.setCameraStream(null); }
     try {
+      if (priority) {
+        await client.stopManual();
+        await readState();
+        setTrialResult("operatorPaused");
+        return;
+      }
       const stoppedMotion=goals.drive===true||trialWasArmed;
       if(stoppedMotion)await client.command({action:"stop"},true);
       else if(manualWasActive)await client.stopManual();
@@ -163,7 +171,7 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
   };
   const ensureAnalysis=async(origin:string)=>{
     const row=await apiFetch<JsonRecord>("/api/v1/rider/navigation/state");ensureOperation(origin);
-    if(record(row.goals).observe===true&&record(row.status).running===true&&record(row.status).stale!==true){
+    if((record(row.goals).observe===true || operatorPrioritySupported(client.status)&&record(row.status).operator_control_version===1)&&record(row.status).running===true&&record(row.status).stale!==true){
       client.setCameraStream("venom");applyState(row);return;
     }
     await stopGoals(origin);ensureOperation(origin);
@@ -214,7 +222,7 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
     finally{startTask.current=null;if(!stopping.current)setOperation(null);}
   };
   const runTrial=async()=>{
-    if(!policy||trialUnavailable||operation||loading||phase==="running"&&goals.drive===true)return;
+    if(!policy||trialUnavailable||operation||loading||phase==="running"&&goals.drive===true&&record(safetyOf(client.status).operator_control).state==="active")return;
     client.setNotice(null);setOperation("check");setError("");setTrialFailure(null);setTrialResult("trialChecking");setTrialStopReason("");trialArmed.current=false;
     const origin=client.currentSession();operationEpoch.current=client.currentMotionEpoch();operationGeneration.current=client.currentGeneration();
     trialSession.current=origin;
@@ -222,8 +230,12 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
       setOperation("start");setTrialResult("trialStarting");client.setCameraStream("venom");
       const plan=t(record(policy.avoidance).enabled===true?"avoidanceTrialPlan":"trialPlan")+" · "+String(policy.speed)+" SDK · ≤ "+String(policy.max_motion_ms)+" ms";
       trialArmed.current=true;
-      const result=await client.startNavigationTrial(plan,Number(policy.revision));
-      if(stopping.current||client.currentSession()!==origin)throw new Error("navigation_trial_cancelled");
+      const warm = operatorPrioritySupported(client.status) && loopState.operator_control_version === 1 && loopState.running === true && loopState.stale !== true && safetyOf(client.status).state === "ARMED";
+      const epoch = client.currentMotionEpoch();
+      const result = warm
+        ? record(await client.command({action:"navigation_resume"},true,true))
+        : await client.startNavigationTrial(plan,Number(policy.revision));
+      if(stopping.current||client.currentSession()!==origin||client.currentMotionEpoch()!==epoch)throw new Error("navigation_trial_cancelled");
       const saved=record(result.config);if(Object.keys(saved).length)applyPolicy(saved);
       operationGeneration.current=client.currentGeneration();operationEpoch.current=client.currentMotionEpoch();
       await readState();
@@ -235,6 +247,8 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
     finally{startTask.current=null;if(!stopping.current)setOperation(null);}
   };
   useEffect(()=>{
+    // The compatible producer keeps observing after a completed trial.
+    if (operatorPrioritySupported(client.status)) return;
     // Only recover a trial initiated in this panel; never replay an old ARM.
     if(!trialArmed.current||operation||client.busy||!connected||stopping.current||trialSession.current!==client.currentSession()
       ||loopState.mode!=="drive"||loopState.running!==false||loopState.latched!==true)return;
@@ -276,6 +290,9 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
 
   const safety = safetyOf(client.status);
   const owner = safety.owner;
+  const operator = record(safety.operator_control);
+  const priority = operatorPrioritySupported(client.status);
+  const automaticActive = priority ? operator.state === "active" || operator.state === "qualifying" : phase === "running" && goals.drive === true;
   return <section className={styles.controlWorkspace} data-testid="control-workspace">
     <div className={styles.controlModeRow}>
       <div className={styles.controlModes} role="group" aria-label={t("workspaceView")}>
@@ -288,6 +305,7 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
         <div hidden={view !== "automatic"} data-testid="automatic-commands">
           <Panel title={t("loopTitle")} extra={<Button aria-label={t("loopLoad")} disabled={loading||!!operation||!connected} onClick={()=>setRefresh(v=>v+1)}><RefreshCw size={14}/>{t("refresh")}</Button>}>
     <div className={styles.loopStatus} role="status" data-testid="loop-state">
+      {priority && <Pill>{t("operatorState." + String(operator.state ?? "idle"))}</Pill>}
       <Pill tone={phase==="running"?"good":phase==="offline"||phase==="unknown"||phase==="fault"?"warning":undefined}>{t(operation==="stop"?"loopStopping":phase==="fault"?"loopPhase.fault":operation==="check"?"trialChecking":operation==="start"?"loopStarting":"loopPhase."+phase)}</Pill>
       <strong>{t(goals.drive===true?"trialActiveMode":"trialAnalysisMode")}</strong>
       <span className={styles.small} data-testid="active-perception-method">{t("perceptionMethod")}: {t(detector.purpose==="relative_ground_geometry"?"perceptionGeometry":"perceptionSemantic")}</span>
@@ -295,8 +313,8 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
     </div>
     <div className={styles.loopToolbar}>
     <div className={styles.loopActions}>
-      <Button tone="primary" data-testid="loop-start" title={t("trialSimpleHelp")} aria-describedby={trialUnavailable?"rider-trial-help rider-trial-block":"rider-trial-help"} disabled={!!trialUnavailable||!!operation||!!client.busy||loading||phase==="running"&&goals.drive===true} onClick={()=>void runTrial()}><Play size={18}/>{t(record(policy?.avoidance).enabled===true?"avoidanceTrialRun":"trialRun")}</Button>
-      <Button tone="danger" data-testid="loop-stop" disabled={!connected||operation==="stop"||operation==="save"} onClick={()=>void stop()}><Square size={18}/>{t(operation==="stop"?"loopStopping":"loopStop")}</Button>
+      <Button tone="primary" data-testid="loop-start" title={t("trialSimpleHelp")} aria-describedby={trialUnavailable?"rider-trial-help rider-trial-block":"rider-trial-help"} disabled={!!trialUnavailable||!!operation||!!client.busy||loading||automaticActive} onClick={()=>void runTrial()}><Play size={18}/>{t(priority&&loopState.operator_control_version===1&&loopState.running===true?"operatorResume":record(policy?.avoidance).enabled===true?"avoidanceTrialRun":"trialRun")}</Button>
+      <Button tone="danger" data-testid="loop-stop" disabled={!connected||operation==="stop"||!priority&&operation==="save"} onClick={()=>void stop()}><Square size={18}/>{t(operation==="stop"?"loopStopping":priority?"operatorPause":"loopStop")}</Button>
       {detector.drive_supported!==false&&<span className={styles.small} data-testid="trial-plan">{String(policy?.speed??"—")} SDK · ≤ {String(policy?.max_motion_ms??"—")} ms</span>}
     </div>
     </div>

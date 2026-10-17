@@ -77,3 +77,19 @@ test("unknown observation retains ARM with an explicit observation error", () =>
   assert.equal(retained.errors.control, "executor_observation_unavailable");
   assert.equal(retained.control, previous.control);
 });
+
+test("operator priority requires negotiated capability, current permission and this panel holder", () => {
+  const current = state(), safety = current.control!.safety as Record<string,unknown>;
+  Object.assign(safety, {owner:"navigation",panel_control:{version:1,holder:"panel-a"}});
+  assert.equal(navigationAvailable(current,"panel-a"),false);
+  safety.operator_control={version:1,state:"qualifying"};
+  assert.equal(navigationAvailable(current,"panel-a"),true);
+  assert.equal(navigationAvailable(current,"panel-b"),false);
+  assert.equal(navigationAvailable(current),false);
+  safety.stale=true;
+  assert.equal(navigationAvailable(current,"panel-a"),false);
+  safety.stale=false;current.errors.control="unavailable";
+  assert.equal(navigationAvailable(current,"panel-a"),false);
+  current.errors={};safety.state="DISARMED";
+  assert.equal(navigationAvailable(current,"panel-a"),false);
+});
