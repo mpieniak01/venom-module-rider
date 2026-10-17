@@ -111,13 +111,9 @@
 .cameraEmbedded .camera { min-height: 180px; max-height: 440px; aspect-ratio: 4/3; }
 .cameraEmbedded .panelTitle { font-size: 14px; }
 
-.driveWorkspace { scroll-margin-top: 250px; display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(210px, 1fr); gap: 20px; align-items: start; }
-.driveWorkspace > div { min-width: 0; }
 .manualEmbedded { border: 0; padding: 0; background: transparent; border-radius: 0; }
 .manualEmbedded .pad { grid-template-columns: repeat(3, 56px); grid-template-rows: repeat(3, 50px); gap: 6px; margin: 12px 0; }
 .manualEmbedded .panelTitle { font-size: 14px; }
-@container rider (max-width: 560px) { .driveWorkspace { grid-template-columns: minmax(0, 1.4fr) minmax(160px, 1fr); gap: 12px; } .manualEmbedded .pad { grid-template-columns: repeat(3, 46px); grid-template-rows: repeat(3, 46px); gap: 4px; } .cameraEmbedded .camera { min-height: 140px; width: 100%; } }
-@container rider (max-width: 400px) { .driveWorkspace { grid-template-columns: minmax(0, 1fr); } }
 
 .driveWorkspace .camera { width: 100%; height: clamp(180px, 28vh, 320px); max-height: none; aspect-ratio: auto; }
 
@@ -144,15 +140,6 @@
 .calibrationSteps { padding-left: 22px; margin: 16px 0; font-size: 12px; line-height: 1.5; }
 .calibrationSteps li { margin-bottom: 14px; padding-left: 4px; }
 .calibrationSteps p { margin: 5px 0; color: var(--ui-muted); }
-@container rider (min-width: 760px) {
-  .driveWorkspace { grid-template-columns: minmax(0, 1.6fr) minmax(300px, 1fr); }
-  .loopCamera { position: sticky; top: 180px; }
-  .driveWorkspace .camera { height: clamp(280px, 42vh, 500px); }
-}
-@container rider (max-width: 759px) {
-  .driveWorkspace { grid-template-columns: minmax(0, 1fr); }
-  .loopCamera { position: static; }
-}
 
 .calibrationSteps .trialParameters { color: var(--r-text); font-weight: 600; }
 
@@ -167,25 +154,10 @@
 .decisionMetrics { display: flex; gap: 12px 20px; flex-wrap: wrap; font-size: 12px; color: var(--ui-muted); margin-top: 14px; }
 @container rider (max-width: 640px) { .decisionGrid { grid-template-columns: minmax(0, 1fr); } }
 
-.loopSidebar .decisionArea { margin: 0; }
-.loopSidebar .decisionGrid { grid-template-columns: minmax(0, 1fr); gap: 8px; }
-.loopSidebar .decisionCard { padding: 10px 12px; }
-.loopSidebar .decisionCard > strong { margin-top: 5px; font-size: 16px; }
-.loopSidebar .decisionCard p { margin-top: 5px; }
-.loopSidebar .decisionMetrics { gap: 8px 12px; }
-@container rider (min-width: 760px) {
-  .loopToolbar { position: sticky; top: calc(var(--rider-sticky-top, 8px) + var(--rider-header-height, 96px) + 8px); z-index: 20; background: var(--r-panel, #030c17); padding: 10px 0; }
-  .loopCamera { top: 250px; }
-}
-
-@container rider (max-width: 759px) { .driveWorkspace { scroll-margin-top: 180px; } }
 
 .permissionSummary { display: grid; gap: 4px; flex: 1 1 100%; font-size: 12px; color: var(--ui-muted); }
 .permissionSummary > strong { font-size: 16px; }
 .modelClass { padding: 10px 12px; margin: 0; border-left: 3px solid #4182f5; font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
-@container rider (min-width: 760px) { .loopCamera { top: calc(var(--rider-sticky-top, 8px) + var(--rider-header-height, 96px) + 80px); } .driveWorkspace { scroll-margin-top: calc(var(--rider-sticky-top, 8px) + var(--rider-header-height, 96px) + 80px); } }
-
-@container rider (min-width: 760px) { .driveWorkspace .camera { height: clamp(240px, 34vh, 380px); } }
 
 .cameraPaused { position: absolute; top: 8px; left: 8px; right: 8px; z-index: 1; padding: 8px 10px; border: 1px solid var(--danger); border-radius: 8px; background: rgba(12, 15, 20, .9); color: #ffc65c; font-size: 12px; font-weight: 700; text-align: center; }
 
@@ -196,8 +168,6 @@
 
 .cameraTransition { border-color: var(--r-border); color: var(--ui-muted); }
 
-.manualPads { display: flex; flex-wrap: wrap; justify-content: center; gap: 16px; }
-.padLabel { display: block; text-align: center; font-size: 12px; margin-top: 12px; }
 .manualFeedback { display: grid; gap: 6px; padding: 12px; margin: 10px 0; border: 1px solid var(--r-border); border-radius: 12px; font-size: 12px; }
 
 .sampleCapture { padding: 12px 0; border-bottom: 1px solid var(--r-border); font-size: 12px; }
@@ -253,3 +223,76 @@
 .sectorBadge[data-side="left"] { color: #48d3e8; }
 .sectorBadge[data-side="right"] { color: #d6a7ff; }
 @container rider (max-width: 420px) { .sectorGrid { gap: 5px; } .sectorCard { padding: 6px; font-size: 11px; } .sectorCard b { flex-wrap: wrap; } }
+
+
+/* Fixed driving geometry: observations scroll; input targets never follow messages. */
+.page[data-section="control"] { height: calc(100dvh - var(--rider-page-top, 210px) - 12px); min-height: 460px; padding-bottom: 0; display: flex; flex-direction: column; }
+.page[data-section="control"] > .header, .page[data-section="control"] > .tabs { flex-shrink: 0; }
+.controlPanel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.controlWorkspace { flex: 1; min-height: 0; display: grid; grid-template-rows: 44px minmax(0, 1fr); gap: 10px; }
+.controlModeRow { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; }
+.controlModes { display: flex; gap: 6px; flex-shrink: 0; }
+.controlModes .button { height: 38px; min-height: 38px; }
+.workspaceOwner { min-width: 0; font-size: 12px; color: var(--ui-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.driveWorkspace { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 16px; min-height: 0; }
+.workspaceContent { min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 0 6px 12px 0; }
+.workspaceContent > * { margin-bottom: 14px; }
+.workspaceContent .loopCamera { position: static; padding: 16px; background: var(--bg-panel); border: 1px solid var(--r-border); border-radius: 16px; }
+.workspaceContent .loopToolbar { position: static; }
+.operatorConsole { min-width: 0; min-height: 0; }
+.operatorPanel { height: 100%; box-sizing: border-box; padding: 12px; display: grid; grid-template-rows: 42px minmax(0, 1fr) 84px; gap: 8px; }
+.operatorPanel > .panelHeader { height: 42px; margin: 0; flex-wrap: nowrap; gap: 6px; }
+.operatorPanel .panelTitle { font-size: 14px; }
+.operatorPanel > .panelHeader .button { height: 38px; min-height: 38px; padding: 6px 9px; font-size: 12px; white-space: nowrap; }
+.manualPad { min-width: 0; }
+.padMode { display: flex; gap: 8px; align-items: center; min-width: 0; font-size: 12px; height: 40px; }
+.padMode > span { flex-shrink: 0; }
+.padMode select { min-width: 0; flex: 1; height: 36px; padding: 5px 8px; border: 1px solid var(--r-border); border-radius: 8px; background: var(--ui-surface); color: var(--text-primary); font: inherit; }
+.padDetails { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.padHelp .hint { margin: 4px 0 8px; }
+.operatorPanel .manualPad { display: grid; grid-template-rows: 40px 190px minmax(0, 1fr); height: 100%; min-height: 0; }
+.operatorPanel .pad { grid-template-columns: repeat(3, 68px); grid-template-rows: repeat(3, 56px); gap: 6px; margin: 8px 0 2px; align-content: start; }
+.operatorPanel .manualFeedback { padding: 8px; margin: 8px 0; }
+.operatorPanel .padStatus { flex-wrap: wrap; justify-content: start; gap: 5px; }
+.operatorMessages { min-height: 0; overflow-y: auto; overscroll-behavior: contain; border-top: 1px solid var(--r-border); padding-top: 6px; overflow-wrap: anywhere; }
+.operatorMessages .hint { margin: 0 0 8px; }
+.messages .banner { margin: 0 0 8px; padding: 8px; font-size: 12px; }
+.messages .noticeText { min-width: 0; overflow-wrap: anywhere; }
+.cameraTools { margin: 12px 0; padding: 10px 0; border-top: 1px solid var(--r-border); font-size: 12px; }
+.cameraTools > summary { cursor: pointer; margin-bottom: 8px; color: var(--ui-muted); }
+.pageFocused { position: fixed; inset: 0; z-index: 1000; max-width: none; margin: 0; padding: 10px; background: var(--bg-base); overflow-y: auto; }
+.pageFocused[data-section="control"] { height: 100dvh; min-height: 0; }
+.pageFocused > .header { top: 0; }
+.page[data-section="control"] .toolbar .pill { width: 170px; height: 28px; box-sizing: border-box; overflow: hidden; text-overflow: ellipsis; display: inline-block; }
+.page[data-section="control"] .toolbar .armArmed, .page[data-section="control"] .toolbar .armDisarmed { width: 178px; height: 42px; min-height: 42px; padding: 8px; white-space: nowrap; }
+@container rider (max-width: 720px) {
+  .page .header { padding: 8px; gap: 6px; margin-bottom: 6px; }
+  .brand { flex-basis: 100%; }
+  .brandIcon, .subtitle { display: none; }
+  .title { font-size: 17px; }
+  .toolbar { flex-basis: 100%; gap: 6px; }
+  .environmentSelect { gap: 4px; font-size: 10px; }
+  .environmentSelect select { width: 76px; min-height: 34px; padding: 4px; font-size: 12px; }
+  .toolbar .pill { width: 110px; font-size: 10px; padding: 4px 6px; }
+  .toolbar > .button { min-height: 34px; padding: 6px 8px; }
+  .page[data-section="control"] .toolbar .armArmed, .page[data-section="control"] .toolbar .armDisarmed { width: 174px; height: 36px; min-height: 36px; font-size: 11px; }
+  .toolbar .stop { height: 36px; min-height: 36px; padding: 6px 14px; font-size: 14px; }
+  .tabs { margin-bottom: 6px; }
+  .tab { padding: 8px; font-size: 12px; }
+  .controlModeRow { gap: 6px; }
+  .workspaceOwner { font-size: 10px; }
+  .driveWorkspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: 340px minmax(100px, 1fr); gap: 10px; }
+  .operatorConsole { grid-row: 1; }
+  .workspaceContent { grid-row: 2; }
+  .operatorPanel { grid-template-rows: 38px minmax(0, 1fr) 38px; gap: 4px; padding: 8px; }
+  .operatorPanel > .panelHeader { height: 38px; }
+  .operatorPanel .manualPad { grid-template-rows: 36px 184px minmax(0, 1fr); }
+  .operatorPanel .padMode { height: 36px; }
+}
+@media (max-height: 520px) and (min-width: 721px) {
+  .pageFocused .driveWorkspace { grid-template-columns: minmax(0, 1fr) 300px; }
+  .pageFocused .operatorPanel { grid-template-rows: 32px minmax(0, 1fr) 30px; gap: 2px; padding: 6px; }
+  .pageFocused .operatorPanel > .panelHeader { height: 32px; }
+  .pageFocused .operatorPanel .manualPad { grid-template-rows: 34px 150px minmax(0, 1fr); }
+  .pageFocused .operatorPanel .pad { grid-template-rows: repeat(3, 44px); grid-template-columns: repeat(3, 60px); gap: 4px; margin: 6px 0 0; }
+}

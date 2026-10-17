@@ -5,7 +5,7 @@ import { manualFeedback } from "../lib/manual-feedback";
 import { frameAge } from "../lib/vision-frame";
 import { previewNotice } from "../lib/loop-controls";
 /* eslint-disable @next/next/no-img-element -- Pi binary frames use revocable object URLs. */
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { displayedPreview, previewLifetime } from "../lib/preview-media";
 import { SampleCapture } from "./sample-capture";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Camera, CirclePause, CircleStop } from "lucide-react";
@@ -22,34 +22,68 @@ const arrows = [
   { direction: "backward" as const, row: 3, column: 2, Icon: ArrowDown },
 ];
 export function ManualPad({ client, t, language, compact = false }: { client: RiderClient; t: Translator; language: string; compact?: boolean }) {
+  const [mode, setMode] = useState<"pulse" | "continuous">("pulse");
+  const helpId = useId();
   const safety = safetyOf(client.status);
   const settings = settingsOf(client.status);
   const directions = record(settings.directions);
   const schema = record(record(settings.parameter_schema).direction_fields);
   const speedDescriptor = record(schema.speed) as NumericDescriptor;
+  const continuous = mode === "continuous";
+  const available = continuous ? client.canContinuous : client.canNavigate;
   const pointerDown = (direction: Direction, event: React.PointerEvent<HTMLButtonElement>) => {
-    if (!client.canNavigate || event.button !== 0) return;
-    event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); client.hold.start(direction, event.pointerId);
+    if (continuous || !available || event.button !== 0) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    client.hold.start(direction, event.pointerId);
+  };
+  const chooseMode = (next: "pulse" | "continuous") => {
+    if (next === mode) return;
+    // End the old intent; selecting an input mode never starts a new one.
+    client.hold.release();
+    setMode(next);
   };
   const feedback = manualFeedback(client.status, client.manualRequest, client.controlFresh);
-  return <div>
-    {!compact && <p className={styles.hint}>{t("manualHint")}</p>}
-    <div className={styles.manualPads}>
-    <div><strong className={styles.padLabel}>{t("pulsePad")}</strong>
-    <div className={styles.pad}>
-      {arrows.map(({ direction, row, column, Icon }) => <button type="button" key={direction} aria-label={t(direction)} title={t(direction)} disabled={!client.canNavigate} data-testid={`rider-${direction}`} className={`${styles.arrow} ${client.manualMode === "hold" && client.activeDirection === direction ? styles.arrowActive : ""}`} style={{ gridRow: row, gridColumn: column }} onPointerDown={event => pointerDown(direction, event)} onPointerUp={event => client.hold.end(event.pointerId)} onPointerCancel={event => client.hold.release(event.pointerId)} onLostPointerCapture={event => client.hold.release(event.pointerId)} onClick={event => { if (event.detail === 0 && client.canNavigate && !client.activeDirection) { client.hold.start(direction, -2); client.hold.end(-2); } }} onKeyDown={event => { if (["Enter", " "].includes(event.key) && !event.repeat) { event.preventDefault(); client.hold.start(direction, -1); } }} onKeyUp={event => { if (["Enter", " "].includes(event.key)) { event.preventDefault(); client.hold.end(-1); } }} onBlur={() => client.hold.releasePointer()}>
-        <Icon size={compact?20:25} />{!compact&&<span>{t(direction)}</span>}<span className={styles.small}>{displayValue(record(directions[direction]).speed, speedDescriptor, language)} {speedDescriptor.display_unit ?? ""}</span>
-      </button>)}
+  return <div className={styles.manualPad} data-testid="manual-pad" data-mode={mode}>
+    <label className={styles.padMode}>
+      <span>{t("manualDrivingMode")}</span>
+      <select value={mode} data-testid="rider-manual-mode" onChange={event => chooseMode(event.target.value as "pulse" | "continuous")}>
+        <option value="pulse">{t("pulsePad")}</option>
+        <option value="continuous">{t("continuousPad")}</option>
+      </select>
+    </label>
+    <div className={styles.pad} role="group" aria-label={t("manual")} aria-describedby={helpId} data-mode={mode}>
+      {arrows.map(({ direction, row, column, Icon }) => {
+        const active = client.activeDirection === direction && client.manualMode === (continuous ? "continuous" : "hold");
+        return <button type="button" key={direction} aria-label={t(direction)} title={t(direction)} aria-pressed={active} disabled={!available} data-testid={`rider-${direction}`} className={`${styles.arrow} ${active ? styles.arrowActive : ""}`} style={{ gridRow: row, gridColumn: column }}
+          onPointerDown={event => pointerDown(direction, event)}
+          onPointerUp={event => { if (!continuous) client.hold.end(event.pointerId); }}
+          onPointerCancel={event => { if (!continuous) client.hold.release(event.pointerId); }}
+          onLostPointerCapture={event => { if (!continuous) client.hold.release(event.pointerId); }}
+          onClick={event => {
+            if (!available) return;
+            if (continuous) client.hold.toggle(direction);
+            else if (event.detail === 0 && !client.activeDirection) { client.hold.start(direction, -2); client.hold.end(-2); }
+          }}
+          onKeyDown={event => {
+            if (!["Enter", " "].includes(event.key)) return;
+            if (event.repeat) { event.preventDefault(); return; }
+            if (!continuous && available) { event.preventDefault(); client.hold.start(direction, -1); }
+          }}
+          onKeyUp={event => {
+            if (!continuous && ["Enter", " "].includes(event.key)) { event.preventDefault(); client.hold.end(-1); }
+          }}
+          onBlur={() => client.hold.releasePointer()}>
+          <Icon size={compact ? 20 : 25} />{!compact && <span>{t(direction)}</span>}<span className={styles.small}>{displayValue(record(directions[direction]).speed, speedDescriptor, language)} {speedDescriptor.display_unit ?? ""}</span>
+        </button>;
+      })}
       <button type="button" className={`${styles.padCenter} ${styles.padStop}`} style={{ gridRow: 2, gridColumn: 2 }} aria-label={t("stopMotors")} title={t("manualStopHint")} data-testid="rider-pad-stop" onClick={() => void client.stopManual()}><CircleStop size={27} /><span>{t("stopShort")}</span></button>
     </div>
+    <div className={styles.padDetails}>
+    <div className={styles.padHelp} id={helpId}>
+      <p className={styles.hint}>{t(continuous ? "manualModeContinuousHint" : "manualModePulseHint")}</p>
+      {continuous && !client.canContinuous && <p className={styles.hint} role="status">{t(record(safety.panel_control).version === 1 ? "continuousTakeover" : "continuousUnsupported")}</p>}
     </div>
-    <div><strong className={styles.padLabel}>{t("continuousPad")}</strong>
-    <div className={styles.pad} role="group" aria-label={t("continuousPad")}>
-      {arrows.map(({direction, row, column, Icon}) => <button type="button" key={direction} data-testid={`rider-continuous-${direction}`} aria-label={`${t("continuousPad")} · ${t(direction)}`} aria-pressed={client.manualMode === "continuous" && client.activeDirection === direction} disabled={!client.canContinuous} className={`${styles.arrow} ${client.manualMode === "continuous" && client.activeDirection === direction ? styles.arrowActive : ""}`} style={{gridRow:row,gridColumn:column}} onClick={()=>client.hold.toggle(direction)}><Icon size={compact?20:25}/>{!compact&&<span>{t(direction)}</span>}<span className={styles.small}>{displayValue(record(directions[direction]).speed, speedDescriptor, language)} {speedDescriptor.display_unit ?? ""}</span></button>)}
-      <button type="button" className={`${styles.padCenter} ${styles.padStop}`} style={{gridRow:2,gridColumn:2}} aria-label={t("stopMotors")} title={t("manualStopHint")} data-testid="rider-continuous-stop" onClick={()=>void client.stopManual()}><CircleStop size={27}/><span>{t("stopShort")}</span></button>
-    </div></div></div>
-    <p className={styles.hint}>{t("continuousHint")}</p>
-    {!client.canContinuous && <p className={styles.hint} role="status">{t(record(safety.panel_control).version === 1 ? "continuousTakeover" : "continuousUnsupported")}</p>}
     <div className={styles.manualFeedback} data-testid="manual-feedback" aria-live="polite">
       <span>{t("manualIntent")}: <strong>{client.activeDirection ? `${t(client.manualMode === "continuous" ? "continuousPad" : "pulsePad")} · ${t(client.activeDirection)}` : t("manualNoDirection")}</strong></span>
       <span>{t("manualAck")}: <strong>{t(feedback.requestKey)}</strong></span>
@@ -57,6 +91,7 @@ export function ManualPad({ client, t, language, compact = false }: { client: Ri
     </div>
     <div className={styles.padStatus}><Pill tone={safety.state === "ARMED" ? "good" : "warning"}>{t(safety.state === "ARMED" ? "armed" : safety.state === "ESTOP" ? "estop" : safety.state === "DISARMED" ? "disarmed" : "unknown")}</Pill>{(client.status?.errors.control || safety.stale === true) && <Pill tone="warning">{t("lastPermission")}</Pill>}{!!record(safety.execution).inhibit && <Pill tone="warning">{t("executionPaused")}</Pill>}{client.activeDirection && <Pill tone="good">{t(client.manualMode === "continuous" ? "continuousPad" : "held")} · {t(client.activeDirection)}</Pill>}</div>
     <div className={`${styles.flex} ${styles.space}`} style={{ marginTop: 15 }}><span className={styles.small}>{t("owner")}: {typeof safety.owner === "string" ? safety.owner : "—"}</span><Button onClick={() => client.hold.release()} disabled={!client.activeDirection}><CirclePause size={15} />{t("endDirection")}</Button></div>
+    </div>
   </div>;
 }
 export function Posture({ client, t, language }: { client: RiderClient; t: Translator; language: string }) {
@@ -116,13 +151,15 @@ export function CameraPanel({ client, t, language, compact = false, onObservatio
   const streams = client.pipeline.status?.profile.analysis_location === "local"
     ? (["raw", "proc"] as const) : compact ? (["raw", "venom"] as const) : (["raw", "venom", "proc"] as const);
   return <Panel className={compact?styles.cameraEmbedded:""} title={t("camera")} hint={compact?undefined:t("cameraHint")} extra={<Button data-testid="camera-preview-toggle" onClick={() => void chooseStream(client.cameraStream ? null : "raw")} disabled={!client.canMutate||previewBusy}><Camera size={15} />{t(client.cameraStream ? "hidePreview" : "showPreview")}</Button>}>
-    <CameraPipelineControls client={client} t={t}/>
     <div className={styles.flex} style={{ marginBottom: 14 }}>{streams.map(stream => <Button key={stream} tone={selected === stream ? "primary" : undefined} aria-pressed={selected === stream} onClick={() => void chooseStream(stream)} disabled={!client.canMutate||previewBusy}>{t(stream === "venom" ? "visionVenom" : stream === "proc" ? "visionPi" : stream)}</Button>)}</div>
     <div className={styles.camera}>{client.camera&&notice&&<div className={transitioning?styles.cameraPaused+" "+styles.cameraTransition:styles.cameraPaused} role="status" data-testid="vision-preview-paused">{t(notice!)}</div>}{client.camera ? <><img data-capture-key={client.camera.captureKey} src={client.camera.url} alt={t("cameraAlt")} onLoad={event=>{const {naturalWidth,naturalHeight}=event.currentTarget;setImageSize(previous=>previous[0]===naturalWidth&&previous[1]===naturalHeight?previous:[naturalWidth,naturalHeight]);client.markCameraDecoded(event.currentTarget.currentSrc,true);if(client.camera&&event.currentTarget.currentSrc===client.camera.url)setDisplayed(client.camera);}} onError={event=>{client.markCameraDecoded(event.currentTarget.currentSrc,false);setDisplayed(null);}} />{editor&&<CorridorOverlay editor={editor} size={imageSize} t={t}/>}</> : <Empty><Camera size={32} />{t(transitioning?"visionPreviewRestarting":client.mediaError ?? (client.cameraStream ? "frameMissing" : "showPreview"))}{onObservation&&<><p className={styles.hint}>{t("loopPreviewHelp")}</p><Button tone="primary" disabled={observationDisabled} onClick={onObservation}>{t("loopPreparePreview")}</Button></>}</Empty>}</div>
     {previewFailure&&<p role="alert" className={styles.hint}>{t(previewFailure)}</p>}
     {editor&&<p className={styles.hint} data-testid="sector-draft-hint">{t("sectorDraftHint")}</p>}
     {selected === "venom" && <VisionSectors frame={visible} t={t}/>}
-    <SampleCapture sourceSession={client.config?.session??null} deviceId={client.config?.device_id??null} frame={client.cameraStream?visible:null} visible={!!client.cameraStream} t={t}/>
+    <details className={styles.cameraTools}><summary>{t("cameraTools")}</summary>
+      <CameraPipelineControls client={client} t={t}/>
+      <SampleCapture sourceSession={client.config?.session??null} deviceId={client.config?.device_id??null} frame={client.cameraStream?visible:null} visible={!!client.cameraStream} t={t}/>
+    </details>
     {selected === "venom" && <p className={styles.hint}>{t("visionLegend")}</p>}
     {visible?.visionState && <p className={styles.hint}>{t(visible.stale?"loopDecision":"state")}: {t("vision." + visible.visionState)} · {visible.inferenceMs} ms · <code>{visible.visionReason}</code>{visible.visionPolicy === "diagnostic_default" && <> · {t("visionDefaultZone")}</>}</p>}
     {visible?.analysis && <p className={styles.small} data-testid="frame-identity">{t("frameSequence")}: {String(sourceIdentity?.sequence)} · {String(sourceIdentity?.frame_id).slice(0,12)} · {t("frameRelativeAge")}: {Math.round(frameAge(visible)??0)} ms · {t("frameAnalysisRevision")}: r{String(visible.analysis.config_revision)}</p>}

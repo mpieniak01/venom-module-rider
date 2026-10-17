@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Play, Square, RefreshCw } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
-import { data, errorCode, formatNumber, formatTime, record, type JsonRecord } from "../lib/model";
+import { data, errorCode, formatNumber, formatTime, record, safetyOf, type JsonRecord } from "../lib/model";
 import { calibrationAcceptance, calibrationMatches, calibrationScope, decisionView, executionHeadline, freshPolicyFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, motionPermission, stoppingZone, stoppingZoneValues, trialBlock, trialPreparation, trialPreparationTitle, trialPreparationErrorKey, trialDiagnostics, trialStopReasonKey, trialOutcomeTone, freshObservation } from "../lib/loop-controls";
 import { stopLoopResources } from "../lib/stop-loop";
 import type { RiderClient } from "../lib/use-rider";
@@ -11,7 +11,8 @@ import { CameraPanel } from "./control";
 import { Button, Field, Panel, Pill } from "./primitives";
 import styles from "../rider.module.css";
 
-export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:Translator;language:string;manual:ReactNode}) {
+export function NavigationLoop({client,t,language,manual,auxiliary}:{client:RiderClient;t:Translator;language:string;manual:ReactNode;auxiliary?:ReactNode}) {
+  const [view, setView] = useState<"manual" | "automatic">("manual");
   const [policy,setPolicy]=useState<JsonRecord|null>(null);
   const [draft,setDraft]=useState<JsonRecord|null>(null);
   const [editingZone,setEditingZone]=useState(false);
@@ -273,7 +274,19 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
   const visibleError=diagnostic.requestErrorCovered||preparation?.source==="pi"&&hasPreparationError||errorRun&&sharedTrial?.run_id===errorRun?"":error;
   const sharedRecovery=sharedTrial&&recoveryFailure?.runId===sharedTrial.run_id?recoveryFailure:null;
 
-  return <Panel title={t("loopTitle")} extra={<Button aria-label={t("loopLoad")} disabled={loading||!!operation||!connected} onClick={()=>setRefresh(v=>v+1)}><RefreshCw size={14}/>{t("refresh")}</Button>}>
+  const owner = safetyOf(client.status).owner;
+  return <section className={styles.controlWorkspace} data-testid="control-workspace">
+    <div className={styles.controlModeRow}>
+      <div className={styles.controlModes} role="group" aria-label={t("workspaceView")}>
+        {(["manual", "automatic"] as const).map(mode => <Button key={mode} data-testid={"workspace-" + mode} aria-pressed={view === mode} tone={view === mode ? "primary" : undefined} onClick={() => setView(mode)}>{t(mode === "manual" ? "workspaceManual" : "workspaceAutomatic")}</Button>)}
+      </div>
+      <span className={styles.workspaceOwner} role="status">{t("workspaceOwner")}: <strong>{t(owner === "manual" ? "workspaceManual" : owner === "navigation" ? "workspaceAutomatic" : "workspaceNoOwner")}</strong></span>
+    </div>
+    <div className={styles.driveWorkspace}>
+      <div className={styles.workspaceContent} data-testid="workspace-content" tabIndex={0} role="region" aria-label={t("workspaceObservation")}>
+        <div className={styles.loopCamera}><CameraPanel client={client} t={t} language={language} compact editor={view === "automatic" && editingZone && draft && Array.isArray(draft.corridor) ? {value:draft.corridor as number[],disabled:goals.drive===true||!!operation,onChange:value=>setDraft({...draft,corridor:value})}:undefined}/></div>
+        <div hidden={view !== "automatic"} data-testid="automatic-panel">
+          <Panel title={t("loopTitle")} extra={<Button aria-label={t("loopLoad")} disabled={loading||!!operation||!connected} onClick={()=>setRefresh(v=>v+1)}><RefreshCw size={14}/>{t("refresh")}</Button>}>
     <div className={styles.loopStatus} role="status" data-testid="loop-state">
       <Pill tone={phase==="running"?"good":phase==="offline"||phase==="unknown"||phase==="fault"?"warning":undefined}>{t(operation==="stop"?"loopStopping":phase==="fault"?"loopPhase.fault":operation==="check"?"trialChecking":operation==="start"?"loopStarting":"loopPhase."+phase)}</Pill>
       <strong>{t(goals.drive===true?"trialActiveMode":"trialAnalysisMode")}</strong>
@@ -331,13 +344,6 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
       <Field label={t("perceptionOutliers")}><input className={styles.input} type="number" min="0" max="2" step=".1" value={Number(perception.outlier_limit)*100} onChange={e=>draft&&setDraft({...draft,perception:{...perception,outlier_limit:Number(e.target.value)/100}})}/></Field>
     </div></>}
     {groundActive&&<p className={styles.hint} data-testid="ground-geometry-help">{t("geometryPreviewHelp")}</p>}
-    <div className={styles.driveWorkspace}>
-      <div className={styles.loopCamera}><CameraPanel client={client} t={t} language={language} compact editor={editingZone&&draft&&Array.isArray(draft.corridor)?{value:draft.corridor as number[],disabled:goals.drive===true||!!operation,onChange:value=>setDraft({...draft,corridor:value})}:undefined}/></div>
-      <div className={styles.loopSidebar}>
-        {manual}
-        <LoopDecision frame={client.cameraStream==="venom"?client.camera:null} state={loopState} detector={detector} policy={policy} status={client.status} t={t} language={language}/>
-      </div>
-    </div>
     <details ref={settingsRef} className={styles.details}><summary>{t("loopSettings")}{dirty?" · "+t("unsaved"):""}</summary>
       <div className={styles.metrics}>
       <div className={styles.metric}><div className={styles.metricLabel}>{t("loopDecision")}</div><strong>{decision.state?t("vision."+String(decision.state)):"—"}</strong><p className={styles.small}>{String(decision.reason??loopState.reason??loopState.stop_reason??"")}</p></div>
@@ -383,5 +389,12 @@ export function NavigationLoop({client,t,language,manual}:{client:RiderClient;t:
         <p className={styles.hint}>{t("loopModel")}: {t(detector.configured===true?"yes":"no")} · {t("computeRevision")}: {String(policy?.revision??"—")}</p>
       </div>:<p>{t(loading?"loading":"loopLoadFailed")}</p>}
     </details>
-  </Panel>;
+          <LoopDecision frame={client.cameraStream==="venom"?client.camera:null} state={loopState} detector={detector} policy={policy} status={client.status} t={t} language={language}/>
+          </Panel>
+        </div>
+        {auxiliary}
+      </div>
+      <aside className={styles.operatorConsole} aria-label={t("manual")} data-testid="operator-console">{manual}</aside>
+    </div>
+  </section>;
 }
