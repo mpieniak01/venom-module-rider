@@ -432,6 +432,6 @@ Use `Input`, `Select`, `Textarea`, `Checkbox`, `Range` and `Field` from the modu
 primitives for every form. `Input` wraps Venom's shared input; the native select,
 checkbox and slider preserve existing browser events, option values, producer
 bounds and fieldset semantics. All fields share theme colors, 36 px height,
-6 px corners, labels, focus and disabled/error states. Text areas grow vertically.
+4 px corners, labels, focus and disabled/error states. Text areas grow vertically.
 Keep action buttons on the existing shared Venom button wrapper; direction pads,
 tabs and selectable media cards retain their specialized interaction geometry.
