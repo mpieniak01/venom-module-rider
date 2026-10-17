@@ -578,3 +578,57 @@ async def test_demo_plain_manual_arm_does_not_enable_navigation_resume():
         )
     finally:
         await nav.close()
+
+
+async def test_demo_current_generation_can_target_initial_and_resumed_operation():
+    nav = ReplayNavigation(b"fixture", Permit, model_sha="a" * 64)
+    pi = DemoPi(navigation=nav)
+    nav.policy.update(verified=True, calibration_id="demo-only", model_sha256="a" * 64)
+    nav.request = lambda *_: asyncio.sleep(
+        0, result={"state": "unknown", "action": "stop"}
+    )
+    try:
+        await nav.start_trial(
+            body(
+                generation=pi.generation,
+                config_revision=nav.policy["revision"],
+                settings_revision=pi.controls["revision"],
+                panel_id="panel-one",
+                operator_control_version=1,
+            )
+        )
+        first_id = pi.safety()["operator_control"]["operation_id"]
+        assert isinstance(first_id, str) and first_id
+        assert (
+            pi.control(
+                command(
+                    pi,
+                    "navigation_pause",
+                    panel_id="panel-one",
+                    supersedes_operation_id=first_id,
+                )
+            ).status_code
+            == 200
+        )
+        assert (
+            pi.control(
+                command(
+                    pi,
+                    "navigation_resume",
+                    panel_id="panel-one",
+                    request_id="resume-current",
+                )
+            ).status_code
+            == 200
+        )
+        request = command(
+            pi,
+            "navigation_pause",
+            panel_id="panel-one",
+            supersedes_operation_id="resume-current",
+        )
+        pi.seq += 20
+        assert pi.control(request).status_code == 200
+        assert pi.owner == "manual" and nav.operator_state == "paused"
+    finally:
+        await nav.close()

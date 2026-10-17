@@ -108,7 +108,8 @@ class ReplayNavigation:
             and self.operator_state in {"qualifying", "active"}
             and isinstance(self.operation_id, str)
             and body.get("supersedes_operation_id") == self.operation_id
-            and body.get("generation") == self.operation_origin_generation
+            and body.get("generation")
+            in {self.state.generation, self.operation_origin_generation}
             and body.get("panel_id") == self.state.panel_id
             and self.state.panel_id is not None
             and body.get("source") == "manual"

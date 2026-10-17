@@ -257,6 +257,11 @@ class DemoPi:
                     else None
                 )
                 self.state = "ARMED"
+                if opt_in and self.navigation:
+                    self.navigation.operation_id = body["request_id"]
+                    self.navigation.operation_origin_generation = self.generation
+                    self.navigation.operation_origin_sequence = body["seq"]
+                    self.navigation.operator_state = "qualifying"
             elif action in {"move", "height", "balance"}:
                 if self.panel_id is not None and body.get("panel_id") != self.panel_id:
                     return envelope({"error": "panel_owner_mismatch"}, status=409)
