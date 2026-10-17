@@ -9,6 +9,7 @@ async page => {
   await page.getByTestId("rider-forward").waitFor({state:"visible"});
   const check = (ok,why) => { if(!ok) throw new Error(why); };
   const pressed=()=>page.getByTestId("rider-forward").getAttribute("aria-pressed");
+  const noIntent=()=>page.getByTestId("manual-feedback").getByText("Brak",{exact:true}).waitFor();
   await page.getByTestId("rider-forward").click();
   await page.waitForTimeout(900);
   check(await pressed()==="true","direction did not latch after release");
@@ -26,11 +27,12 @@ async page => {
   check(stopped.includes("Zgłoszone ZERO"),"no zero after release");
   await page.getByTestId("rider-forward").click();
   await page.getByTestId("rider-manual-mode").selectOption("pulse");
-  check(await pressed()==="false","input mode switch kept the previous latch");
+  await noIntent();
   await page.getByTestId("rider-left").click();
   await page.waitForTimeout(700);
-  check(await pressed()==="false","pulse restored previous latch");
+  await noIntent();
   await page.getByTestId("rider-manual-mode").selectOption("continuous");
+  check(await pressed()==="false","returning to continuous restored previous latch");
   await page.getByTestId("rider-forward").click();
   await page.getByTestId("rider-pad-stop").click();
   await page.waitForTimeout(700);
