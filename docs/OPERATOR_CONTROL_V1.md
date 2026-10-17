@@ -20,7 +20,12 @@ The envelope retains `request_id`, `source: "manual"`,
 `execution_context: "panel"`, `panel_id`, `generation`, `seq`, `ts`, `ttl_ms` and
 `settings_revision`. The proxy neither changes timestamps nor impersonates the
 navigation owner. The Pi admits the request under its own safety and motion
-locks. Pause/intervention revoke the old generation and leave the automatic
+locks. A pause or explicit `move` intervention may include
+`supersedes_operation_id`, the exact pending resume request identifier. This
+allows the Pi to retire that operation when its new generation has not yet
+reached the browser. It is scoped to the original generation, panel holder,
+request freshness and operation identity; it is not a general stale-generation
+exception. No status GET or retry is required before the urgent correction. Pause/intervention revoke the old generation and leave the automatic
 controller paused. Resume requires existing permission; it never ARM/disarms,
 clears E-Stop, renews a timed lease or replays old movement.
 

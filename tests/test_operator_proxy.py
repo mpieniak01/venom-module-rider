@@ -364,3 +364,103 @@ async def test_demo_expired_lease_keeps_observation_without_rearming():
         assert refused.status_code == 409 and pi.state == "DISARMED"
     finally:
         await nav.close()
+
+
+async def test_proxy_preserves_exact_superseded_resume_identifier(monkeypatch):
+    seen = []
+    service, client = await setup_proxy(
+        monkeypatch, lambda request: seen.append(request) or packet()
+    )
+    try:
+        original = intent(
+            "move",
+            intervene=True,
+            supersedes_operation_id="pending-resume",
+            direction="left",
+            mode="pulse",
+            device_settings=True,
+        )
+        response = await client.post(
+            "/api/v1/rider/control",
+            json=original,
+            headers={"X-Rider-Session": service.session},
+        )
+        assert response.status_code == 200
+        assert len(seen) == 1 and json.loads(seen[0].content) == original
+    finally:
+        await client.aclose()
+        await service.close()
+
+
+@pytest.mark.parametrize("value", ["", " ", "x" * 129, True, 4])
+def test_superseded_operation_is_a_strict_bounded_identifier(value):
+    with pytest.raises(ValidationError):
+        Command(action="navigation_pause", supersedes_operation_id=value)
+
+
+@pytest.mark.parametrize(
+    "action,intervene",
+    [("navigation_resume", None), ("move", None), ("height", True), ("stop", None)],
+)
+def test_supersession_is_restricted_to_explicit_operator_intervention(
+    action, intervene
+):
+    with pytest.raises(ValidationError):
+        Command(action=action, intervene=intervene, supersedes_operation_id="resume")
+
+
+@pytest.mark.parametrize("action", ["navigation_pause", "move"])
+async def test_demo_exact_pending_resume_can_be_interrupted_before_browser_ack(action):
+    nav = ReplayNavigation(b"fixture", Permit, model_sha="a" * 64)
+    pi = DemoPi(navigation=nav)
+    nav.policy.update(verified=True, calibration_id="demo-only", model_sha256="a" * 64)
+    nav.request = lambda *_: asyncio.sleep(
+        0, result={"state": "unknown", "action": "stop"}
+    )
+    try:
+        await nav.start_trial(
+            body(
+                generation=pi.generation,
+                config_revision=nav.policy["revision"],
+                settings_revision=pi.controls["revision"],
+                panel_id="panel-one",
+                operator_control_version=1,
+            )
+        )
+        pi.control(command(pi, "navigation_pause", panel_id="panel-one"))
+        resume = command(
+            pi, "navigation_resume", panel_id="panel-one", request_id="pending-resume"
+        )
+        assert pi.control(resume).status_code == 200
+        pending_generation = pi.generation
+        # The pending response has not delivered this generation to the browser.
+        correction = command(
+            pi,
+            action,
+            panel_id="panel-one",
+            generation=resume["generation"],
+            seq=resume["seq"] + 1,
+            supersedes_operation_id="pending-resume",
+            **(
+                {
+                    "intervene": True,
+                    "direction": "left",
+                    "mode": "pulse",
+                    "device_settings": True,
+                }
+                if action == "move"
+                else {}
+            ),
+        )
+        bad = pi.control(correction | {"supersedes_operation_id": "another-operation"})
+        assert bad.status_code == 409 and pi.generation == pending_generation
+        # New navigation sequence numbers do not invalidate the original panel lane.
+        pi.seq += 20
+        accepted = pi.control(correction)
+        assert accepted.status_code == 200
+        assert pi.owner == "manual" and nav.operator_state == "paused"
+        assert pi.generation != pending_generation
+        repeated = pi.control(correction)
+        assert repeated.status_code == 409
+    finally:
+        await nav.close()

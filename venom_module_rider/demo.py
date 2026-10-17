@@ -168,10 +168,17 @@ class DemoPi:
             self.generation = uuid.uuid4().hex
             self.seq = -1
         else:
+            supersedes = bool(
+                self.navigation and self.navigation.supersedes_operation(body)
+            )
+            last_seq = (
+                self.navigation.operation_origin_sequence if supersedes else self.seq
+            )
             if (
                 body.get("generation") != self.generation
+                and not supersedes
                 or type(body.get("seq")) is not int
-                or body["seq"] <= self.seq
+                or body["seq"] <= last_seq
             ):
                 return envelope({"error": "stale_generation_or_sequence"}, status=409)
             if (

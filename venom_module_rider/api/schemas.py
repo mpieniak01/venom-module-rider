@@ -55,15 +55,28 @@ class Command(StrictModel):
     mode: Literal["pulse", "hold", "release"] | None = None
     device_settings: StrictBool | None = None
     intervene: StrictBool | None = None
+    supersedes_operation_id: (
+        Annotated[str, Field(strict=True, min_length=1, max_length=128)] | None
+    ) = None
     height: StrictInt | None = None
     enabled: StrictBool | None = None
 
-    @field_validator("panel_id")
+    @field_validator("panel_id", "supersedes_operation_id")
     @classmethod
     def nonblank_panel(cls, value):
         if value is not None and not value.strip():
             raise ValueError("invalid_panel_id")
         return value
+
+    @model_validator(mode="after")
+    def supersession_scope(self):
+        if self.supersedes_operation_id is not None and not (
+            self.action == "navigation_pause"
+            or self.action == "move"
+            and self.intervene is True
+        ):
+            raise ValueError("operator_supersession_scope")
+        return self
 
 
 class SettingsPatch(StrictModel):

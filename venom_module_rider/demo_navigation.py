@@ -88,6 +88,8 @@ class ReplayNavigation:
         self.operator_state = "idle"
         self.operator_reason = "not_started"
         self.operation_id = None
+        self.operation_origin_generation = None
+        self.operation_origin_sequence = -1
 
     def operator_status(self):
         return {
@@ -98,10 +100,31 @@ class ReplayNavigation:
             "reason": self.operator_reason,
         }
 
+    def supersedes_operation(self, body):
+        return (
+            self.operator_mode
+            and self.state.state == "ARMED"
+            and self.state.owner == "navigation"
+            and self.operator_state in {"qualifying", "active"}
+            and isinstance(self.operation_id, str)
+            and body.get("supersedes_operation_id") == self.operation_id
+            and body.get("generation") == self.operation_origin_generation
+            and body.get("panel_id") == self.state.panel_id
+            and self.state.panel_id is not None
+            and body.get("source") == "manual"
+            and body.get("execution_context") == "panel"
+            and (
+                body.get("action") == "navigation_pause"
+                or (body.get("action") == "move" and body.get("intervene") is True)
+            )
+        )
+
     def operator_command(self, body):
         """In-memory copy of the negotiated Pi boundary; never calls hardware."""
         if not self.operator_mode or not self.status.get("running"):
             raise ValueError("operator_control_not_available")
+        if "supersedes_operation_id" in body and not self.supersedes_operation(body):
+            raise ValueError("navigation_operation_stale")
         if not body.get("panel_id"):
             raise ValueError("operator_panel_required")
         if body["panel_id"] != self.state.panel_id:
@@ -114,6 +137,8 @@ class ReplayNavigation:
         resume = body.get("action") == "navigation_resume"
         if resume and self.operator_state in {"active", "qualifying"}:
             raise ValueError("navigation_already_active")
+        self.operation_origin_generation = self.state.generation if resume else None
+        self.operation_origin_sequence = body["seq"] if resume else -1
         self.state.deadline = 0.0
         self.state.generation = uuid.uuid4().hex
         self.state.owner = "navigation" if resume else "manual"
