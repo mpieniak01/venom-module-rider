@@ -417,7 +417,7 @@ def test_actual_host_registry_optional_loading_and_cleanup(monkeypatch):
     settings = SimpleNamespace(
         API_OPTIONAL_MODULES="",
         CORE_MODULE_API_VERSION="1.0.0",
-        CORE_RUNTIME_VERSION="1.5.0",
+        CORE_RUNTIME_VERSION="1.6.0",
     )
     empty = FastAPI()
     assert include_optional_api_routers(empty, settings) == []

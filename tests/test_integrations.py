@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import sys
+import textwrap
 import time
 from datetime import datetime
 from pathlib import Path
@@ -442,16 +443,87 @@ async def test_mixed_fresh_reads_are_degraded_without_unknown_device_leak(servic
     assert result["resources"][1]["state"] == "unverified"
 
 
+@pytest.mark.parametrize(
+    "runtime_version,package_version",
+    [("1.5.0", "99.0.0"), ("1.6.0", "1.0.0")],
+)
+def test_real_core_loader_checks_runtime_abi_before_rider_import(
+    runtime_version, package_version
+):
+    root = Path(__file__).parents[1]
+    code = textwrap.dedent(
+        """
+        import sys
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from fastapi import FastAPI
+        from venom_core.services import module_registry
+
+        runtime_version, package_version, manifest = sys.argv[1:]
+        settings = SimpleNamespace(
+            API_OPTIONAL_MODULES=f"manifest:{manifest}",
+            CORE_MODULE_API_VERSION="1.0.0",
+            CORE_RUNTIME_VERSION=runtime_version,
+            APP_VERSION=package_version,
+        )
+        app = FastAPI()
+        assert not any(name.startswith("venom_module_rider") for name in sys.modules)
+        original_import = module_registry.importlib.import_module
+        with patch.object(
+            module_registry.importlib, "import_module", wraps=original_import
+        ) as imports:
+            included = module_registry.include_optional_api_routers(app, settings)
+
+        rider_imports = [
+            call.args[0]
+            for call in imports.call_args_list
+            if call.args[0].startswith("venom_module_rider")
+        ]
+        diagnostic = app.state.optional_module_diagnostics[0]
+        if runtime_version == "1.5.0":
+            assert included == []
+            assert rider_imports == []
+            assert not any(
+                name.startswith("venom_module_rider") for name in sys.modules
+            )
+            assert diagnostic["state"] == "unavailable"
+            assert diagnostic["reason_code"] == "incompatible_module"
+        else:
+            assert included == ["rider"]
+            assert "venom_module_rider.api.routes" in rider_imports
+            assert "venom_module_rider.api.routes" in sys.modules
+            assert diagnostic["state"] == "loaded"
+            assert diagnostic["reason_code"] == "router_loaded"
+        """
+    )
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            code,
+            runtime_version,
+            package_version,
+            str(root / "module.json"),
+        ],
+        cwd=root,
+        env=os.environ.copy(),
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
 def test_manifest_hook_is_opt_in_and_router_import_does_not_load_it():
     root = Path(__file__).parents[1]
     manifest = json.loads((root / "module.json").read_text())
-    assert manifest["backend"]["min_core_version"] == "1.5.0"
+    assert manifest["backend"]["min_core_version"] == "1.6.0"
     assert (
         manifest["backend"]["integration_provider_import"]
         == "venom_module_rider.integrations:observe_integration"
     )
     # Fresh interpreter prevents prior tests importing the hook from obscuring
-    # compatibility: an older core router path must not import the new adapter.
+    # compatibility: importing the router must not import the optional adapter.
     code = (
         "import sys; import venom_module_rider.api.routes; "
         "assert 'venom_module_rider.integrations' not in sys.modules"
