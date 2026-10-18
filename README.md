@@ -87,15 +87,23 @@ Use Venom's existing environment and optional-module installation workflow. Keep
 
 Retain other installed entries. Set NEXT_PUBLIC_FEATURE_RIDER=true for the UI and run the host's existing optional-module preparation/generation commands before building. The route is /rider, the API prefix is /api/v1/rider. Backend imports need the module root on PYTHONPATH or the package installed in the host virtualenv. Frontend dependencies come from Venom; no duplicate frontend stack is needed.
 
-The manifest uses module API 1.0 and minimum core runtime 1.5, which differs from Venom's package version (validated on 1.9). R2/R3 also require the matching conversation-provider and shared AudioEngine companion changes. Pi must provide the negotiated HTTP envelope v1 and the versions listed in [docs/API.md](docs/API.md). Posture descriptors are supplied by the companion Pi change; unsupported capabilities are unavailable in the UI.
+The manifest requires module API 1.0 and core runtime ABI 1.6.0 or newer. Venom's
+`CORE_RUNTIME_VERSION` identifies the module/runtime ABI independently of its
+`APP_VERSION` package/release version. ABI 1.6 provides the MAF
+`venom_core.execution.agent_contracts.tool_function` contract; install the matching
+core contract before updating this module. A core with runtime ABI 1.5 is rejected
+before importing Rider's backend. The module does not fall back to Semantic Kernel.
+
+R2/R3 also require the matching conversation-provider and shared AudioEngine companion changes. Pi must provide the negotiated HTTP envelope v1 and the versions listed in [docs/API.md](docs/API.md). Posture descriptors are supplied by the companion Pi change; unsupported capabilities are unavailable in the UI.
 
 ## Central integration inventory
 
 The optional read-only 263R hook exposes configured robots and existing cached
 connection evidence to newer Venom cores, without probing or selecting a robot.
 See [Integration observations](docs/INTEGRATION_OBSERVATIONS.md) and
-[opis po polsku](docs/INTEGRATION_OBSERVATIONS_PL.md). Older core/panel behavior
-remains independent of the hook.
+[opis po polsku](docs/INTEGRATION_OBSERVATIONS_PL.md). Manual control on a host
+meeting the required runtime ABI remains independent of the optional inventory
+hook.
 
 ## Device configuration
 

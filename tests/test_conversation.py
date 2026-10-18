@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 from fastapi import FastAPI
-from semantic_kernel import Kernel
+from venom_core.execution.maf_runtime import AgentRuntime as Kernel
 from venom_core.services.conversation_providers import (
     ConversationContext,
     ConversationProviderRegistry,
@@ -135,7 +135,7 @@ async def test_disabled_and_cached_skill_have_no_access(rig):
     enable(rig)
     kernel = Kernel()
     plugin = kernel.add_plugin(rig.provider.skill, plugin_name="RiderSkill")
-    assert set(plugin.functions) == {row["name"] for row in rig.provider.list_tools()}
+    assert set(plugin) == {row["name"] for row in rig.provider.list_tools()}
     scope = context()
     with (
         conversation_turn(scope),

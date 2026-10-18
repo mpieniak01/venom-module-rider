@@ -6,7 +6,7 @@
     "router_import": "venom_module_rider.api.routes:router",
     "conversation_provider_import": "venom_module_rider.conversation:create_provider",
     "module_api_version": "1.0.0",
-    "min_core_version": "1.5.0",
+    "min_core_version": "1.6.0",
     "data_policy": {
       "storage_mode": "core_prefixed",
       "mutation_guard": "core_environment_policy",
