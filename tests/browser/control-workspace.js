@@ -91,6 +91,11 @@ async page => {
     connection="offline";controlMissing=true;
     await wait(async()=>(await page.getByTestId("operator-messages").innerText()).includes("Ostatni znany stan"),"offline notice absent");
     await same(initial,"offline notice");
+    const lastMessage=page.getByTestId("operator-messages").locator("p").last();
+    await lastMessage.scrollIntoViewIfNeeded();
+    const messages=await lastMessage.boundingBox();
+    check(messages && messages.y>=0 && messages.y+messages.height<=1000,"last offline message cannot be reached inside the viewport");
+    await same(initial,"scrolling offline messages keeps controls fixed");
     check(await page.getByTestId("rider-arm").getAttribute("aria-pressed")==="true","missing read faked disarm");
     connection="online";controlMissing=false;
     await wait(async()=>!await page.getByTestId("rider-forward").isDisabled(),"manual control not restored");
@@ -160,6 +165,21 @@ async page => {
     check(phonePreview && phonePreview.height>=150 && phonePreview.y+phonePreview.height<=844,"phone preview inaccessible");
     check(calls.filter(c=>c.body.action==="arm").length===1,"phone startup armed");
     scenarios.push("phone first load: focused workspace, accessible preview, no ARM");
+    for(const viewport of [{width:1280,height:720},{width:1366,height:768}]) {
+      const callsBefore=calls.length;
+      await page.setViewportSize(viewport);
+      await page.reload();
+      await page.getByTestId("rider-forward").waitFor();
+      await stable();
+      const surface=await page.getByTestId("rider-page").boundingBox();
+      const controls=await boxes();
+      check(surface && surface.y===0 && surface.height===viewport.height,"short desktop did not open focused workspace");
+      check(controls["rider-backward"].y+controls["rider-backward"].height<=viewport.height,"short desktop hid backward control");
+      await page.getByTestId("operator-messages").scrollIntoViewIfNeeded();
+      await same(controls,"short desktop operator messages");
+      check(calls.length===callsBefore,"short desktop startup mutated robot");
+      scenarios.push(viewport.width+"x"+viewport.height+": complete controls and scrollable messages, no actuation");
+    }
     configured=false;
     await wait(async()=>await page.getByTestId("operator-console").count()===0,"unconfigured fallback not shown");
     check(await page.getByTestId("rider-messages").count()===1,"fallback lost operator messages");

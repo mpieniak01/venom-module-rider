@@ -246,7 +246,7 @@
 .workspaceContent .loopCamera { position: static; padding: 16px; background: var(--bg-panel); border: 1px solid var(--r-border); border-radius: 16px; }
 .workspaceContent .loopToolbar { position: static; }
 .operatorConsole { overflow-anchor: none; min-width: 0; min-height: 0; }
-.operatorPanel { height: 100%; box-sizing: border-box; padding: 12px; display: grid; grid-template-rows: var(--r-button-large) minmax(0, 1fr) 84px; gap: 8px; }
+.operatorPanel { height: 100%; box-sizing: border-box; padding: 12px; display: grid; grid-template-rows: var(--r-button-large) minmax(0, 1fr); gap: 8px; }
 .operatorPanel > .panelHeader { height: var(--r-button-large); margin: 0; flex-wrap: nowrap; gap: 6px; }
 .operatorPanel .panelTitle { font-size: 14px; }
 .operatorPanel > .panelHeader .button { padding: 0 10px; white-space: nowrap; }
@@ -260,7 +260,7 @@
 .operatorPanel .pad { grid-template-columns: repeat(3, 68px); grid-template-rows: repeat(3, 56px); gap: 6px; margin: 8px 0 2px; align-content: start; }
 .operatorPanel .manualFeedback { padding: 8px; margin: 8px 0; }
 .operatorPanel .padStatus { flex-wrap: wrap; justify-content: start; gap: 5px; }
-.operatorMessages { min-height: 0; overflow-y: auto; overscroll-behavior: contain; border-top: 1px solid var(--r-border); padding-top: 6px; overflow-wrap: anywhere; }
+.operatorMessages { min-width: 0; border-top: 1px solid var(--r-border); padding-top: 6px; overflow-wrap: anywhere; }
 .operatorMessages .hint { margin: 0 0 8px; }
 .messages .banner { margin: 0 0 8px; padding: 8px; font-size: 12px; }
 .messages .noticeText { min-width: 0; overflow-wrap: anywhere; }
@@ -290,7 +290,7 @@
   .driveWorkspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(290px, 1fr) minmax(40px, .8fr); gap: 10px; }
   .operatorConsole { grid-row: 1; }
   .workspaceContent { grid-row: 2; }
-  .operatorPanel { grid-template-rows: var(--r-button-large) minmax(0, 1fr) 38px; gap: 4px; padding: 8px; }
+  .operatorPanel { grid-template-rows: var(--r-button-large) minmax(0, 1fr); gap: 4px; padding: 8px; }
   .operatorPanel > .panelHeader { height: var(--r-button-large); }
   .operatorPanel .manualPad { grid-template-rows: 36px 146px minmax(0, 1fr); }
   .operatorPanel .padMode { height: 36px; }
@@ -299,7 +299,7 @@
 }
 @media (max-height: 520px) and (min-width: 721px) {
   .pageFocused .driveWorkspace { grid-template-columns: minmax(0, 1fr) 300px; }
-  .pageFocused .operatorPanel { grid-template-rows: var(--r-button-large) minmax(0, 1fr) 30px; gap: 2px; padding: 6px; }
+  .pageFocused .operatorPanel { grid-template-rows: var(--r-button-large) minmax(0, 1fr); gap: 2px; padding: 6px; }
   .pageFocused .operatorPanel > .panelHeader { height: var(--r-button-large); }
   .pageFocused .operatorPanel .manualPad { grid-template-rows: 34px 150px minmax(0, 1fr); }
   .pageFocused .operatorPanel .pad { grid-template-rows: repeat(3, 44px); grid-template-columns: repeat(3, 60px); gap: 4px; margin: 6px 0 0; }
@@ -320,6 +320,8 @@
 
 /* The host document may scroll when browser focus/anchoring changes. Keep the
    entire driving surface anchored to its measured host slot, not that scroll. */
+/* Host scrollbar appearance must not shift the fixed steering targets. */
+:global(html):has(.page) { scrollbar-gutter: stable; }
 .workspaceFrame { width: 100%; min-width: 0; }
 .page[data-section="control"] { position: fixed; top: var(--rider-page-top, 210px); left: var(--rider-page-left, 0px); width: var(--rider-page-width, 100%); z-index: 40; margin: 0; background: var(--bg-base); }
 .page.pageFocused[data-section="control"] { inset: 0; width: 100%; height: 100dvh; z-index: 1000; }
@@ -343,4 +345,9 @@
 .page[data-section="control"] .subtitle { display: none; }
 @container rider (max-width: 720px) {
   .loopCamera .cameraEmbedded .camera { height: min(28dvh, 180px); min-height: 96px; max-height: 180px; }
+}
+
+@media (max-height: 800px) {
+  .page:not(.pageFocused)[data-section="control"] .controlPanel { overflow-y: auto; }
+  .page:not(.pageFocused)[data-section="control"] .controlWorkspace { min-height: 400px; }
 }

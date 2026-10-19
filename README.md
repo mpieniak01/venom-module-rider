@@ -451,3 +451,16 @@ geometry, accessible labels and light/dark colors at desktop and phone widths.
 Every Rider mutation is rejected; sample-library GETs are fixtures. Run with
 Playwright CLI `run-code --filename` alongside the existing control-workspace,
 camera-lifecycle and ui-consistency scenarios.
+
+## Operator workspace on small screens
+
+The driving workspace opens in its focused view on narrow or short windows. The
+expand/restore button switches back to the host layout. Steering arrows and motor
+STOP stay in place while manual/automatic views and status messages change.
+Operator messages share the scrollable information area below the arrows; long
+errors do not reserve a separate panel at the bottom of the screen.
+
+The device transport is independent of the web stack. After a host restart,
+restore the configured device connection before diagnosing disabled controls.
+An unavailable connection keeps motion controls disabled; reconnecting does not
+arm the robot or replay a previous movement command.
