@@ -110,12 +110,15 @@ def enrich(points, events):
     gaps = []
     for first, second in zip(points, points[1:], strict=False):
         if (
-            first["segment"] != second["segment"]
+            not first["valid"]
+            or not second["valid"]
+            or not first["instance_id"]
             or first["instance_id"] != second["instance_id"]
+            or second["t"] <= first["t"]
         ):
             continue
         a, b = first["source_time"], second["source_time"]
-        if finite(a) and finite(b) and 0 < b - a <= 1:
+        if finite(a) and finite(b) and b > a:
             gaps.append(b - a)
     ordered = sorted(gaps)
     median = statistics.median(ordered) if ordered else None
