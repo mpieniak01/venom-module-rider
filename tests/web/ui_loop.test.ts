@@ -587,3 +587,15 @@ test("ground permission matches Pi evidence instead of displaying a bare GO as v
   assert.equal(motionPermission({...state,decision:{...decision,...patch}},{drive:true},policy,permissionDetector,permissionStatus()).venom,false);
  }
 });
+
+test("editing a previously driving policy saves an unaccepted observation policy, not invalid drive authority",()=>{
+ const policy={revision:53,mode:"drive",verified:true,calibration_id:"operator-test",model_sha256:"a".repeat(64),speed:.1,max_motion_ms:150,decision_budget_ms:300,corridor:[.35,.8,.65,.95],avoidance:{enabled:false,protocol_version:3,sweep_verified:false,geometry:{mode:"ground",fx:null,fy:null,radius_ratio:null}}};
+ for(const patch of [{speed:.09},{avoidance:{...policy.avoidance,enabled:true}},{avoidance:{...policy.avoidance,geometry:{mode:"image"}}}]){
+  const values=loopSettingsValues(policy,{...policy,...patch});
+  assert.equal(values.mode,"observe");assert.equal(values.verified,false);
+  assert.equal(values.calibration_id,"");assert.equal(values.model_sha256,"");
+  assert.equal(values.revision,undefined);
+ }
+ assert.equal(loopSettingsValues(policy,policy).mode,"drive");
+ assert.equal(policy.mode,"drive");assert.equal(policy.verified,true);
+});

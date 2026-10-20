@@ -27,6 +27,7 @@ check-web:
 	node --check tests/browser/navigation-takeover.js
 	node --check tests/browser/manual-continuous.js
 	node --check tests/browser/manual-panel-authority.js
+	node --check tests/browser/journey-settings.js
 	node --check tests/browser/journey.js
 	$(WEB_BIN)/tsc --project web-next/tsconfig.json --noEmit
 	$(WEB_BIN)/eslint web-next tests/web --max-warnings 0 --config web-next/eslint.config.mjs

@@ -5,6 +5,32 @@ existing ten-second trial retain their behavior. A journey has no overall time
 limit; every individual forward/steering pulse retains the configured low speed
 and short deadline. This is reactive local obstacle avoidance, not a route or map.
 
+## Prepare in the panel
+
+Open **Automat2 → Open journey settings**. Enable avoidance and choose the
+geometry method explicitly. **Current ground and footprint** requires measured
+normalized intrinsics and footprint radius; incomplete values can be saved for
+observation but cannot authorize ground-based driving. The supported **L/C/R image
+zones** alternative uses the existing image masks, without metric distance or
+physical footprint measurement. It still requires checking the visible zones,
+steering sides, swept path and braking on the robot.
+
+**Save on Pi** becomes available after a change. Observation does not lock editing:
+save stops observation, writes the policy and resumes analysis only. Active driving
+must be stopped before editing or saving. Any calibration-scoped change saves an
+unaccepted **observe** policy, so editing a previously accepted drive policy never
+submits the contradictory combination `mode=drive, verified=false`. The panel
+reports the confirmed revision, a rejected save, or a saved policy whose analysis
+restart failed separately. Saving never starts or arms motion.
+
+After saving, use **Enable preview and analysis without driving**, inspect fresh
+floor and obstacle evidence, and complete actual steering/braking checks. Confirm
+the swept path only after those checks; then save it and accept the current zone
+and braking against the fresh visible analysis. **Start journey** is available
+only when the persisted policy, detector and executor meet the existing contract.
+A green image or saving parameters alone does not grant authority. Neither camera
+intrinsics nor physical acceptance are guessed or filled automatically.
+
 ## Start and authority
 
 The operator explicitly starts `POST /api/v1/rider/navigation/journey`. The host

@@ -52,7 +52,7 @@ export function loopSettingsValues(policy: JsonRecord, draft: JsonRecord): JsonR
   const {revision: ignoredRevision, protocol_version: ignoredProtocol, ...values} = draft;
   void ignoredRevision; void ignoredProtocol;
   return calibrationScope(policy, {}) === calibrationScope(draft, {}) ? values
-    : {...values, verified: false, calibration_id: "", model_sha256: ""};
+    : {...values, mode: "observe", verified: false, calibration_id: "", model_sha256: ""};
 }
 /** UI extents write the existing Pi corridor; they are not distance presets. */
 export function stoppingZone(policy: JsonRecord | null): "near" | "far" | "custom" {
