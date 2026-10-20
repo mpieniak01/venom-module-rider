@@ -423,3 +423,30 @@ async def test_actual_pi_flat_sensor_quality_and_observation_wrapper(tmp_path, w
         assert row["quality"]["sensors"] == sensors
     finally:
         await registry.close()
+
+
+async def test_inflight_write_cannot_repopulate_retired_source_window(
+    tmp_path, monkeypatch
+):
+    registry = SamplesRegistry(tmp_path)
+    begun, release = threading.Event(), threading.Event()
+    original = registry.store.evidence.append
+    try:
+        await registry.start("one", "pi")
+
+        def delayed(*args, **kwargs):
+            begun.set()
+            release.wait(5)
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(registry.store.evidence, "append", delayed)
+        registry.observe_evidence("/state", imu(), "pi", "selected")
+        await asyncio.to_thread(begun.wait, 1)
+        registry.retire_evidence("stop")
+        release.set()
+        await drain(registry)
+        assert registry.evidence.status()["ram_records"] == 0
+        assert next(iter(registry.evidence.status()["sessions"].values()))["retired"]
+    finally:
+        release.set()
+        await registry.close()
