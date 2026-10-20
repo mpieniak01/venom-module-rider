@@ -403,9 +403,12 @@ This is manual control and does not use vision obstacle avoidance.
 
 The panel distinguishes selected intent, Pi acknowledgement and the latest
 reported actuator output. Acknowledgement is not proof of physical travel.
-Continuous drive requires `panel_control.version == 1` on Pi and explicit ARM
-or Take manual control in this browser. Other panels may always use global
-STOP; takeover stops and invalidates the previous generation before ARM.
+Continuous drive requires `panel_control.version == 1` on Pi. With
+`operator_intervention_version == 1`, the first direction gesture supplies fresh
+manual consent and ends pending/active navigation without a separate ARM or
+Take manual click. Older Pi uses explicit ARM or Take manual control in this
+browser. Other panels may always use global STOP; a new takeover invalidates
+the previous generation before submitting its requested direction.
 Legacy Pi retains the pulse/hold controls and reports continuous drive unavailable.
 
 The direction lives only in memory. Closing, hiding or leaving the control
