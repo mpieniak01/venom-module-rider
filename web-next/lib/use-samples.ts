@@ -17,7 +17,7 @@ function finishDetached(id:string) {
     body:JSON.stringify({interrupted:true}),keepalive:true,
   }).catch(()=>undefined);
 }
-export function useSamples(deviceId:string|null, previewVisible:boolean, purpose?:string) {
+export function useSamples(deviceId:string|null, previewVisible:boolean, purpose?:string, sourceSession?:string|null) {
   const [session,setSession]=useState<Collection|null>(null);
   const [outcome,setOutcome]=useState<CaptureOutcome|null>(null);
   const [error,setError]=useState("");
@@ -78,7 +78,7 @@ export function useSamples(deviceId:string|null, previewVisible:boolean, purpose
     const hidden=()=>{if(document.hidden&&sessionRef.current?.state==="collecting")void end(true);};
     document.addEventListener("visibilitychange",hidden);
     return()=>{alive.current=false;invalidate();document.removeEventListener("visibilitychange",hidden);const current=sessionRef.current;sessionRef.current=null;if(current?.state==="collecting")finishDetached(current.session_id);};
-  },[check,deviceId,end,invalidate,syncSession]);
+  },[check,deviceId,end,invalidate,syncSession,sourceSession]);
   useEffect(()=>{if(!previewVisible&&sessionRef.current?.state==="collecting")void end(true);},[previewVisible,end]);
   const activeId=session?.state==="collecting"?session.session_id:null;
   const pending=["queued","running","submitting"].includes(outcome?.state??"");

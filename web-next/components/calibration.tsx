@@ -1,3 +1,4 @@
+import type {StudyRecording} from "../lib/use-study-recording";
 import { MotionStudy } from "./motion-study";
 import { LoopTimingPanel } from "./loop-timing";
 import { useState } from "react";
@@ -10,7 +11,7 @@ import { ManualPad, Posture } from "./control";
 import { Button, Empty, Field, Input, NumberField, Panel, Pill, Select } from "./primitives";
 import styles from "../rider.module.css";
 
-export function Calibration({ client, t, language }: { client: RiderClient; t: Translator; language: string }) {
+export function Calibration({ client, t, language, recording }: { client: RiderClient; t: Translator; language: string; recording:StudyRecording }) {
   const settings = settingsOf(client.status);
   const [draft, setDraft] = useState<CalibrationDraft | null>(null);
   const [selectedProfile, setSelectedProfile] = useState<string | null>(null);
@@ -35,7 +36,7 @@ export function Calibration({ client, t, language }: { client: RiderClient; t: T
     const result = await client.mutate("/settings", { revision: settings.revision, values: {}, profile: { action, id: selected, ...(action === "rename" ? { name } : {}) } });
     if (result) { setDraft(null); setSelectedProfile(null); setProfileName(null); setDeletePending(false); }
   };
-  if (!settings.parameter_schema || !settings.directions) return <div className={styles.stack}><Panel title={t("calibration")}><Empty><SlidersHorizontal size={28} />{t("unavailable")}</Empty></Panel><MotionStudy key={client.status?.connection.session} client={client} t={t} language={language}/></div>;
+  if (!settings.parameter_schema || !settings.directions) return <div className={styles.stack}><Panel title={t("calibration")}><Empty><SlidersHorizontal size={28} />{t("unavailable")}</Empty></Panel><MotionStudy key={client.status?.connection.session} recording={recording} t={t} language={language}/></div>;
   return <div className={styles.stack}>
     <div className={styles.calibrationTop}>
       <div className={styles.calibrationOperator} data-testid="calibration-operator"><Panel title={t("testDirection")} hint={t("testHint")}>{draft&&<p className={styles.hint}>{t("study.savedSettings")}</p>}<ManualPad client={client} t={t} language={language} compact /></Panel><Posture client={client} t={t} language={language}/></div>
@@ -55,7 +56,7 @@ export function Calibration({ client, t, language }: { client: RiderClient; t: T
       <Panel title={t("ramp")}>      <div className={styles.grid3} style={{ marginTop: 16 }}>{Object.entries(record(schema.value_fields)).map(([field, descriptor]) => <NumberField compact key={field} label={t(field)} value={Number(effective.values[field])} descriptor={record(descriptor) as NumericDescriptor} disabled={!canEdit} onChange={value => setValue(field, value)} />)}<Field label={t("ramp_mode")}><Select value={String(effective.values.ramp_mode)} disabled={!canEdit} onChange={event => setValue("ramp_mode", Number(event.target.value))}>{rows(schema.ramp_modes).map(mode => <option key={String(mode.value)} value={String(mode.value)}>{t(str(mode.id))}</option>)}</Select></Field></div>
       <div className={`${styles.flex} ${styles.space}`} style={{ marginTop: 20 }}><div>{draft && <Pill tone={valid && !conflict ? "warning" : "danger"}>{t(valid && !conflict ? "unsaved" : "invalidDraft")}</Pill>}</div><div className={styles.flex}><Button disabled={!draft} onClick={() => setDraft(null)}>{t("resetDraft")}</Button><Button tone="primary" data-testid="calibration-save" disabled={!canEdit || !draft || !valid || conflict} onClick={() => void save()}>{t("save")}</Button></div></div>
 </Panel>
-      <MotionStudy key={client.status?.connection.session} client={client} t={t} language={language}/>
+      <MotionStudy key={client.status?.connection.session} recording={recording} t={t} language={language}/>
     </div>
     <LoopTimingPanel key={client.status?.connection.session} client={client} t={t} language={language}/>
   </div>;

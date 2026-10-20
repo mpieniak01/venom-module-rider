@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import tempfile
 import time
@@ -144,6 +145,15 @@ async def seed(service, registry, name, magnitude, qualified=False, firmware=Fal
     return sid
 
 
+class FixturePiClient(PiClient):
+    async def json(self, path, *args, **kwargs):
+        # Separate telemetry from the control reply like independent network
+        # responses; the bounded recorder may drop simultaneous zero-latency jobs.
+        if path == "/state":
+            await asyncio.sleep(0.05)
+        return await super().json(path, *args, **kwargs)
+
+
 @asynccontextmanager
 async def lifespan(app):
     with tempfile.TemporaryDirectory(prefix="rider-motion-fixture-") as folder:
@@ -151,7 +161,7 @@ async def lifespan(app):
         transport = httpx.ASGITransport(app=create_app(pi))
         device = Device("fixture", "Fixture", "http://127.0.0.1:18880", "demo")
         service = RiderService(
-            (device,), client_factory=lambda d: PiClient(d, transport=transport)
+            (device,), client_factory=lambda d: FixturePiClient(d, transport=transport)
         )
         await service.select("fixture", service.session)
         await service.status("calibration")
@@ -183,6 +193,12 @@ app.router.lifespan_context = lifespan
 @app.get("/")
 async def index():
     return FileResponse(ASSETS / "index.html")
+
+
+@app.get("/rider")
+@app.get("/workspace")
+async def workspace():
+    return FileResponse(ASSETS / "workspace.html")
 
 
 @app.get("/fixture")
