@@ -16,7 +16,7 @@ async page => {
   let configured = true;
   let connection = "online", reject = false, output = {lx:0, az:0}, controlMissing = false;
   const calls = [], refreshes = [];
-  let recoverable = true;
+  let recoverable = true, readOnly = false;
   const policy = {revision:1,mode:"observe",speed:.1,max_motion_ms:150,decision_budget_ms:300,corridor:[.35,.65,.65,.95],verified:false,perception:{engine:"depth_plane"}};
   const safety = () => ({state:armed?"ARMED":"DISARMED",owner,generation,panel_motion_enabled:true,ready:true,can_move:armed,stale:false,observed_at:Date.now()/1000,output,capabilities:{move:{available:true}},panel_control:{version:1,holder},remote_decision_deadline_supported:true,scoped_stop_generation_supported:true});
   await page.route("**/api/v1/rider/**", async route => {
@@ -29,6 +29,7 @@ async page => {
         check(Object.keys(body).length===0,"refresh supplied actuator/transport arguments");
         check(req.headers()["x-rider-session"]==="workspace-fixture","refresh used stale device session");
         await new Promise(resolve=>setTimeout(resolve,250));
+        if(readOnly) return json({detail:{code:"environment_read_only"}},403);
         if(recoverable){connection="online";controlMissing=false;}
         return json({connection:{status:connection},recovery:{attempted:true,state:recoverable?"recovered":"failed",...(recoverable?{}:{error:"connection_recovery_failed"})}});
       }
@@ -111,6 +112,20 @@ async page => {
     check(!await page.getByTestId("rider-arm").isDisabled(),"retry did not restore current state");
     check(calls.length===0,"reconnect retry replayed a hardware command");
     scenarios.push("refresh: disconnected transport, bounded busy, failed recovery and retry; no ARM or command replay");
+    readOnly=true;
+    await page.getByTestId("rider-refresh").click();
+    await wait(async()=>!await page.getByTestId("rider-refresh").isDisabled(),"read-only refresh stayed busy");
+    check((await page.getByTestId("rider-messages").innerText()).includes("Odczytano aktualny stan Pi. Tryb tylko do odczytu"),"healthy read-only refresh showed a connection failure");
+    connection="offline";controlMissing=true;
+    await wait(async()=>(await page.getByTestId("operator-messages").innerText()).includes("Ostatni znany stan"),"read-only offline state missing");
+    await page.getByTestId("rider-refresh").click();
+    await wait(async()=>!await page.getByTestId("rider-refresh").isDisabled(),"read-only offline refresh stayed busy");
+    check((await page.getByTestId("rider-messages").innerText()).includes("Brak potwierdzenia połączenia z Pi. Tryb tylko do odczytu"),"offline read-only restriction missing");
+    check(calls.length===0,"read-only fallback issued a hardware command");
+    readOnly=false;
+    await page.getByTestId("rider-refresh").click();
+    await wait(async()=>!await page.getByTestId("rider-refresh").isDisabled(),"refresh after read-only restriction stayed busy");
+    scenarios.push("read-only refresh: status GET works online, offline recovery stays restricted, no hardware command");
     await page.getByTestId("rider-arm").click();
     await wait(async()=>!await page.getByTestId("rider-forward").isDisabled(),"fixture manual permission missing");
     await page.getByTestId("rider-messages").getByRole("status").filter({hasText:"Polecenie przyjęte"}).waitFor();

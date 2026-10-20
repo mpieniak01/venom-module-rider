@@ -129,6 +129,10 @@ checks. It coalesces simultaneous requests and invokes the configured helper
 only when a fresh control read reports `pi_unreachable`. A zero helper exit
 code is followed by a new negotiated Pi read before reporting recovery. Healthy
 connections are not restarted; device selection and Pi permissions stay intact.
+The final Pi read determines recovery even when the helper reports a diagnostic
+error. In read-only environments the recovery POST remains prohibited; Refresh
+falls back to the existing status GET and reports that transport recovery is
+restricted, rather than treating that restriction as a connection failure.
 
 ## Device configuration
 

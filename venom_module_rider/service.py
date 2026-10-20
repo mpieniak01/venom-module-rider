@@ -384,6 +384,8 @@ class RiderService:
                     snapshot = await self._fresh_connection_status()
                     if snapshot["errors"].get("control"):
                         recovery.update(state="failed")
+                    else:
+                        recovery["state"] = "recovered"
             return {"connection": snapshot["connection"], "recovery": recovery}
 
     async def validate_intent(

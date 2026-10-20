@@ -199,7 +199,7 @@ export function useRider(section: Section) {
     abortReads(); setRefreshing(true); setBusy("/connection/refresh");
     setNotice({ key: "connectionRefreshing", tone: "info" });
     const task = async () => {
-      let failure = "";
+      let failure = "", readOnly = false;
       const controller = new AbortController();
       const deadline = setTimeout(() => controller.abort(), 20000);
       try {
@@ -214,14 +214,20 @@ export function useRider(section: Section) {
           const recovery = record(data(response).recovery);
           if (recovery.state === "failed") failure = str(recovery.error) || "pi_unreachable";
         }
-      } catch (error) { failure = errorCode(error); }
+      } catch (error) {
+        const code = errorCode(error);
+        if (code === "environment_read_only") readOnly = true;
+        else failure = code;
+      }
       finally {
         clearTimeout(deadline);
         await poll(undefined, false, true);
         const online = ["online", "degraded"].includes(statusRef.current?.connection.status ?? "");
-        setNotice(online && !failure
-          ? { key: "connectionRefreshed", tone: "success" }
-          : { key: "connectionRefreshFailed", code: failure || str(statusRef.current?.connection.error), tone: "error" });
+        setNotice(readOnly
+          ? { key: online ? "connectionReadOnlyRefreshed" : "connectionReadOnlyUnavailable", tone: online ? "info" : "error" }
+          : online && !failure
+            ? { key: "connectionRefreshed", tone: "success" }
+            : { key: "connectionRefreshFailed", code: failure || str(statusRef.current?.connection.error), tone: "error" });
         motionBlocked.current = Math.max(0, motionBlocked.current - 1);
         setRefreshing(false); setBusy(null);
       }

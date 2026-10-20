@@ -238,3 +238,65 @@ async def test_runner_classifies_failures_and_reaps_owned_process(monkeypatch, k
     assert bool(killed) == (kind in {"timeout", "cancel"})
     if killed:
         assert waits == 2
+
+
+@pytest.mark.parametrize(
+    "error", ["connection_recovery_failed", "connection_recovery_timeout"]
+)
+async def test_final_pi_read_wins_when_helper_failed_after_transport_recovered(
+    monkeypatch, error
+):
+    service, pi, reachable, reads = fixture_service("/fixture/recover")
+    await service.restore("fixture")
+    reachable[0] = False
+
+    async def late_recovery(_):
+        reachable[0] = True
+        raise RiderError(error)
+
+    monkeypatch.setattr(connection_recovery, "recover_connection", late_recovery)
+    result = await service.refresh(service.session)
+    assert result["connection"]["status"] == "online"
+    assert result["recovery"] == {
+        "attempted": True,
+        "state": "recovered",
+        "error": error,
+    }
+    assert pi.state == "DISARMED" and not pi.camera_on and set(reads) == {"GET"}
+    await service.close()
+
+
+async def test_read_only_guard_rejects_transport_recovery_but_allows_status_get(
+    monkeypatch,
+):
+    from venom_module_rider.api import routes
+
+    service, _, _, reads = fixture_service("/fixture/recover")
+    await service.restore("fixture")
+
+    def restricted(**_):
+        raise PermissionError("fixture read-only environment")
+
+    async def unexpected(_):
+        pytest.fail("read-only recovery ran the transport helper")
+
+    monkeypatch.setattr(routes, "ensure_module_mutation_allowed", restricted)
+    monkeypatch.setattr(connection_recovery, "recover_connection", unexpected)
+    app = FastAPI()
+    app.state.rider = service
+    app.include_router(router)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://fixture"
+    ) as client:
+        result = await client.post(
+            "/api/v1/rider/connection/refresh",
+            headers={"X-Rider-Session": service.session},
+            json={},
+        )
+        assert result.status_code == 403
+        assert result.json()["detail"]["code"] == "environment_read_only"
+        status = await client.get("/api/v1/rider/status?section=navigation")
+        assert status.status_code == 200
+        assert status.json()["connection"]["status"] == "online"
+    assert service.refresh_task is None and set(reads) == {"GET"}
+    await service.close()
