@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[2]
 ASSETS = ROOT / "docs_dev" / "_reports" / "motion-study-browser"
 
 
-async def seed(service, registry, name, magnitude, qualified=False):
+async def seed(service, registry, name, magnitude, qualified=False, firmware=False):
     session = await registry.start(
         name, "fixture", {"scene_group": "motion-study-v1:wood"}
     )
@@ -90,6 +90,14 @@ async def seed(service, registry, name, magnitude, qualified=False):
                 for axis in ("roll", "pitch", "yaw")
             },
         }
+        if firmware:
+            quality["source"] = "motion-executor"
+            quality["telemetry"] = {
+                "firmware": "R-1.1.6",
+                "contract_id": "rider.telemetry",
+                "contract_version": 1,
+                "uart_owner": "motion-executor",
+            }
         if qualified:
             quality["orientation"] = {
                 "convention": "rider-body-zyx-v1",
@@ -155,6 +163,9 @@ async def lifespan(app):
             "A": await seed(service, registry, "fixture-A", 1, True),
             "B": await seed(service, registry, "fixture-B", 0.5, True),
             "raw": await seed(service, registry, "fixture-raw", 2),
+            "firmware": await seed(
+                service, registry, "fixture-firmware", 1, firmware=True
+            ),
         }
         try:
             yield

@@ -1,0 +1,31 @@
+async page=>{
+  const check=(v,m)=>{if(!v)throw new Error(m)};
+  const origin=new URL(page.url()).origin;
+  const fixture=await(await page.request.get(origin+"/fixture")).json();
+  check(fixture.config.devices.every(d=>d.mode==="demo"),"Fixture required");
+  const writes=[];
+  page.on("request",r=>{if(r.method()!=="GET"&&r.url().includes("/api/v1/rider"))writes.push(r.url());});
+  const id=fixture.sessions.firmware;
+  const timeline=await(await page.request.get(origin+"/api/v1/rider/samples/sessions/"+id+"/motion-timeline")).json();
+  const source=timeline.streams[0];
+  check(source.points[0].units.roll==="sdk_raw","archive original units changed");
+  check(source.points[0].angle_semantics.roll.unit==="deg","firmware angle profile absent");
+  check(Object.keys(source.points[1].angle_rates_deg_s).length===3,"estimated rates absent");
+  await page.getByTestId("study-session-A").selectOption(id);
+  await page.getByTestId("attitude-body-A").waitFor();
+  await page.getByTestId("attitude-provisional-A").waitFor();
+  check(await page.getByTestId("attitude-unit-assumption-A").count()===0,"known unit shown as assumption");
+  check(await page.getByRole("img",{name:"Oś 1 · deg",exact:true}).count()===1,"neutral axis label missing");
+  await page.getByTestId("angle-rates").locator("summary").click();
+  check(await page.getByRole("img",{name:"Oś 3 · deg/s",exact:true}).count()===1,"rate plot absent");
+  const geometry=await page.getByTestId("attitude-body-A").locator("polygon").first().getAttribute("points");
+  await page.getByTestId("attitude-assumed-unit").selectOption("rad");
+  check(await page.getByTestId("attitude-body-A").locator("polygon").first().getAttribute("points")===geometry,"assumption overwrote known units");
+  await page.getByTestId("study-session-A").selectOption(fixture.sessions.raw);
+  await page.getByTestId("attitude-unit-assumption-A").waitFor();
+  await page.getByTestId("attitude-assumed-unit").selectOption("deg");
+  await page.getByTestId("attitude-preview").uncheck();
+  check(await page.getByTestId("attitude-body-A").count()===0,"preview cannot be disabled");
+  check(writes.length===0,"analysis issued mutation");
+  return {axes123:true,versionedUnits:true,rawUnchanged:true,estimatedRates:true,provisional3D:true,mutations:writes.length};
+}

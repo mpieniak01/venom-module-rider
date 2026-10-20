@@ -94,9 +94,22 @@ def observations(path, payload, device, source_session, mono, wall):
             "simulated": True if source.get("source") == "demo" else flag("simulated"),
             "physical_validation": physical,
             "stale": flag("stale"),
-            "source": source.get("source", "unknown"),
+            "source": observation.get("source", source.get("source", "unknown")),
             "clock_sync_uncertainty_ms": None,
         }
+        telemetry: dict[str, object] = {}
+        for key in ("contract_id", "uart_owner"):
+            value = observation.get(key, source.get(key))
+            if isinstance(value, str) and 0 < len(value) <= 64:
+                telemetry[key] = value
+        firmware = observation.get("fw", source.get("fw"))
+        if isinstance(firmware, str) and 0 < len(firmware) <= 32:
+            telemetry["firmware"] = firmware
+        version = observation.get("contract_version", source.get("contract_version"))
+        if type(version) is int and 0 <= version <= 1000:
+            telemetry["contract_version"] = version
+        if telemetry:
+            details["telemetry"] = telemetry
         orientation = quality.get("orientation", observation.get("orientation"))
         if isinstance(orientation, dict):
             details["orientation"] = {
@@ -118,6 +131,8 @@ def observations(path, payload, device, source_session, mono, wall):
         identity = [values, units, stamps]
         if "orientation" in details:
             identity.append(details["orientation"])
+        if "telemetry" in details:
+            identity.append(details["telemetry"])
     elif path == "/api/control/state":
         source = data.get("safety", data)
         if not isinstance(source, dict):

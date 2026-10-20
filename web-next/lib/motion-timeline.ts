@@ -1,8 +1,8 @@
 import {finite,record,str,type JsonRecord} from "./model";
-export type MotionPoint={id:string;t:number;segment:number;valid:boolean;instance_id:string|null;source_time:number|null;values:Record<string,number|null>;units:Record<string,string>;quality:JsonRecord};
+export type MotionPoint={id:string;t:number;segment:number;valid:boolean;instance_id:string|null;source_time:number|null;values:Record<string,number|null>;units:Record<string,string>;quality:JsonRecord;angle_semantics?:Record<string,{unit:"deg"|"rad";basis:string}>;angle_rates_deg_s?:Record<string,number>};
 export type MotionEvent={id:string;t:number;operation_id:string;phase:"requested"|"result";intent:JsonRecord;profile_ref:string|null;outcome:string;reason:string|null;ack_status:string|null};
 export type MotionOutput={id:string;t:number;instance_id:string|null;source_time:number|null;target:Record<string,number|null>;output:Record<string,number|null>;state:string|null;quality:JsonRecord};
-export type MotionStream={id:string;device_id:string;source_session:string;clock:string;origin:string;range:[number,number];points:MotionPoint[];events:MotionEvent[];outputs:MotionOutput[];profiles:Record<string,JsonRecord>};
+export type MotionStream={id:string;device_id:string;source_session:string;clock:string;origin:string;range:[number,number];points:MotionPoint[];events:MotionEvent[];outputs:MotionOutput[];profiles:Record<string,JsonRecord>;sampling_diagnostics?:JsonRecord};
 export type MotionTimeline={schema_version:1;dataset_revision:string;session_id:string;context:string|null;streams:MotionStream[];collection_status:JsonRecord;counts:JsonRecord;sampling:JsonRecord;source_gaps_s:JsonRecord};
 export function readTimeline(value:unknown):MotionTimeline {
   const r=record(value);
@@ -74,4 +74,14 @@ export function markerIds(points:MotionPoint[],cursor:number,maximum=256):Set<st
   const stride=Math.max(1,Math.ceil(points.length/maximum));
   const current=points.find(p=>Math.abs(p.t-cursor)<1e-9)?.id;
   return new Set(points.filter((p,i)=>i%stride===0||i===points.length-1||p.id===current).map(p=>p.id));
+}
+
+
+export const axisNumber=(key:string)=>({roll:1,pitch:2,yaw:3,accel_x:1,accel_y:2,accel_z:3} as Record<string,number>)[key]??0;
+export function angleStream(stream:MotionStream|null,rates=false):MotionStream|null {
+  if(!stream)return null;
+  return {...stream,points:stream.points.map(p=>({...p,
+    values:rates?Object.fromEntries(["roll","pitch","yaw"].map(key=>[key,p.angle_rates_deg_s?.[key]??null])):p.values,
+    units:rates?{roll:"deg/s",pitch:"deg/s",yaw:"deg/s"}:{...p.units,...Object.fromEntries(Object.entries(p.angle_semantics??{}).map(([key,value])=>[key,value.unit]))},
+  }))};
 }
