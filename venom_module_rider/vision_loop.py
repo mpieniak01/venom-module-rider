@@ -15,6 +15,7 @@ from .journey import planner_history, record_result
 from .sector_trend import update as sector_trend
 from .steering import plan as steering_plan
 from .vision_overlay import preview_sectors
+from .workers import VisionWorkers
 
 
 class VisionLoop:
@@ -45,6 +46,7 @@ class VisionLoop:
         self.inference_cache = OrderedDict()
         self.diagnostic_inferences = set()
         self.production_waiters = {False: 0, True: 0}
+        self.workers = VisionWorkers("rider-vision")
 
     def _detect_depth(self, payload, frame):
         if frame.protocol_version == 3 and frame.avoidance.geometry.mode == "ground":
@@ -150,7 +152,7 @@ class VisionLoop:
     def _start_inference(self, key, frame, payload, *, diagnostic=False):
         depth_mode = frame.perception.engine == "depth_plane"
         task = asyncio.create_task(
-            asyncio.to_thread(
+            self.workers.run(
                 self._detect_depth if depth_mode else self.detector.detect,
                 payload,
                 frame if depth_mode else frame.corridor,
@@ -273,12 +275,19 @@ class VisionLoop:
             result = copy.deepcopy(
                 detected, memo={id(trace): trace} if trace is not None else {}
             )
+        except TimeoutError:
+            result = {
+                "state": "unknown",
+                "reason": "vision_inference_timeout",
+                "inference_error": "vision_inference_timeout",
+                "floor_fraction": 0.0,
+            }
         except Exception:
-            # A shared task never grants motion when its caller's own source
-            # budget expires. Cancellation still propagates to the caller only.
+            # Never expose model exception text (paths or private inputs).
             result = {
                 "state": "unknown",
                 "reason": "vision_inference_unavailable",
+                "inference_error": "vision_model_failure",
                 "floor_fraction": 0.0,
             }
         finally:
@@ -323,6 +332,11 @@ class VisionLoop:
                 "state": "unknown",
                 "reason": "vision_decision_expired",
                 "floor_fraction": 0.0,
+                **(
+                    {"inference_error": result["inference_error"]}
+                    if "inference_error" in result
+                    else {}
+                ),
             }
         count = count + 1 if result["state"] == "clear" else 0
         state["count"] = count
@@ -496,7 +510,7 @@ class VisionLoop:
             self.previews.pop(device_id, None)
         changed, self.preview_changed = self.preview_changed, asyncio.Event()
         changed.set()
-        return {
+        response = {
             **result,
             **(
                 {
@@ -529,6 +543,52 @@ class VisionLoop:
             "perception_engine": frame.perception.engine,
             "drive_supported": True,
         }
+
+        # Planning, prediction annotation and preview publication also spend
+        # the original capture budget. Never return an earlier GO/TTL after
+        # this post-inference work has exhausted it.
+        complete_ms = max(0.0, (self.clock() - now) * 1000)
+        response["decision_elapsed_ms"] = round(complete_ms, 2)
+        response["valid_for_ms"] = min(
+            200, max(0, int(frame.deadline_ms - frame.age_ms - complete_ms))
+        )
+        if response["valid_for_ms"] == 0:
+            response.update(
+                state="unknown",
+                reason="vision_decision_expired",
+                action="stop",
+                vision_action="stop",
+                motion_reason="vision_decision_expired",
+                clear_count=0,
+                sectors={},
+                paths={},
+            )
+            response.pop("_preview", None)
+            response.pop("_preview_analysis", None)
+            state["count"] = 0
+            if "avoidance" in state:
+                state["avoidance"].update(front=0, counts={"left": 0, "right": 0})
+            if frame.journey is not None:
+                state["journey_completed"] = False
+            if "maneuver_clear_count" in response:
+                response.update(
+                    maneuver_clear_count=0, maneuver_phase="vision_decision_expired"
+                )
+            self.previews.pop(device_id, None)
+            if capture_key and self.samples is not None:
+                self.samples.annotate_prediction(
+                    capture_key,
+                    {
+                        **{
+                            key: value
+                            for key, value in response.items()
+                            if not key.startswith("_")
+                        },
+                        "input_frame": frame.model_dump(mode="json"),
+                        "diagnostic": with_preview,
+                    },
+                )
+        return response
 
     def preview(self, device_id, *, corridor=None, revision=None, run_id=None):
         row = self.previews.get(device_id)
@@ -612,5 +672,8 @@ class VisionLoop:
         for task in snapshots:
             task.cancel()
         pending = [task for task in (self.busy, self.depth_busy) if task is not None]
-        if pending or snapshots:
-            await asyncio.gather(*pending, *snapshots, return_exceptions=True)
+        try:
+            if pending or snapshots:
+                await asyncio.gather(*pending, *snapshots, return_exceptions=True)
+        finally:
+            self.workers.close()

@@ -176,15 +176,25 @@ async def test_sequence_has_count_time_and_gap_bounds_with_actual_receipts(tmp_p
         await instance.close()
 
 
-async def test_deadline_without_a_single_input_is_incomplete(tmp_path):
+async def test_deadline_without_a_single_input_is_incomplete(tmp_path, monkeypatch):
     instance = SamplesRegistry(tmp_path / "empty-sequence")
     try:
         session = await instance.start(
             "start", "robot", {"kind": "sequence", "duration_s": 1.0}
         )
         sid = session["session_id"]
+        completed = asyncio.Event()
+        original_end = instance.end
+
+        async def end(*args, **kwargs):
+            try:
+                return await original_end(*args, **kwargs)
+            finally:
+                completed.set()
+
+        monkeypatch.setattr(instance, "end", end)
         instance._finish_sequence(sid)  # simulate the existing timer callback
-        await asyncio.sleep(0.02)
+        await asyncio.wait_for(completed.wait(), timeout=2)
         assert instance.store.session(sid)["state"] == "interrupted"
     finally:
         await instance.close()

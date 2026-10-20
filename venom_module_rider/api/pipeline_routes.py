@@ -28,6 +28,7 @@ TRANSIENT_PREVIEW_ERRORS = {
     "vision_frame_expired",
     "vision_decision_expired",
     "vision_inference_unavailable",
+    "vision_inference_timeout",
     "stream_frame_unavailable",
     "stream_disconnected",
 }

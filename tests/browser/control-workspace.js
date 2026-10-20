@@ -227,11 +227,60 @@ async page => {
       check(calls.length===callsBefore,"short desktop startup mutated robot");
       scenarios.push(viewport.width+"x"+viewport.height+": complete controls and scrollable messages, no actuation");
     }
+    // The operational surface, not just its scrollport, must fit. All API
+    // requests remain intercepted by this fixture, including every mutation.
+    const cockpit=[];
+    for(const viewport of [{width:1440,height:1000},{width:1366,height:768},{width:1280,height:720},{width:1024,height:768},{width:768,height:1024},{width:390,height:844},{width:844,height:390},{width:1024,height:576},{width:853,height:480}]) {
+      await page.setViewportSize(viewport);
+      await page.reload();
+      await page.getByTestId("rider-forward").waitFor();
+      await stable();
+      const camera=await page.getByTestId("camera-surface").elementHandle();
+      const pad=await page.getByTestId("rider-forward").elementHandle();
+      const origin=await page.getByTestId("camera-surface").boundingBox();
+      let autoStart=null;
+      for(const mode of ["manual","automatic","journey"]) {
+        await page.getByTestId("workspace-"+mode).click();
+        await stable();
+        check(await camera.evaluate(el=>el===document.querySelector('[data-testid="camera-surface"]')),"mode remounted camera");
+        check(await pad.evaluate(el=>el===document.querySelector('[data-testid="rider-forward"]')),"mode remounted manual input");
+        const bounds=await page.getByTestId("camera-surface").boundingBox();
+        for(const key of ["x","y","width","height"])check(Math.abs(origin[key]-bounds[key])<=1,"mode shifted camera "+viewport.width+" "+mode+" "+key);
+        check(bounds.width>=160&&bounds.height>=120,"camera too small "+viewport.width+"x"+viewport.height+" "+JSON.stringify(bounds));
+        if(mode!=="manual") {
+          const start=await page.getByTestId(mode==="automatic"?"loop-start":"journey-start").boundingBox();
+          const reason=await page.getByTestId("command-reason").boundingBox();
+          const deck=await page.getByTestId("command-deck").boundingBox();
+          check(reason.y>=deck.y-1&&reason.y+reason.height<=deck.y+deck.height+1,"reason escaped command deck");
+          const stop=await page.getByTestId(mode==="automatic"?"loop-stop":"journey-stop").boundingBox();
+          for(const action of [start,stop])check(action.y+action.height<=reason.y+1||reason.y+reason.height<=action.y+1||action.x+action.width<=reason.x+1||reason.x+reason.width<=action.x+1,"reason overlaps action controls");
+          if(autoStart)check(Math.abs(start.y-autoStart.y)<=1,"automatic and journey start targets differ");
+          else autoStart=start;
+        }
+        const targets=["camera-surface",...ids,...(mode==="automatic"?["loop-start","loop-stop"]:mode==="journey"?["journey-start","journey-stop"]:[])];
+        const visibility=await page.evaluate(targets=>targets.map(id=>{
+          const el=document.querySelector('[data-testid="'+id+'"]'),r=el.getBoundingClientRect();
+          let fits=r.x>=0&&r.y>=0&&r.right<=innerWidth&&r.bottom<=innerHeight;
+          for(let parent=el.parentElement;parent;parent=parent.parentElement){const style=getComputedStyle(parent),p=parent.getBoundingClientRect();if(/auto|scroll|hidden|clip/.test(style.overflowY))fits&&=r.y>=p.y-1&&r.bottom<=p.bottom+1;if(/auto|scroll|hidden|clip/.test(style.overflowX))fits&&=r.x>=p.x-1&&r.right<=p.right+1;}
+          const at=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);
+          return {id,fits,uncovered:!!at&&(el===at||el.contains(at)||el.disabled&&at.contains(el)),at:at?.outerHTML.slice(0,220),height:r.height};
+        }),targets);
+        check(visibility.every(item=>item.fits&&item.uncovered),"clipped/covered cockpit "+viewport.width+" "+mode+" "+JSON.stringify(visibility));
+        await page.getByTestId("workspace-settings-toggle").click();
+        await wait(async()=>await page.getByTestId("workspace-settings-toggle").getAttribute("aria-expanded")==="true","details state missing");
+        const after=await boxes();
+        for(const id of ids)check(after[id].y+(after[id].height/2)<viewport.height,"details hid manual control");
+        await page.getByTestId("workspace-settings-toggle").click();
+      }
+      cockpit.push(viewport);
+    }
+    check(calls.filter(c=>c.body.action==="arm").length===1,"layout checks armed robot");
+    scenarios.push("cockpit: nine viewports / zoom-equivalent sizes, three modes, camera identity, clipping, occlusion and details");
     configured=false;
     await wait(async()=>await page.getByTestId("operator-console").count()===0,"unconfigured fallback not shown");
     check(await page.getByTestId("rider-messages").count()===1,"fallback lost operator messages");
     scenarios.push("unconfigured fallback retains messages");
-    return {result:"PASS",scenarios,fixtureOnly:true,transportRefreshes:refreshes.length,mutations:calls.length,desktopTargets:initial};
+    return {result:"PASS",scenarios,fixtureOnly:true,cockpit,transportRefreshes:refreshes.length,mutations:calls.length,desktopTargets:initial};
   } finally {
     await page.goto("about:blank");
     await page.unroute("**/api/v1/rider/**");

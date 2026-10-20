@@ -125,7 +125,14 @@ def test_near_obstacle_covering_whole_stop_zone_does_not_become_the_plane(delta)
     inverse = 1.0 / ground_depth()
     inverse[192:228, 112:208] += delta
     result = assess_depth(1.0 / inverse, NEAR_CORRIDOR, SETTINGS)
-    assert result["state"] == "obstacle"
+    # A large step can invalidate the single reference plane itself. It must
+    # never become clear; with insufficient support expose uncertainty instead
+    # of claiming an established ground plane or permitting avoidance.
+    expected = "unknown" if abs(delta) == 0.2 else "obstacle"
+    assert result["state"] == expected
+    if expected == "unknown":
+        assert result["reason"] == "ground_reference_uncertain"
+        assert all(row["state"] == "unknown" for row in result["paths"].values())
 
 
 def test_far_local_deviation_is_not_an_immediate_near_zone_stop():

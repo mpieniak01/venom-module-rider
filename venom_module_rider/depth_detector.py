@@ -46,6 +46,15 @@ def assess_depth(depth, corridor, settings):
         (x[reference] / w, y[reference] / h, np.ones(reference.sum()))
     )
     coefficients = np.linalg.lstsq(design, inverse_reference, rcond=None)[0]
+    reference_fit = "least_squares"
+    initial_errors = np.abs(inverse_reference - design @ coefficients) / scale
+    if float((initial_errors > settings.residual_limit).mean()) > 0.20:
+        from .image_ground_reference import recover
+
+        recovered = recover(design, inverse_reference, scale, settings)
+        if recovered is not None:
+            coefficients = recovered
+            reference_fit = "supported_trimmed_plane"
     scoring_design = np.column_stack((x[mask] / w, y[mask] / h, np.ones(mask.sum())))
     # Positive residuals are nearer than the fitted plane; negative ones are
     # farther away. Keep both: a recess/drop-off must not become a clear path.
@@ -58,7 +67,15 @@ def assess_depth(depth, corridor, settings):
     outliers = outlier_pixels / zone_pixels
     reference_errors = np.abs(inverse_reference - design @ coefficients) / scale
     residual = float(np.quantile(errors, 0.99))
-    if not settings.slope_min <= slope <= 6.0:
+    reference_outliers = float((reference_errors > settings.residual_limit).mean())
+    # A single OLS plane supported by less than 80% of its own reference is
+    # not reliable enough to classify other corridors or authorize steering.
+    # This is a reference-quality gate, not a relaxed obstacle tolerance.
+    reference_valid = reference_outliers <= 0.20
+    oriented = settings.slope_min <= slope <= 6.0
+    if not reference_valid:
+        state, reason = "unknown", "ground_reference_uncertain"
+    elif not oriented:
         state, reason = "unknown", "depth_ground_orientation"
     elif outlier_pixels > allowed_pixels:
         state, reason = "obstacle", "depth_ground_deviation"
@@ -75,7 +92,7 @@ def assess_depth(depth, corridor, settings):
             coefficients,
             scale,
             settings,
-            settings.slope_min <= slope <= 6.0,
+            oriented and reference_valid,
         ),
         "paths": assess_paths(
             depth,
@@ -83,7 +100,7 @@ def assess_depth(depth, corridor, settings):
             coefficients,
             scale,
             settings,
-            settings.slope_min <= slope <= 6.0,
+            oriented and reference_valid,
         ),
         "perception_engine": "depth_plane",
         "plane_residual_p99": residual,
@@ -95,9 +112,10 @@ def assess_depth(depth, corridor, settings):
         "allowed_outlier_pixels": allowed_pixels,
         "nearer_outlier_pixels": int((signed_errors > settings.residual_limit).sum()),
         "farther_outlier_pixels": int((signed_errors < -settings.residual_limit).sum()),
-        "reference_outlier_fraction": float(
-            (reference_errors > settings.residual_limit).mean()
-        ),
+        "reference_outlier_fraction": reference_outliers,
+        "ground_reference_valid": reference_valid,
+        "reference_fit": reference_fit,
+        "reference_inlier_fraction": 1.0 - reference_outliers,
         "nearer_outlier_fraction": float(
             (signed_errors > settings.residual_limit).mean()
         ),

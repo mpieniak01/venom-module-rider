@@ -166,3 +166,39 @@ A transient vision_busy response may retain the last decoded image only within
 its original display lifetime. Repeated retries cannot renew the image timestamp,
 restore an expired frame, or grant motion. Other camera failures still invalidate
 the live label immediately.
+
+
+## Reference quality and complete capture deadlines
+
+Image-space depth decisions qualify the fitted ground reference before classifying
+neighboring corridors. At least 80% of reference pixels must agree within the
+configured residual tolerance. If ordinary least squares fails this check, a
+bounded, deterministic trimmed fit may recover a plane only with broad majority
+support across the reference rows. It does not shrink the STOP region or change
+the configured obstacle tolerance. Large steps, boxes and recesses must never be
+absorbed into a clear-ground fit.
+
+A rejected reference returns `state: unknown` and `reason: ground_reference_uncertain`.
+Directional sectors and swept paths also remain unknown: this is not clearance
+or authorization to steer. Additional diagnostic fields are
+`ground_reference_valid`, `reference_inlier_fraction` and `reference_fit`.
+Reference quality checks geometry; they do not identify objects or measure
+physical distance. Uncertain surfaces can still stop a journey. This does not
+claim to fix every floor false-positive or replace hardware acceptance.
+
+Native reference requests spend one original capture budget on source lookup,
+canonical JPEG preparation, inference and planning. No stage grants a new TTL.
+A missing reference whose sequence has already passed fails immediately with
+`stream_frame_unavailable`; future references may still wait within the budget.
+An exhausted whole-request budget returns `vision_frame_expired`. Before returning
+a decision, its final age is checked again: expired work cannot publish GO or
+renew the clear-frame streak. `decision_elapsed_ms` records complete decision
+processing time; `inference_ms` retains its existing earlier timing meaning.
+
+Inference and canonical JPEG preparation use module-owned worker lanes with
+bounded admission and explicit teardown. They no longer compete with unrelated
+work in the application's default thread pool. Diagnostics distinguish
+`vision_inference_timeout` from sanitized `vision_model_failure` through
+`inference_error`; exception text and private input are not exposed. Pi still
+checks capture age and execution authority. Existing speed, pulse and watchdog
+limits remain unchanged.

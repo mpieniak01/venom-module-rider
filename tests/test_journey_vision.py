@@ -360,3 +360,35 @@ def test_journey_http_contract_survives_both_image_transports(monkeypatch, trans
         assert pi.opened == (1 if transport == "mjpeg" else 0)
         assert pi.snapshot_requests == 0
         assert all(method == "GET" for method, _, _ in pi.calls)
+
+
+@pytest.mark.parametrize("expire_action", ["steer", "go"])
+async def test_expired_decision_never_qualifies_next_maneuver_epoch(
+    vision, monkeypatch, expire_action
+):
+    from venom_module_rider import vision_loop
+
+    loop, detector, now = vision
+    original = vision_loop.record_result
+
+    def record(state, capture, action, result):
+        original(state, capture, action, result)
+        if (expire_action == "steer" and action.startswith("steer_")) or (
+            expire_action == "go" and state.get("journey_completed")
+        ):
+            now[0] += 0.31
+
+    monkeypatch.setattr(vision_loop, "record_result", record)
+    for seq in range(1, 16):
+        if seq > 3:
+            detector.result = {**obstacle(), "state": "clear"}
+        result = await decide(vision, seq)
+        if result["reason"] == "vision_decision_expired":
+            break
+    assert result["reason"] == "vision_decision_expired"
+    assert result["action"] == "stop"
+    assert result["maneuver_clear_count"] == 0
+    assert result["maneuver_phase"] == "vision_decision_expired"
+    assert loop.runs[("fixture", "journey-run")]["journey_completed"] is False
+    with pytest.raises(RiderError, match="vision_journey_epoch_changed"):
+        await decide(vision, seq + 1, epoch=1)
