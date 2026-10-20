@@ -126,8 +126,10 @@ matching identities/units/semantics and continuous valid segments up to 1s.
 Half-turn ambiguity, nonpositive/reset clocks, stale samples and unknown units
 produce missing values. These are estimated Euler-channel changes, not measured
 body-frame gyro XYZ. The physical response latency remains unavailable.
-Diagnostics show observed source cadence, contiguous gaps and pulse observations;
-they do not claim a firmware ODR. Short-pulse undersampling is explicit.
+Diagnostics show observed source cadence, gaps and pulse observations;
+sparse same-boot intervals remain visible across segment breaks. Rate estimates
+remain disabled across gaps longer than one second. Diagnostics do not claim
+a firmware ODR. Short-pulse undersampling is explicit.
 
 Memoized aligned streams and derived series avoid rebuilding static dataset
 projections on each replay cursor step. Existing host refresh/cache controls

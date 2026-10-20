@@ -161,3 +161,13 @@ def test_oversized_clock_and_missing_channels_are_not_valid_observations():
     assert "yaw" not in points[2]["angle_rates_deg_s"]
     assert report["pulses"][0]["observations"] == 1
     assert report["pulses"][0]["insufficient"]
+
+
+def test_sparse_source_cadence_remains_visible_across_gap_segments():
+    points = [point(0, 0), point(2, 1, segment=2), point(4, 2, segment=3)]
+    report = enrich(points, [])
+    assert report["observed_hz"] == pytest.approx(0.5)
+    assert report["source_interval_max_s"] == 2
+    assert all(not p["angle_rates_deg_s"] for p in points)
+    points[1]["instance_id"] = "other-boot"
+    assert enrich(points, [])["observed_hz"] is None
