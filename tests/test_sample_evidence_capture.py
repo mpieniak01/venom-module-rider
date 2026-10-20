@@ -562,3 +562,66 @@ async def test_invalid_context_during_enrichment_fails_closed(tmp_path, invalid)
         assert registry.frames.rejected == 1
     finally:
         await registry.close()
+
+
+@pytest.mark.parametrize("failure", ["disk", "database"])
+async def test_optional_evidence_status_failure_does_not_prevent_session_end(
+    tmp_path, monkeypatch, failure
+):
+    import sqlite3
+
+    registry = SamplesRegistry(tmp_path)
+    try:
+        sid = (await registry.start("one", "pi"))["session_id"]
+
+        def fail_status(*args, **kwargs):
+            if failure == "database":
+                raise sqlite3.OperationalError("fixture evidence status failure")
+            raise OSError("fixture evidence status failure")
+
+        monkeypatch.setattr(registry.store.evidence, "status", fail_status)
+        result = await registry.end(sid)
+        assert result["state"] == "closed"
+        assert registry.store.session(sid)["state"] == "closed"
+        assert sid not in registry.active and sid not in registry.closing
+        assert sid not in registry.deadlines and sid not in registry.evidence.sessions
+        assert registry.lease is None
+        assert registry.failures == 1
+    finally:
+        await registry.close()
+
+
+@pytest.mark.parametrize("failure", ["disk", "database"])
+async def test_optional_evidence_status_failure_does_not_skip_close_recovery(
+    tmp_path, monkeypatch, failure
+):
+    import sqlite3
+
+    registry = SamplesRegistry(tmp_path)
+    try:
+        first = (await registry.start("one", "pi"))["session_id"]
+        second = (await registry.start("two", "pi"))["session_id"]
+
+        def fail_status(*args, **kwargs):
+            if failure == "database":
+                raise sqlite3.OperationalError("fixture evidence status failure")
+            raise OSError("fixture evidence status failure")
+
+        monkeypatch.setattr(registry.store.evidence, "status", fail_status)
+        await registry.close()
+        assert registry.store.session(first)["state"] == "interrupted"
+        assert registry.store.session(second)["state"] == "interrupted"
+        assert registry.closed and registry.lease is None
+        assert not registry.active and not registry.evidence.sessions
+        assert not registry.deadlines
+        assert registry.failures == 2
+
+        replacement = SamplesRegistry(tmp_path)
+        try:
+            assert (await replacement.start("replacement", "pi"))[
+                "state"
+            ] == "collecting"
+        finally:
+            await replacement.close()
+    finally:
+        await registry.close()
