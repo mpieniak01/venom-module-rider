@@ -75,3 +75,17 @@ test("exact cursor and replay do not interpolate gaps or contact a transport",()
   assert.deepEqual(replayStep([0,.2,2],2),{next:null,delay:0,gap:false});
   assert.ok(project([1,1,1]).every(Number.isFinite));
 });
+
+test("provisional axes explicitly allow an assumed unit without qualifying source data",()=>{
+  const p=point({roll:10,pitch:20,yaw:30});
+  delete p.quality.orientation;
+  p.units={roll:"sdk_raw",pitch:"sdk_raw",yaw:"sdk_raw"};
+  for(const row of Object.values(p.quality.sensors as Record<string,Record<string,unknown>>))row.unit="sdk_raw";
+  const strict=qualifyAttitude(p);
+  assert.equal(strict.state,"unqualified");
+  const preview=qualifyAttitude(p,{enabled:true,assumedUnit:"deg"});
+  assert.equal(preview.state,"available");
+  if(preview.state==="available"){assert.equal(preview.provisional,true);assert.equal(preview.unitAssumption,true);}
+  assert.equal(p.units.yaw,"sdk_raw");
+  assert.equal(qualifyAttitude({...p,source_time:0},{enabled:true,assumedUnit:"deg"}).state,"unavailable");
+});

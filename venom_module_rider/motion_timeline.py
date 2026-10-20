@@ -7,6 +7,7 @@ import json
 import math
 from collections import defaultdict
 
+from .angle_analysis import enrich, semantics
 from .evidence_contract import validate_evidence
 from .motion_evidence import analyze_manifest
 
@@ -114,9 +115,11 @@ def build_timeline(manifest):
                             key: row["units"].get(key, "unknown") for key in CHANNELS
                         },
                         "quality": q,
+                        "angle_semantics": semantics(row),
                     }
                 )
                 previous = row, valid
+        diagnostics = enrich(points, events)
         times = [row["t"] for row in [*points, *events, *outputs]]
         streams.append(
             {
@@ -131,6 +134,7 @@ def build_timeline(manifest):
                 "outputs": outputs,
                 "profiles": profiles,
                 "skipped_times": skipped_times,
+                "sampling_diagnostics": diagnostics,
             }
         )
     report = {

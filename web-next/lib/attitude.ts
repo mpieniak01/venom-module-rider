@@ -3,7 +3,7 @@ import {pointAt,type MotionPoint,type MotionStream} from "./motion-timeline";
 
 export type Quaternion=[number,number,number,number]; // w,x,y,z; active body -> reference
 export type Vector3=[number,number,number];
-export type Attitude={state:"available";q:Quaternion;point:MotionPoint;identity:string;reference:string;simulated:boolean;singular:boolean}|{state:"unavailable"|"unqualified";reason:string};
+export type Attitude={state:"available";q:Quaternion;point:MotionPoint;identity:string;reference:string;simulated:boolean;singular:boolean;provisional?:boolean;unitAssumption?:boolean}|{state:"unavailable"|"unqualified";reason:string};
 export function multiply(a:Quaternion,b:Quaternion):Quaternion {
   const [w,x,y,z]=a,[v,i,j,k]=b;
   return [w*v-x*i-y*j-z*k,w*i+x*v+y*k-z*j,w*j-x*k+y*v+z*i,w*k+x*j-y*i+z*v];
@@ -17,24 +17,32 @@ export function rotate(q:Quaternion,v:Vector3):Vector3 {
   const r=multiply(multiply(q,[0,...v]),inverse(q));
   return [r[1],r[2],r[3]];
 }
-export function qualifyAttitude(point:MotionPoint|null):Attitude {
+export type PreviewOptions={enabled:boolean;assumedUnit:"deg"|"rad"};
+export function qualifyAttitude(point:MotionPoint|null,preview?:PreviewOptions):Attitude {
   if(!point)return {state:"unavailable",reason:"noSample"};
   const q=record(point.quality),meta=record(q.orientation);
-  const unit=meta.unit;
-  if(meta.convention!=="rider-body-zyx-v1"||meta.revision!==1||meta.verified!==true||!str(meta.qualification_ref)||str(meta.qualification_ref).length>128||(unit!=="deg"&&unit!=="rad")||!point.instance_id||meta.instance_id!==point.instance_id)return {state:"unqualified",reason:"convention"};
-  if(!point.valid||q.ready!==true||q.stale!==false||q.offline!==false)return {state:"unavailable",reason:"quality"};
-  const values:number[]=[],stamps:number[]=[];
+  const qualified=meta.convention==="rider-body-zyx-v1"&&meta.revision===1&&meta.verified===true&&!!str(meta.qualification_ref)&&str(meta.qualification_ref).length<=128&&(meta.unit==="deg"||meta.unit==="rad")&&!!point.instance_id&&meta.instance_id===point.instance_id;
+  if(!qualified&&!preview?.enabled)return {state:"unqualified",reason:"convention"};
+  if(!point.valid||!point.instance_id||q.ready!==true||q.stale!==false||q.offline!==false)return {state:"unavailable",reason:"quality"};
+  const values:number[]=[],stamps:number[]=[],units:string[]=[];
+  let assumed=false;
   for(const axis of ["roll","pitch","yaw"]){
     const value=point.values[axis],sensor=record(record(q.sensors)[axis]);
-    if(!finite(value)||point.units[axis]!==unit||sensor.unit!==unit||Math.abs(value)>(unit==="deg"?360:2*Math.PI))return {state:"unqualified",reason:"units"};
-    if(sensor.ready!==true||sensor.stale!==false||sensor.offline!==false||sensor.instance_id!==point.instance_id||!finite(sensor.observed_at))return {state:"unavailable",reason:"coherence"};
-    values.push(unit==="deg"?value*Math.PI/180:value);
-    stamps.push(sensor.observed_at);
+    const declared=point.angle_semantics?.[axis]?.unit??point.units[axis];
+    const known=declared==="deg"||declared==="rad";
+    const unit=qualified?meta.unit:known?declared:preview!.assumedUnit;
+    if(!known&&!qualified)assumed=true;
+    if(!finite(value)||Math.abs(value)>1e9||qualified&&(point.units[axis]!==unit||sensor.unit!==unit||Math.abs(value)>(unit==="deg"?360:2*Math.PI)))return {state:"unqualified",reason:"units"};
+    if(sensor.unit!==point.units[axis]||sensor.ready!==true||sensor.stale!==false||sensor.offline!==false||sensor.instance_id!==point.instance_id||!finite(sensor.observed_at))return {state:"unavailable",reason:"coherence"};
+    const period=unit==="deg"?360:2*Math.PI;
+    values.push(((value%period)+period)%period*(unit==="deg"?Math.PI/180:1));
+    units.push(String(unit));stamps.push(sensor.observed_at);
   }
   if(!finite(point.source_time)||Math.max(...stamps)-Math.min(...stamps)>1e-6||Math.abs(Math.max(...stamps)-point.source_time)>1e-6)return {state:"unavailable",reason:"coherence"};
-  return {state:"available",q:eulerZYX(values[0],values[1],values[2]),point,identity:JSON.stringify([meta.convention,meta.revision,unit,meta.qualification_ref,point.instance_id]),reference:str(meta.qualification_ref),simulated:q.simulated!==false,singular:Math.abs(Math.cos(values[1]))<.01};
+  const identity=qualified?[meta.convention,meta.revision,meta.unit,meta.qualification_ref,point.instance_id]:["provisional-axes-123-v1",units,point.instance_id];
+  return {state:"available",q:eulerZYX(values[0],values[1],values[2]),point,identity:JSON.stringify(identity),reference:qualified?str(meta.qualification_ref):"provisional-axes-123-v1",provisional:!qualified,unitAssumption:assumed,simulated:q.simulated!==false,singular:Math.abs(Math.cos(values[1]))<.01};
 }
-export const attitudeAt=(stream:MotionStream|null,time:number)=>qualifyAttitude(pointAt(stream,time));
+export const attitudeAt=(stream:MotionStream|null,time:number,preview?:PreviewOptions)=>qualifyAttitude(pointAt(stream,time),preview);
 export function relativeAttitude(current:Attitude,reference:Attitude|null):Attitude {
   if(current.state!=="available")return current;
   if(!reference||reference.state!=="available"||reference.identity!==current.identity||reference.point.segment!==current.point.segment)return {state:"unavailable",reason:"reference"};

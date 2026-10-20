@@ -1,10 +1,10 @@
 import {AttitudeComparison} from "./attitude-view";
 import {replayStep} from "../lib/attitude";
-import {useEffect,useState} from "react";
+import {useEffect,useMemo,useState} from "react";
 import {apiFetch} from "@/lib/api-client";
 import {getApiBaseUrl} from "@/lib/env";
 import {errorCode,formatNumber,formatTime,record} from "../lib/model";
-import {readTimeline,pointAt,profileAt,streamTimes,nearestTime,trialRequests,alignTrial,pulseEvidence,type MotionStream,type MotionTimeline} from "../lib/motion-timeline";
+import {angleStream,axisNumber,readTimeline,pointAt,profileAt,streamTimes,nearestTime,trialRequests,alignTrial,pulseEvidence,type MotionStream,type MotionTimeline} from "../lib/motion-timeline";
 import {SAMPLES_BASE,type Collection} from "../lib/samples";
 import {useSamples} from "../lib/use-samples";
 import type {RiderClient} from "../lib/use-rider";
@@ -48,7 +48,7 @@ export function MotionStudy({client,t,language}:{client:RiderClient;t:Translator
   const a=useTimeline(aId,revision),b=useTimeline(bId,revision);
   const sourceA=a.value?.streams.find(s=>s.id===aStream)??a.value?.streams[0]??null;
   const sourceB=b.value?.streams.find(s=>s.id===bStream)??b.value?.streams[0]??null;
-  const streamA=alignTrial(sourceA,aTrial),streamB=alignTrial(sourceB,bTrial);
+  const streamA=useMemo(()=>alignTrial(sourceA,aTrial),[sourceA,aTrial]),streamB=useMemo(()=>alignTrial(sourceB,bTrial),[sourceB,bTrial]);
   return <Panel title={t("study.title")} hint={t("study.hint")}>
     <div data-testid="motion-study">
       <Field label={t("study.surface")}><Input value={surface} maxLength={80} disabled={active||capture.busy} onChange={e=>setSurface(e.target.value)}/></Field>
@@ -73,7 +73,9 @@ export function MotionStudy({client,t,language}:{client:RiderClient;t:Translator
   </Panel>;
 }
 export function MotionTimelineView({a,b,streamA,streamB,t,language}:{a:MotionTimeline;b:MotionTimeline|null;streamA:MotionStream|null;streamB:MotionStream|null;t:Translator;language:string}){
-  const times=streamTimes(streamA,streamB);
+  const times=useMemo(()=>streamTimes(streamA,streamB),[streamA,streamB]);
+  const anglesA=useMemo(()=>angleStream(streamA),[streamA]),anglesB=useMemo(()=>angleStream(streamB),[streamB]);
+  const ratesA=useMemo(()=>angleStream(streamA,true),[streamA]),ratesB=useMemo(()=>angleStream(streamB,true),[streamB]);
   const [cursor,setCursor]=useState(times[0]??0),[zoom,setZoom]=useState("all");
   const [playing,setPlaying]=useState(false);
   const min=times[0]??0,max=times.at(-1)??0;
@@ -91,7 +93,7 @@ export function MotionTimelineView({a,b,streamA,streamB,t,language}:{a:MotionTim
   const range:[number,number]=radius===null?[min,max]:[Math.max(min,cursor-radius),Math.min(max,cursor+radius)];
   const pA=pointAt(streamA,cursor),pB=pointAt(streamB,cursor);
   const next=(direction:number)=>{const n=direction>0?times.find(v=>v>cursor+1e-9):times.findLast(v=>v<cursor-1e-9);if(n!==undefined)chooseTime(n);};
-  const readout=(p:typeof pA)=>p?["roll","pitch","yaw"].map(key=>key+" "+formatNumber(p.values[key],language,2)+" "+p.units[key]).join(" · "):t("study.noSample");
+  const readout=(p:typeof pA)=>p?["roll","pitch","yaw"].map(key=>t("motion.axis",{axis:axisNumber(key)})+" "+formatNumber(p.values[key],language,2)+" "+(p.angle_semantics?.[key]?.unit??p.units[key])).join(" · "):t("study.noSample");
   const profileA=profileAt(streamA,cursor),profileB=profileAt(streamB,cursor);
   const trialA=pulseEvidence(streamA),trialB=pulseEvidence(streamB);
   const condition=(trial:ReturnType<typeof pulseEvidence>)=>({intent:trial.event?.intent??null,outcome:trial.result?.outcome??"unknown",profile:trial.profile,observed_range:trial.peaks});
@@ -99,6 +101,8 @@ export function MotionTimelineView({a,b,streamA,streamB,t,language}:{a:MotionTim
     <p className={styles.hint}>{t("study.reception")} · {t("study.revision")} A {a.dataset_revision.slice(0,8)}{b?" · B "+b.dataset_revision.slice(0,8):""}</p>
     <p>{t("study.context")} A: {a.context?.replace("motion-study-v1:","")||t("unknown")}{b?" · B: "+(b.context?.replace("motion-study-v1:","")||t("unknown")):""}</p>
     {([["A",a],["B",b]] as const).map(([name,data])=>data&&<p key={name} data-testid={"study-quality-"+name} className={styles.hint}>{name}: {t("study.quality",{samples:Number(data.counts.imu_records??0),drops:Number(data.collection_status.dropped??0),failed:Number(data.collection_status.failed??0),gap:formatNumber(data.source_gaps_s.p95,language,3)})}</p>)}
+    {([["A",streamA],["B",streamB]] as const).map(([name,stream])=>stream&&<div key={name} data-testid={"sampling-"+name} className={styles.hint}>{t("motion.sampling",{name,hz:formatNumber(stream.sampling_diagnostics?.observed_hz,language,2),gap:formatNumber(stream.sampling_diagnostics?.source_interval_max_s,language,3)})}{Array.isArray(stream.sampling_diagnostics?.pulses)&&stream.sampling_diagnostics.pulses.some(p=>record(p).insufficient===true)&&<p>{t("motion.sparse")}</p>}</div>)}
+    <p className={styles.hint}>{t("motion.semantics")}</p>
     {b&&(!a.context?.replace("motion-study-v1:","")||a.context!==b.context)&&<p role="status">{t("study.contextDifferent")}</p>}
     {b&&trialA.event?.intent.direction!==trialB.event?.intent.direction&&<p role="status">{t("study.directionDifferent")}</p>}
     <p className={styles.hint}>{t(trialA.peaks&&(!b||trialB.peaks)?"study.observedRange":"study.insufficient")}</p>
@@ -117,7 +121,8 @@ export function MotionTimelineView({a,b,streamA,streamB,t,language}:{a:MotionTim
       <AttitudeComparison a={streamA} b={streamB} time={cursor} t={t} language={language}/>
       <CommandTrace stream={streamA} range={range} cursor={cursor} t={t} language={language}/>
       {streamB&&<CommandTrace series="B" stream={streamB} range={range} cursor={cursor} t={t} language={language}/>}
-      {["roll","pitch","yaw"].map(channel=><MotionTrace key={channel} a={streamA} b={streamB} channel={channel} range={range} cursor={cursor} onTime={chooseTime} t={t} language={language}/>)}
+      {["roll","pitch","yaw"].map(channel=><MotionTrace key={channel} a={anglesA} b={anglesB} channel={channel} range={range} cursor={cursor} onTime={chooseTime} t={t} language={language}/>)}
+      <details data-testid="angle-rates" className={styles.details}><summary>{t("motion.rates")}</summary><p className={styles.hint}>{t("motion.rateHint")}</p>{["roll","pitch","yaw"].map(channel=><MotionTrace key={channel} a={ratesA} b={ratesB} channel={channel} range={range} cursor={cursor} onTime={chooseTime} t={t} language={language}/>)}</details>
       <details className={styles.details}><summary>{t("study.acceleration")}</summary>{["accel_x","accel_y","accel_z"].map(channel=><MotionTrace key={channel} a={streamA} b={streamB} channel={channel} range={range} cursor={cursor} onTime={chooseTime} t={t} language={language}/>)}</details>
       <details className={styles.details}><summary>{t("study.outputs")}</summary>{["lx","az"].map(channel=><MotionTrace key={channel} a={outputStream(streamA)} b={outputStream(streamB)} channel={channel} range={range} cursor={cursor} onTime={chooseTime} t={t} language={language}/>)}</details>
       <Details t={t} value={{profiles:{A:profileA,B:profileB},events:{A:streamA?.events.filter(e=>Math.abs(e.t-cursor)<1e-9),B:streamB?.events.filter(e=>Math.abs(e.t-cursor)<1e-9)},origin_a:streamA?.origin}}/>

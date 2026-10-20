@@ -44,6 +44,10 @@ async page=>{
   check(await page.getByTestId("study-play").getAttribute("aria-pressed")==="false","reduced motion auto-started");
   await page.getByTestId("study-session-A").selectOption(fixture.sessions.raw);
   await page.getByTestId("attitude-card-A").waitFor();
+  await page.getByTestId("attitude-body-A").waitFor();
+  await page.getByTestId("attitude-provisional-A").waitFor();
+  await page.getByTestId("attitude-unit-assumption-A").waitFor();
+  await page.getByTestId("attitude-preview").uncheck();
   await page.waitForFunction(()=>document.querySelector('[data-testid="attitude-card-A"]')?.textContent?.includes("nicht qualifiziert"));
   check(await page.getByTestId("attitude-body-A").count()===0,"sdk_raw interpreted as degrees");
   check(await page.locator("svg circle").count()>8,"raw plots disappeared");

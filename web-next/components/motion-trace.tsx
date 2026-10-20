@@ -1,6 +1,6 @@
 import {useEffect,useRef,useState} from "react";
 import {finite,formatNumber,record,str} from "../lib/model";
-import {markerIds,nearestTime,seriesSegments,type MotionStream} from "../lib/motion-timeline";
+import {axisNumber,markerIds,nearestTime,seriesSegments,type MotionStream} from "../lib/motion-timeline";
 import type {Translator} from "../lib/i18n";
 import {Field,Select} from "./primitives";
 import styles from "../rider.module.css";
@@ -13,6 +13,7 @@ export function usePlotWidth(){
 }
 export function MotionTrace({a,b,channel,range,cursor,onTime,t,language}:{a:MotionStream|null;b:MotionStream|null;channel:string;range:[number,number];cursor:number;onTime:(time:number)=>void;t:Translator;language:string}){
   const {ref,width}=usePlotWidth();
+  const label=axisNumber(channel)?t("motion.axis",{axis:axisNumber(channel)}):channel;
   const units=[...new Set([a,b].flatMap(s=>s?.points.filter(p=>finite(p.values[channel])).map(p=>p.units[channel])??[]))];
   const [chosen,setChosen]=useState("");
   const unit=units.includes(chosen)?chosen:units[0]??"unknown";
@@ -26,10 +27,10 @@ export function MotionTrace({a,b,channel,range,cursor,onTime,t,language}:{a:Moti
   const y=(value:number)=>bottom-4-(value/magnitude-lo/magnitude)/scale*(bottom-top-8);
   const tick=(v:number)=>Math.abs(v)>=10000?v.toExponential(1):formatNumber(v,language,1);
   return <div ref={ref} className={styles.motionTrace}>
-    {units.length>1&&<Field label={t("study.unit")+" · "+channel}><Select value={unit} onChange={e=>setChosen(e.target.value)}>{units.map(u=><option key={u}>{u}</option>)}</Select></Field>}
-    <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} role="img" aria-label={channel+" · "+unit} onClick={e=>{const rect=e.currentTarget.getBoundingClientRect();const time=xmin+((e.clientX-rect.left)-left)/(right-left)*span;onTime(nearestTime([a,b].flatMap(s=>s?.points.map(p=>p.t)??[]),time));}}>
-      <title>{channel+" · "+unit}</title>
-      <text x={left} y={13}>{channel+" · "+unit}</text>
+    {units.length>1&&<Field label={t("study.unit")+" · "+label}><Select value={unit} onChange={e=>setChosen(e.target.value)}>{units.map(u=><option key={u}>{u}</option>)}</Select></Field>}
+    <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} role="img" aria-label={label+" · "+unit} onClick={e=>{const rect=e.currentTarget.getBoundingClientRect();const time=xmin+((e.clientX-rect.left)-left)/(right-left)*span;onTime(nearestTime([a,b].flatMap(s=>s?.points.map(p=>p.t)??[]),time));}}>
+      <title>{label+" · "+unit}</title>
+      <text x={left} y={13}>{label+" · "+unit}</text>
       <rect x={left} y={top} width={Math.max(1,right-left)} height={bottom-top} className={styles.motionPlotFrame}/>
       {[lo,hi].map((v,i)=><text key={i} x={left-5} y={top+(1-i)*(bottom-top)+4} textAnchor="end">{tick(v)}</text>)}
       {[0,1,2,3].map(i=>{const v=xmin+i*span/3;return <text key={i} x={x(v)} y={101} textAnchor={i===0?"start":i===3?"end":"middle"}>{formatNumber(v,language,2)} s</text>;})}
