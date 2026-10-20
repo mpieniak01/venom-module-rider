@@ -24,10 +24,20 @@ reports the confirmed revision, a rejected save, or a saved policy whose analysi
 restart failed separately. Saving never starts or arms motion.
 
 After saving, use **Enable preview and analysis without driving**, inspect fresh
-floor and obstacle evidence, and complete actual steering/braking checks. Confirm
-the swept path only after those checks; then save it and accept the current zone
-and braking against the fresh visible analysis. **Start journey** is available
-only when the persisted policy, detector and executor meet the existing contract.
+floor and obstacle evidence, and complete actual steering/braking checks. In
+Automat2 the explicit **I confirm the zone, steering and braking** button saves
+zone/model acceptance and swept-path acceptance atomically. It remains visible
+when zone acceptance already exists but swept-path acceptance is missing. This
+replaces the separate advanced swept-path checkbox in this view; the bounded
+trial retains its existing controls. No acceptance is written automatically.
+
+Both snapshot age (`pi-reported-plus-host-elapsed`) and the native MJPEG age
+(`pi-status-anchor-plus-host-elapsed`) are recognized. Run/revision matching,
+decoded visible media, known age and a qualified clear assessment remain required;
+unknown host-only timing, stale frames and RAW cannot enable acceptance. The
+panel explains which frame condition is missing. Motion deadlines do not change.
+**Start journey** is available only when the persisted policy, detector and
+executor meet the existing contract.
 A green image or saving parameters alone does not grant authority. Neither camera
 intrinsics nor physical acceptance are guessed or filled automatically.
 

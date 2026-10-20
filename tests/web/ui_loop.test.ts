@@ -599,3 +599,24 @@ test("editing a previously driving policy saves an unaccepted observation policy
  assert.equal(loopSettingsValues(policy,policy).mode,"drive");
  assert.equal(policy.mode,"drive");assert.equal(policy.verified,true);
 });
+
+test("native MJPEG age from the validated Pi status anchor permits the same visible calibration acceptance as snapshots",()=>{
+ const state={run_id:"active-observation"},policy={revision:54};
+ const frame={decoded:true,stale:false,knownFreshness:true,id:"camera-session-5515",fileAt:"",visionState:"clear",visionPolicy:"",ageMs:306.25,receivedAt:performance.now(),ageSource:"pi-status-anchor-plus-host-elapsed",analysis:{run_id:state.run_id,config_revision:54,state:"clear",vision_action:"go"}};
+ assert.equal(freshPolicyFrame(frame,"venom",state,policy),true);
+ assert.equal(freshPolicyFrame({...frame,ageSource:"pi-reported-plus-host-elapsed"},"venom",state,policy),true);
+ for(const ageSource of ["host-received","unknown",undefined])assert.equal(freshPolicyFrame({...frame,ageSource},"venom",state,policy),false);
+ for(const patch of [{stale:true},{knownFreshness:false},{decoded:false},{ageMs:3001},{analysis:{...frame.analysis,config_revision:53}},{analysis:{...frame.analysis,run_id:"previous-observation"}},{analysis:{...frame.analysis,vision_action:"stop"}}])assert.equal(freshPolicyFrame({...frame,...patch},"venom",state,policy),false);
+ assert.equal(freshPolicyFrame(frame,"raw",state,policy),false);
+});
+
+test("explicit journey acceptance records zone and swept clearance atomically; legacy acceptance never grants sweep",()=>{
+ const policy={mode:"observe",speed:.1,max_motion_ms:150,verified:false,avoidance:{enabled:true,protocol_version:3,sweep_verified:false}};
+ const detector={sha256:"a".repeat(64)};
+ const accepted=calibrationAcceptance(policy,detector,"operator-explicit",true);
+ assert.equal(accepted.verified,true);assert.equal(accepted.calibration_id,"operator-explicit");
+ assert.equal((accepted.avoidance as Record<string,unknown>).sweep_verified,true);
+ assert.equal((calibrationAcceptance(policy,detector,"operator-legacy").avoidance as Record<string,unknown>).sweep_verified,false);
+ assert.equal(policy.avoidance.sweep_verified,false);
+ for(const avoidance of [{enabled:false,protocol_version:3},{enabled:true,protocol_version:2}])assert.throws(()=>calibrationAcceptance({...policy,avoidance},detector,"operator-explicit",true));
+});

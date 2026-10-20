@@ -76,26 +76,33 @@ export function stoppingZoneValues(policy: JsonRecord, zone: "near" | "far"): Js
   }
   return loopSettingsValues(policy,next);
 }
-export function calibrationAcceptance(policy: JsonRecord, detector: JsonRecord, id: string): JsonRecord {
+export function calibrationAcceptance(policy: JsonRecord, detector: JsonRecord, id: string, acceptSweep = false): JsonRecord {
   if (!/^[a-f0-9]{64}$/.test(str(detector.sha256)) || !id.trim()) throw new Error("calibration_model_unavailable");
-  return {...loopSettingsValues(policy, policy), verified: true, calibration_id: id, model_sha256: detector.sha256};
+  const avoidance=record(policy.avoidance);
+  if(acceptSweep&&(avoidance.enabled!==true||avoidance.protocol_version!==3))throw new Error("calibration_avoidance_unavailable");
+  return {...loopSettingsValues(policy, policy), ...(acceptSweep?{avoidance:{...avoidance,sweep_verified:true}}:{}), verified: true, calibration_id: id, model_sha256: detector.sha256};
 }
 export function freshAnalysisFrame(frame: {ageMs?: number; receivedAt?: number; ageSource?: string; decoded?: boolean; stale: boolean; knownFreshness: boolean; fileAt: string; id: string; visionState: string; visionPolicy: string} | null, stream: string | null, now = Date.now()): boolean {
   const age = frameAge(frame);
   if (age !== null) return !!frame && frame.decoded === true && stream === "venom" && !frame.stale
-    && frame.knownFreshness && !!frame.id && frame.ageSource === "pi-reported-plus-host-elapsed" && age <= 3000;
+    && frame.knownFreshness && !!frame.id && ["pi-reported-plus-host-elapsed","pi-status-anchor-plus-host-elapsed"].includes(frame.ageSource??"") && age <= 3000;
   const at = timestampMs(frame?.fileAt && Number.isFinite(Number(frame.fileAt)) ? Number(frame.fileAt) : frame?.fileAt);
   return !!frame && frame.decoded === true && stream === "venom" && !frame.stale && frame.knownFreshness && !!frame.id
     && !!frame.visionState && !!frame.visionPolicy && frame.visionPolicy !== "diagnostic_default"
     && at !== null && now >= at - 1000 && now - at <= 3000;
 }
 
-/** A new zone cannot be accepted from the previous zone's still-fresh JPEG. */
-export function freshPolicyFrame(frame: (Parameters<typeof freshAnalysisFrame>[0] & {analysis?:JsonRecord})|null, stream:string|null, state:JsonRecord, policy:JsonRecord|null):boolean {
+/** The visible analysis must belong to this run and persisted policy. */
+export function calibrationFrameBlock(frame: (Parameters<typeof freshAnalysisFrame>[0] & {analysis?:JsonRecord})|null, stream:string|null, state:JsonRecord, policy:JsonRecord|null):string {
+  if(stream!=="venom")return "calibrationShowVision";
+  if(!freshAnalysisFrame(frame,stream))return "calibrationFreshFrame";
   const analysis=record(frame?.analysis);
-  return freshAnalysisFrame(frame,stream)&&!!state.run_id&&analysis.run_id===state.run_id
-    &&typeof policy?.revision==="number"&&analysis.config_revision===policy.revision
-    &&analysis.state==="clear"&&analysis.vision_action==="go";
+  if(!state.run_id||analysis.run_id!==state.run_id||typeof policy?.revision!=="number"||analysis.config_revision!==policy.revision)return "calibrationMatchingFrame";
+  if(analysis.state!=="clear"||analysis.vision_action!=="go")return "calibrationClearFrame";
+  return "";
+}
+export function freshPolicyFrame(frame: (Parameters<typeof freshAnalysisFrame>[0] & {analysis?:JsonRecord})|null, stream:string|null, state:JsonRecord, policy:JsonRecord|null):boolean {
+  return calibrationFrameBlock(frame,stream,state,policy)==="";
 }
 
 export function decisionView(state: JsonRecord, detector: JsonRecord) {
