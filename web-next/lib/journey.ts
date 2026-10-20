@@ -21,13 +21,15 @@ export function journeyBlocks(policy: JsonRecord | null, runtime: JsonRecord, de
 
 /** Stale status never represents a currently travelling robot. */
 export function journeyView(state: JsonRecord) {
-  const journey = record(state.journey);
+  const currentJourney=record(state.journey), previous=record(record(state.last_trial).journey);
+  const historical=!(currentJourney.version===1&&str(currentJourney.id))&&previous.version===1&&previous.active===false&&!!str(previous.id);
+  const journey = historical?previous:currentJourney;
   const supported = journey.version === 1 && !!str(journey.id);
   const current = state.stale !== true;
   const active = supported && journey.active === true;
   const known = ["qualifying", "forward", "steer_left", "steer_right", "waiting", "blocked", "stopped", "failed"];
   const phase = !supported ? "idle" : !current && active ? "unknown" : known.includes(str(journey.state)) ? str(journey.state) : active ? "unknown" : "idle";
-  return { active, phase, reason: supported ? str(journey.reason) : "", id: supported ? str(journey.id) : "",
+  return { active, phase, historical, reason: supported ? str(journey.reason) : "", id: supported ? str(journey.id) : "",
     elapsed: supported && typeof journey.elapsed_s === "number" && Number.isFinite(journey.elapsed_s) ? journey.elapsed_s : null,
     maneuver: supported && Number.isInteger(journey.maneuver_epoch) ? Number(journey.maneuver_epoch) : null };
 }

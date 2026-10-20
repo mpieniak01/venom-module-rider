@@ -155,7 +155,7 @@ export function CameraPanel({ client, t, language, compact = false, onObservatio
   };
   const selected = client.cameraStream ?? "raw";
   const transitioning=selected==="venom"&&client.cameraTransition;
-  const previewPolling=client.cameraStream!==null&&client.mediaError!=="visionCameraOff";
+  const previewPolling=client.cameraStream!==null&&client.mediaError!=="visionCameraOff"&&!["stopped","failed"].includes(power?.state??"");
   const notice=previewNotice(visible?.stale??client.camera?.stale??false,selected,previewPolling,transitioning);
   const sourceIdentity = visible?.analysis && Object.keys(record(visible.analysis.source)).length
     ? record(visible.analysis.source) : visible?.analysis;

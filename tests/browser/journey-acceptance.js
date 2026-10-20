@@ -5,7 +5,7 @@ async page => {
   await page.goto("about:blank");
   const wait=async(fn,message)=>{const end=Date.now()+8000;while(!await fn()){check(Date.now()<end,message);await new Promise(resolve=>setTimeout(resolve,40));}};
   const sha="a".repeat(64),calls=[],saved=[];
-  let observe=true,drive=false,rejectSave=false,rejectResume=false;
+  let observe=true,drive=false,rejectSave=false,rejectResume=false,cameraState="active";
   // Same incomplete ground calibration and saved drive mode as the deployed Pi.
   let policy={protocol_version:1,revision:55,mode:"observe",speed:.1,max_motion_ms:150,decision_budget_ms:300,corridor:[.35,.8,.65,.95],verified:true,calibration_id:"operator-fixture",model_sha256:sha,perception:{engine:"depth_plane",residual_limit:.06,outlier_limit:.005,slope_min:2},avoidance:{enabled:true,protocol_version:3,sweep_verified:false,mirrored:false,turn_speed:.05,turn_ms:100,max_turn_pulses:3,max_stalled_corrections:2,progress_min_delta:.03,geometry:{mode:"image",fx:null,fy:null,cx:.5,cy:.5,radius_ratio:null,lookahead_ratio:2,max_heading_deg:45}}};
   const settings={revision:1,directions:Object.fromEntries(["forward","backward","left","right"].map(key=>[key,{speed:.2,duration:.25,minimum:0,maximum:1,step:.01}])),parameter_schema:{direction_fields:{speed:{display_factor:100,display_precision:0,display_unit:"%"}}},control_modes:{version:1,supported:["pulse","hold","release"],hold_renewal_ms:150,hold_timeout_ms:500,click_threshold_ms:180,request_ttl_ms:500}};
@@ -36,7 +36,7 @@ async page => {
     if(path.startsWith("/navigation/"))return json(navigation());
     if(path==="/camera/pipeline"){
       const profile={analysis_location:"venom",local_engine:"canny",remote_transport:"mjpeg"};
-      return json({contract_id:"rider.camera_pipeline",contract_version:1,revision:34,profile,active_profile:profile,state:"active",transport_epoch:6,camera_session:"acceptance-camera",capabilities:{analysis_locations:["venom","local"],local_engines:["canny"],remote_transports:["snapshots","mjpeg"]},effective_stages:{capture:true,hardware_mjpeg:true},error:null,latest_frame:{camera_session:"acceptance-camera",transport_epoch:6,pipeline_revision:34,captured_monotonic_ns:Date.now()*1e6,frame_age_ms:20}});
+      return json({contract_id:"rider.camera_pipeline",contract_version:1,revision:34,profile,active_profile:profile,state:cameraState,transport_epoch:6,camera_session:"acceptance-camera",capabilities:{analysis_locations:["venom","local"],local_engines:["canny"],remote_transports:["snapshots","mjpeg"]},effective_stages:{capture:true,hardware_mjpeg:true},error:null,latest_frame:{camera_session:"acceptance-camera",transport_epoch:6,pipeline_revision:34,captured_monotonic_ns:Date.now()*1e6,frame_age_ms:20}});
     }
     if(path.startsWith("/camera/"))return json({detail:{code:"camera_off"}},404);
     return json({});
@@ -102,6 +102,17 @@ async page => {
     check(calls.map(call=>call.path).join(",")==="/goal/s15_venom_perception,/navigation/config,/goal/s15_venom_perception","unexpected joint acceptance lifecycle");
     check(calls.every(call=>call.path!=="/control"&&call.path!=="/navigation/journey"),"acceptance actuated robot");
     scenarios.push("one explicit operator click saves both acceptances in one Pi write, resumes observation and enables Start without issuing ARM or journey");
+    cameraState="stopped";
+    await wait(async()=>(await page.getByTestId("camera-power-toggle").innerText()).includes("Włącz"),"camera OFF not confirmed");
+    await wait(async()=>(await page.getByTestId("vision-preview-paused").innerText()).includes("ZATRZYMANY"),"OFF still claims to wait for analysis");
+    const stoppedConnections=await page.evaluate(()=>window.__journeyAcceptanceFixture.connections);
+    await new Promise(resolve=>setTimeout(resolve,1800));
+    check(await page.evaluate(()=>window.__journeyAcceptanceFixture.connections)===stoppedConnections,"camera OFF keeps opening media connections");
+    cameraState="active";
+    await wait(async()=>await page.getByTestId("vision-preview-paused").count()===0,"native preview did not restart after camera ON");
+    check(await page.evaluate(()=>window.__journeyAcceptanceFixture.connections)>stoppedConnections,"camera ON did not reconnect");
+    check(calls.every(call=>call.path!=="/control"&&call.path!=="/navigation/journey"),"preview restart armed robot");
+    scenarios.push("confirmed OFF stops media reconnects with a paused-image warning; ON reconnects native preview without ARM or journey");
     return {passed:scenarios,fixtureOnly:true,revision:policy.revision,savedPolicies:saved,mutations:calls.map(call=>({path:call.path,enabled:call.body.enabled}))};
   }finally{await page.goto("about:blank");await page.unrouteAll({behavior:"wait"});}
 }

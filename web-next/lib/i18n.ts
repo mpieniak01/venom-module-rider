@@ -19,6 +19,7 @@ export const messages = {
   "journeyAccept": ["Potwierdzam strefę, skręt i hamowanie", "I confirm the zone, steering and braking", "Ich bestätige Bereich, Lenken und Bremsen"],
   "journeySweepHelp": ["Odbiór strefy i obrysu zapisuje wspólny przycisk „Potwierdzam strefę, skręt i hamowanie” nad ustawieniami, po rzeczywistych próbach operatora.", "The shared “I confirm the zone, steering and braking” button above settings saves acceptance after actual operator checks.", "Die gemeinsame Schaltfläche „Ich bestätige Bereich, Lenken und Bremsen“ über den Einstellungen speichert die Abnahme nach realen Bedienerprüfungen."],
   "journeySweepSaved": ["Odbiór obrysu skrętu zapisany na Pi dla bieżących parametrów.", "Swept-path acceptance is saved on Pi for the current parameters.", "Schwenkraumabnahme für die aktuellen Parameter auf Pi gespeichert."],
+  "journeyLastOutcome": ["Ostatnia zakończona podróż", "Last ended journey", "Letzte beendete Fahrt"],
   "journeyTitle": ["Podróż do zatrzymania", "Journey until stopped", "Fahrt bis zum Stopp"],
   "journeyStart": ["Rozpocznij podróż", "Start journey", "Fahrt starten"],
   "journeyStop": ["Zatrzymaj podróż", "Stop journey", "Fahrt stoppen"],

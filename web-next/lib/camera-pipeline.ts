@@ -43,6 +43,10 @@ export function readCameraPipeline(value: unknown): CameraPipeline | null {
 export function pipelinePending(p: CameraPipeline | null): boolean {
   return !!p && ["starting", "stopping", "waiting_frame"].includes(p.state);
 }
+/** Confirmed OFF suspends media requests, while status polling continues. */
+export function cameraPreviewStopped(p: CameraPipeline | null): boolean {
+  return !!p && ["stopped", "failed"].includes(p.state);
+}
 export function nativePreview(p: CameraPipeline | null, view: string | null): boolean {
   // A saved inactive transport choice must not start a second path in local mode.
   return !!p && p.profile.analysis_location === "venom" && p.profile.remote_transport === "mjpeg"
@@ -69,4 +73,17 @@ export function nativeAnalysisMatches(analysis: JsonRecord | undefined, source: 
   const reference = record(analysis.source);
   return ["camera_session", "sequence", "transport_epoch", "pipeline_revision", "frame_id", "sha256"].every(key =>
     reference[key] !== undefined && reference[key] === source[key]);
+}
+
+/** Keep a tighter recent upper age bound, never renew the source or cross sessions. */
+export function preferredPreviewAnchor(previous:CameraPipeline["previewAnchor"],candidate:NonNullable<CameraPipeline["previewAnchor"]>):NonNullable<CameraPipeline["previewAnchor"]> {
+  const elapsed=previous?candidate.receivedAt-previous.receivedAt:Infinity;
+  if(previous&&elapsed>=0&&elapsed<=2000
+    &&["camera_session","transport_epoch","pipeline_revision"].every(key=>previous.latest[key]!==undefined&&previous.latest[key]===candidate.latest[key])
+    &&Number.isFinite(candidate.latest.frame_age_ms)&&Number.isFinite(candidate.latest.captured_monotonic_ns)){
+    const priorAge=anchoredPreviewAge(candidate.latest,0,candidate.receivedAt,previous);
+    const candidateAge=Number(candidate.latest.frame_age_ms)+candidate.roundTripMs;
+    if(priorAge>=Number(candidate.latest.frame_age_ms)&&priorAge<=candidateAge)return previous;
+  }
+  return candidate;
 }

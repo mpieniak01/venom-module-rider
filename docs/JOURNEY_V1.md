@@ -116,3 +116,36 @@ or prove physical progress. Existing camera calibration and operator acceptance
 remain required. Low battery, cliff detection, metric odometry/SLAM, autonomous
 recovery after a terminal fault and new vision models are outside v1. Keep the
 existing short command watchdogs and the near swept-path guard.
+
+## Preview and transport recovery
+
+A confirmed camera OFF suspends snapshot reads and native media reconnects;
+pipeline status polling continues so a later camera ON reconnects automatically.
+The last image remains explicitly paused. An expired new native candidate cannot
+renew, or prematurely invalidate, another displayed source: its original 1 s
+preview deadline still applies. Invalid identity and source changes remain stale.
+Warm observation displays the last terminal journey from Pi `last_trial`, without
+presenting it as an active journey or automatically restarting motion.
+
+Pi reuses one bounded HTTP decision connection per runner. A failed POST is never
+replayed; an observation retry uses a new capture. Idle/error/shutdown closes the
+connection. Response bounds, same-origin token handling, exact-source echo and
+capture/feedback deadlines are unchanged. `decision_transport.connections` and
+`.requests` in Pi navigation status expose reuse without recording credentials.
+
+A diagnostic native run is scoped to camera session AND Pi policy revision, so
+saving settings without restarting capture cannot permanently reject the preview
+as a replay. A live Pi producer still owns its exact-source preview. When the
+journey is explicitly terminal and its producer stopped, the retained S14 request
+may use diagnostic preview only after Pi confirms DISARMED, cannot move, no
+movement and nonstale control. Preparing/active/unknown/ESTOP states do not use
+this exception. No goal, ARM, navigation resume or motor request is issued.
+`preview_only:true` labels this independent assessment; its fresh image can show
+GO for the current policy/model while the Pi motion reply remains absent/STOP.
+Operator calibration acceptance still requires the live Pi run's matching frame.
+
+A slow status roundtrip does not replace a tighter recent source-age upper bound
+for the same camera authority. Reuse is bounded to 2 s; source timestamps and all
+stored/header age floors still apply. Camera session/epoch/profile replacement
+always discards the preceding anchor. The source, cache, display and motor
+freshness limits are unchanged.

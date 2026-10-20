@@ -4,7 +4,7 @@ import vm from "node:vm";
 import { test } from "node:test";
 import ts from "typescript";
 import { data, errorCode, record } from "../../web-next/lib/model";
-import { readCameraPipeline } from "../../web-next/lib/camera-pipeline";
+import { readCameraPipeline, preferredPreviewAnchor } from "../../web-next/lib/camera-pipeline";
 
 const fixture = JSON.parse(fs.readFileSync(new URL("../../config/contracts/camera_pipeline_v1.examples.json", import.meta.url), "utf8")).stopped_status;
 const compiled = ts.transpileModule(fs.readFileSync(new URL("../../web-next/lib/use-camera-pipeline.ts", import.meta.url), "utf8"), {
@@ -35,7 +35,7 @@ test("revision recovery reads immediately while holding the mutation lock", { ti
       if (name === "react") return react;
       if (name === "@/lib/api-client") return { apiFetch };
       if (name === "./model") return { data, errorCode, record };
-      if (name === "./camera-pipeline") return { readCameraPipeline };
+      if (name === "./camera-pipeline") return { readCameraPipeline, preferredPreviewAnchor };
       throw new Error("unexpected dependency " + name);
     },
   });

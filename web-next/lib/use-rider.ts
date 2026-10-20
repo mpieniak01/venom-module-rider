@@ -3,11 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api-client";
 import { getApiBaseUrl } from "@/lib/env";
-import { nativePreview, anchoredPreviewAge, nativeAnalysisMatches } from "./camera-pipeline";
+import { cameraPreviewStopped, nativePreview, anchoredPreviewAge, nativeAnalysisMatches } from "./camera-pipeline";
 import { useCameraPipeline } from "./use-camera-pipeline";
 import { readMjpeg, type MjpegPart } from "./mjpeg";
 import { readAnalysis } from "./vision-frame";
-import { decodePreview, nextPreviewDelay, previewLifetime, previewRequestCurrent, retainedPreview } from "./preview-media";
+import { decodePreview, nextPreviewDelay, previewLifetime, previewRequestCurrent, retainedPreview, expiredNativeCandidate } from "./preview-media";
 import { configForConnection } from "./device-session";
 import { adoptIntervention } from "./operator-control";
 import { HoldController, readHoldTiming, type MovementIntent } from "./hold-controller";
@@ -491,6 +491,10 @@ export function useRider(section: Section) {
   }, [pipelineLocation, cameraStream]);
   const pipelineIdentity = pipeline.status ? [pipeline.status.revision, pipeline.status.transport_epoch, pipeline.status.camera_session].join(":") : "";
   const pipelineBusy = pipeline.busy;
+  const pipelineStopped = cameraPreviewStopped(pipeline.status);
+  useEffect(() => {
+    if (pipelineStopped) { replaceFrame("camera", null, true); setMediaError("visionCameraOff"); }
+  }, [pipelineStopped, replaceFrame]);
   const nativePart = useCallback(async (part: MjpegPart, signal: AbortSignal, current: () => boolean) => {
     const headers = part.headers;
     const source = record(JSON.parse(headers.get("X-Rider-Source-Json") ?? "{}"));
@@ -530,7 +534,7 @@ export function useRider(section: Section) {
     } catch (error) { URL.revokeObjectURL(url); throw error; }
   }, [replaceFrame]);
   useEffect(() => {
-    if (!cameraStream || !["control", "vision"].includes(section) || processedTransition || nativeStreaming || pipelineBusy) return;
+    if (!cameraStream || !["control", "vision"].includes(section) || processedTransition || nativeStreaming || pipelineBusy || pipelineStopped) return;
     let alive = true, cycle = 0, timer: ReturnType<typeof setTimeout> | undefined, abort: AbortController | undefined;
     const tick = async () => {
       if (!alive || document.hidden) return;
@@ -542,9 +546,9 @@ export function useRider(section: Section) {
     const visibility = () => { cycle++; clearTimeout(timer); abort?.abort(); if (!document.hidden) void tick(); };
     document.addEventListener("visibilitychange", visibility); void tick();
     return () => { alive=false; cycle++; clearTimeout(timer); abort?.abort(); document.removeEventListener("visibilitychange", visibility); };
-  }, [cameraStream, section, mediaSession, fetchFrame, replaceFrame, processedTransition, nativeStreaming, pipelineBusy, pipelineIdentity]);
+  }, [cameraStream, section, mediaSession, fetchFrame, replaceFrame, processedTransition, nativeStreaming, pipelineBusy, pipelineStopped, pipelineIdentity]);
   useEffect(() => {
-    if (!nativeStreaming || !cameraStream || !["control", "vision"].includes(section) || processedTransition || pipelineBusy) return;
+    if (!nativeStreaming || !cameraStream || !["control", "vision"].includes(section) || processedTransition || pipelineBusy || pipelineStopped) return;
     let alive = true, cycle = 0, retry: ReturnType<typeof setTimeout> | undefined, controller: AbortController | undefined;
     const connect = async () => {
       if (!alive || document.hidden) return;
@@ -557,7 +561,7 @@ export function useRider(section: Section) {
       const pump = async () => {
         if (decoding) return; decoding = true;
         try { while (latest && current()) { const part = latest; latest = null; await nativePart(part, abort.signal, current); } }
-        catch { if (current()) { replaceFrame("camera", null, true); setMediaError("frameStale"); } }
+        catch (error) { if (current()) { replaceFrame("camera", null, true, expiredNativeCandidate(error)); setMediaError("frameStale"); } }
         finally { decoding = false; }
       };
       gap = setTimeout(expire, 5000);
@@ -586,7 +590,7 @@ export function useRider(section: Section) {
     };
     document.addEventListener("visibilitychange", visibility); void connect();
     return () => { alive = false; cycle++; clearTimeout(retry); controller?.abort(); document.removeEventListener("visibilitychange", visibility); };
-  }, [cameraStream, nativeStreaming, pipelineBusy, pipelineIdentity, processedTransition, section, mediaSession, nativePart, replaceFrame]);
+  }, [cameraStream, nativeStreaming, pipelineBusy, pipelineStopped, pipelineIdentity, processedTransition, section, mediaSession, nativePart, replaceFrame]);
   useEffect(() => {
     if ((!nativeStreaming && cameraStream !== "venom") || !camera || camera.stale) return;
     const remaining = previewLifetime(camera);

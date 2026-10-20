@@ -359,6 +359,7 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
         <div hidden={view !== "journey"} data-testid="journey-commands">
           <Panel title={t("journeyTitle")}>
             <div className={styles.loopStatus} role="status" data-testid="journey-state">
+              {journey.historical&&<span className={styles.small} data-testid="journey-last-outcome">{t("journeyLastOutcome")}</span>}
               <Pill tone={journey.active&&journey.phase!=="unknown"?"good":journey.phase==="blocked"||journey.phase==="failed"||journey.phase==="unknown"?"warning":undefined}>{t("journey.state."+journey.phase)}</Pill>
               <span className={styles.small}>{t("journeyElapsed")}: {formatNumber(journey.elapsed,language,1)} s · {t("journeyManeuver")}: {journey.maneuver??"—"}</span>
             </div>
@@ -372,7 +373,7 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
             {journeyUnavailable.length>0&&<div data-testid="journey-blocks" className={styles.loopError} role="status"><ul>{journeyUnavailable.map(block=><li key={block}>{t(block)}</li>)}</ul><Button onClick={showJourneySettings}>{t("journeySettings")}</Button></div>}
             {policy&&calibrationMatches(policy,detector)&&record(policy.avoidance).sweep_verified===true&&<p className={styles.hint} role="status" data-testid="journey-acceptance-saved">{t("journeyAcceptanceSaved",{revision:String(policy.revision)})}</p>}
             {journey.reason&&<p className={styles.hint} data-testid="journey-reason">{t("state")}: <code>{journey.reason}</code></p>}
-            {journeyRequested&&<p className={styles.hint}>{t("journeyStarted")}</p>}
+            {journeyRequested&&journey.active&&<p className={styles.hint}>{t("journeyStarted")}</p>}
             {journeyError&&<p className={styles.loopError} role="alert" data-testid="journey-error">{t("journeyRequestError")} · {journeyError}</p>}
           </Panel>
         </div>

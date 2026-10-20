@@ -89,3 +89,19 @@ def test_anchor_never_crosses_session_epoch_or_revision():
 )
 def test_invalid_or_missing_transport_timing_cannot_create_an_anchor(start, end):
     assert age_anchor(status_for(native()), start, end) is None
+
+
+def test_slow_status_uses_tighter_recent_bound_without_rejuvenating_old_capture():
+    from venom_module_rider.age_anchor import SourceAgeAnchor, preferred_anchor
+
+    fast = SourceAgeAnchor("camera", 2, 3, 5_000_000_000, 5.0, 10.0, 10.01)
+    slow = SourceAgeAnchor("camera", 2, 3, 6_200_000_000, 5.0, 10.8, 11.4)
+    chosen = preferred_anchor(fast, slow, 11.4)
+    assert chosen is fast
+    assert chosen.upper_age_ms(slow, 11.4) == pytest.approx(205)
+    assert chosen.upper_age_ms(fast, 11.4) > 1000
+    later = SourceAgeAnchor("camera", 2, 3, 8_500_000_000, 5.0, 13.0, 13.7)
+    assert preferred_anchor(fast, later, 13.7) is later
+    changed = SourceAgeAnchor("other", 3, 4, 6_200_000_000, 5.0, 10.8, 11.4)
+    assert preferred_anchor(fast, changed, 11.4) is changed
+    assert preferred_anchor(None, slow, 11.4) is slow

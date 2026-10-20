@@ -37,7 +37,7 @@ test("journey uses actual saved geometry and preserves small motion limits",()=>
 });
 test("journey status does not invent live motion from stale or unknown observations",()=>{
   const value={version:1,id:"journey",active:true,state:"forward",elapsed_s:35,maneuver_epoch:2,reason:"clear"};
-  assert.deepEqual(journeyView({journey:value}),{active:true,phase:"forward",elapsed:35,maneuver:2,reason:"clear",id:"journey"});
+  assert.deepEqual(journeyView({journey:value}),{active:true,phase:"forward",historical:false,elapsed:35,maneuver:2,reason:"clear",id:"journey"});
   assert.equal(journeyView({stale:true,journey:value}).phase,"unknown");
   assert.equal(journeyView({journey:{...value,state:"invented"}}).phase,"unknown");
   assert.equal(journeyView({journey:{...value,active:false,state:"stopped"}}).phase,"stopped");
@@ -56,4 +56,14 @@ test("navigation journey requires explicit STOP and manual takeover; trial warm 
   assert.equal(journeyOwnsMotion(status),false);
   assert.equal(navigationAvailable(status,"panel"),true);
   assert.equal(operatorSessionActive(status),true);
+});
+
+test("warm observation retains the ended journey outcome without reviving its authority",()=>{
+  const ended={version:1,id:"ended",active:false,state:"failed",reason:"decision_invalid_or_expired",elapsed_s:6.32,maneuver_epoch:0};
+  const result=journeyView({mode:"observe",running:true,last_trial:{journey:ended}});
+  assert.equal(result.historical,true);assert.equal(result.phase,"failed");assert.equal(result.active,false);
+  assert.equal(result.reason,ended.reason);assert.equal(result.elapsed,6.32);
+  assert.equal(journeyView({last_trial:{journey:{...ended,active:true}}}).phase,"idle");
+  const current=journeyView({journey:{...ended,id:"new",active:true,state:"qualifying"},last_trial:{journey:ended}});
+  assert.equal(current.historical,false);assert.equal(current.id,"new");assert.equal(current.active,true);
 });

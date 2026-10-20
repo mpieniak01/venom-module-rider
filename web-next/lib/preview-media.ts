@@ -67,3 +67,8 @@ export function retainedPreview<T extends FrameTiming & { stale: boolean; knownF
   if (previous.stale || busyRetry && previous.knownFreshness && (previewLifetime(previous, now) ?? 0) > 0) return previous;
   return { ...previous, stale: true, knownFreshness: false };
 }
+
+/** A late candidate cannot expire a different, still-valid displayed source. */
+export function expiredNativeCandidate(error: unknown): boolean {
+  return error instanceof Error && error.message === "stream_source_expired";
+}

@@ -101,6 +101,13 @@ export function calibrationFrameBlock(frame: (Parameters<typeof freshAnalysisFra
   if(analysis.state!=="clear"||analysis.vision_action!=="go")return "calibrationClearFrame";
   return "";
 }
+/** Diagnostic image GO is presentation only; the Pi reply/permission stays separate. */
+export function diagnosticImageCurrent(frame: (Parameters<typeof freshAnalysisFrame>[0] & {analysis?:JsonRecord})|null, policy:JsonRecord|null, detector:JsonRecord):boolean {
+  return freshAnalysisFrame(frame,"venom")&&(frameAge(frame)??Infinity)<1000
+    &&frame?.analysis?.preview_only===true&&frame.analysis.config_revision===policy?.revision
+    &&typeof policy?.revision==="number"&&/^[a-f0-9]{64}$/.test(str(detector.sha256))
+    &&frame.analysis.model_sha256===detector.sha256;
+}
 export function freshPolicyFrame(frame: (Parameters<typeof freshAnalysisFrame>[0] & {analysis?:JsonRecord})|null, stream:string|null, state:JsonRecord, policy:JsonRecord|null):boolean {
   return calibrationFrameBlock(frame,stream,state,policy)==="";
 }

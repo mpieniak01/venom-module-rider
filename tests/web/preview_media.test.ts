@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { displayedPreview, decodePreview, nextPreviewDelay, previewLifetime, previewRequestCurrent, retainedPreview } from "../../web-next/lib/preview-media";
+import { displayedPreview, decodePreview, nextPreviewDelay, previewLifetime, previewRequestCurrent, retainedPreview, expiredNativeCandidate } from "../../web-next/lib/preview-media";
 
 test("camera cadence is start-to-start while a slow read never overlaps another request", () => {
   assert.equal(nextPreviewDelay(1000, 1000), 500);
@@ -119,4 +119,14 @@ test("unknown timing remains unconfirmed and a confirmed displayed flag is not b
   assert.equal(displayedPreview(unknown,unknown,1500)!.knownFreshness,false);
   assert.equal(displayedPreview(unknown,previous,1500),previous);
   assert.equal(displayedPreview({ ...previous,stale:true },previous,1500)!.knownFreshness,false);
+});
+
+test("one expired native candidate keeps a valid prior source only to its original deadline", () => {
+  const prior={ageMs:200,receivedAt:1000,stale:false,knownFreshness:true};
+  const retry=expiredNativeCandidate(new Error("stream_source_expired"));
+  assert.equal(retainedPreview(prior,retry,1400),prior);
+  assert.equal(previewLifetime(prior,1400),400);
+  assert.equal(retainedPreview(prior,retry,1800).stale,true);
+  for(const cause of ["stream_source_invalid","stream_analysis_mismatch","stream_age_unavailable"])
+    assert.equal(retainedPreview(prior,expiredNativeCandidate(new Error(cause)),1400).stale,true);
 });
