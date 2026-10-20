@@ -5,13 +5,19 @@ export type ControlClock = { offset: number; rtt: number; at: number };
 export function operatorPrioritySupported(status: RiderStatus | null): boolean {
   return record(safetyOf(status).operator_control).version === 1;
 }
+/** Journey authority is ended through STOP, never a warm manual intervention. */
+export function journeyOwnsMotion(status: RiderStatus | null): boolean {
+  const safety = safetyOf(status);
+  return safety.owner === "navigation" && safety.arming_mode === "journey";
+}
 export function operatorSessionActive(status: RiderStatus | null): boolean {
-  return operatorPrioritySupported(status) && ["paused", "qualifying", "active"].includes(str(record(safetyOf(status).operator_control).state));
+  return !journeyOwnsMotion(status) && operatorPrioritySupported(status) && ["paused", "qualifying", "active"].includes(str(record(safetyOf(status).operator_control).state));
 }
 /** Buttons accept a new operator intent; Pi still authorizes every command. */
 export function navigationAvailable(status: RiderStatus | null, panelId?: string): boolean {
   const safety = safetyOf(status);
   const panel = record(safety.panel_control);
+  if (journeyOwnsMotion(status)) return false;
   const priority = safety.owner === "navigation" && operatorPrioritySupported(status);
   if (panelId && panel.version === 1 && panel.holder !== panelId) return false;
   if (priority && (!["online", "degraded"].includes(status?.connection.status ?? "") || !panelId || panel.version !== 1 || panel.holder !== panelId || status?.errors.control || safety.stale === true)) return false;

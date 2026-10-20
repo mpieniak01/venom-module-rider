@@ -3,6 +3,7 @@ import { Play, Square, RefreshCw } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 import { data, errorCode, formatNumber, formatTime, record, safetyOf, type JsonRecord } from "../lib/model";
 import { calibrationAcceptance, calibrationMatches, calibrationScope, decisionView, executionHeadline, freshPolicyFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, motionPermission, stoppingZone, stoppingZoneValues, trialBlock, trialPreparation, trialPreparationTitle, trialPreparationErrorKey, trialDiagnostics, trialStopReasonKey, trialOutcomeTone, freshObservation } from "../lib/loop-controls";
+import { journeyBlocks, journeyView } from "../lib/journey";
 import { operatorPrioritySupported } from "../lib/navigation";
 import { stopLoopResources } from "../lib/stop-loop";
 import type { RiderClient } from "../lib/use-rider";
@@ -13,7 +14,7 @@ import { Button, Checkbox, Field, Input, Panel, Pill, Select } from "./primitive
 import styles from "../rider.module.css";
 
 export function NavigationLoop({client,t,language,manual,auxiliary}:{client:RiderClient;t:Translator;language:string;manual:ReactNode;auxiliary?:ReactNode}) {
-  const [view, setView] = useState<"manual" | "automatic">("manual");
+  const [view, setView] = useState<"manual" | "automatic" | "journey">("manual");
   const [policy,setPolicy]=useState<JsonRecord|null>(null);
   const [draft,setDraft]=useState<JsonRecord|null>(null);
   const [editingZone,setEditingZone]=useState(false);
@@ -35,6 +36,8 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
   const [recoveryFailure,setRecoveryFailure]=useState<{runId:string;code:string}|null>(null);
   const [readError,setReadError]=useState("");
   const [trialResult,setTrialResult]=useState("");
+  const [journeyError,setJourneyError]=useState("");
+  const [journeyRequested,setJourneyRequested]=useState(false);
   const [trialStopReason,setTrialStopReason]=useState("");
   const trialSession=useRef("");
   const [refresh,setRefresh]=useState(0);
@@ -222,7 +225,7 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
     finally{startTask.current=null;if(!stopping.current)setOperation(null);}
   };
   const runTrial=async()=>{
-    if(!policy||trialUnavailable||operation||loading||phase==="running"&&goals.drive===true&&record(safetyOf(client.status).operator_control).state==="active")return;
+    if(!policy||trialUnavailable||journey.active||operation||loading||phase==="running"&&goals.drive===true&&record(safetyOf(client.status).operator_control).state==="active")return;
     client.setNotice(null);setOperation("check");setError("");setTrialFailure(null);setTrialResult("trialChecking");setTrialStopReason("");trialArmed.current=false;
     const origin=client.currentSession();operationEpoch.current=client.currentMotionEpoch();operationGeneration.current=client.currentGeneration();
     trialSession.current=origin;
@@ -245,6 +248,32 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
     try{await task;}
     catch(err){if(!stopping.current){failure(err);setTrialResult("trialFailed");}}
     finally{startTask.current=null;if(!stopping.current)setOperation(null);}
+  };
+  const runJourney=async()=>{
+    if(!policy||journeyUnavailable.length||operation||loading||startTask.current||journey.active)return;
+    const origin=client.currentSession(),epoch=client.currentMotionEpoch();
+    client.setNotice(null);setOperation("start");setJourneyError("");setJourneyRequested(false);trialArmed.current=false;
+    const task=(async()=>{
+      client.setCameraStream("venom");
+      const plan=t("journeyPlan")+" · "+String(policy.speed)+" SDK · ≤ "+String(policy.max_motion_ms)+" ms";
+      const result=await client.startNavigationJourney(plan,Number(policy.revision));
+      if(stopping.current||client.currentSession()!==origin||client.currentMotionEpoch()!==epoch)throw new Error("navigation_trial_cancelled");
+      const saved=record(result.config);if(Object.keys(saved).length)applyPolicy(saved);
+      await readState();setJourneyRequested(true);
+    })();startTask.current=task;
+    try{await task;}catch(err){if(!stopping.current)setJourneyError(errorCode(err));}
+    finally{startTask.current=null;if(!stopping.current)setOperation(null);}
+  };
+  const stopJourney=async()=>{
+    if(stopping.current)return;
+    stopping.current=true;setOperation("stop");setJourneyError("");client.hold.cancel();
+    try{await client.command({action:"stop"},true);await readState();setJourneyRequested(false);}
+    catch(err){setJourneyError(errorCode(err));}
+    finally{stopping.current=false;setOperation(null);}
+  };
+  const showJourneySettings=()=>{
+    setEditingZone(false);
+    if(settingsRef.current){settingsRef.current.open=true;settingsRef.current.scrollIntoView({block:"start",behavior:"smooth"});}
   };
   useEffect(()=>{
     // The compatible producer keeps observing after a completed trial.
@@ -276,6 +305,8 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
   const observeBlock=policy?loopBlock({...policy,mode:"observe"},runtime,detector,connected,dirty,client.status):"loopLoadFailed";
   const avoidanceSupported=Array.isArray(detector.supported_protocol_versions)&&detector.supported_protocol_versions.includes(Number(record(draft?.avoidance??policy?.avoidance).protocol_version??3));
   const trialUnavailable=record(policy?.avoidance).enabled===true&&!avoidanceSupported?"avoidanceUpdateRequired":trialBlock(policy,runtime,detector,connected,dirty,client.status);
+  const journeyUnavailable=journeyBlocks(policy,runtime,detector,connected,dirty,client.status);
+  const journey=journeyView(loopState);
   const decision=record(loopState.decision);
   const perception=record(draft?.perception);
   const permission=motionPermission(loopState,goals,policy,detector,client.status);
@@ -296,9 +327,9 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
   return <section className={styles.controlWorkspace} data-testid="control-workspace">
     <div className={styles.controlModeRow}>
       <div className={styles.controlModes} role="group" aria-label={t("workspaceView")}>
-        {(["manual", "automatic"] as const).map(mode => <Button key={mode} data-testid={"workspace-" + mode} aria-pressed={view === mode} tone={view === mode ? "primary" : undefined} onClick={() => setView(mode)}>{t(mode === "manual" ? "workspaceManual" : "workspaceAutomatic")}</Button>)}
+        {(["manual", "automatic", "journey"] as const).map(mode => <Button key={mode} data-testid={"workspace-" + mode} aria-pressed={view === mode} tone={view === mode ? "primary" : undefined} onClick={() => setView(mode)}>{t(mode === "manual" ? "workspaceManual" : mode === "journey" ? "workspaceJourney" : "workspaceAutomatic")}</Button>)}
       </div>
-      <span className={styles.workspaceOwner} role="status">{t("workspaceOwner")}: <strong>{t(owner === "manual" ? "workspaceManual" : owner === "navigation" ? "workspaceAutomatic" : safety.state === "DISARMED" ? "workspaceDisarmedOwner" : "workspaceNoOwner")}</strong></span>
+      <span className={styles.workspaceOwner} role="status">{t("workspaceOwner")}: <strong>{t(owner === "manual" ? "workspaceManual" : owner === "navigation" ? safety.arming_mode === "journey" ? "workspaceJourney" : "workspaceAutomatic" : safety.state === "DISARMED" ? "workspaceDisarmedOwner" : "workspaceNoOwner")}</strong></span>
     </div>
     <div className={styles.driveWorkspace}>
       <div className={styles.workspaceContent} data-testid="workspace-content" tabIndex={0} role="region" aria-label={t("workspaceObservation")}>
@@ -313,17 +344,35 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
     </div>
     <div className={styles.loopToolbar}>
     <div className={styles.loopActions}>
-      <Button size="large" tone="primary" data-testid="loop-start" title={t("trialSimpleHelp")} aria-describedby={trialUnavailable?"rider-trial-help rider-trial-block":"rider-trial-help"} disabled={!!trialUnavailable||!!operation||!!client.busy||loading||automaticActive} onClick={()=>void runTrial()}><Play size={18}/>{t(priority&&loopState.operator_control_version===1&&loopState.running===true?"operatorResume":record(policy?.avoidance).enabled===true?"avoidanceTrialRun":"trialRun")}</Button>
+      <Button size="large" tone="primary" data-testid="loop-start" title={t("trialSimpleHelp")} aria-describedby={trialUnavailable?"rider-trial-help rider-trial-block":"rider-trial-help"} disabled={!!trialUnavailable||!!operation||!!client.busy||loading||automaticActive||journey.active} onClick={()=>void runTrial()}><Play size={18}/>{t(priority&&loopState.operator_control_version===1&&loopState.running===true?"operatorResume":record(policy?.avoidance).enabled===true?"avoidanceTrialRun":"trialRun")}</Button>
       <Button size="large" tone="caution" data-testid="loop-stop" title={t(priority ? "operatorPauseHint" : "loopStop")} disabled={!connected||operation==="stop"||!priority&&operation==="save"} onClick={()=>void stop()}><Square size={18}/>{t(operation==="stop"?"loopStopping":priority?"operatorPause":"loopStop")}</Button>
       {detector.drive_supported!==false&&<span className={styles.small} data-testid="trial-plan">{String(policy?.speed??"—")} SDK · ≤ {String(policy?.max_motion_ms??"—")} ms</span>}
     </div>
     </div>
           </Panel>
         </div>
-        <div className={styles.loopCamera}><CameraPanel client={client} t={t} language={language} compact editor={view === "automatic" && editingZone && draft && Array.isArray(draft.corridor) ? {value:draft.corridor as number[],disabled:goals.drive===true||!!operation,onChange:value=>setDraft({...draft,corridor:value})}:undefined}/></div>
-        <div hidden={view !== "automatic"} data-testid="automatic-panel">
+        <div hidden={view !== "journey"} data-testid="journey-commands">
+          <Panel title={t("journeyTitle")}>
+            <div className={styles.loopStatus} role="status" data-testid="journey-state">
+              <Pill tone={journey.active&&journey.phase!=="unknown"?"good":journey.phase==="blocked"||journey.phase==="failed"||journey.phase==="unknown"?"warning":undefined}>{t("journey.state."+journey.phase)}</Pill>
+              <span className={styles.small}>{t("journeyElapsed")}: {formatNumber(journey.elapsed,language,1)} s · {t("journeyManeuver")}: {journey.maneuver??"—"}</span>
+            </div>
+            <div className={styles.loopActions}>
+              <Button size="large" tone="primary" data-testid="journey-start" disabled={journeyUnavailable.length>0||!!operation||!!client.busy||loading||journey.active||automaticActive} onClick={()=>void runJourney()}><Play size={18}/>{t("journeyStart")}</Button>
+              <Button size="large" tone="caution" data-testid="journey-stop" disabled={!connected||operation==="stop"} onClick={()=>void stopJourney()}><Square size={18}/>{t("journeyStop")}</Button>
+              <span className={styles.small} data-testid="journey-motion-limits">{String(policy?.speed??"—")} SDK · ≤ {String(policy?.max_motion_ms??"—")} ms</span>
+            </div>
+            <p className={styles.hint}>{t("journeyHelp")}</p>
+            {journeyUnavailable.length>0&&<div data-testid="journey-blocks" className={styles.loopError} role="status"><ul>{journeyUnavailable.map(block=><li key={block}>{t(block)}</li>)}</ul><Button onClick={showJourneySettings}>{t("journeySettings")}</Button></div>}
+            {journey.reason&&<p className={styles.hint} data-testid="journey-reason">{t("state")}: <code>{journey.reason}</code></p>}
+            {journeyRequested&&<p className={styles.hint}>{t("journeyStarted")}</p>}
+            {(journeyError||readError)&&<p className={styles.loopError} role="alert" data-testid="journey-error">{t("journeyRequestError")} · {journeyError||readError}</p>}
+          </Panel>
+        </div>
+        <div className={styles.loopCamera}><CameraPanel client={client} t={t} language={language} compact editor={view !== "manual" && editingZone && draft && Array.isArray(draft.corridor) ? {value:draft.corridor as number[],disabled:goals.drive===true||!!operation,onChange:value=>setDraft({...draft,corridor:value})}:undefined}/></div>
+        <div hidden={view === "manual"} data-testid="automatic-panel">
           <Panel title={t("loopSettings")}>
-    <p id="rider-trial-help" className={styles.hint} data-testid="trial-start-help">{t("trialStartHelp")}</p>
+    <p hidden={view !== "automatic"} id="rider-trial-help" className={styles.hint} data-testid="trial-start-help">{t("trialStartHelp")}</p>
     <details className={styles.details} data-testid="loop-observation">
       <summary>{t("observationOptional")}</summary>
       <p className={styles.hint}>{t("observationOptionalHelp")}</p>
@@ -342,6 +391,7 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
       <p className={styles.hint}>{t("trialAcceptanceHelp")}</p>
       <Button data-testid="trial-accept" disabled={!connected||!!operation||loading||dirty||goals.drive===true||imageDecision.vision!=="go"||!freshPolicyFrame(client.camera,client.cameraStream,loopState,policy)} onClick={()=>void acceptTrial()}>{t("trialAccept")}</Button>
     </div>}
+    <div hidden={view !== "automatic"}>
     {preparation&&!diagnostic.combined&&<div className={preparation.state==="failed"?styles.loopError:styles.metric} role={preparation.state==="failed"?"alert":"status"} data-testid="trial-preparation" data-request-id={preparation.requestId}>
       <strong>{t(trialPreparationTitle(preparation))} · {t("trialPreparation.phase."+preparation.phase)}</strong>
       <p className={styles.small}>{t("trialPreparationElapsed",{seconds:formatNumber(preparation.elapsedMs===null?null:preparation.elapsedMs/1000,language,1)})}</p>
@@ -358,6 +408,7 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
     {phase==="fault"&&!displayedStopReason&&<p role="alert" className={styles.loopError}>{t("loopFaultHint")} · {String(loopState.stop_reason??"")}</p>}
 
     {(visibleError||readError)&&<p className={styles.loopError} role="alert">{t("trialRequestError")} · {visibleError||readError}</p>}
+    </div>
     <div className={styles.loopModeRow}>
       {!groundActive&&<Button data-testid="zone-edit" disabled={!draft||goals.drive===true||!!operation} onClick={()=>setEditingZone(!editingZone)}>{t(editingZone?"zoneFinish":"zoneEdit")}</Button>}
       {editingZone&&!groundActive&&<><Button data-testid="zone-save" disabled={!dirty||!!operation||goals.drive===true} onClick={()=>void save()}>{t("loopSave")}</Button><Button onClick={()=>{setDraft(policy);setEditingZone(false);}}>{t("loopDiscard")}</Button><Button disabled={!!operation} onClick={()=>draft&&setDraft({...draft,corridor:[.35,.80,.65,.95]})}>{t("zoneReset")}</Button></>}

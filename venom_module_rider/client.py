@@ -62,6 +62,7 @@ def expected_contract(path: str):
         "/svc/frame-distributor.service": ("rider.services", 2),
         "/api/navigation/config": ("rider.navigation_loop", 1),
         "/api/navigation/trial": ("rider.navigation_loop", 1),
+        "/api/navigation/journey": ("rider.navigation_loop", 1),
         "/api/navigation/status": ("rider.navigation_loop", 1),
         "/api/compute/config": ("rider.compute", 1),
         "/api/compute/status": ("rider.compute", 1),
@@ -90,11 +91,10 @@ def preparation_identity(value):
     if not isinstance(value, dict):
         return value
     request_id = value.get("request_id")
-    if not isinstance(request_id, str) or not 0 < len(request_id) <= 64:
+    if not isinstance(request_id, str) or not 0 < len(request_id) <= 128:
         return value
-    start_id = (
-        "trial-" + hashlib.sha256(request_id.encode()).hexdigest()[:32] + "-start"
-    )
+    prefix = "journey-" if value.get("journey_version") == 1 else "trial-"
+    start_id = prefix + hashlib.sha256(request_id.encode()).hexdigest()[:32] + "-start"
     return {**value, "operator_request_id": start_id}
 
 
@@ -128,7 +128,10 @@ def json_timeout(path: str, method: str, stop: bool) -> httpx.Timeout:
             )
         ):
             duration = 20.0
-        elif method == "POST" and path == "/api/navigation/trial":
+        elif method == "POST" and path in {
+            "/api/navigation/trial",
+            "/api/navigation/journey",
+        }:
             # Pi bounds service preparation to 15 s, including at most 5 s
             # for the final start after ARM. Do not time out before its result.
             duration = 18.0
@@ -250,7 +253,7 @@ class PiClient:
                         str(code or "pi_request_failed")[:128],
                         response.status_code,
                         trial_error_details(payload)
-                        if path == "/api/navigation/trial"
+                        if path in {"/api/navigation/trial", "/api/navigation/journey"}
                         else payload,
                     )
                 meta = payload.get("meta")

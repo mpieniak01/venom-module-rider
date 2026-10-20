@@ -506,7 +506,10 @@ class RiderService:
         try:
             result = await task
             self.check_session(session)
-            if path == "/api/navigation/trial" and epoch != self.epoch:
+            if (
+                path in {"/api/navigation/trial", "/api/navigation/journey"}
+                and epoch != self.epoch
+            ):
                 raise RiderError("command_superseded")
             return result
         except asyncio.CancelledError as exc:

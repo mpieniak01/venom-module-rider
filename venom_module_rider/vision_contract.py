@@ -15,6 +15,14 @@ from .avoidance import AvoidanceSettings, MotionPhase
 from .depth_detector import PerceptionSettings
 
 
+class JourneyContext(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    version: Annotated[StrictInt, Field(ge=1, le=1)]
+    id: Annotated[str, Field(min_length=1, max_length=128, pattern=r"^\S+$")]
+    maneuver_epoch: Annotated[StrictInt, Field(ge=0, le=2**53 - 1)]
+
+
 class VisionFrame(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
     protocol_version: Literal[1, 2, 3]
@@ -32,6 +40,7 @@ class VisionFrame(BaseModel):
 
     avoidance: AvoidanceSettings = Field(default_factory=AvoidanceSettings)
     motion_phase: MotionPhase = "ready"
+    journey: JourneyContext | None = None
 
     perception: PerceptionSettings = Field(default_factory=PerceptionSettings)
 
@@ -42,6 +51,13 @@ class VisionFrame(BaseModel):
             or self.perception.engine != "depth_plane"
         ):
             raise ValueError("avoidance_requires_depth_protocol_v2_or_v3")
+        if self.journey is not None and not (
+            self.mode == "drive"
+            and self.protocol_version == 3
+            and self.avoidance.enabled
+            and self.avoidance.sweep_verified
+        ):
+            raise ValueError("journey_requires_accepted_steering_v3")
         return self
 
     def valid_corridor(self):

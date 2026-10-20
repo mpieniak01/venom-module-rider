@@ -148,3 +148,11 @@ class NavigationTrialRequest(StrictModel):
         if not value.strip():
             raise ValueError("specific operator plan required")
         return value
+
+
+class NavigationJourneyRequest(NavigationTrialRequest):
+    """Separate opt-in; the legacy ten-second trial keeps its contract."""
+
+    journey_version: Annotated[StrictInt, Field(ge=1, le=1)]
+    operator_control_version: Annotated[StrictInt, Field(ge=1, le=1)]
+    panel_id: Annotated[str, Field(strict=True, min_length=1, max_length=128)]

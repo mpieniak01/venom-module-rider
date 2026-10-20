@@ -4,12 +4,14 @@ import asyncio
 import copy
 import time
 from collections import OrderedDict
+from uuid import uuid4
 
 from . import depth_trace
 from .avoidance import plan
 from .depth_detector import DepthDetector
 from .errors import RiderError
 from .floor_detector import FloorDetector
+from .journey import planner_history, record_result
 from .sector_trend import update as sector_trend
 from .steering import plan as steering_plan
 from .vision_overlay import preview_sectors
@@ -25,6 +27,7 @@ class VisionLoop:
         source_session=None,
         priority=None,
     ):
+        self.host_session = uuid4().hex
         self.priority = priority
         self.priority_errors = 0
         self.samples = samples
@@ -59,6 +62,7 @@ class VisionLoop:
             "busy": (self.depth_busy if selected is self.depth_detector else self.busy)
             is not None,
             "supported_protocol_versions": [1, 2, 3],
+            "navigation_journey_version": 1,
             "ground_geometry_supported": callable(
                 getattr(self.depth_detector, "detect_ground", None)
             ),
@@ -161,6 +165,7 @@ class VisionLoop:
             frame.perception.model_dump_json(),
             frame.protocol_version,
             frame.avoidance.model_dump_json(),
+            frame.journey.id if frame.journey else None,
             (
                 source_reference.get("camera_session"),
                 source_reference.get("transport_epoch"),
@@ -175,6 +180,7 @@ class VisionLoop:
             or previous["signature"] != signature
         ):
             raise RiderError("vision_replay_or_configuration_changed", 409)
+        prior_planner = planner_history(frame, previous)
         now = self.clock()
         count = previous["count"] if previous and now - previous["at"] <= 0.5 else 0
         # Reserve sequence before await: duplicates cannot race admission.
@@ -186,6 +192,14 @@ class VisionLoop:
             "at": now,
             "engine": frame.perception.engine,
         }
+        if frame.journey is not None:
+            # An interrupted inference cannot leave an incomplete authority
+            # record or silently restore a maneuver budget on the next request.
+            state.update(
+                journey_epoch=frame.journey.maneuver_epoch,
+                journey_terminal=True,
+                journey_completed=False,
+            )
         self.runs[identity] = state
         self.runs.move_to_end(identity)
         while len(self.runs) > 32:
@@ -327,7 +341,7 @@ class VisionLoop:
             else:
                 action, motion_reason = "stop", "avoidance_not_enabled"
         if frame.protocol_version == 3:
-            prior = dict(previous.get("avoidance") or {}) if previous else {}
+            prior = prior_planner
             if previous and now - previous["at"] > 0.5:
                 prior.update(counts={"left": 0, "right": 0}, front=0)
             action, motion_reason, planner, sectors, paths, terminal = steering_plan(
@@ -349,6 +363,12 @@ class VisionLoop:
                 progress_delta=planner.get("progress_delta"),
                 pose_resets=planner.get("pose_resets", 0),
             )
+        record_result(state, frame, action, result)
+        journey_result = (
+            {"journey": frame.journey.model_dump(), "host_session": self.host_session}
+            if frame.journey is not None
+            else {}
+        )
         capture_key = None
         if self.samples is not None:
             from .sample_sources import vision
@@ -378,6 +398,7 @@ class VisionLoop:
                         "action": action,
                         "vision_action": vision_action,
                         "input_frame": frame.model_dump(mode="json"),
+                        **journey_result,
                         "perception_engine": frame.perception.engine,
                         "inference_ms": round(elapsed, 2),
                         "valid_for_ms": min(
@@ -412,6 +433,7 @@ class VisionLoop:
                     ),
                     "corridor": frame.corridor,
                     "config_revision": frame.config_revision,
+                    **journey_result,
                     "observed_at": time.time() - (frame.age_ms + elapsed) / 1000,
                 },
                 round(elapsed, 2),
@@ -437,6 +459,7 @@ class VisionLoop:
                 else {}
             ),
             **({"source": source_reference} if source_reference else {}),
+            **journey_result,
             "action": action,
             "vision_action": vision_action,
             "motion_reason": motion_reason,

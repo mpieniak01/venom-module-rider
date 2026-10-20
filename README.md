@@ -444,7 +444,7 @@ Offline mapping qualification: [geometry research v1](docs/MAPPING_RESEARCH_V1.m
 
 ## Operator workspace
 
-See [control workspace](docs/CONTROL_WORKSPACE.md) for Manual/Automatic views, fixed directional controls, the three STOP meanings and hardware-free layout acceptance.
+See [control workspace](docs/CONTROL_WORKSPACE.md) for Manual/Automatic/Automat2 views, fixed directional controls, the three STOP meanings and hardware-free layout acceptance.
 
 ### Panel action styles
 
@@ -493,3 +493,20 @@ The device transport is independent of the web stack. After a host restart,
 restore the configured device connection before diagnosing disabled controls.
 An unavailable connection keeps motion controls disabled; reconnecting does not
 arm the robot or replay a previous movement command.
+
+
+## Automat2 — continuous supervised journey
+
+The separate Automat2 view starts a low-speed journey with local obstacle
+avoidance until STOP or a terminal freshness/avoidance fault. The existing
+ten-second trial remains available. No periodic ARM or timer extension is used.
+Pi and Venom negotiate journey v1; mismatched versions show a clear unavailable
+state. Per-obstacle correction budgets reset only after fresh qualified
+straightening, and stale mission/epoch/host/source identities cannot resume a
+journey. Camera and manual controls remain in the same workspace.
+
+See [Journey v1](docs/JOURNEY_V1.md) for protocol, limits and operator acceptance.
+`make check-journey` runs the focused hardware-free regression. The paired lease
+fixture optionally accepts `RIDER_TEST_PI_LEASE` pointing to the actual matching
+Pi source, with its repository root on `PYTHONPATH`; ordinary tests never locate
+or connect to a robot. Physical acceptance remains a separate operator step.

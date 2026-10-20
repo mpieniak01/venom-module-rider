@@ -16,7 +16,7 @@ import { canRequestArm, commandAccepted, controlIdentity, data, errorCode, faceR
 const BASE = "/api/v1/rider";
 export type Notice = { key: string; code?: string; tone: "error" | "success" | "info" };
 export type Frame = { captureKey?: string; analysis?: JsonRecord; ageMs?: number; receivedAt?: number; ageSource?: string; decoded?: boolean; url: string; stale: boolean; source: string; fileAt: string; id: string; knownFreshness: boolean; visionState: string; visionReason: string; inferenceMs: string; visionPolicy: string; recordedAt: string };
-import { continuousAvailable, controlChanged, freshControl, navigationAvailable, navigationView, observationClock, operatorPrioritySupported, operatorSessionActive, retainControl, type ControlClock } from "./navigation";
+import { continuousAvailable, controlChanged, freshControl, navigationAvailable, navigationView, observationClock, journeyOwnsMotion, operatorPrioritySupported, operatorSessionActive, retainControl, type ControlClock } from "./navigation";
 export function useRider(section: Section) {
   const [config, setConfig] = useState<DeviceConfig | null>(null);
   const [status, setStatus] = useState<RiderStatus | null>(null);
@@ -272,6 +272,7 @@ export function useRider(section: Section) {
   const sendControl = useCallback(async (body: JsonRecord, current: () => boolean = () => true, announce = true): Promise<JsonRecord> => {
     if (!current()) return {};
     const action = str(body.action);
+    if (journeyOwnsMotion(statusRef.current) && ["move", "navigation_pause", "navigation_resume"].includes(action)) throw Object.assign(new Error("journey_manual_takeover_required"), {data:{error:"journey_manual_takeover_required"}});
     const stopping = ["stop", "disarm"].includes(action);
     if (["stop","disarm","clear_estop","height","balance","navigation_pause"].includes(action) || action==="arm"&&body.owner!=="navigation" || action==="move"&&body.mode!=="release") motionEpoch.current += 1;
     const origin = controlIdentity(statusRef.current);
@@ -335,6 +336,7 @@ export function useRider(section: Section) {
   const stopManual = useCallback(async () => {
     motionEpoch.current += 1;
     hold.cancel();
+    if (journeyOwnsMotion(statusRef.current)) return command({ action: "stop" }, true);
     if (operatorSessionActive(statusRef.current) || pendingResume.current) return command({ action: "navigation_pause" }, true);
     if (!navigationAvailable(statusRef.current, panelId)) return null;
     return command({ action: "move", device_settings: true, direction: "forward", mode: "release" });
@@ -354,6 +356,21 @@ export function useRider(section: Section) {
       await poll("control", true);
       return result;
     } finally { if (!priority) motionBlocked.current = Math.max(0, motionBlocked.current - 1); setBusy(null); }
+  }, [hold, poll, makeEnvelope, mutation, panelId]);
+  const startNavigationJourney = useCallback(async (plan: string, revision: number) => {
+    const origin = sessionRef.current, epoch = motionEpoch.current;
+    hold.cancel(); motionBlocked.current += 1; setBusy("journey");
+    try {
+      await poll("control", true);
+      if (sessionRef.current !== origin || motionEpoch.current !== epoch || document.hidden) throw new Error("navigation_trial_cancelled");
+      if (safetyOf(statusRef.current).navigation_journey_version !== 1) throw new Error("navigation_journey_update_required");
+      const {seq: ignoredSeq, action: ignoredAction, ...intent} = makeEnvelope({action:"arm"});
+      void ignoredSeq; void ignoredAction;
+      const result = await mutation("/navigation/journey", {...intent, panel_id:panelId, operator_control_version:1, journey_version:1, config_revision:revision, operator_consent:true, operator_plan:plan}, "POST", true);
+      if (sessionRef.current !== origin || motionEpoch.current !== epoch) throw new Error("navigation_trial_cancelled");
+      await poll("control", true);
+      return result;
+    } finally { motionBlocked.current = Math.max(0, motionBlocked.current - 1); setBusy(null); }
   }, [hold, poll, makeEnvelope, mutation, panelId]);
   const currentSession = useCallback(() => sessionRef.current, []);
   const currentMotionEpoch = useCallback(() => motionEpoch.current, []);
@@ -383,7 +400,15 @@ export function useRider(section: Section) {
       if (sessionRef.current !== origin || motionEpoch.current !== epoch || document.hidden) throw Object.assign(new Error("navigation_trial_cancelled"), {data:{error:"navigation_trial_cancelled"}});
     };
     hold.cancel(); setBusy("takeover");
+    const fromJourney = journeyOwnsMotion(statusRef.current);
     try {
+      if (fromJourney) {
+        await command({ action:"stop" }, true, true);
+        epoch += 1;
+        await poll("control", true);
+        assertCurrent();
+        if (statusRef.current?.errors.control || safetyOf(statusRef.current).stale === true || safetyOf(statusRef.current).state !== "DISARMED") throw new Error("journey_takeover_stop_unconfirmed");
+      }
       if (operatorSessionActive(statusRef.current) && safetyOf(statusRef.current).state === "ARMED") {
         await command({ action: "navigation_pause" }, true, true);
         return;
@@ -414,7 +439,7 @@ export function useRider(section: Section) {
         epoch += 1;
         assertCurrent();
       }
-      setCameraStream("raw"); await poll();
+      if (!fromJourney) setCameraStream("raw"); await poll();
     } catch(error) { setNotice({ key: "requestFailed", code: errorCode(error), tone: "error" }); }
     finally { setBusy(null); }
   }, [hold, mutation, poll, command, panelId]);
@@ -576,6 +601,6 @@ export function useRider(section: Section) {
   // ARM always refreshes the fast control endpoint before making its envelope.
   // The latency of a diagnostics view must not prevent that refresh request.
   const canArm = canRequestArm(status);
-  return { pipeline, config, status, loading, notice, setNotice, busy, activeDirection, manualMode, manualRequest, panelId, canContinuous: continuousAvailable(status, panelId), controlFresh: hasFreshControl(), canMutate: isConnected(), canArm, canNavigate: canNavigate(), canMove: movementReady(), poll, refresh, refreshing, command, stopManual, startNavigationTrial, currentSession, currentMotionEpoch, currentGeneration, currentCamera, mutate: runMutation, takeManual, selectDevice, hold, camera, cameraStream, setCameraStream, cameraTransition, setCameraTransition, markCameraDecoded, runtimeFrame, showRuntimeFrame, setShowRuntimeFrame, mediaError };
+  return { pipeline, config, status, loading, notice, setNotice, busy, activeDirection, manualMode, manualRequest, panelId, canContinuous: continuousAvailable(status, panelId), controlFresh: hasFreshControl(), canMutate: isConnected(), canArm, canNavigate: canNavigate(), canMove: movementReady(), poll, refresh, refreshing, command, stopManual, startNavigationTrial, startNavigationJourney, currentSession, currentMotionEpoch, currentGeneration, currentCamera, mutate: runMutation, takeManual, selectDevice, hold, camera, cameraStream, setCameraStream, cameraTransition, setCameraTransition, markCameraDecoded, runtimeFrame, showRuntimeFrame, setShowRuntimeFrame, mediaError };
 }
 export type RiderClient = ReturnType<typeof useRider>;
