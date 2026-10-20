@@ -68,3 +68,21 @@ def age_anchor(status, request_started, response_received):
         float(request_started),
         float(response_received),
     )
+
+
+def preferred_anchor(current, candidate, host_now):
+    """The tighter of two valid upper bounds is still an upper bound.
+
+    Limit reuse to 2 s and the exact camera authority; a slow status response
+    must not unnecessarily discard current video. No capture time is renewed.
+    """
+    if (
+        current is not None
+        and current.authority() == candidate.authority()
+        and 0 <= host_now - current.response_received_mono <= 2.0
+    ):
+        prior_age = current.upper_age_ms(candidate, host_now)
+        candidate_age = candidate.upper_age_ms(candidate, host_now)
+        if candidate.frame_age_ms <= prior_age <= candidate_age:
+            return current
+    return candidate

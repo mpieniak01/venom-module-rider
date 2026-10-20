@@ -72,6 +72,7 @@ class RiderService:
         self.cache: dict[str, tuple[float, dict]] = {}
         self.inflight: dict[str, asyncio.Task] = {}
         self.commands: set[asyncio.Task] = set()
+        self.interventions: dict[asyncio.Task, tuple[str, str]] = {}
         self.stops: set[asyncio.Task] = set()
         self.operations: set[asyncio.Task] = set()
         self.last_seen: float | None = None
@@ -422,6 +423,13 @@ class RiderService:
     async def control(self, body: dict, session):
         action = body.get("action")
         stop = action in {"stop", "disarm"}
+        intervention = (
+            action == "move"
+            and body.get("intervene") is True
+            and type(body.get("operator_intervention_version")) is int
+            and body["operator_intervention_version"] == 1
+        )
+        scoped_release = intervention and body.get("mode") == "release"
         priority = action == "navigation_pause" or (
             action == "move" and body.get("intervene") is True
         )
@@ -429,7 +437,14 @@ class RiderService:
             self.check_session(session)
         if stop:
             self.stop_sample_events("auto_global_stop")
-        if stop or priority:
+        if scoped_release:
+            # A cancelled press bypasses the pending operator ACK. Only its own
+            # request is retired: an old release cannot revoke a newer gesture.
+            target = (body.get("supersedes_operation_id"), body.get("panel_id"))
+            for task, identity in tuple(self.interventions.items()):
+                if identity == target:
+                    task.cancel()
+        elif stop or priority:
             self.cancel_pending_motion()
         elif self.conversation_invalidator:
             self.conversation_invalidator()
@@ -454,12 +469,17 @@ class RiderService:
                 path,
                 method="POST",
                 body=body,
-                stop=stop,
-                **({"priority": True} if priority else {}),
+                stop=stop or scoped_release,
+                **({"priority": True} if priority and not scoped_release else {}),
             )
         )
         self.commands.add(task)
-        if stop:
+        if intervention and not scoped_release:
+            self.interventions[task] = (
+                body.get("request_id", ""),
+                body.get("panel_id", ""),
+            )
+        if stop or scoped_release:
             self.stops.add(task)
         try:
             result = await task
@@ -481,6 +501,7 @@ class RiderService:
         finally:
             self.commands.discard(task)
             self.stops.discard(task)
+            self.interventions.pop(task, None)
 
     async def mutate(self, path, body, session, *, method="POST"):
         self.check_session(session)
@@ -506,7 +527,10 @@ class RiderService:
         try:
             result = await task
             self.check_session(session)
-            if path == "/api/navigation/trial" and epoch != self.epoch:
+            if (
+                path in {"/api/navigation/trial", "/api/navigation/journey"}
+                and epoch != self.epoch
+            ):
                 raise RiderError("command_superseded")
             return result
         except asyncio.CancelledError as exc:

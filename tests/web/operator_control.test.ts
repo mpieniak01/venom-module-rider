@@ -33,3 +33,25 @@ test("a newer exact own-transfer observation is preserved when its executed ACK 
   (previous.control.safety as JsonRecord).operator_control={operation_id:"foreign"};
   assert.equal(adoptIntervention(previous,response,intent,"panel"),null);
 });
+
+test("only a versioned consented intervention adopts new manual authority from DISARMED",()=>{
+  const {previous,intent,response}=scenario();
+  Object.assign(previous.control!.safety as JsonRecord,{state:"DISARMED",owner:null,operator_intervention_version:1});
+  Object.assign(intent,{operator_intervention_version:1,operator_consent:true,operator_plan:"manual left",owner:"manual",arming_mode:"operator"});
+  assert.ok(adoptIntervention(previous,response,intent,"panel"));
+  for(const patch of [{operator_intervention_version:undefined},{operator_consent:false},{operator_plan:""},{owner:"navigation"},{arming_mode:"journey"}]){
+    assert.equal(adoptIntervention(previous,response,{...intent,...patch},"panel"),null);
+  }
+  (previous.control!.safety as JsonRecord).state="ESTOP";
+  assert.equal(adoptIntervention(previous,response,intent,"panel"),null);
+});
+
+test("a preparation generation transition only permits ACK adoption for its exact superseded operation",()=>{
+  const {previous,intent,response}=scenario();
+  Object.assign(intent,{operator_intervention_version:1,operator_consent:true,operator_plan:"manual left",owner:"manual",arming_mode:"operator",supersedes_operation_id:"prepare"});
+  Object.assign(previous.control!.safety as JsonRecord,{operator_intervention_version:1,generation:"preparing-new",operator_control:{operation_id:"prepare"}});
+  assert.ok(adoptIntervention(previous,response,intent,"panel"));
+  assert.equal(adoptIntervention(previous,response,{...intent,supersedes_operation_id:"foreign"},"panel"),null);
+  (previous.control!.safety as JsonRecord).owner="manual";
+  assert.equal(adoptIntervention(previous,response,intent,"panel"),null);
+});

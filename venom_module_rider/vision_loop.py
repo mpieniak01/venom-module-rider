@@ -4,12 +4,14 @@ import asyncio
 import copy
 import time
 from collections import OrderedDict
+from uuid import uuid4
 
 from . import depth_trace
 from .avoidance import plan
 from .depth_detector import DepthDetector
 from .errors import RiderError
 from .floor_detector import FloorDetector
+from .journey import planner_history, record_result
 from .sector_trend import update as sector_trend
 from .steering import plan as steering_plan
 from .vision_overlay import preview_sectors
@@ -25,6 +27,7 @@ class VisionLoop:
         source_session=None,
         priority=None,
     ):
+        self.host_session = uuid4().hex
         self.priority = priority
         self.priority_errors = 0
         self.samples = samples
@@ -40,6 +43,8 @@ class VisionLoop:
         self.preview_changed = asyncio.Event()
         self.snapshot_tasks = {}
         self.inference_cache = OrderedDict()
+        self.diagnostic_inferences = set()
+        self.production_waiters = {False: 0, True: 0}
 
     def _detect_depth(self, payload, frame):
         if frame.protocol_version == 3 and frame.avoidance.geometry.mode == "ground":
@@ -59,6 +64,7 @@ class VisionLoop:
             "busy": (self.depth_busy if selected is self.depth_detector else self.busy)
             is not None,
             "supported_protocol_versions": [1, 2, 3],
+            "navigation_journey_version": 1,
             "ground_geometry_supported": callable(
                 getattr(self.depth_detector, "detect_ground", None)
             ),
@@ -94,7 +100,54 @@ class VisionLoop:
         row = self.inference_cache.get(key) if key is not None else None
         return row[1] if row is not None else None
 
-    def _start_inference(self, key, frame, payload):
+    async def _admit_inference(self, device_id, frame, source_key, diagnostic):
+        depth = frame.perception.engine == "depth_plane"
+        key = self._inference_key(device_id, frame, source_key)
+        cached = self._cached_inference(key)
+        busy = self.depth_busy if depth else self.busy
+        if cached is not None:
+            return frame, cached
+        if self.production_waiters[depth]:
+            raise RiderError("vision_busy", 429)
+        if busy is None:
+            return frame, None
+        if diagnostic or busy not in self.diagnostic_inferences:
+            raise RiderError("vision_busy", 429)
+        # A Pi handoff may finish the one already-running preview, but never
+        # queues captures or lets another preview jump ahead. Waiting consumes
+        # this request's original capture budget, just like model processing.
+        self.production_waiters[depth] += 1
+        started = self.clock()
+        try:
+            try:
+                await asyncio.wait_for(
+                    asyncio.shield(busy), (frame.deadline_ms - frame.age_ms) / 1000
+                )
+            except TimeoutError as exc:
+                raise RiderError("vision_frame_expired", 409) from exc
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # A failed diagnostic does not poison the next current source.
+                pass
+        finally:
+            self.production_waiters[depth] -= 1
+        frame = frame.model_copy(
+            update={
+                "age_ms": frame.age_ms + max(0.0, self.clock() - started) * 1000,
+            }
+        )
+        if busy.done():
+            self._drain(busy)
+        if self.closed:
+            raise RiderError("module_closed", 503)
+        if frame.age_ms >= frame.deadline_ms:
+            raise RiderError("vision_frame_expired", 409)
+        if (self.depth_busy if depth else self.busy) is not None:
+            raise RiderError("vision_busy", 429)
+        return frame, self._cached_inference(key)
+
+    def _start_inference(self, key, frame, payload, *, diagnostic=False):
         depth_mode = frame.perception.engine == "depth_plane"
         task = asyncio.create_task(
             asyncio.to_thread(
@@ -107,6 +160,8 @@ class VisionLoop:
             self.depth_busy = task
         else:
             self.busy = task
+        if diagnostic:
+            self.diagnostic_inferences.add(task)
         task.add_done_callback(self._drain)
         if key is not None:
             # The first receipt fixes expiry. Reusing a result cannot renew it.
@@ -143,12 +198,10 @@ class VisionLoop:
             for identity, row in self.runs.items()
         ):
             raise RiderError("vision_production_priority", 429)
+        frame, cached_task = await self._admit_inference(
+            device_id, frame, source_key, with_preview
+        )
         key = self._inference_key(device_id, frame, source_key)
-        cached_task = self._cached_inference(key)
-        if (
-            self.depth_busy if depth_mode else self.busy
-        ) is not None and cached_task is None:
-            raise RiderError("vision_busy", 429)
         identity = (device_id, frame.run_id)
         previous = self.runs.get(identity)
         signature = (
@@ -161,6 +214,7 @@ class VisionLoop:
             frame.perception.model_dump_json(),
             frame.protocol_version,
             frame.avoidance.model_dump_json(),
+            frame.journey.id if frame.journey else None,
             (
                 source_reference.get("camera_session"),
                 source_reference.get("transport_epoch"),
@@ -175,6 +229,7 @@ class VisionLoop:
             or previous["signature"] != signature
         ):
             raise RiderError("vision_replay_or_configuration_changed", 409)
+        prior_planner = planner_history(frame, previous)
         now = self.clock()
         count = previous["count"] if previous and now - previous["at"] <= 0.5 else 0
         # Reserve sequence before await: duplicates cannot race admission.
@@ -186,6 +241,14 @@ class VisionLoop:
             "at": now,
             "engine": frame.perception.engine,
         }
+        if frame.journey is not None:
+            # An interrupted inference cannot leave an incomplete authority
+            # record or silently restore a maneuver budget on the next request.
+            state.update(
+                journey_epoch=frame.journey.maneuver_epoch,
+                journey_terminal=True,
+                journey_completed=False,
+            )
         self.runs[identity] = state
         self.runs.move_to_end(identity)
         while len(self.runs) > 32:
@@ -197,7 +260,9 @@ class VisionLoop:
                 # Optional offline scheduling must never break live decisions.
                 self.priority_errors += 1
         selected = self.depth_detector if depth_mode else self.detector
-        task = cached_task or self._start_inference(key, frame, payload)
+        task = cached_task or self._start_inference(
+            key, frame, payload, diagnostic=with_preview
+        )
         try:
             detected = await asyncio.wait_for(
                 asyncio.shield(task), (frame.deadline_ms - frame.age_ms) / 1000
@@ -327,7 +392,7 @@ class VisionLoop:
             else:
                 action, motion_reason = "stop", "avoidance_not_enabled"
         if frame.protocol_version == 3:
-            prior = dict(previous.get("avoidance") or {}) if previous else {}
+            prior = prior_planner
             if previous and now - previous["at"] > 0.5:
                 prior.update(counts={"left": 0, "right": 0}, front=0)
             action, motion_reason, planner, sectors, paths, terminal = steering_plan(
@@ -349,6 +414,12 @@ class VisionLoop:
                 progress_delta=planner.get("progress_delta"),
                 pose_resets=planner.get("pose_resets", 0),
             )
+        record_result(state, frame, action, result)
+        journey_result = (
+            {"journey": frame.journey.model_dump(), "host_session": self.host_session}
+            if frame.journey is not None
+            else {}
+        )
         capture_key = None
         if self.samples is not None:
             from .sample_sources import vision
@@ -378,6 +449,7 @@ class VisionLoop:
                         "action": action,
                         "vision_action": vision_action,
                         "input_frame": frame.model_dump(mode="json"),
+                        **journey_result,
                         "perception_engine": frame.perception.engine,
                         "inference_ms": round(elapsed, 2),
                         "valid_for_ms": min(
@@ -412,6 +484,7 @@ class VisionLoop:
                     ),
                     "corridor": frame.corridor,
                     "config_revision": frame.config_revision,
+                    **journey_result,
                     "observed_at": time.time() - (frame.age_ms + elapsed) / 1000,
                 },
                 round(elapsed, 2),
@@ -437,6 +510,7 @@ class VisionLoop:
                 else {}
             ),
             **({"source": source_reference} if source_reference else {}),
+            **journey_result,
             "action": action,
             "vision_action": vision_action,
             "motion_reason": motion_reason,
@@ -519,6 +593,7 @@ class VisionLoop:
             task.exception()
 
     def _drain(self, task):
+        self.diagnostic_inferences.discard(task)
         if not task.cancelled():
             task.exception()
         if self.busy is task:

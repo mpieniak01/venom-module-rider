@@ -236,9 +236,9 @@
 .page[data-section="control"] { height: calc(100dvh - var(--rider-page-top, 210px) - 12px); min-height: 460px; padding-bottom: 0; display: flex; flex-direction: column; }
 .page[data-section="control"] > .header, .page[data-section="control"] > .tabs { flex-shrink: 0; }
 .controlPanel { overflow-anchor: none; overflow: hidden; flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.controlWorkspace { flex: 1; min-height: 0; display: grid; grid-template-rows: 44px minmax(0, 1fr); gap: 10px; }
+.controlWorkspace { flex: 1; min-height: 0; display: grid; grid-template-rows: minmax(44px, max-content) minmax(0, 1fr); gap: 10px; }
 .controlModeRow { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; }
-.controlModes { display: flex; gap: 6px; flex-shrink: 0; }
+.controlModes { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
 .workspaceOwner { min-width: 0; font-size: 12px; color: var(--ui-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .driveWorkspace { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 16px; min-height: 0; }
 .workspaceContent { min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 0 6px 12px 0; }

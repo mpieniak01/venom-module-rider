@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api-client";
 import { data, errorCode, record, type JsonRecord, type Section } from "./model";
-import { readCameraPipeline, type CameraPipeline, type CameraProfile } from "./camera-pipeline";
+import { readCameraPipeline, preferredPreviewAnchor, type CameraPipeline, type CameraProfile } from "./camera-pipeline";
 
 type Mutate = (path: string, body?: JsonRecord, method?: string, quiet?: boolean) => Promise<JsonRecord>;
 export function useCameraPipeline(section: Section, session: string | undefined, mutate: Mutate, invalidate: () => void) {
@@ -23,7 +23,7 @@ export function useCameraPipeline(section: Section, session: string | undefined,
     if (signal?.aborted || origin !== sessionRef.current || epoch !== readEpoch.current) return;
     const row = data(response), next = readCameraPipeline(row);
     if (!next && record(row).supported !== false) throw new Error("camera_pipeline_invalid_status");
-    if (next) next.previewAnchor = {latest: record(record(row).latest_frame), receivedAt, roundTripMs: receivedAt - started};
+    if (next) next.previewAnchor = preferredPreviewAnchor(statusRef.current?.previewAnchor, {latest: record(record(row).latest_frame), receivedAt, roundTripMs: receivedAt - started});
     statusRef.current = next; setStatus(next); setSupported(!!next);
     setError(next?.error ?? null);
   }, []);

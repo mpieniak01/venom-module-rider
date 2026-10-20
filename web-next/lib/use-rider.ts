@@ -3,11 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api-client";
 import { getApiBaseUrl } from "@/lib/env";
-import { nativePreview, anchoredPreviewAge, nativeAnalysisMatches } from "./camera-pipeline";
+import { cameraPreviewStopped, nativePreview, anchoredPreviewAge, nativeAnalysisMatches } from "./camera-pipeline";
 import { useCameraPipeline } from "./use-camera-pipeline";
 import { readMjpeg, type MjpegPart } from "./mjpeg";
 import { readAnalysis } from "./vision-frame";
-import { decodePreview, nextPreviewDelay, previewLifetime, previewRequestCurrent, retainedPreview } from "./preview-media";
+import { decodePreview, nextPreviewDelay, previewLifetime, previewRequestCurrent, retainedPreview, expiredNativeCandidate } from "./preview-media";
 import { configForConnection } from "./device-session";
 import { adoptIntervention } from "./operator-control";
 import { HoldController, readHoldTiming, type MovementIntent } from "./hold-controller";
@@ -16,7 +16,7 @@ import { canRequestArm, commandAccepted, controlIdentity, data, errorCode, faceR
 const BASE = "/api/v1/rider";
 export type Notice = { key: string; code?: string; tone: "error" | "success" | "info" };
 export type Frame = { captureKey?: string; analysis?: JsonRecord; ageMs?: number; receivedAt?: number; ageSource?: string; decoded?: boolean; url: string; stale: boolean; source: string; fileAt: string; id: string; knownFreshness: boolean; visionState: string; visionReason: string; inferenceMs: string; visionPolicy: string; recordedAt: string };
-import { continuousAvailable, controlChanged, freshControl, navigationAvailable, navigationView, observationClock, operatorPrioritySupported, operatorSessionActive, retainControl, type ControlClock } from "./navigation";
+import { continuousAvailable, controlChanged, freshControl, navigationAvailable, navigationView, observationClock, journeyOwnsMotion, manualInterventionAvailable, manualInterventionSupported, operatorPrioritySupported, operatorSessionActive, retainControl, type ControlClock } from "./navigation";
 export function useRider(section: Section) {
   const [config, setConfig] = useState<DeviceConfig | null>(null);
   const [status, setStatus] = useState<RiderStatus | null>(null);
@@ -42,8 +42,12 @@ export function useRider(section: Section) {
   const clockRef = useRef<ControlClock | null>(null);
   const seqRef = useRef(0);
   const motionBlocked = useRef(0);
+  const journeyPreparing = useRef(0);
+  const pendingJourney = useRef<{requestId:string;generation:string}|null>(null);
+  const pendingAtomic = useRef<JsonRecord|null>(null);
+  const cancelPendingRef = useRef<() => boolean>(() => false);
   const motionEpoch = useRef(0);
-  const pendingHandoff = useRef<{requestId:string;generation:string;session:string;epoch:number;deadline:number}|null>(null);
+  const pendingHandoff = useRef<{requestId:string;generation:string;session:string;epoch:number;deadline:number;navigationOperation?:string}|null>(null);
   const pendingResume = useRef<{requestId:string;generation:string}|null>(null);
   const sessionRef = useRef("");
   const sectionRef = useRef(section);
@@ -58,12 +62,14 @@ export function useRider(section: Section) {
   const abortReads = useCallback(() => { abortRef.current?.abort(); controlAbortRef.current?.abort(); }, []);
   const isConnected = useCallback(() => ["online", "degraded"].includes(statusRef.current?.connection.status ?? ""), []);
   const hasFreshControl = useCallback(() => freshControl(statusRef.current, clockRef.current, Date.now(), statusRef.current?.polling[`${sectionRef.current}_ms`] ?? 0), []);
-  const canNavigate = useCallback(() => motionBlocked.current === 0 && navigationAvailable(statusRef.current, panelId), [panelId]);
+  const canNavigate = useCallback(() => (motionBlocked.current === 0 || motionBlocked.current === journeyPreparing.current && manualInterventionAvailable(statusRef.current, panelId)) && navigationAvailable(statusRef.current, panelId), [panelId]);
   const movementReady = useCallback(() => canNavigate() && safetyOf(statusRef.current).owner === "manual", [canNavigate]);
   const [hold] = useState(() => new HoldController({
     timing: () => readHoldTiming(settingsOf(statusRef.current).control_modes),
     canMove: canNavigate,
+    cancelPending: () => cancelPendingRef.current(),
     prepare: (current: () => boolean) => {
+      if (manualInterventionSupported(statusRef.current)) return;
       if (!operatorPrioritySupported(statusRef.current) || !(safetyOf(statusRef.current).owner === "navigation" || pendingResume.current)) return;
       return commandRef.current({ action:"navigation_pause" }, current).then(() => undefined);
     },
@@ -144,12 +150,15 @@ export function useRider(section: Section) {
         next = retainControl(previous, next);
         if (controlChanged(previous, next)) {
           const pending = pendingHandoff.current, nextSafety = safetyOf(next);
+          const ownTransfer = nextSafety.state === "ARMED" && nextSafety.owner === "manual" && str(nextSafety.generation)
+            && nextSafety.generation !== pending?.generation && record(nextSafety.panel_control).holder === panelId
+            && record(nextSafety.operator_control).operation_id === pending?.requestId
+            && record(nextSafety.operator_control).generation === nextSafety.generation;
+          const ownPreparation = manualInterventionSupported(next) && nextSafety.owner === "navigation"
+            && !!pending?.navigationOperation && record(nextSafety.operator_control).operation_id === pending.navigationOperation;
           const ownPending = pending && Date.now() < pending.deadline && pending.epoch === motionEpoch.current
             && pending.session === next.connection.session && pending.session === previous?.connection.session
-            && nextSafety.state === "ARMED" && nextSafety.owner === "manual" && str(nextSafety.generation)
-            && nextSafety.generation !== pending.generation && record(nextSafety.panel_control).holder === panelId
-            && record(nextSafety.operator_control).operation_id === pending.requestId
-            && record(nextSafety.operator_control).generation === nextSafety.generation;
+            && (ownTransfer || ownPreparation);
           if (!ownPending) hold.cancel();
           seqRef.current = 0;
           if (previous?.connection.session !== next.connection.session || previous?.connection.device_id !== next.connection.device_id) {
@@ -272,6 +281,7 @@ export function useRider(section: Section) {
   const sendControl = useCallback(async (body: JsonRecord, current: () => boolean = () => true, announce = true): Promise<JsonRecord> => {
     if (!current()) return {};
     const action = str(body.action);
+    if (journeyOwnsMotion(statusRef.current) && ["move", "navigation_pause", "navigation_resume"].includes(action) && !(action === "move" && manualInterventionSupported(statusRef.current))) throw Object.assign(new Error("journey_manual_takeover_required"), {data:{error:"journey_manual_takeover_required"}});
     const stopping = ["stop", "disarm"].includes(action);
     if (["stop","disarm","clear_estop","height","balance","navigation_pause"].includes(action) || action==="arm"&&body.owner!=="navigation" || action==="move"&&body.mode!=="release") motionEpoch.current += 1;
     const origin = controlIdentity(statusRef.current);
@@ -282,25 +292,37 @@ export function useRider(section: Section) {
     if (!current()) return {};
     if (!stopping && (origin !== controlIdentity(statusRef.current) || revision !== settingsOf(statusRef.current).revision)) throw Object.assign(new Error("stale_control"), { data: { error: "stale_control" } });
     const superseding = (action === "move" || action === "navigation_pause")
-      ? pendingResume.current ?? (safetyOf(statusRef.current).owner === "navigation" ? { requestId:str(record(safetyOf(statusRef.current).operator_control).operation_id), generation:str(safetyOf(statusRef.current).generation) } : null)
+      ? pendingJourney.current ?? pendingResume.current ?? (safetyOf(statusRef.current).owner === "navigation" ? { requestId:str(record(safetyOf(statusRef.current).operator_control).operation_id), generation:str(safetyOf(statusRef.current).generation) } : null)
       : null;
-    const intervene = action === "move" && operatorPrioritySupported(statusRef.current) && (safetyOf(statusRef.current).owner === "navigation" || !!superseding);
+    const atomic = action === "move" && body.mode !== "release" && manualInterventionAvailable(statusRef.current, panelId)
+      && (safetyOf(statusRef.current).state === "DISARMED" || safetyOf(statusRef.current).owner !== "manual"
+        || record(safetyOf(statusRef.current).panel_control).holder !== panelId || !!pendingJourney.current || !!pendingResume.current);
+    const intervene = atomic || action === "move" && body.mode !== "release" && operatorPrioritySupported(statusRef.current) && (safetyOf(statusRef.current).owner === "navigation" || !!superseding);
     const interventionEpoch = motionEpoch.current, interventionSession = sessionRef.current;
     const adopting = intervene || action === "navigation_pause";
     if (adopting) abortReads();
-    const envelope = makeEnvelope({ ...body, ...(intervene ? {intervene:true} : {}), ...(superseding ? {supersedes_operation_id:superseding.requestId} : {}) });
-    if (adopting) pendingHandoff.current = {requestId:str(envelope.request_id),generation:str(envelope.generation),session:interventionSession,epoch:interventionEpoch,deadline:Date.now()+Number(envelope.ttl_ms)};
+    const envelope = makeEnvelope({ ...body, ...(intervene ? {intervene:true} : {}), ...(atomic ? {operator_intervention_version:1, operator_consent:true, operator_plan:`manual ${str(body.direction)}`, owner:"manual", arming_mode:"operator"} : {}), ...(superseding ? {supersedes_operation_id:superseding.requestId} : {}) });
+    const interventionDeadline = Date.now() + Number(envelope.ttl_ms);
+    if (atomic) pendingAtomic.current = envelope;
+    if (adopting) pendingHandoff.current = {requestId:str(envelope.request_id),generation:str(envelope.generation),session:interventionSession,epoch:interventionEpoch,deadline:Date.now()+Number(envelope.ttl_ms),navigationOperation:atomic?str(envelope.supersedes_operation_id):undefined};
     if (action === "navigation_resume") pendingResume.current = { requestId:str(envelope.request_id), generation:str(envelope.generation) };
     const movement = action === "move";
     if (movement) setManualRequest({ ...envelope, phase: "pending" });
     let response: JsonRecord;
     try {
       response = await mutation("/control", envelope, "POST", true);
+      if (atomic && pendingAtomic.current === envelope && Date.now() >= interventionDeadline) {
+        cancelPendingRef.current();
+        throw Object.assign(new Error("hold_timed_out"), {data:{error:"hold_timed_out"}});
+      }
+      if (pendingAtomic.current === envelope) pendingAtomic.current = null;
       if (movement && current()) setManualRequest({ ...envelope, phase: response.pending === true ? "pending" : "accepted" });
     } catch (error) {
+      if (pendingAtomic.current === envelope) pendingAtomic.current = null;
       if (movement && current()) setManualRequest({ ...envelope, phase: "failed" });
       if (pendingHandoff.current?.requestId === envelope.request_id) pendingHandoff.current = null;
       if (action === "navigation_resume" && pendingResume.current?.requestId === envelope.request_id) pendingResume.current = null;
+      if (atomic && !current()) return {};
       throw error;
     }
     if (adopting && current() && interventionEpoch === motionEpoch.current && interventionSession === sessionRef.current) {
@@ -310,6 +332,7 @@ export function useRider(section: Section) {
         const last = safetyOf(adopted).last_seq;
         seqRef.current = finite(last) ? last : Number(envelope.seq);
         if (pendingResume.current?.requestId === envelope.supersedes_operation_id) pendingResume.current = null;
+        if (pendingJourney.current?.requestId === envelope.supersedes_operation_id) pendingJourney.current = null;
       } else {
         if (pendingHandoff.current?.requestId === envelope.request_id) pendingHandoff.current = null;
         hold.cancel();
@@ -318,10 +341,26 @@ export function useRider(section: Section) {
     }
     if (pendingHandoff.current?.requestId === envelope.request_id) pendingHandoff.current = null;
     if (action === "navigation_resume" && pendingResume.current?.requestId === envelope.request_id) pendingResume.current = null;
-    if (announce) setNotice({ key: response.pending === true || record(response.operation).status === "pending" ? "commandPending" : "commandAccepted", tone: "info" });
+    if (announce && current()) setNotice({ key: response.pending === true || record(response.operation).status === "pending" ? "commandPending" : "commandAccepted", tone: "info" });
     return response;
   }, [abortReads, hasFreshControl, hold, makeEnvelope, mutation, panelId, poll]);
   useEffect(() => { commandRef.current = sendControl; }, [sendControl]);
+  cancelPendingRef.current = () => {
+    const pending = pendingAtomic.current;
+    if (!pending) return false;
+    pendingAtomic.current = null; motionEpoch.current += 1;
+    // Independent cancellation must not queue behind the takeover request it invalidates.
+    try {
+      const envelope = makeEnvelope({action:"move", mode:"release", direction:pending.direction, device_settings:true,
+        intervene:true, operator_intervention_version:1, supersedes_operation_id:pending.request_id,
+        ...(str(pending.supersedes_operation_id) ? {supersedes_navigation_operation_id:pending.supersedes_operation_id} : {})});
+      envelope.generation = pending.generation;
+      void mutation("/control", envelope, "POST", true).catch(error => {
+        setNotice({key:"requestFailed",code:errorCode(error),tone:"error"});
+      });
+    } catch (error) { setNotice({key:"requestFailed",code:errorCode(error),tone:"error"}); }
+    return true;
+  };
   const command = useCallback(async (body: JsonRecord, throwOnError = false, quiet = false) => {
     const key = str(body.action); if (key !== "move") hold.cancel();
     const safetyAction = ["arm", "clear_estop", "stop", "disarm"].includes(key);
@@ -335,6 +374,7 @@ export function useRider(section: Section) {
   const stopManual = useCallback(async () => {
     motionEpoch.current += 1;
     hold.cancel();
+    if (journeyPreparing.current > 0 || pendingJourney.current || journeyOwnsMotion(statusRef.current)) return command({ action: "stop" }, true);
     if (operatorSessionActive(statusRef.current) || pendingResume.current) return command({ action: "navigation_pause" }, true);
     if (!navigationAvailable(statusRef.current, panelId)) return null;
     return command({ action: "move", device_settings: true, direction: "forward", mode: "release" });
@@ -354,6 +394,22 @@ export function useRider(section: Section) {
       await poll("control", true);
       return result;
     } finally { if (!priority) motionBlocked.current = Math.max(0, motionBlocked.current - 1); setBusy(null); }
+  }, [hold, poll, makeEnvelope, mutation, panelId]);
+  const startNavigationJourney = useCallback(async (plan: string, revision: number) => {
+    const origin = sessionRef.current, epoch = motionEpoch.current;
+    hold.cancel(); motionBlocked.current += 1; journeyPreparing.current += 1; setBusy("journey");
+    try {
+      await poll("control", true);
+      if (sessionRef.current !== origin || motionEpoch.current !== epoch || document.hidden) throw new Error("navigation_trial_cancelled");
+      if (safetyOf(statusRef.current).navigation_journey_version !== 1) throw new Error("navigation_journey_update_required");
+      const {seq: ignoredSeq, action: ignoredAction, ...intent} = makeEnvelope({action:"arm"});
+      void ignoredSeq; void ignoredAction;
+      pendingJourney.current = {requestId:str(intent.request_id),generation:str(intent.generation)};
+      const result = await mutation("/navigation/journey", {...intent, panel_id:panelId, operator_control_version:1, journey_version:1, config_revision:revision, operator_consent:true, operator_plan:plan}, "POST", true);
+      if (sessionRef.current !== origin || motionEpoch.current !== epoch) throw new Error("navigation_trial_cancelled");
+      await poll("control", true);
+      return result;
+    } finally { pendingJourney.current = null; journeyPreparing.current = Math.max(0, journeyPreparing.current - 1); motionBlocked.current = Math.max(0, motionBlocked.current - 1); setBusy(value => value === "journey" ? null : value); }
   }, [hold, poll, makeEnvelope, mutation, panelId]);
   const currentSession = useCallback(() => sessionRef.current, []);
   const currentMotionEpoch = useCallback(() => motionEpoch.current, []);
@@ -383,7 +439,15 @@ export function useRider(section: Section) {
       if (sessionRef.current !== origin || motionEpoch.current !== epoch || document.hidden) throw Object.assign(new Error("navigation_trial_cancelled"), {data:{error:"navigation_trial_cancelled"}});
     };
     hold.cancel(); setBusy("takeover");
+    const fromJourney = journeyOwnsMotion(statusRef.current);
     try {
+      if (fromJourney) {
+        await command({ action:"stop" }, true, true);
+        epoch += 1;
+        await poll("control", true);
+        assertCurrent();
+        if (statusRef.current?.errors.control || safetyOf(statusRef.current).stale === true || safetyOf(statusRef.current).state !== "DISARMED") throw new Error("journey_takeover_stop_unconfirmed");
+      }
       if (operatorSessionActive(statusRef.current) && safetyOf(statusRef.current).state === "ARMED") {
         await command({ action: "navigation_pause" }, true, true);
         return;
@@ -414,7 +478,7 @@ export function useRider(section: Section) {
         epoch += 1;
         assertCurrent();
       }
-      setCameraStream("raw"); await poll();
+      await poll();
     } catch(error) { setNotice({ key: "requestFailed", code: errorCode(error), tone: "error" }); }
     finally { setBusy(null); }
   }, [hold, mutation, poll, command, panelId]);
@@ -466,6 +530,10 @@ export function useRider(section: Section) {
   }, [pipelineLocation, cameraStream]);
   const pipelineIdentity = pipeline.status ? [pipeline.status.revision, pipeline.status.transport_epoch, pipeline.status.camera_session].join(":") : "";
   const pipelineBusy = pipeline.busy;
+  const pipelineStopped = cameraPreviewStopped(pipeline.status);
+  useEffect(() => {
+    if (pipelineStopped) { replaceFrame("camera", null, true); setMediaError("visionCameraOff"); }
+  }, [pipelineStopped, replaceFrame]);
   const nativePart = useCallback(async (part: MjpegPart, signal: AbortSignal, current: () => boolean) => {
     const headers = part.headers;
     const source = record(JSON.parse(headers.get("X-Rider-Source-Json") ?? "{}"));
@@ -505,7 +573,7 @@ export function useRider(section: Section) {
     } catch (error) { URL.revokeObjectURL(url); throw error; }
   }, [replaceFrame]);
   useEffect(() => {
-    if (!cameraStream || !["control", "vision"].includes(section) || processedTransition || nativeStreaming || pipelineBusy) return;
+    if (!cameraStream || !["control", "vision"].includes(section) || processedTransition || nativeStreaming || pipelineBusy || pipelineStopped) return;
     let alive = true, cycle = 0, timer: ReturnType<typeof setTimeout> | undefined, abort: AbortController | undefined;
     const tick = async () => {
       if (!alive || document.hidden) return;
@@ -517,9 +585,9 @@ export function useRider(section: Section) {
     const visibility = () => { cycle++; clearTimeout(timer); abort?.abort(); if (!document.hidden) void tick(); };
     document.addEventListener("visibilitychange", visibility); void tick();
     return () => { alive=false; cycle++; clearTimeout(timer); abort?.abort(); document.removeEventListener("visibilitychange", visibility); };
-  }, [cameraStream, section, mediaSession, fetchFrame, replaceFrame, processedTransition, nativeStreaming, pipelineBusy, pipelineIdentity]);
+  }, [cameraStream, section, mediaSession, fetchFrame, replaceFrame, processedTransition, nativeStreaming, pipelineBusy, pipelineStopped, pipelineIdentity]);
   useEffect(() => {
-    if (!nativeStreaming || !cameraStream || !["control", "vision"].includes(section) || processedTransition || pipelineBusy) return;
+    if (!nativeStreaming || !cameraStream || !["control", "vision"].includes(section) || processedTransition || pipelineBusy || pipelineStopped) return;
     let alive = true, cycle = 0, retry: ReturnType<typeof setTimeout> | undefined, controller: AbortController | undefined;
     const connect = async () => {
       if (!alive || document.hidden) return;
@@ -532,7 +600,7 @@ export function useRider(section: Section) {
       const pump = async () => {
         if (decoding) return; decoding = true;
         try { while (latest && current()) { const part = latest; latest = null; await nativePart(part, abort.signal, current); } }
-        catch { if (current()) { replaceFrame("camera", null, true); setMediaError("frameStale"); } }
+        catch (error) { if (current()) { replaceFrame("camera", null, true, expiredNativeCandidate(error)); setMediaError("frameStale"); } }
         finally { decoding = false; }
       };
       gap = setTimeout(expire, 5000);
@@ -561,7 +629,7 @@ export function useRider(section: Section) {
     };
     document.addEventListener("visibilitychange", visibility); void connect();
     return () => { alive = false; cycle++; clearTimeout(retry); controller?.abort(); document.removeEventListener("visibilitychange", visibility); };
-  }, [cameraStream, nativeStreaming, pipelineBusy, pipelineIdentity, processedTransition, section, mediaSession, nativePart, replaceFrame]);
+  }, [cameraStream, nativeStreaming, pipelineBusy, pipelineStopped, pipelineIdentity, processedTransition, section, mediaSession, nativePart, replaceFrame]);
   useEffect(() => {
     if ((!nativeStreaming && cameraStream !== "venom") || !camera || camera.stale) return;
     const remaining = previewLifetime(camera);
@@ -576,6 +644,6 @@ export function useRider(section: Section) {
   // ARM always refreshes the fast control endpoint before making its envelope.
   // The latency of a diagnostics view must not prevent that refresh request.
   const canArm = canRequestArm(status);
-  return { pipeline, config, status, loading, notice, setNotice, busy, activeDirection, manualMode, manualRequest, panelId, canContinuous: continuousAvailable(status, panelId), controlFresh: hasFreshControl(), canMutate: isConnected(), canArm, canNavigate: canNavigate(), canMove: movementReady(), poll, refresh, refreshing, command, stopManual, startNavigationTrial, currentSession, currentMotionEpoch, currentGeneration, currentCamera, mutate: runMutation, takeManual, selectDevice, hold, camera, cameraStream, setCameraStream, cameraTransition, setCameraTransition, markCameraDecoded, runtimeFrame, showRuntimeFrame, setShowRuntimeFrame, mediaError };
+  return { pipeline, config, status, loading, notice, setNotice, busy, activeDirection, manualMode, manualRequest, panelId, canContinuous: continuousAvailable(status, panelId) && canNavigate(), controlFresh: hasFreshControl(), canMutate: isConnected(), canArm, canNavigate: canNavigate(), canMove: movementReady(), poll, refresh, refreshing, command, stopManual, startNavigationTrial, startNavigationJourney, currentSession, currentMotionEpoch, currentGeneration, currentCamera, mutate: runMutation, takeManual, selectDevice, hold, camera, cameraStream, setCameraStream, cameraTransition, setCameraTransition, markCameraDecoded, runtimeFrame, showRuntimeFrame, setShowRuntimeFrame, mediaError };
 }
 export type RiderClient = ReturnType<typeof useRider>;

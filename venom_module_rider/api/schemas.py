@@ -59,13 +59,19 @@ class Command(StrictModel):
     mode: Literal["pulse", "hold", "release"] | None = None
     device_settings: StrictBool | None = None
     intervene: StrictBool | None = None
+    operator_intervention_version: Annotated[StrictInt, Field(ge=1, le=1)] | None = None
     supersedes_operation_id: (
+        Annotated[str, Field(strict=True, min_length=1, max_length=128)] | None
+    ) = None
+    supersedes_navigation_operation_id: (
         Annotated[str, Field(strict=True, min_length=1, max_length=128)] | None
     ) = None
     height: StrictInt | None = None
     enabled: StrictBool | None = None
 
-    @field_validator("panel_id", "supersedes_operation_id")
+    @field_validator(
+        "panel_id", "supersedes_operation_id", "supersedes_navigation_operation_id"
+    )
     @classmethod
     def nonblank_panel(cls, value):
         if value is not None and not value.strip():
@@ -80,6 +86,37 @@ class Command(StrictModel):
             and self.intervene is True
         ):
             raise ValueError("operator_supersession_scope")
+        if self.supersedes_navigation_operation_id is not None and not (
+            self.operator_intervention_version == 1 and self.mode == "release"
+        ):
+            raise ValueError("operator_intervention_cancel_scope")
+        if self.operator_intervention_version is not None:
+            if not (
+                self.action == "move"
+                and self.intervene is True
+                and self.panel_id is not None
+                and self.request_id is not None
+                and 1 <= len(self.request_id.strip()) <= 128
+                and self.device_settings is True
+                and self.direction is not None
+                and self.mode in {"pulse", "hold", "release"}
+            ):
+                raise ValueError("operator_intervention_scope")
+            if self.mode == "release":
+                if (
+                    self.supersedes_operation_id is None
+                    or self.operator_consent is not None
+                ):
+                    raise ValueError("operator_intervention_cancel_scope")
+            elif not (
+                self.operator_consent is True
+                and self.owner == "manual"
+                and self.arming_mode == "operator"
+                and self.operator_plan is not None
+                and 1 <= len(self.operator_plan.strip()) <= 512
+                and self.lease_s is None
+            ):
+                raise ValueError("operator_intervention_consent_required")
         return self
 
 
@@ -148,3 +185,11 @@ class NavigationTrialRequest(StrictModel):
         if not value.strip():
             raise ValueError("specific operator plan required")
         return value
+
+
+class NavigationJourneyRequest(NavigationTrialRequest):
+    """Separate opt-in; the legacy ten-second trial keeps its contract."""
+
+    journey_version: Annotated[StrictInt, Field(ge=1, le=1)]
+    operator_control_version: Annotated[StrictInt, Field(ge=1, le=1)]
+    panel_id: Annotated[str, Field(strict=True, min_length=1, max_length=128)]

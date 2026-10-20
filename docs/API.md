@@ -13,6 +13,9 @@ All paths below are under /api/v1/rider. Mutations carry X-Rider-Session from GE
 | GET /camera/raw, /camera/proc | Original binary frame and available source metadata |
 | POST /goal/{name} | /api/logic/feature/{name}; Pi-owned goal/resource orchestration |
 | POST /resource/{name} | /api/resource/{name}; explicit power, stop or release |
+| GET /navigation/config, /navigation/state | Pi navigation policy/status plus host detector capability |
+| POST /navigation/trial | /api/navigation/trial; original bounded 10 s operator intent |
+| POST /navigation/journey | /api/navigation/journey; separate opt-in journey v1, see [contract](JOURNEY_V1.md) |
 | GET /diagnostics | /api/services/graph |
 | GET /logs/{unit.service} | /api/services/{unit}/logs; explicit bounded journal request |
 | GET/POST /face/library, DELETE /face/library/{id} | Pi gesture library |
@@ -43,6 +46,7 @@ Transport requests application/vnd.rider.api+json;version=1. The envelope has me
 | rider.resources | 1 |
 | rider.catalog, rider.tasks, rider.service_graph, rider.services | 2 |
 | rider.face_studio, rider.face | 1 |
+| rider.navigation_loop | 1; trial and negotiated journey capability are separate |
 | rider.audio | 1; private shared playback/cancel |
 
 Manual settings additionally require parameter_schema.version=1 and control_modes.version=1. Units, bounds, display factors, curves, hold timing and posture descriptors come from Pi. Unsupported versions produce an explicit error; legacy responses are not guessed.

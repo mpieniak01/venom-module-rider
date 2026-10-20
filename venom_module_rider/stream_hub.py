@@ -9,7 +9,7 @@ from collections import OrderedDict
 from contextlib import aclosing, asynccontextmanager
 from dataclasses import dataclass, field, replace
 
-from .age_anchor import SourceAgeAnchor
+from .age_anchor import SourceAgeAnchor, preferred_anchor
 from .client import finish_native_cleanup
 from .errors import RiderError
 from .stream_contract import NativeFrame, SourceReference, canonical_jpeg
@@ -140,6 +140,9 @@ class NativeStreamHub:
                 <= connection.anchor.request_started_mono
             )
         ):
+            return
+        anchor = preferred_anchor(connection.anchor, anchor, self.clock())
+        if anchor is connection.anchor:
             return
         connection.anchor = anchor
         for identity, frame in tuple(connection.frames.items()):

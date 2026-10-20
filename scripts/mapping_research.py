@@ -97,7 +97,9 @@ def overlap(images):
     views = []
     for image in images:
         grey = cv2.cvtColor(np.asarray(image), cv2.COLOR_RGB2GRAY)
-        points, descriptors = orb.detectAndCompute(grey, None)
+        points, descriptors = orb.detectAndCompute(
+            grey, np.empty((0, 0), dtype=np.uint8)
+        )
         views.append((points, descriptors))
     rows = []
     for index in range(1, len(views)):

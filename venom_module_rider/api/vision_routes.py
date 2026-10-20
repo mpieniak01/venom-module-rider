@@ -7,7 +7,7 @@ from ..errors import RiderError
 from ..vision_contract import VisionFrame
 from .compute_routes import authenticate, bounded_body
 from .routing import RiderRoute
-from .schemas import NavigationTrialRequest
+from .schemas import NavigationJourneyRequest, NavigationTrialRequest
 
 router = APIRouter(route_class=RiderRoute)
 
@@ -259,5 +259,16 @@ async def start_trial(request: Request, body: NavigationTrialRequest):
     return await request.app.state.rider.mutate(
         "/api/navigation/trial",
         body.model_dump(exclude_none=True),
+        request.headers.get("X-Rider-Session"),
+    )
+
+
+@router.post("/navigation/journey")
+async def start_journey(request: Request, body: NavigationJourneyRequest):
+    # One original operator intent. Pi validates capability, policy, generation,
+    # calibration and executor readiness before granting journey authority.
+    return await request.app.state.rider.mutate(
+        "/api/navigation/journey",
+        body.model_dump(),
         request.headers.get("X-Rider-Session"),
     )

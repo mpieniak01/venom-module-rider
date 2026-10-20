@@ -529,7 +529,7 @@ test("recovery brackets preview polling and late processed GETs cannot publish o
  assert.ok(client.indexOf("!currentPreview()",dispatch)>dispatch);
  assert.ok(client.indexOf("!currentPreview()",client.indexOf("await decodePreview",dispatch))>dispatch);
  assert.ok(client.includes('cameraStream === "venom" && cameraTransition'));
- assert.ok(client.includes('if (!cameraStream || !["control", "vision"].includes(section) || processedTransition || nativeStreaming || pipelineBusy) return;'));
+ assert.ok(client.includes('if (!cameraStream || !["control", "vision"].includes(section) || processedTransition || nativeStreaming || pipelineBusy || pipelineStopped) return;'));
  assert.ok(client.includes("stale: true, knownFreshness: false"));
 });
 
@@ -586,4 +586,37 @@ test("ground permission matches Pi evidence instead of displaying a bare GO as v
  for(const patch of [{ground_support:.1},{ground_reference:{}},{ground_reference:{normal:[0,0,3],height:1}},{geometry:"image"}]){
   assert.equal(motionPermission({...state,decision:{...decision,...patch}},{drive:true},policy,permissionDetector,permissionStatus()).venom,false);
  }
+});
+
+test("editing a previously driving policy saves an unaccepted observation policy, not invalid drive authority",()=>{
+ const policy={revision:53,mode:"drive",verified:true,calibration_id:"operator-test",model_sha256:"a".repeat(64),speed:.1,max_motion_ms:150,decision_budget_ms:300,corridor:[.35,.8,.65,.95],avoidance:{enabled:false,protocol_version:3,sweep_verified:false,geometry:{mode:"ground",fx:null,fy:null,radius_ratio:null}}};
+ for(const patch of [{speed:.09},{avoidance:{...policy.avoidance,enabled:true}},{avoidance:{...policy.avoidance,geometry:{mode:"image"}}}]){
+  const values=loopSettingsValues(policy,{...policy,...patch});
+  assert.equal(values.mode,"observe");assert.equal(values.verified,false);
+  assert.equal(values.calibration_id,"");assert.equal(values.model_sha256,"");
+  assert.equal(values.revision,undefined);
+ }
+ assert.equal(loopSettingsValues(policy,policy).mode,"drive");
+ assert.equal(policy.mode,"drive");assert.equal(policy.verified,true);
+});
+
+test("native MJPEG age from the validated Pi status anchor permits the same visible calibration acceptance as snapshots",()=>{
+ const state={run_id:"active-observation"},policy={revision:54};
+ const frame={decoded:true,stale:false,knownFreshness:true,id:"camera-session-5515",fileAt:"",visionState:"clear",visionPolicy:"",ageMs:306.25,receivedAt:performance.now(),ageSource:"pi-status-anchor-plus-host-elapsed",analysis:{run_id:state.run_id,config_revision:54,state:"clear",vision_action:"go"}};
+ assert.equal(freshPolicyFrame(frame,"venom",state,policy),true);
+ assert.equal(freshPolicyFrame({...frame,ageSource:"pi-reported-plus-host-elapsed"},"venom",state,policy),true);
+ for(const ageSource of ["host-received","unknown",undefined])assert.equal(freshPolicyFrame({...frame,ageSource},"venom",state,policy),false);
+ for(const patch of [{stale:true},{knownFreshness:false},{decoded:false},{ageMs:3001},{analysis:{...frame.analysis,config_revision:53}},{analysis:{...frame.analysis,run_id:"previous-observation"}},{analysis:{...frame.analysis,vision_action:"stop"}}])assert.equal(freshPolicyFrame({...frame,...patch},"venom",state,policy),false);
+ assert.equal(freshPolicyFrame(frame,"raw",state,policy),false);
+});
+
+test("explicit journey acceptance records zone and swept clearance atomically; legacy acceptance never grants sweep",()=>{
+ const policy={mode:"observe",speed:.1,max_motion_ms:150,verified:false,avoidance:{enabled:true,protocol_version:3,sweep_verified:false}};
+ const detector={sha256:"a".repeat(64)};
+ const accepted=calibrationAcceptance(policy,detector,"operator-explicit",true);
+ assert.equal(accepted.verified,true);assert.equal(accepted.calibration_id,"operator-explicit");
+ assert.equal((accepted.avoidance as Record<string,unknown>).sweep_verified,true);
+ assert.equal((calibrationAcceptance(policy,detector,"operator-legacy").avoidance as Record<string,unknown>).sweep_verified,false);
+ assert.equal(policy.avoidance.sweep_verified,false);
+ for(const avoidance of [{enabled:false,protocol_version:3},{enabled:true,protocol_version:2}])assert.throws(()=>calibrationAcceptance({...policy,avoidance},detector,"operator-explicit",true));
 });

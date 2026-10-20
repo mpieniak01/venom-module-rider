@@ -306,3 +306,252 @@ async def test_model_warmup_expiry_skips_one_part_without_reconnect_or_fake_fres
         await hub.close()
         await loop.close()
         await domain.close()
+
+
+@pytest.mark.parametrize("stream", [False, True])
+async def test_diagnostic_revision_change_without_camera_restart_recovers_preview(
+    stream,
+):
+    from venom_module_rider.api.vision_preview import processed_camera
+
+    pi, domain, hub, loop, state = await setup()
+    revision = [4]
+    original = pi.json
+
+    async def read(path, **kwargs):
+        row = await original(path, **kwargs)
+        if path == "/api/navigation/config":
+            row["data"]["revision"] = revision[0]
+        return row
+
+    pi.json = read
+    browser = Browser(state)
+    iterator = (
+        (await browser_stream("venom", browser)).body_iterator if stream else None
+    )
+
+    async def next_analysis():
+        if iterator is not None:
+            headers, _ = unpack(await asyncio.wait_for(anext(iterator), 1))
+        else:
+            headers = (await processed_camera(browser)).headers
+        assert headers["x-rider-vision-action"] == "stop"
+        return json.loads(headers["x-rider-analysis-json"])
+
+    try:
+        before = await next_analysis()
+        revision[0] = 5
+        domain.cache.pop("/api/navigation/config", None)
+        await pi.emit(2)
+        after = await next_analysis()
+        assert before["config_revision"] == 4 and after["config_revision"] == 5
+        assert before["run_id"] != after["run_id"]
+        assert after["clear_count"] == 1
+        assert after["source"]["camera_session"] == before["source"]["camera_session"]
+        await pi.emit(3)
+        following = await next_analysis()
+        assert following["run_id"] == after["run_id"]
+        assert following["clear_count"] == 2
+        assert following["source"]["sequence"] == 3
+        assert pi.opened == 1 and pi.snapshot_requests == 0
+        assert not any(method != "GET" for method, _path, _body in pi.calls)
+    finally:
+        if iterator is not None:
+            await iterator.aclose()
+        await hub.close()
+        await loop.close()
+        await domain.close()
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize(
+    "manual_moving",
+    [None, False, True],
+    ids=["disarmed", "manual-idle", "manual-moving"],
+)
+async def test_ended_journey_keeps_fresh_preview_without_goal_or_arm(
+    stream, manual_moving
+):
+    from venom_module_rider.api.vision_preview import processed_camera
+
+    pi, domain, hub, loop, state = await setup()
+    original = pi.json
+
+    async def read(path, **kwargs):
+        if path == "/api/navigation/status":
+            return {
+                "data": {
+                    "running": False,
+                    "stale": True,
+                    "run_id": "ended",
+                    "mode": "drive",
+                    "journey": {
+                        "version": 1,
+                        "id": "ended-mission",
+                        "active": False,
+                        "state": "stopped",
+                    },
+                }
+            }
+        if path == "/api/logic/state":
+            return {
+                "data": {
+                    "features": {
+                        "s14_venom_navigation": {"requested": True},
+                        "s15_venom_perception": {"requested": False},
+                    }
+                }
+            }
+        if path == "/api/control/state":
+            return {
+                "data": {
+                    "safety": {
+                        "state": "DISARMED" if manual_moving is None else "ARMED",
+                        "can_move": manual_moving is not None,
+                        "moving": manual_moving is True,
+                        "stale": False,
+                        "owner": None if manual_moving is None else "manual",
+                        "arming_mode": None if manual_moving is None else "operator",
+                        "journey": {"active": False},
+                    }
+                }
+            }
+        return await original(path, **kwargs)
+
+    pi.json = read
+    browser = Browser(state)
+    iterator = (
+        (await browser_stream("venom", browser)).body_iterator if stream else None
+    )
+    try:
+        if iterator is None:
+            response = await processed_camera(browser)
+            headers = response.headers
+        else:
+            headers, _ = unpack(await asyncio.wait_for(anext(iterator), 1))
+        analysis = json.loads(headers["x-rider-analysis-json"])
+        assert analysis["run_id"].startswith("native-preview-")
+        assert analysis["run_id"] != "ended"
+        assert "journey" not in analysis
+        assert analysis["preview_only"] is True
+        assert headers["x-rider-vision-action"] == "stop"
+        assert float(headers["x-rider-frame-age-ms"]) < 500
+        assert loop.detector.calls == 1 and pi.opened == 1
+        assert not any(method != "GET" for method, _path, _body in pi.calls)
+    finally:
+        if iterator is not None:
+            await iterator.aclose()
+        await hub.close()
+        await loop.close()
+        await domain.close()
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"state": "ARMED", "can_move": True},
+        {"state": "ESTOP"},
+        {"state": None},
+        {"stale": True},
+        {"moving": True},
+        {"can_move": None},
+        {
+            "state": "ARMED",
+            "can_move": True,
+            "owner": "manual",
+            "arming_mode": "operator",
+            "journey": {"active": False},
+            "stale": True,
+        },
+        {
+            "state": "ARMED",
+            "can_move": True,
+            "owner": "navigation",
+            "arming_mode": "operator",
+            "journey": {"active": False},
+        },
+        {
+            "state": "ARMED",
+            "can_move": True,
+            "owner": "manual",
+            "arming_mode": "journey",
+            "journey": {"active": False},
+        },
+        {
+            "state": "ARMED",
+            "can_move": True,
+            "owner": "manual",
+            "arming_mode": "operator",
+            "journey": {"active": True},
+        },
+        {
+            "state": "ARMED",
+            "can_move": True,
+            "owner": "manual",
+            "arming_mode": "operator",
+            "journey": {},
+        },
+        {
+            "state": "ARMED",
+            "can_move": None,
+            "owner": "manual",
+            "arming_mode": "operator",
+            "journey": {"active": False},
+        },
+    ],
+)
+async def test_retired_goal_never_bypasses_current_safety_for_diagnostic_inference(
+    change,
+):
+    from venom_module_rider.api.vision_preview import diagnostic_preview_allowed
+
+    safety = {
+        "state": "DISARMED",
+        "can_move": False,
+        "moving": False,
+        "stale": False,
+        **change,
+    }
+    calls = []
+
+    class Domain:
+        async def read(self, path, _ttl):
+            calls.append(path)
+            return {"data": {"safety": safety}}
+
+    status = {
+        "running": False,
+        "journey": {"version": 1, "active": False, "state": "stopped"},
+    }
+    goals = {"observe": False, "drive": True}
+    assert not await diagnostic_preview_allowed(Domain(), status, goals)
+    assert calls == ["/api/control/state"]
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"running": True},
+        {"running": None},
+        {"journey": {}},
+        {"journey": {"version": 1, "active": True, "state": "forward"}},
+        {"preparation": {"state": "preparing"}},
+    ],
+)
+async def test_new_or_unconfirmed_producer_never_uses_terminal_preview_exception(
+    change,
+):
+    from venom_module_rider.api.vision_preview import diagnostic_preview_allowed
+
+    class Domain:
+        async def read(self, *_args):
+            pytest.fail("must refuse before extra control I/O")
+
+    status = {
+        "running": False,
+        "journey": {"version": 1, "active": False, "state": "stopped"},
+        **change,
+    }
+    assert not await diagnostic_preview_allowed(
+        Domain(), status, {"observe": False, "drive": True}
+    )

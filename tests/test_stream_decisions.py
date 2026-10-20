@@ -139,3 +139,93 @@ async def test_shared_cache_is_bounded_and_shutdown_removes_source_results():
     assert len(loop.inference_cache) == 8 and detector.calls == 12
     await loop.close()
     assert not loop.inference_cache and not loop.previews
+
+
+async def test_pi_handoff_waits_for_diagnostic_without_another_preview_jumping_ahead():
+    release = threading.Event()
+    detector = Detector(release)
+    loop = VisionLoop(detector)
+    diagnostic = asyncio.create_task(
+        loop.decide("pi", frame("preview"), b"old", source_key="old", with_preview=True)
+    )
+    control = None
+    try:
+        assert await asyncio.to_thread(detector.started.wait, 0.5)
+        control = asyncio.create_task(
+            loop.decide("pi", frame("new-control"), b"new", source_key="new")
+        )
+        await asyncio.sleep(0)
+        assert not control.done()
+        with pytest.raises(RiderError, match="vision_busy|vision_production_priority"):
+            await loop.decide(
+                "pi",
+                frame("another-preview"),
+                b"later",
+                source_key="later",
+                with_preview=True,
+            )
+        release.set()
+        await diagnostic
+        result = await control
+        assert result["run_id"] == "new-control" and result["action"] == "stop"
+        assert detector.calls == 2 and result["clear_count"] == 1
+    finally:
+        release.set()
+        await asyncio.gather(
+            diagnostic, *([control] if control else []), return_exceptions=True
+        )
+        await loop.close()
+
+
+async def test_waiting_for_diagnostic_never_renews_the_pi_capture_budget():
+    release = threading.Event()
+    detector = Detector(release)
+    loop = VisionLoop(detector)
+    diagnostic = asyncio.create_task(
+        loop.decide("pi", frame("preview"), b"old", source_key="old", with_preview=True)
+    )
+    try:
+        assert await asyncio.to_thread(detector.started.wait, 0.5)
+        with pytest.raises(RiderError, match="vision_frame_expired"):
+            await loop.decide(
+                "pi",
+                frame("expired").model_copy(update={"age_ms": 285.0}),
+                b"new",
+                source_key="new",
+            )
+        assert detector.calls == 1 and ("pi", "expired") not in loop.runs
+    finally:
+        release.set()
+        await diagnostic
+        await loop.close()
+
+
+async def test_cancelled_waiter_does_not_cancel_diagnostic_or_leave_priority_reserved():
+    release = threading.Event()
+    detector = Detector(release)
+    loop = VisionLoop(detector)
+    diagnostic = asyncio.create_task(
+        loop.decide("pi", frame("preview"), b"old", source_key="old", with_preview=True)
+    )
+    control = None
+    try:
+        assert await asyncio.to_thread(detector.started.wait, 0.5)
+        control = asyncio.create_task(
+            loop.decide("pi", frame("cancelled"), b"new", source_key="new")
+        )
+        await asyncio.sleep(0)
+        control.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await control
+        release.set()
+        await diagnostic
+        result = await loop.decide(
+            "pi", frame("next-preview"), b"next", source_key="next", with_preview=True
+        )
+        assert result["run_id"] == "next-preview" and detector.calls == 2
+    finally:
+        release.set()
+        await asyncio.gather(
+            diagnostic, *([control] if control else []), return_exceptions=True
+        )
+        await loop.close()

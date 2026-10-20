@@ -403,9 +403,12 @@ This is manual control and does not use vision obstacle avoidance.
 
 The panel distinguishes selected intent, Pi acknowledgement and the latest
 reported actuator output. Acknowledgement is not proof of physical travel.
-Continuous drive requires `panel_control.version == 1` on Pi and explicit ARM
-or Take manual control in this browser. Other panels may always use global
-STOP; takeover stops and invalidates the previous generation before ARM.
+Continuous drive requires `panel_control.version == 1` on Pi. With
+`operator_intervention_version == 1`, the first direction gesture supplies fresh
+manual consent and ends pending/active navigation without a separate ARM or
+Take manual click. Older Pi uses explicit ARM or Take manual control in this
+browser. Other panels may always use global STOP; a new takeover invalidates
+the previous generation before submitting its requested direction.
 Legacy Pi retains the pulse/hold controls and reports continuous drive unavailable.
 
 The direction lives only in memory. Closing, hiding or leaving the control
@@ -444,7 +447,7 @@ Offline mapping qualification: [geometry research v1](docs/MAPPING_RESEARCH_V1.m
 
 ## Operator workspace
 
-See [control workspace](docs/CONTROL_WORKSPACE.md) for Manual/Automatic views, fixed directional controls, the three STOP meanings and hardware-free layout acceptance.
+See [control workspace](docs/CONTROL_WORKSPACE.md) for Manual/Automatic/Automat2 views, fixed directional controls, the three STOP meanings and hardware-free layout acceptance.
 
 ### Panel action styles
 
@@ -493,3 +496,20 @@ The device transport is independent of the web stack. After a host restart,
 restore the configured device connection before diagnosing disabled controls.
 An unavailable connection keeps motion controls disabled; reconnecting does not
 arm the robot or replay a previous movement command.
+
+
+## Automat2 — continuous supervised journey
+
+The separate Automat2 view starts a low-speed journey with local obstacle
+avoidance until STOP or a terminal freshness/avoidance fault. The existing
+ten-second trial remains available. No periodic ARM or timer extension is used.
+Pi and Venom negotiate journey v1; mismatched versions show a clear unavailable
+state. Per-obstacle correction budgets reset only after fresh qualified
+straightening, and stale mission/epoch/host/source identities cannot resume a
+journey. Camera and manual controls remain in the same workspace.
+
+See [Journey v1](docs/JOURNEY_V1.md) for protocol, limits and operator acceptance.
+`make check-journey` runs the focused hardware-free regression. The paired lease
+fixture optionally accepts `RIDER_TEST_PI_LEASE` pointing to the actual matching
+Pi source, with its repository root on `PYTHONPATH`; ordinary tests never locate
+or connect to a robot. Physical acceptance remains a separate operator step.

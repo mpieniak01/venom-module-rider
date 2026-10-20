@@ -27,6 +27,10 @@ check-web:
 	node --check tests/browser/navigation-takeover.js
 	node --check tests/browser/manual-continuous.js
 	node --check tests/browser/manual-panel-authority.js
+	node --check tests/browser/journey-acceptance.js
+	node --check tests/browser/journey-settings.js
+	node --check tests/browser/journey.js
+	node --check tests/browser/operator-journey-priority.js
 	$(WEB_BIN)/tsc --project web-next/tsconfig.json --noEmit
 	$(WEB_BIN)/eslint web-next tests/web --max-warnings 0 --config web-next/eslint.config.mjs
 	node --import $(HOST)/web-next/node_modules/tsx/dist/loader.mjs --test tests/web/*.test.ts
@@ -52,3 +56,7 @@ MAPPING_PYTHON ?= $(if $(filter --pose,$(ARGS)),$(DA3_PYTHON),$(PYTHON))
 .PHONY: research-mapping
 research-mapping:
 	PYTHONPATH=$(HOST):$(DA3_SDK_PATH):. $(MAPPING_PYTHON) -m scripts.mapping_research $(ARGS)
+
+.PHONY: check-journey
+check-journey:
+	PYTHONPATH=$(HOST):. $(PYTHON) -m pytest -q tests/test_navigation_journey_api.py tests/test_journey_vision.py tests/test_navigation_trial_api.py tests/test_steering.py tests/test_operator_proxy.py

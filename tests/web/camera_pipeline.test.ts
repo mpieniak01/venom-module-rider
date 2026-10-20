@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { test } from "node:test";
-import { anchoredPreviewAge, nativePreview, nativeAnalysisMatches, readCameraPipeline } from "../../web-next/lib/camera-pipeline";
+import { anchoredPreviewAge, preferredPreviewAnchor, cameraPreviewStopped, nativePreview, nativeAnalysisMatches, readCameraPipeline } from "../../web-next/lib/camera-pipeline";
 import { MjpegParser, readMjpeg } from "../../web-next/lib/mjpeg";
 import { previewLifetime, retainedPreview } from "../../web-next/lib/preview-media";
 const fixture = JSON.parse(fs.readFileSync(new URL("../../config/contracts/camera_pipeline_v1.examples.json", import.meta.url), "utf8"));
@@ -83,4 +83,27 @@ test("active Pi run preview binds camera source even when request sequence and S
   }
   assert.equal(nativeAnalysisMatches(undefined, source), false);
   assert.equal(nativeAnalysisMatches({...analysis, source: undefined, frame_id: source.frame_id, sequence: source.sequence}, source), false);
+});
+
+test("confirmed camera OFF suspends both media paths; pending and legacy status do not", () => {
+  const base=readCameraPipeline(fixture.stopped_status)!;
+  assert.equal(cameraPreviewStopped(null),false);
+  for(const state of ["stopped","failed"])assert.equal(cameraPreviewStopped({...base,state}),true);
+  for(const state of ["starting","waiting_frame","active","stopping"])assert.equal(cameraPreviewStopped({...base,state}),false);
+});
+
+test("slow status refresh cannot replace a tighter recent camera age bound or renew old video",()=>{
+  const common={camera_session:"camera",transport_epoch:2,pipeline_revision:3};
+  const fast={latest:{...common,captured_monotonic_ns:5e9,frame_age_ms:5},receivedAt:10010,roundTripMs:10};
+  const slow={latest:{...common,captured_monotonic_ns:6.2e9,frame_age_ms:5},receivedAt:11400,roundTripMs:600};
+  assert.equal(preferredPreviewAnchor(fast,slow),fast);
+  assert.equal(anchoredPreviewAge(slow.latest,0,11400,fast),205);
+  assert.equal(anchoredPreviewAge(slow.latest,700,11400,fast),700);
+  assert.ok(anchoredPreviewAge(fast.latest,0,11400,fast)>1000);
+  const later={...slow,receivedAt:13000};
+  assert.equal(preferredPreviewAnchor(fast,later),later);
+  const replaced={...slow,latest:{...slow.latest,camera_session:"new"}};
+  assert.equal(preferredPreviewAnchor(fast,replaced),replaced);
+  const missing={...slow,latest:{}};
+  assert.equal(preferredPreviewAnchor(fast,missing),missing);
 });

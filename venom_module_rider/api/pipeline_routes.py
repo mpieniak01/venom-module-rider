@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from typing import Literal
@@ -103,6 +104,7 @@ async def processed_native(request, connection, incoming):
     """A live Pi result wins; diagnostics never create another motion run."""
     from ..depth_detector import PerceptionSettings
     from ..vision_contract import VisionFrame
+    from .vision_preview import diagnostic_preview_allowed
     from .vision_routes import loop_goals
 
     domain, loop, hub = (
@@ -129,7 +131,7 @@ async def processed_native(request, connection, incoming):
         image, result, elapsed = row[1], row[2], row[3]
     else:
         goals = await loop_goals(domain, force=False)
-        if any(goals.get(mode) is not False for mode in ("observe", "drive")):
+        if not await diagnostic_preview_allowed(domain, status, goals):
             raise RiderError("vision_busy", 429)
         # Status/configuration I/O may outlive the candidate selected by the
         # receiver. In diagnostic mode choose the latest source AFTER those
@@ -144,7 +146,13 @@ async def processed_native(request, connection, incoming):
             raise RiderError("frame_stale", 409)
         frame = VisionFrame(
             protocol_version=1,
-            run_id="native-preview-" + incoming.source.camera_session[:40],
+            # Configuration edits do not restart the camera. A diagnostic run
+            # must still change, or the previous policy's signature rejects every
+            # subsequent frame as replay/configuration_changed indefinitely.
+            run_id="native-preview-"
+            + hashlib.sha256(
+                f"{incoming.source.camera_session}:{revision}".encode()
+            ).hexdigest()[:40],
             frame_id=incoming.source.frame_id,
             sequence=incoming.source.sequence,
             config_revision=revision,
@@ -197,6 +205,7 @@ async def processed_native(request, connection, incoming):
         if image is None:
             raise RiderError(result["reason"], 503)
         elapsed = result["inference_ms"]
+        result["preview_only"] = True
     if connection.closed:
         raise RiderError("stream_epoch_changed", 409)
     if incoming.age_ms(hub.clock()) >= 500:

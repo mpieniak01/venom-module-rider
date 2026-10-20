@@ -313,3 +313,46 @@ def test_unsupported_ground_is_blue_not_an_obstacle_red_or_go_green(label):
     )
     red, green, blue = image.getpixel((256, 256))
     assert blue > green > red
+
+
+@pytest.mark.parametrize("moving", [False, True])
+async def test_manual_takeover_keeps_legacy_preview_after_journey(moving):
+    domain = Domain()
+    domain.features["s14_venom_navigation"]["requested"] = True
+    original = domain.read
+
+    async def read(path, ttl, force=False):
+        if path == "/api/navigation/status":
+            return {
+                "data": {
+                    "running": False,
+                    "stale": True,
+                    "journey": {"version": 1, "active": False, "state": "failed"},
+                }
+            }
+        if path == "/api/control/state":
+            return {
+                "data": {
+                    "safety": {
+                        "state": "ARMED",
+                        "owner": "manual",
+                        "arming_mode": "operator",
+                        "can_move": True,
+                        "moving": moving,
+                        "stale": False,
+                        "journey": {"active": False},
+                    }
+                }
+            }
+        return await original(path, ttl, force)
+
+    domain.read = read
+    loop = VisionLoop(Detector())
+    try:
+        response = await processed_camera(request(domain, loop))
+        assert response.body == b"jpeg-fixture"
+        assert response.headers["x-rider-vision-action"] == "stop"
+        assert all(row["signature"][2] == "observe" for row in loop.runs.values())
+        assert all(call[0] in {"read", "camera"} for call in domain.calls)
+    finally:
+        await loop.close()

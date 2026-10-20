@@ -1,6 +1,6 @@
 import { frameAge } from "../lib/vision-frame";
 import type { Frame } from "../lib/use-rider";
-import { decisionView } from "../lib/loop-controls";
+import { decisionView, diagnosticImageCurrent } from "../lib/loop-controls";
 import { formatNumber, formatTime, record, safetyOf, type JsonRecord, type RiderStatus } from "../lib/model";
 import type { Translator } from "../lib/i18n";
 import styles from "../rider.module.css";
@@ -9,7 +9,8 @@ export function LoopDecision({frame,state,detector,policy,status,t,language}:{fr
   const view=decisionView(state,detector), safety=safetyOf(status);
   const sameRun=frame?.analysis?.run_id===state.run_id&&frame?.analysis?.config_revision===state.config_revision;
   const age=frameAge(frame??null);
-  const imageState=frame?.analysis ? {running: sameRun&&!frame.stale&&age!==null&&age<1000, stale:frame.stale, decision:frame.analysis} : state;
+  const previewOnly=state.running!==true&&diagnosticImageCurrent(frame??null,policy,detector);
+  const imageState=frame?.analysis ? {running: (sameRun||previewOnly)&&!frame.stale&&age!==null&&age<1000, stale:frame.stale, decision:frame.analysis} : state;
   const imageView=decisionView(imageState,detector);
   const decision=record(state.decision), key="vision.reason."+imageView.imageReason;
   const reason=t(key)===key?t("vision.reason.default"):t(key);

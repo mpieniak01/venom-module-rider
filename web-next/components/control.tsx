@@ -1,5 +1,5 @@
 import { VisionSectors } from "./vision-sectors";
-import { operatorPrioritySupported } from "../lib/navigation";
+import { journeyOwnsMotion, operatorPrioritySupported } from "../lib/navigation";
 import { CameraPipelineControls } from "./camera-pipeline";
 import { CorridorOverlay, type CorridorEditorProps } from "./corridor-overlay";
 import { manualFeedback } from "../lib/manual-feedback";
@@ -78,7 +78,7 @@ export function ManualPad({ client, t, language, compact = false, children }: { 
           <Icon size={compact ? 20 : 25} />{!compact && <span>{t(direction)}</span>}<span className={styles.small}>{displayValue(record(directions[direction]).speed, speedDescriptor, language)} {speedDescriptor.display_unit ?? ""}</span>
         </button>;
       })}
-      <button type="button" className={`${styles.padCenter} ${styles.padStop}`} style={{ gridRow: 2, gridColumn: 2 }} aria-label={t("stopMotors")} title={t(operatorPrioritySupported(client.status) ? "operatorPauseHint" : "manualStopHint")} data-testid="rider-pad-stop" onClick={() => void client.stopManual().catch(() => undefined)}><CircleStop size={27} /><span>{t("stopShort")}</span></button>
+      <button type="button" className={`${styles.padCenter} ${styles.padStop}`} style={{ gridRow: 2, gridColumn: 2 }} aria-label={t("stopMotors")} title={t(journeyOwnsMotion(client.status) ? "journeyStop" : operatorPrioritySupported(client.status) ? "operatorPauseHint" : "manualStopHint")} data-testid="rider-pad-stop" onClick={() => void client.stopManual().catch(() => undefined)}><CircleStop size={27} /><span>{t("stopShort")}</span></button>
     </div>
     <div className={styles.padDetails}>
     <div className={styles.padHelp} id={helpId}>
@@ -155,7 +155,7 @@ export function CameraPanel({ client, t, language, compact = false, onObservatio
   };
   const selected = client.cameraStream ?? "raw";
   const transitioning=selected==="venom"&&client.cameraTransition;
-  const previewPolling=client.cameraStream!==null&&client.mediaError!=="visionCameraOff";
+  const previewPolling=client.cameraStream!==null&&client.mediaError!=="visionCameraOff"&&!["stopped","failed"].includes(power?.state??"");
   const notice=previewNotice(visible?.stale??client.camera?.stale??false,selected,previewPolling,transitioning);
   const sourceIdentity = visible?.analysis && Object.keys(record(visible.analysis.source)).length
     ? record(visible.analysis.source) : visible?.analysis;

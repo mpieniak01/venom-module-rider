@@ -5,13 +5,32 @@ export type ControlClock = { offset: number; rtt: number; at: number };
 export function operatorPrioritySupported(status: RiderStatus | null): boolean {
   return record(safetyOf(status).operator_control).version === 1;
 }
+/** Versioned explicit gestures can establish new manual authority, never reuse GO. */
+export function manualInterventionSupported(status: RiderStatus | null): boolean {
+  return safetyOf(status).operator_intervention_version === 1;
+}
+export function manualInterventionAvailable(status: RiderStatus | null, panelId?: string): boolean {
+  const safety = safetyOf(status);
+  return manualInterventionSupported(status) && !!panelId && !!status?.connection.configured
+    && ["online", "degraded"].includes(status.connection.status) && !status.errors.control && safety.stale !== true
+    && ["ARMED", "DISARMED"].includes(str(safety.state)) && safety.ready !== false
+    && (safety.state === "DISARMED" || safety.panel_motion_enabled === true) && record(record(safety.capabilities).move).available === true
+    && record(safety.panel_control).version === 1 && !!str(safety.generation) && Number.isInteger(settingsOf(status).revision);
+}
+/** Journey authority is independent from a newly consented manual gesture. */
+export function journeyOwnsMotion(status: RiderStatus | null): boolean {
+  const safety = safetyOf(status);
+  return safety.owner === "navigation" && safety.arming_mode === "journey";
+}
 export function operatorSessionActive(status: RiderStatus | null): boolean {
-  return operatorPrioritySupported(status) && ["paused", "qualifying", "active"].includes(str(record(safetyOf(status).operator_control).state));
+  return !journeyOwnsMotion(status) && operatorPrioritySupported(status) && ["paused", "qualifying", "active"].includes(str(record(safetyOf(status).operator_control).state));
 }
 /** Buttons accept a new operator intent; Pi still authorizes every command. */
 export function navigationAvailable(status: RiderStatus | null, panelId?: string): boolean {
   const safety = safetyOf(status);
   const panel = record(safety.panel_control);
+  if (manualInterventionSupported(status)) return manualInterventionAvailable(status, panelId);
+  if (journeyOwnsMotion(status)) return false;
   const priority = safety.owner === "navigation" && operatorPrioritySupported(status);
   if (panelId && panel.version === 1 && panel.holder !== panelId) return false;
   if (priority && (!["online", "degraded"].includes(status?.connection.status ?? "") || !panelId || panel.version !== 1 || panel.holder !== panelId || status?.errors.control || safety.stale === true)) return false;

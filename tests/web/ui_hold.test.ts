@@ -217,3 +217,34 @@ test("an expired replacement click waiting for an earlier request is never repla
   now=timing.request_ttl_ms+1;finish();await flush();
   assert.deepEqual(intents,[{direction:"forward",mode:"pulse"}]);
 });
+
+test("release and replacement cancel a pending atomic handoff before its acknowledgement",async t=>{
+  t.mock.timers.enable({apis:["setTimeout"]});
+  let finish!:()=>void,cancelled=0;
+  const sent:MovementIntent[]=[];
+  const controller=new HoldController({timing:()=>timing,canMove:()=>true,cancelPending:()=>{cancelled++;},send:async(intent)=>{sent.push(intent);if(intent.mode==="hold")await new Promise<void>(resolve=>{finish=resolve;});},onActive:()=>undefined,onError:()=>undefined});
+  controller.start("forward",1);t.mock.timers.tick(timing.click_threshold_ms);await flush();
+  const before=cancelled;controller.end(1);
+  assert.equal(cancelled,before+1,"release must cancel without waiting for in-flight ACK");
+  assert.equal(sent.length,1);
+  finish();await flush();assert.deepEqual(sent.map(intent=>intent.mode),["hold","release"]);
+  controller.cancel();
+});
+test("global cancellation invalidates an in-flight pulse while pointer capture loss after click does not",async t=>{
+  t.mock.timers.enable({apis:["setTimeout"]});
+  let finish!:()=>void,cancelled=0;
+  const controller=new HoldController({timing:()=>timing,canMove:()=>true,cancelPending:()=>{cancelled++;},send:async()=>new Promise<void>(resolve=>{finish=resolve;}),onActive:()=>undefined,onError:()=>undefined});
+  controller.start("left",1);controller.end(1);await flush();
+  const before=cancelled;controller.release(1);assert.equal(cancelled,before);
+  controller.release();assert.equal(cancelled,before+1);finish();await flush();
+  controller.cancel();
+});
+
+test("an acknowledged scoped cancellation suppresses an unscoped release against the old owner",async t=>{
+  t.mock.timers.enable({apis:["setTimeout"]});
+  let pending=false,finish!:()=>void;
+  const intents:MovementIntent[]=[];
+  const controller=new HoldController({timing:()=>timing,canMove:()=>true,cancelPending:()=>{const cancelled=pending;pending=false;return cancelled;},send:async intent=>{intents.push(intent);pending=true;await new Promise<void>(resolve=>{finish=resolve;});},onActive:()=>undefined,onError:()=>undefined});
+  controller.start("forward",1);t.mock.timers.tick(timing.click_threshold_ms);await flush();controller.end(1);
+  finish();await flush();assert.deepEqual(intents.map(intent=>intent.mode),["hold"]);controller.cancel();
+});
