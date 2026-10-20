@@ -6,14 +6,13 @@ import {getApiBaseUrl} from "@/lib/env";
 import {errorCode,formatNumber,formatTime,record} from "../lib/model";
 import {angleStream,axisNumber,readTimeline,pointAt,profileAt,streamTimes,nearestTime,trialRequests,alignTrial,pulseEvidence,type MotionStream,type MotionTimeline} from "../lib/motion-timeline";
 import {SAMPLES_BASE,type Collection} from "../lib/samples";
-import {useSamples} from "../lib/use-samples";
-import type {RiderClient} from "../lib/use-rider";
+import type {StudyRecording} from "../lib/use-study-recording";
 import type {Translator} from "../lib/i18n";
 import {Button,Details,Empty,Field,Input,Panel,Range,Select} from "./primitives";
 import {CommandTrace,MotionTrace,outputStream} from "./motion-trace";
 import styles from "../rider.module.css";
 
-function useTimeline(id:string,refresh:number){
+function useTimeline(id:string,refresh:number|string){
   const key=id+":"+refresh;
   const [result,setResult]=useState<{key:string;value:MotionTimeline|null;error:string}>({key:"",value:null,error:""});
   useEffect(()=>{
@@ -27,11 +26,10 @@ function useTimeline(id:string,refresh:number){
   return result.key===key?result:{value:null,error:""};
 }
 
-export function MotionStudy({client,t,language}:{client:RiderClient;t:Translator;language:string}){
-  const [surface,setSurface]=useState("");
-  const capture=useSamples(client.config?.device_id??null,true,"motion-study-v1:"+surface.trim());
+export function MotionStudy({recording,t,language}:{recording:StudyRecording;t:Translator;language:string}){
+  const {surface,setSurface,capture}=recording;
   const [sessions,setSessions]=useState<Collection[]>([]);
-  const [selectedA,setA]=useState<string|null>(null),[bId,setB]=useState("");
+  const [selectedA,setA]=useState<{id:string;captureId:string|undefined}|null>(null),[bId,setB]=useState("");
   const [aStream,setAStream]=useState(""),[bStream,setBStream]=useState("");
   const [aTrial,setATrial]=useState(""),[bTrial,setBTrial]=useState("");
   const [revision,refresh]=useState(0);
@@ -39,13 +37,13 @@ export function MotionStudy({client,t,language}:{client:RiderClient;t:Translator
   const active=capture.session?.state==="collecting";
   const retired=record(capture.session?.evidence).retired===true;
   const currentId=capture.session?.session_id;
-  const aId=selectedA??currentId??"";
+  const aId=(selectedA&&selectedA.captureId===currentId?selectedA.id:currentId)??"";
   useEffect(()=>{
     const controller=new AbortController();
     void apiFetch<{sessions:Collection[]}>(SAMPLES_BASE+"/sessions",{signal:controller.signal}).then(r=>{if(!controller.signal.aborted){setSessions(r.sessions);setError("");}}).catch(err=>{if(!controller.signal.aborted)setError(errorCode(err));});
     return()=>controller.abort();
   },[revision,currentId,active]);
-  const a=useTimeline(aId,revision),b=useTimeline(bId,revision);
+  const a=useTimeline(aId,revision+":"+capture.session?.state),b=useTimeline(bId,revision);
   const sourceA=a.value?.streams.find(s=>s.id===aStream)??a.value?.streams[0]??null;
   const sourceB=b.value?.streams.find(s=>s.id===bStream)??b.value?.streams[0]??null;
   const streamA=useMemo(()=>alignTrial(sourceA,aTrial),[sourceA,aTrial]),streamB=useMemo(()=>alignTrial(sourceB,bTrial),[sourceB,bTrial]);
@@ -53,14 +51,12 @@ export function MotionStudy({client,t,language}:{client:RiderClient;t:Translator
     <div data-testid="motion-study">
       <Field label={t("study.surface")}><Input value={surface} maxLength={80} disabled={active||capture.busy} onChange={e=>setSurface(e.target.value)}/></Field>
       <div className={styles.flex} style={{marginTop:12}}>
-        <Button data-testid="study-record" disabled={!client.canMutate||capture.busy||active&&!retired} onClick={()=>{setA(null);void capture.start("manual");}}>{t("study.record")}</Button>
-        <Button data-testid="study-end" disabled={!active||capture.busy} onClick={()=>void capture.end().then(()=>refresh(r=>r+1))}>{t("study.end")}</Button>
         <Button data-testid="study-refresh" onClick={()=>refresh(r=>r+1)}>{t("refresh")}</Button>
       </div>
-      <p role="status" className={styles.hint}>{t(retired?"study.retired":active?"study.recording":"study.passive")}</p>
+      <p role="status" className={styles.hint}>{t(retired?"study.retired":active?"study.recording":"study.globalHint")}</p>
       {(error||capture.error||a.error||b.error)&&<p role="alert">{t("requestFailed")} · {error||capture.error||a.error||b.error}</p>}
       <div className={styles.grid}>{(["A","B"] as const).map(name=><Field key={name} label={t("study.session")+" "+name}>
-        <Select data-testid={"study-session-"+name} value={name==="A"?aId:bId} onChange={e=>{if(name==="A"){setA(e.target.value);setAStream("");}else{setB(e.target.value);setBStream("");}}}>
+        <Select data-testid={"study-session-"+name} value={name==="A"?aId:bId} onChange={e=>{if(name==="A"){setA({id:e.target.value,captureId:currentId});setAStream("");}else{setB(e.target.value);setBStream("");}}}>
           <option value="">{t("samples.choose")}</option>
           {sessions.map(s=><option key={s.session_id} value={s.session_id}>{formatTime(s.started_at,language)+" · "+s.session_id.slice(0,8)+" · "+s.state}</option>)}
         </Select>

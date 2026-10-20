@@ -379,7 +379,7 @@
 .cameraEmbedded > .panelHeader > .flex { gap:6px; flex-wrap:nowrap; }
 .cameraEmbedded .button { min-height:36px; height:36px; padding:0 10px; }
 .cameraSources { display:flex; flex:0 0 36px; gap:6px; }
-.workspaceContent .loopCamera .cameraEmbedded .camera { flex:1 1 0; width:100%; height:auto; min-height:100px; max-height:none; aspect-ratio:auto; }
+.workspaceContent .loopCamera .cameraEmbedded .camera { flex:1 1 0; width:100%; height:auto; min-height:120px; max-height:none; aspect-ratio:auto; }
 .cameraEmbedded .camera img { width:100%; height:100%; object-fit:contain; }
 .cameraEmbedded .camera > .empty { min-height:0; height:100%; padding:8px; }
 .cameraEmbedded .cameraPaused { font-size:11px; line-height:15px; padding:5px; top:4px; left:4px; right:4px; }
@@ -601,3 +601,27 @@
 .attitudeReference { stroke:var(--text-secondary);stroke-dasharray:3 3;fill:none; }
 .attitudeAxes { stroke:var(--text-primary);fill:var(--text-primary);stroke-width:1.5; }
 .attitudePlaceholder { min-height:130px;display:flex;flex-direction:column;justify-content:center;gap:10px;color:var(--text-secondary); }
+
+/* Page-owned actions remain in the sticky header above every module tab. */
+.page .header { height:auto; flex-wrap:wrap; }
+.recordingBar { grid-column:1 / -1; flex-basis:100%; width:100%; min-width:0; display:flex; flex-wrap:wrap; gap:6px 12px; align-items:center; justify-content:space-between; padding-top:6px; border-top:1px solid var(--r-border); }
+.recordingState { min-width:0; max-width:100%; flex:1 1 220px; font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.recordingActions { display:flex; flex-wrap:wrap; gap:6px; min-width:0; }
+@container rider (max-width:720px) {
+  .recordingBar { gap:4px; }
+  .recordingState { flex-basis:100%; font-size:11px; }
+  .recordingActions { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); width:100%; gap:4px; }
+  .recordingActions .button { min-width:0; padding:4px; font-size:11px; white-space:normal; }
+  .recordingActions [data-testid="rider-pause"] { grid-column:auto; }
+}
+
+
+@media (max-height:620px) and (min-width:721px) {
+  /* Keep 44px driving targets; compact view selectors and recording instead. */
+  .pageFocused .header { min-height:0; gap:2px; }
+  .pageFocused .recordingBar { padding-top:0; border-top:0; }
+  .pageFocused .recordingActions .button { height:28px; min-height:28px; padding:0 8px; font-size:11px; }
+  .pageFocused .controlWorkspace { grid-template-rows:24px 44px minmax(0,1fr); gap:0; }
+  .pageFocused .controlModes .button { height:24px; min-height:24px; padding:0 6px; font-size:11px; }
+  .pageFocused .commandDeck { gap:0; }
+}

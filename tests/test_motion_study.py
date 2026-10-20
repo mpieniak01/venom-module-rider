@@ -16,6 +16,7 @@ from venom_module_rider.motion_timeline import build_timeline
 from venom_module_rider.samples_archive import SampleArchive
 from venom_module_rider.samples_import import SampleImporter
 from venom_module_rider.samples_registry import SamplesRegistry
+from venom_module_rider.service import POLLING
 
 
 async def setup_study(tmp_path):
@@ -311,6 +312,67 @@ async def test_malformed_optional_ack_still_records_explicit_result(tmp_path, da
             else "unknown"
         )
         assert registry.failures == 0
+    finally:
+        await registry.close()
+        await service.close()
+
+
+@pytest.mark.parametrize(
+    "section",
+    [
+        "control",
+        "overview",
+        "calibration",
+        "resources",
+        "face",
+        "compute",
+        "navigation",
+        "vision",
+    ],
+)
+async def test_study_records_across_tabs_with_shared_cache_and_bounded_cadence(
+    tmp_path, section
+):
+    service, pi, registry, sid = await setup_study(tmp_path)
+    try:
+        normal = service.timing.polling(POLLING)
+        service.cache.pop("/state", None)
+        before = sum(row["path"] == "/state" for row in pi.trace)
+        first = await service.status(section)
+        await service.status(section)
+        assert sum(row["path"] == "/state" for row in pi.trace) == before + 1
+        assert first["telemetry"] is not None
+        key = "control_ms" if section == "navigation" else section + "_ms"
+        assert first["polling"][key] <= normal["calibration_ms"]
+        assert (await snapshot(registry, sid))["evidence"]["records"]
+        await registry.end(sid)
+        after = await service.status(section)
+        assert after["polling"] == normal
+        assert all(row["method"] == "GET" for row in pi.trace)
+    finally:
+        await registry.close()
+        await service.close()
+
+
+async def test_concurrent_status_reports_bounded_writer_drops_without_delays(tmp_path):
+    service, pi, registry, sid = await setup_study(tmp_path)
+    try:
+        # Deterministically keep the existing one-job slot busy while the
+        # unchanged gather() delivers control and telemetry without a delay.
+        collector = registry.evidence
+        assert collector.slot.acquire(blocking=False)
+        try:
+            status = await service.status("control")
+            assert status["telemetry"] is not None
+            assert any(row["path"] == "/state" for row in pi.trace)
+            assert any(row["path"] == "/api/control/state" for row in pi.trace)
+            assert collector.sessions[sid]["dropped"] >= 2
+        finally:
+            collector.slot.release()
+        await registry.end(sid)
+        manifest = await snapshot(registry, sid)
+        assert manifest["evidence"]["status"]["dropped"] >= 2
+        assert all(row["method"] == "GET" for row in pi.trace)
     finally:
         await registry.close()
         await service.close()

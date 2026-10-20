@@ -134,3 +134,34 @@ a firmware ODR. Short-pulse undersampling is explicit.
 Memoized aligned streams and derived series avoid rebuilding static dataset
 projections on each replay cursor step. Existing host refresh/cache controls
 remain available; firmware sampling, UART owner and safety loops are unchanged.
+
+
+## Recording across module tabs
+
+Start/end study recording and its state/session identity are in the sticky page
+header above all module tabs. Recording belongs to the page, so changing between
+Control, Calibration, overview, resources, Face Studio or perception preserves the
+same collection. Calibration selects that current collection by default, and
+reloads its timeline when recording ends. Optional surface context is edited in
+Calibration before recording; no draft settings are applied by Start.
+
+Explicit study collection includes demand-driven telemetry in each status view,
+with shared cache/coalescing and the configured calibration cadence as an upper
+bound on display intervals. The stored timing profile remains unchanged. Ending
+the collection restores ordinary view intervals. This changes neither UART rate,
+safety freshness budgets nor camera state, and adds no background inventory loop.
+
+Hiding the browser tab, leaving the page or changing device/source session ends
+the recording as interrupted. A failed End remains retryable from the header.
+Recording never arms or starts motion. The header's Stop motion action reuses the
+existing manual pause/journey-stop contract and preserves study recording; the
+separate emergency STOP retains its existing stop/disarm behavior. Setup-dependent
+motion starts stay with their controls. Capturing a specific camera frame stays
+beside that frame so the capture identity is explicit.
+
+The browser fixture defaults to zero-latency responses. Its explicit
+RIDER_BROWSER_NETWORK_PROFILE=staggered profile separates network replies for
+the complete archive/UI test. A separate no-delay concurrent-status regression
+holds the bounded writer slot busy and verifies that discarded observations
+remain counted in the archived dropped status. Recording remains bounded and
+does not promise lossless retention; sparse/drop diagnostics must be considered.

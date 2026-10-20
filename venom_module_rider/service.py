@@ -304,7 +304,7 @@ class RiderService:
         # Explicit motion collection borrows the same demand-driven telemetry
         # reader/cache; no extra timer, UART owner, force read or camera.
         collector = getattr(self.samples, "evidence", None)
-        if section == "calibration" and collector is not None:
+        if collector is not None:
             with collector.lock:
                 collecting = any(
                     sid in self.samples.active
@@ -316,7 +316,13 @@ class RiderService:
                     for sid, state in self.samples.evidence.sessions.items()
                 )
             if collecting:
-                keys = (*keys, "telemetry")
+                if "telemetry" not in keys:
+                    keys = (*keys, "telemetry")
+                cadence = snapshot["polling"]["calibration_ms"]
+                snapshot["polling"] = {
+                    key: min(value, cadence)
+                    for key, value in snapshot["polling"].items()
+                }
         calls = [
             self.read(
                 READS[key][0],
@@ -325,7 +331,9 @@ class RiderService:
                     if key == "telemetry"
                     else READS[key][1]
                 ),
-                force=key == "control" or section == "navigation",
+                force=key == "control"
+                or section == "navigation"
+                and key != "telemetry",
             )
             for key in keys
         ]

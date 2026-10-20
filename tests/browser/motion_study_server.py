@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import os
 import tempfile
 import time
 from contextlib import asynccontextmanager
@@ -25,6 +27,7 @@ from venom_module_rider.service import RiderService
 
 ROOT = Path(__file__).resolve().parents[2]
 ASSETS = ROOT / "docs_dev" / "_reports" / "motion-study-browser"
+NETWORK_PROFILE = os.environ.get("RIDER_BROWSER_NETWORK_PROFILE", "zero-latency")
 
 
 async def seed(service, registry, name, magnitude, qualified=False, firmware=False):
@@ -144,6 +147,15 @@ async def seed(service, registry, name, magnitude, qualified=False, firmware=Fal
     return sid
 
 
+class FixturePiClient(PiClient):
+    async def json(self, path, *args, **kwargs):
+        # Default is zero latency. The explicit staggered profile models
+        # separated network responses for the complete archive/UI scenario.
+        if path == "/state" and NETWORK_PROFILE == "staggered":
+            await asyncio.sleep(0.05)
+        return await super().json(path, *args, **kwargs)
+
+
 @asynccontextmanager
 async def lifespan(app):
     with tempfile.TemporaryDirectory(prefix="rider-motion-fixture-") as folder:
@@ -151,7 +163,7 @@ async def lifespan(app):
         transport = httpx.ASGITransport(app=create_app(pi))
         device = Device("fixture", "Fixture", "http://127.0.0.1:18880", "demo")
         service = RiderService(
-            (device,), client_factory=lambda d: PiClient(d, transport=transport)
+            (device,), client_factory=lambda d: FixturePiClient(d, transport=transport)
         )
         await service.select("fixture", service.session)
         await service.status("calibration")
@@ -185,9 +197,16 @@ async def index():
     return FileResponse(ASSETS / "index.html")
 
 
+@app.get("/rider")
+@app.get("/workspace")
+async def workspace():
+    return FileResponse(ASSETS / "workspace.html")
+
+
 @app.get("/fixture")
 async def fixture():
     return {
+        "network_profile": NETWORK_PROFILE,
         "sessions": app.state.fixture_sessions,
         "config": app.state.rider.config(),
         "status": await app.state.rider.status("calibration"),
