@@ -41,6 +41,7 @@ async page => {
   try{
     await page.setViewportSize({width:1440,height:1000});await page.goto(base+"/rider");
     await page.getByTestId("workspace-journey").click();
+    await page.getByTestId("workspace-settings-toggle").click();
     await page.getByRole("button",{name:"Otwórz ustawienia podróży"}).click();
     const geometry=page.getByTestId("geometry-mode"),save=page.getByTestId("settings-save");
     check(!await geometry.isDisabled(),"observation locks settings");

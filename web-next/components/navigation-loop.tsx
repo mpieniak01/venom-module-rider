@@ -46,6 +46,8 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
   const startTask=useRef<Promise<unknown>|null>(null);
   const stopping=useRef(false);
   const settingsRef=useRef<HTMLDetailsElement>(null);
+  const workspaceDetailsRef=useRef<HTMLDetailsElement>(null);
+  const [detailsOpen,setDetailsOpen]=useState(false);
   const displayedRun=useRef("");
   const mounted=useRef(true);
   const trialArmed=useRef(false);
@@ -277,6 +279,7 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
   };
   const showJourneySettings=()=>{
     setEditingZone(false);
+    if(workspaceDetailsRef.current)workspaceDetailsRef.current.open=true;
     if(settingsRef.current){settingsRef.current.open=true;settingsRef.current.scrollIntoView({block:"start",behavior:"smooth"});}
   };
   useEffect(()=>{
@@ -329,6 +332,17 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
   const operator = record(safety.operator_control);
   const priority = operatorPrioritySupported(client.status);
   const automaticActive = priority ? operator.state === "active" || operator.state === "qualifying" : phase === "running" && goals.drive === true;
+  let commandReason = "";
+  if (view === "journey") {
+    if (journeyError) commandReason = t("journeyRequestError") + " · " + journeyError;
+    else if (journey.reason) commandReason = t("state") + ": " + journey.reason;
+    else if (journeyUnavailable[0]) commandReason = t(journeyUnavailable[0]);
+  } else if (view === "automatic") {
+    commandReason = visibleError || readError;
+    if (!commandReason && preparation?.state === "failed") commandReason = t(trialPreparationErrorKey(preparation));
+    if (!commandReason && displayedStopReason) commandReason = t(trialStopReasonKey(displayedStopReason));
+    if (!commandReason && trialUnavailable) commandReason = t(trialUnavailable);
+  }
   return <section className={styles.controlWorkspace} data-testid="control-workspace">
     <div className={styles.controlModeRow}>
       <div className={styles.controlModes} role="group" aria-label={t("workspaceView")}>
@@ -336,8 +350,8 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
       </div>
       <span className={styles.workspaceOwner} role="status">{t("workspaceOwner")}: <strong>{t(owner === "manual" ? "workspaceManual" : owner === "navigation" ? safety.arming_mode === "journey" ? "workspaceJourney" : "workspaceAutomatic" : safety.state === "DISARMED" ? "workspaceDisarmedOwner" : "workspaceNoOwner")}</strong></span>
     </div>
-    <div className={styles.driveWorkspace}>
-      <div className={styles.workspaceContent} data-testid="workspace-content" tabIndex={0} role="region" aria-label={t("workspaceObservation")}>
+    <div className={styles.commandDeck} data-testid="command-deck">
+      <div hidden={view !== "manual"} className={styles.manualCommandHint}>{t("manualGestureReady")}</div>
         <div hidden={view !== "automatic"} data-testid="automatic-commands">
           <Panel title={t("loopTitle")} extra={<Button aria-label={t("loopLoad")} disabled={loading||!!operation||!connected} onClick={()=>setRefresh(v=>v+1)}><RefreshCw size={14}/>{t("refresh")}</Button>}>
     <div className={styles.loopStatus} role="status" data-testid="loop-state">
@@ -349,8 +363,8 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
     </div>
     <div className={styles.loopToolbar}>
     <div className={styles.loopActions}>
-      <Button size="large" tone="primary" data-testid="loop-start" title={t("trialSimpleHelp")} aria-describedby={trialUnavailable?"rider-trial-help rider-trial-block":"rider-trial-help"} disabled={!!trialUnavailable||!!operation||!!client.busy||loading||automaticActive||journey.active} onClick={()=>void runTrial()}><Play size={18}/>{t(priority&&loopState.operator_control_version===1&&loopState.running===true?"operatorResume":record(policy?.avoidance).enabled===true?"avoidanceTrialRun":"trialRun")}</Button>
-      <Button size="large" tone="caution" data-testid="loop-stop" title={t(priority ? "operatorPauseHint" : "loopStop")} disabled={!connected||operation==="stop"||!priority&&operation==="save"} onClick={()=>void stop()}><Square size={18}/>{t(operation==="stop"?"loopStopping":priority?"operatorPause":"loopStop")}</Button>
+      <Button tone="primary" data-testid="loop-start" title={t("trialSimpleHelp")} aria-describedby={trialUnavailable?"rider-trial-help rider-trial-block":"rider-trial-help"} disabled={!!trialUnavailable||!!operation||!!client.busy||loading||automaticActive||journey.active} onClick={()=>void runTrial()}><Play size={18}/>{t(priority&&loopState.operator_control_version===1&&loopState.running===true?"cockpitResume":"cockpitStartTrial")}</Button>
+      <Button tone="caution" data-testid="loop-stop" title={t(priority ? "operatorPauseHint" : "loopStop")} disabled={!connected||operation==="stop"||!priority&&operation==="save"} onClick={()=>void stop()}><Square size={18}/>{t(operation==="stop"?"loopStopping":priority?"cockpitPause":"cockpitStop")}</Button>
       {detector.drive_supported!==false&&<span className={styles.small} data-testid="trial-plan">{String(policy?.speed??"—")} SDK · ≤ {String(policy?.max_motion_ms??"—")} ms</span>}
     </div>
     </div>
@@ -364,18 +378,32 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
               <span className={styles.small}>{t("journeyElapsed")}: {formatNumber(journey.elapsed,language,1)} s · {t("journeyManeuver")}: {journey.maneuver??"—"}</span>
             </div>
             <div className={styles.loopActions}>
-              <Button size="large" tone="primary" data-testid="journey-start" disabled={journeyUnavailable.length>0||!!operation||!!client.busy||loading||journey.active||automaticActive} onClick={()=>void runJourney()}><Play size={18}/>{t("journeyStart")}</Button>
-              <Button size="large" tone="caution" data-testid="journey-stop" disabled={!connected||operation==="stop"} onClick={()=>void stopJourney()}><Square size={18}/>{t("journeyStop")}</Button>
+              <Button tone="primary" data-testid="journey-start" disabled={journeyUnavailable.length>0||!!operation||!!client.busy||loading||journey.active||automaticActive} onClick={()=>void runJourney()}><Play size={18}/>{t("cockpitStartJourney")}</Button>
+              <Button tone="caution" data-testid="journey-stop" disabled={!connected||operation==="stop"} onClick={()=>void stopJourney()}><Square size={18}/>{t("cockpitStopJourney")}</Button>
               <span className={styles.small} data-testid="journey-motion-limits">{String(policy?.speed??"—")} SDK · ≤ {String(policy?.max_motion_ms??"—")} ms</span>
             </div>
+          </Panel>
+        </div>
+      <div className={styles.commandReason} role="status" data-testid="command-reason">
+        {commandReason}
+      </div>
+      <div className={styles.commandAccess}>
+        <Button data-testid="workspace-settings-toggle" aria-expanded={detailsOpen} aria-controls="rider-workspace-details" onClick={()=>{if(workspaceDetailsRef.current)workspaceDetailsRef.current.open=!workspaceDetailsRef.current.open;}}>{t("cockpitDetails")}</Button>
+      </div>
+    </div>
+    <div className={styles.driveWorkspace}>
+      <div className={styles.workspaceContent} data-testid="workspace-content" role="region" aria-label={t("workspaceObservation")}>
+        <div className={styles.loopCamera}><CameraPanel client={client} t={t} language={language} compact editor={view !== "manual" && editingZone && draft && Array.isArray(draft.corridor) ? {value:draft.corridor as number[],disabled:goals.drive===true||!!operation,onChange:value=>setDraft({...draft,corridor:value})}:undefined}/></div>
+        <details id="rider-workspace-details" ref={workspaceDetailsRef} onToggle={event=>setDetailsOpen(event.currentTarget.open)} className={styles.workspaceDetails} data-testid="workspace-details">
+          <summary>{t("cockpitDetails")}</summary>
+          <div className={styles.workspaceDetailsBody}>
+            <div hidden={view !== "journey"}>
             {journeyUnavailable.length>0&&<div data-testid="journey-blocks" className={styles.loopError} role="status"><ul>{journeyUnavailable.map(block=><li key={block}>{t(block)}</li>)}</ul><Button onClick={showJourneySettings}>{t("journeySettings")}</Button></div>}
             {policy&&calibrationMatches(policy,detector)&&record(policy.avoidance).sweep_verified===true&&<p className={styles.hint} role="status" data-testid="journey-acceptance-saved">{t("journeyAcceptanceSaved",{revision:String(policy.revision)})}</p>}
             {journey.reason&&<p className={styles.hint} data-testid="journey-reason">{t("state")}: <code>{journey.reason}</code></p>}
             {journeyRequested&&journey.active&&<p className={styles.hint}>{t("journeyStarted")}</p>}
             {journeyError&&<p className={styles.loopError} role="alert" data-testid="journey-error">{t("journeyRequestError")} · {journeyError}</p>}
-          </Panel>
-        </div>
-        <div className={styles.loopCamera}><CameraPanel client={client} t={t} language={language} compact editor={view !== "manual" && editingZone && draft && Array.isArray(draft.corridor) ? {value:draft.corridor as number[],disabled:goals.drive===true||!!operation,onChange:value=>setDraft({...draft,corridor:value})}:undefined}/></div>
+            </div>
         <div hidden={view === "manual"} data-testid="automatic-panel">
           <Panel title={t("loopSettings")}>
     <p hidden={view !== "automatic"} id="rider-trial-help" className={styles.hint} data-testid="trial-start-help">{t("trialStartHelp")}</p>
@@ -480,6 +508,8 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
           </Panel>
         </div>
         {auxiliary}
+          </div>
+        </details>
       </div>
       <aside className={styles.operatorConsole} aria-label={t("manual")} data-testid="operator-console">{manual}</aside>
     </div>

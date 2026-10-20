@@ -13,6 +13,7 @@ from .age_anchor import SourceAgeAnchor, preferred_anchor
 from .client import finish_native_cleanup
 from .errors import RiderError
 from .stream_contract import NativeFrame, SourceReference, canonical_jpeg
+from .workers import VisionWorkers
 
 MAX_FRAME_AGE_MS = 500
 MAX_REFERENCES = 8
@@ -49,6 +50,7 @@ class NativeStreamHub:
         self.connection: StreamConnection | None = None
         self.lock = asyncio.Lock()
         self.closed = False
+        self.workers = VisionWorkers("rider-frame")
 
     @staticmethod
     def binding(domain, pipeline):
@@ -268,6 +270,11 @@ class NativeStreamHub:
                     frame = None
             if frame is not None:
                 return frame
+            if source is not None and source.sequence <= connection.sequence:
+                # Sequence is monotonic within the pinned connection. An old
+                # or altered reference cannot arrive later: waiting only burns
+                # the decision budget and competes with the next fresh frame.
+                raise RiderError("stream_frame_unavailable", 409)
             remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
                 raise RiderError(connection.error or "stream_frame_unavailable", 409)
@@ -291,7 +298,7 @@ class NativeStreamHub:
             # teardown. Refuse additional work instead of queueing more sources.
             if len(connection.canonical_jobs) >= MAX_REFERENCES:
                 raise RiderError("stream_busy", 429)
-            task = asyncio.create_task(asyncio.to_thread(canonical_jpeg, frame))
+            task = asyncio.create_task(self.workers.run(canonical_jpeg, frame))
             connection.canonical_jobs[identity] = task
             connection.canonical[identity] = task
 
@@ -356,4 +363,7 @@ class NativeStreamHub:
 
     async def close(self):
         self.closed = True
-        await self.invalidate()
+        try:
+            await self.invalidate()
+        finally:
+            self.workers.close()

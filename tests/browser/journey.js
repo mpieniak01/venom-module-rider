@@ -49,6 +49,7 @@ async page => {
     await page.setViewportSize({width:1440,height:1000});
     await page.goto(base+"/rider");
     await page.getByTestId("workspace-journey").click();
+    await page.getByTestId("workspace-settings-toggle").click();
     await page.getByTestId("journey-start").waitFor();
     check(await page.getByTestId("journey-start").isDisabled(),"missing capability enabled journey");
     check((await page.getByTestId("journey-blocks").innerText()).includes("obsługi podróży"),"capability gap not explained");
@@ -66,6 +67,7 @@ async page => {
     policy.model_sha256=calibratedModel;
     policy.avoidance.enabled=true;policy.revision+=1;
     await wait(async()=>!await page.getByTestId("journey-start").isDisabled(),"valid existing image policy blocked journey");
+    await page.getByTestId("workspace-settings-toggle").click();
     await page.getByTestId("journey-start").click();
     await wait(()=>journey?.active,"journey did not start");
     await wait(async()=>(await page.getByTestId("journey-state").innerText()).includes("35"),"elapsed time beyond 10 s not displayed");

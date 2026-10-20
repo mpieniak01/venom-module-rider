@@ -1,5 +1,7 @@
 """Pi-authenticated binary frames; operators configure the authoritative Pi."""
 
+import asyncio
+
 from fastapi import APIRouter, Request
 from pydantic import ValidationError
 
@@ -72,9 +74,7 @@ async def decision(request: Request):
 
 @router.post("/compute/vision/decision-reference")
 async def reference_decision(request: Request):
-    from ..sample_sources import native_ticket
-    from ..stream_contract import ReferenceDecision, source_headers
-    from .pipeline_routes import native_pipeline
+    from ..stream_contract import ReferenceDecision
 
     device = authenticate(request)
     admitted_at = request.app.state.rider_stream.clock()
@@ -86,6 +86,26 @@ async def reference_decision(request: Request):
         )
     except (ValueError, ValidationError) as exc:
         raise RiderError("vision_invalid_frame", 400) from exc
+    hub = request.app.state.rider_stream
+    remaining = (descriptor.frame.deadline_ms - descriptor.frame.age_ms) / 1000
+    remaining -= max(0.0, hub.clock() - admitted_at)
+    if remaining <= 0:
+        raise RiderError("vision_frame_expired", 409)
+    try:
+        # Source lookup and canonical JPEG preparation are inside the same
+        # original budget as inference. Waiting here cannot age a frame out
+        # and then enqueue another expensive model call.
+        async with asyncio.timeout(remaining):
+            return await _reference_decision(request, device, descriptor, admitted_at)
+    except TimeoutError as exc:
+        raise RiderError("vision_frame_expired", 409) from exc
+
+
+async def _reference_decision(request, device, descriptor, admitted_at):
+    from ..sample_sources import native_ticket
+    from ..stream_contract import source_headers
+    from .pipeline_routes import native_pipeline
+
     domain, hub, loop = (
         request.app.state.rider,
         request.app.state.rider_stream,

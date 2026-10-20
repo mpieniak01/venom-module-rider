@@ -20,7 +20,7 @@ import { OperatorConsole, RiderMessages } from "./components/operator-console";
 import styles from "./rider.module.css";
 
 const tabs = [{ id: "control", Icon: Bot }, { id: "overview", Icon: Activity }, { id: "calibration", Icon: SlidersHorizontal }, { id: "resources", Icon: Boxes }, { id: "face", Icon: Smile }, { id: "compute", Icon: BrainCircuit }] as const;
-const focusedViewport = "(max-width: 720px), (max-height: 800px)";
+const focusedViewport = "(max-width: 1024px), (max-height: 800px)";
 const readFocusedViewport = () => window.matchMedia(focusedViewport).matches;
 const serverFocusedViewport = () => false;
 function subscribeViewport(changed: () => void) {
