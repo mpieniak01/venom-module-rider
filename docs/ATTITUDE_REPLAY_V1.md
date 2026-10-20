@@ -158,3 +158,10 @@ existing manual pause/journey-stop contract and preserves study recording; the
 separate emergency STOP retains its existing stop/disarm behavior. Setup-dependent
 motion starts stay with their controls. Capturing a specific camera frame stays
 beside that frame so the capture identity is explicit.
+
+The browser fixture defaults to zero-latency responses. Its explicit
+RIDER_BROWSER_NETWORK_PROFILE=staggered profile separates network replies for
+the complete archive/UI test. A separate no-delay concurrent-status regression
+holds the bounded writer slot busy and verifies that discarded observations
+remain counted in the archived dropped status. Recording remains bounded and
+does not promise lossless retention; sparse/drop diagnostics must be considered.

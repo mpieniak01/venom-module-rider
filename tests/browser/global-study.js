@@ -5,6 +5,7 @@ async page=>{
  check(new URL(origin).port==="18798","Isolated fixture port required");
  const fixture=await(await page.request.get(origin+"/fixture")).json();
  check(fixture.config.devices.every(d=>d.mode==="demo"),"Demo fixture required");
+ check(fixture.network_profile==="staggered","Explicit staggered network fixture required; zero-latency/drop path is tested separately");
  if(fixture.config.device_id!==fixture.config.devices[0].id)await page.getByTestId("rider-environment").selectOption(fixture.config.devices[0].id);
  await page.getByTestId("rider-stop").click();
  const requests=[];
@@ -91,5 +92,5 @@ async page=>{
  const finalSessions=await(await page.request.get(origin+"/api/v1/rider/samples/sessions")).json();
  check(!finalSessions.sessions.some(s=>s.state==="collecting"),"Device switch left recording active");
  check(requests.filter(r=>r.path.endsWith("/samples/sessions")).length===3,"Tab switching created extra recordings");
- return {sameSessionAcrossTabs:true,manualRecorded:true,pausePreservesRecording:true,endFailureRetry:true,hiddenEnds:true,deviceChangeEnds:true,layouts:layouts.length,fixtureOnly:true};
+ return {sameSessionAcrossTabs:true,manualRecorded:true,pausePreservesRecording:true,endFailureRetry:true,hiddenEnds:true,deviceChangeEnds:true,layouts:layouts.length,networkProfile:fixture.network_profile,fixtureOnly:true};
 }

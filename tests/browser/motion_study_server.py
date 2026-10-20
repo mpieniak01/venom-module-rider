@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import os
 import tempfile
 import time
 from contextlib import asynccontextmanager
@@ -26,6 +27,7 @@ from venom_module_rider.service import RiderService
 
 ROOT = Path(__file__).resolve().parents[2]
 ASSETS = ROOT / "docs_dev" / "_reports" / "motion-study-browser"
+NETWORK_PROFILE = os.environ.get("RIDER_BROWSER_NETWORK_PROFILE", "zero-latency")
 
 
 async def seed(service, registry, name, magnitude, qualified=False, firmware=False):
@@ -147,9 +149,9 @@ async def seed(service, registry, name, magnitude, qualified=False, firmware=Fal
 
 class FixturePiClient(PiClient):
     async def json(self, path, *args, **kwargs):
-        # Separate telemetry from the control reply like independent network
-        # responses; the bounded recorder may drop simultaneous zero-latency jobs.
-        if path == "/state":
+        # Default is zero latency. The explicit staggered profile models
+        # separated network responses for the complete archive/UI scenario.
+        if path == "/state" and NETWORK_PROFILE == "staggered":
             await asyncio.sleep(0.05)
         return await super().json(path, *args, **kwargs)
 
@@ -204,6 +206,7 @@ async def workspace():
 @app.get("/fixture")
 async def fixture():
     return {
+        "network_profile": NETWORK_PROFILE,
         "sessions": app.state.fixture_sessions,
         "config": app.state.rider.config(),
         "status": await app.state.rider.status("calibration"),

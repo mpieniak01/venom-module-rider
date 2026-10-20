@@ -352,3 +352,27 @@ async def test_study_records_across_tabs_with_shared_cache_and_bounded_cadence(
     finally:
         await registry.close()
         await service.close()
+
+
+async def test_concurrent_status_reports_bounded_writer_drops_without_delays(tmp_path):
+    service, pi, registry, sid = await setup_study(tmp_path)
+    try:
+        # Deterministically keep the existing one-job slot busy while the
+        # unchanged gather() delivers control and telemetry without a delay.
+        collector = registry.evidence
+        assert collector.slot.acquire(blocking=False)
+        try:
+            status = await service.status("control")
+            assert status["telemetry"] is not None
+            assert any(row["path"] == "/state" for row in pi.trace)
+            assert any(row["path"] == "/api/control/state" for row in pi.trace)
+            assert collector.sessions[sid]["dropped"] >= 2
+        finally:
+            collector.slot.release()
+        await registry.end(sid)
+        manifest = await snapshot(registry, sid)
+        assert manifest["evidence"]["status"]["dropped"] >= 2
+        assert all(row["method"] == "GET" for row in pi.trace)
+    finally:
+        await registry.close()
+        await service.close()
