@@ -105,6 +105,35 @@ See [Integration observations](docs/INTEGRATION_OBSERVATIONS.md) and
 meeting the required runtime ABI remains independent of the optional inventory
 hook.
 
+## Reconnecting from the panel
+
+Use the header **Refresh** button after a connection failure. It re-reads the
+selected device/session, retires old observations and fetches current control
+and settings. It shows progress and a retryable failure if Pi is still unavailable.
+It never repeats motion, ARM, camera or navigation commands. Ordinary polling
+does not run transport recovery.
+
+For a device behind an administrator-managed tunnel, its private
+`RIDER_DEVICES_JSON` entry may include `reconnect_command`: an absolute path to
+an executable on the Venom host. The helper accepts no arguments, must return
+within 12 seconds, and must only ensure the configured transport is available.
+Keep credentials in the transport's existing private configuration. Use a
+supervised transport service so it also reconnects after network interruptions;
+keep its restart and connection timeouts within the helper budget. Direct HTTP
+connections need no helper. This option is unavailable for Demo devices and is
+not exposed as an executable or command input in the browser.
+
+`POST /api/v1/rider/connection/refresh` accepts only an empty JSON object and
+requires the current `X-Rider-Session` and the existing module access/origin
+checks. It coalesces simultaneous requests and invokes the configured helper
+only when a fresh control read reports `pi_unreachable`. A zero helper exit
+code is followed by a new negotiated Pi read before reporting recovery. Healthy
+connections are not restarted; device selection and Pi permissions stay intact.
+The final Pi read determines recovery even when the helper reports a diagnostic
+error. In read-only environments the recovery POST remains prohibited; Refresh
+falls back to the existing status GET and reports that transport recovery is
+restricted, rather than treating that restriction as a connection failure.
+
 ## Device configuration
 
 Configure devices on the **server**, using private environment configuration:
@@ -451,3 +480,16 @@ geometry, accessible labels and light/dark colors at desktop and phone widths.
 Every Rider mutation is rejected; sample-library GETs are fixtures. Run with
 Playwright CLI `run-code --filename` alongside the existing control-workspace,
 camera-lifecycle and ui-consistency scenarios.
+
+## Operator workspace on small screens
+
+The driving workspace opens in its focused view on narrow or short windows. The
+expand/restore button switches back to the host layout. Steering arrows and motor
+STOP stay in place while manual/automatic views and status messages change.
+Operator messages share the scrollable information area below the arrows; long
+errors do not reserve a separate panel at the bottom of the screen.
+
+The device transport is independent of the web stack. After a host restart,
+restore the configured device connection before diagnosing disabled controls.
+An unavailable connection keeps motion controls disabled; reconnecting does not
+arm the robot or replay a previous movement command.

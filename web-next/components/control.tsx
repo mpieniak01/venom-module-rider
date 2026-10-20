@@ -6,7 +6,7 @@ import { manualFeedback } from "../lib/manual-feedback";
 import { frameAge } from "../lib/vision-frame";
 import { previewNotice } from "../lib/loop-controls";
 /* eslint-disable @next/next/no-img-element -- Pi binary frames use revocable object URLs. */
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import { displayedPreview, previewLifetime } from "../lib/preview-media";
 import { SampleCapture } from "./sample-capture";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Camera, CirclePause, CircleStop } from "lucide-react";
@@ -22,7 +22,7 @@ const arrows = [
   { direction: "right" as const, row: 2, column: 3, Icon: ArrowRight },
   { direction: "backward" as const, row: 3, column: 2, Icon: ArrowDown },
 ];
-export function ManualPad({ client, t, language, compact = false }: { client: RiderClient; t: Translator; language: string; compact?: boolean }) {
+export function ManualPad({ client, t, language, compact = false, children }: { client: RiderClient; t: Translator; language: string; compact?: boolean; children?: ReactNode }) {
   const [mode, setMode] = useState<"pulse" | "continuous">("pulse");
   const helpId = useId();
   const safety = safetyOf(client.status);
@@ -92,6 +92,7 @@ export function ManualPad({ client, t, language, compact = false }: { client: Ri
     </div>
     <div className={styles.padStatus}><Pill tone={safety.state === "ARMED" ? "good" : "warning"}>{t(safety.state === "ARMED" ? "armed" : safety.state === "ESTOP" ? "estop" : safety.state === "DISARMED" ? "disarmed" : "unknown")}</Pill>{(client.status?.errors.control || safety.stale === true) && <Pill tone="warning">{t("lastPermission")}</Pill>}{!!record(safety.execution).inhibit && <Pill tone="warning">{t("executionPaused")}</Pill>}{client.activeDirection && <Pill tone="good">{t(client.manualMode === "continuous" ? "continuousPad" : "held")} · {t(client.activeDirection)}</Pill>}</div>
     <div className={`${styles.flex} ${styles.space}`} style={{ marginTop: 15 }}><span className={styles.small}>{t("owner")}: {typeof safety.owner === "string" ? safety.owner : "—"}</span><Button onClick={() => client.hold.release()} disabled={!client.activeDirection}><CirclePause size={15} />{t("endDirection")}</Button></div>
+      {children}
     </div>
   </div>;
 }

@@ -18,6 +18,10 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
 
+class ConnectionRefresh(StrictModel):
+    pass
+
+
 class Selection(StrictModel):
     device_id: str | None
 

@@ -15,14 +15,25 @@ async page => {
   let armed = false, owner = null, holder = null, generation = "fixture-0", serial = 0;
   let configured = true;
   let connection = "online", reject = false, output = {lx:0, az:0}, controlMissing = false;
-  const calls = [];
+  const calls = [], refreshes = [];
+  let recoverable = true, readOnly = false;
   const policy = {revision:1,mode:"observe",speed:.1,max_motion_ms:150,decision_budget_ms:300,corridor:[.35,.65,.65,.95],verified:false,perception:{engine:"depth_plane"}};
   const safety = () => ({state:armed?"ARMED":"DISARMED",owner,generation,panel_motion_enabled:true,ready:true,can_move:armed,stale:false,observed_at:Date.now()/1000,output,capabilities:{move:{available:true}},panel_control:{version:1,holder},remote_decision_deadline_supported:true,scoped_stop_generation_supported:true});
   await page.route("**/api/v1/rider/**", async route => {
     const req = route.request(), path = new URL(req.url()).pathname.slice("/api/v1/rider".length);
     const json = (body,status=200) => route.fulfill({status,contentType:"application/json",body:JSON.stringify(body)});
     if (req.method() !== "GET") {
-      const body = req.postDataJSON(); calls.push({path,body});
+      const body = req.postDataJSON();
+      if (path === "/connection/refresh") {
+        refreshes.push({body,session:req.headers()["x-rider-session"]});
+        check(Object.keys(body).length===0,"refresh supplied actuator/transport arguments");
+        check(req.headers()["x-rider-session"]==="workspace-fixture","refresh used stale device session");
+        await new Promise(resolve=>setTimeout(resolve,250));
+        if(readOnly) return json({detail:{code:"environment_read_only"}},403);
+        if(recoverable){connection="online";controlMissing=false;}
+        return json({connection:{status:connection},recovery:{attempted:true,state:recoverable?"recovered":"failed",...(recoverable?{}:{error:"connection_recovery_failed"})}});
+      }
+      calls.push({path,body});
       if (path === "/control") {
         if (reject) return json({detail:{code:"fixture_rejection_"+"details_".repeat(30)}},409);
         if (body.action === "arm") { armed=true; owner="manual";holder=body.panel_id;generation="fixture-"+(++serial); }
@@ -79,6 +90,42 @@ async page => {
     await page.getByTestId("workspace-manual").click();
     await same(initial,"manual view");
     check(calls.length===0,"view changed authority/resources");
+    connection="offline"; controlMissing=true;
+    await wait(async()=>(await page.getByTestId("operator-messages").innerText()).includes("Ostatni znany stan"),"offline state not observed before refresh");
+    await page.getByTestId("rider-refresh").click();
+    check(await page.getByTestId("rider-refresh").isDisabled(),"refresh can run twice concurrently");
+    await wait(async()=>!await page.getByTestId("rider-refresh").isDisabled(),"refresh stayed busy");
+    check(!await page.getByTestId("rider-arm").isDisabled(),"refresh failed to restore current controls");
+    check(await page.getByTestId("rider-forward").isDisabled(),"refresh armed robot");
+    check(refreshes.length===1 && calls.length===0,"refresh replayed a hardware command");
+    await same(initial,"refresh success");
+    recoverable=false; connection="offline";controlMissing=true;
+    await wait(async()=>(await page.getByTestId("operator-messages").innerText()).includes("Ostatni znany stan"),"offline state missing before failed refresh");
+    await page.getByTestId("rider-refresh").click();
+    await wait(async()=>!await page.getByTestId("rider-refresh").isDisabled(),"failed refresh stayed busy");
+    check(await page.getByTestId("rider-forward").isDisabled(),"failed refresh enabled motion");
+    check((await page.getByTestId("operator-messages").innerText()).includes("Ostatni znany stan"),"failed refresh hid offline state");
+    check((await page.getByTestId("rider-messages").innerText()).includes("Nie udało się potwierdzić połączenia"),"failed refresh did not explain recovery");
+    recoverable=true;
+    await page.getByTestId("rider-refresh").click();
+    await wait(async()=>!await page.getByTestId("rider-refresh").isDisabled(),"retry stayed busy");
+    check(!await page.getByTestId("rider-arm").isDisabled(),"retry did not restore current state");
+    check(calls.length===0,"reconnect retry replayed a hardware command");
+    scenarios.push("refresh: disconnected transport, bounded busy, failed recovery and retry; no ARM or command replay");
+    readOnly=true;
+    await page.getByTestId("rider-refresh").click();
+    await wait(async()=>!await page.getByTestId("rider-refresh").isDisabled(),"read-only refresh stayed busy");
+    check((await page.getByTestId("rider-messages").innerText()).includes("Odczytano aktualny stan Pi. Tryb tylko do odczytu"),"healthy read-only refresh showed a connection failure");
+    connection="offline";controlMissing=true;
+    await wait(async()=>(await page.getByTestId("operator-messages").innerText()).includes("Ostatni znany stan"),"read-only offline state missing");
+    await page.getByTestId("rider-refresh").click();
+    await wait(async()=>!await page.getByTestId("rider-refresh").isDisabled(),"read-only offline refresh stayed busy");
+    check((await page.getByTestId("rider-messages").innerText()).includes("Brak potwierdzenia połączenia z Pi. Tryb tylko do odczytu"),"offline read-only restriction missing");
+    check(calls.length===0,"read-only fallback issued a hardware command");
+    readOnly=false;
+    await page.getByTestId("rider-refresh").click();
+    await wait(async()=>!await page.getByTestId("rider-refresh").isDisabled(),"refresh after read-only restriction stayed busy");
+    scenarios.push("read-only refresh: status GET works online, offline recovery stays restricted, no hardware command");
     await page.getByTestId("rider-arm").click();
     await wait(async()=>!await page.getByTestId("rider-forward").isDisabled(),"fixture manual permission missing");
     await page.getByTestId("rider-messages").getByRole("status").filter({hasText:"Polecenie przyjęte"}).waitFor();
@@ -91,6 +138,11 @@ async page => {
     connection="offline";controlMissing=true;
     await wait(async()=>(await page.getByTestId("operator-messages").innerText()).includes("Ostatni znany stan"),"offline notice absent");
     await same(initial,"offline notice");
+    const lastMessage=page.getByTestId("operator-messages").locator("p").last();
+    await lastMessage.scrollIntoViewIfNeeded();
+    const messages=await lastMessage.boundingBox();
+    check(messages && messages.y>=0 && messages.y+messages.height<=1000,"last offline message cannot be reached inside the viewport");
+    await same(initial,"scrolling offline messages keeps controls fixed");
     check(await page.getByTestId("rider-arm").getAttribute("aria-pressed")==="true","missing read faked disarm");
     connection="online";controlMissing=false;
     await wait(async()=>!await page.getByTestId("rider-forward").isDisabled(),"manual control not restored");
@@ -160,11 +212,26 @@ async page => {
     check(phonePreview && phonePreview.height>=150 && phonePreview.y+phonePreview.height<=844,"phone preview inaccessible");
     check(calls.filter(c=>c.body.action==="arm").length===1,"phone startup armed");
     scenarios.push("phone first load: focused workspace, accessible preview, no ARM");
+    for(const viewport of [{width:1280,height:720},{width:1366,height:768}]) {
+      const callsBefore=calls.length;
+      await page.setViewportSize(viewport);
+      await page.reload();
+      await page.getByTestId("rider-forward").waitFor();
+      await stable();
+      const surface=await page.getByTestId("rider-page").boundingBox();
+      const controls=await boxes();
+      check(surface && surface.y===0 && surface.height===viewport.height,"short desktop did not open focused workspace");
+      check(controls["rider-backward"].y+controls["rider-backward"].height<=viewport.height,"short desktop hid backward control");
+      await page.getByTestId("operator-messages").scrollIntoViewIfNeeded();
+      await same(controls,"short desktop operator messages");
+      check(calls.length===callsBefore,"short desktop startup mutated robot");
+      scenarios.push(viewport.width+"x"+viewport.height+": complete controls and scrollable messages, no actuation");
+    }
     configured=false;
     await wait(async()=>await page.getByTestId("operator-console").count()===0,"unconfigured fallback not shown");
     check(await page.getByTestId("rider-messages").count()===1,"fallback lost operator messages");
     scenarios.push("unconfigured fallback retains messages");
-    return {result:"PASS",scenarios,fixtureOnly:true,mutations:calls.length,desktopTargets:initial};
+    return {result:"PASS",scenarios,fixtureOnly:true,transportRefreshes:refreshes.length,mutations:calls.length,desktopTargets:initial};
   } finally {
     await page.goto("about:blank");
     await page.unroute("**/api/v1/rider/**");

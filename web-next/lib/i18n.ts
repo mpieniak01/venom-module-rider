@@ -1,5 +1,11 @@
 // Module-owned translations. Every key contains PL, EN and DE by construction.
 export const messages = {
+  connectionReadOnlyRefreshed: ["Odczytano aktualny stan Pi. Tryb tylko do odczytu blokuje odtwarzanie transportu.", "Current Pi state loaded. Read-only mode prevents transport recovery.", "Aktueller Pi-Status geladen. Der Nur-Lese-Modus verhindert die Wiederherstellung der Verbindung."],
+  connectionReadOnlyUnavailable: ["Brak potwierdzenia połączenia z Pi. Tryb tylko do odczytu blokuje odtwarzanie transportu.", "Pi connection unconfirmed. Read-only mode prevents transport recovery.", "Pi-Verbindung unbestätigt. Der Nur-Lese-Modus verhindert die Wiederherstellung der Verbindung."],
+  connectionRefreshHint: ["Odśwież stan i w razie potrzeby odtwórz skonfigurowane połączenie z Pi", "Refresh state and recover the configured Pi connection if needed", "Status aktualisieren und konfigurierte Pi-Verbindung bei Bedarf wiederherstellen"],
+  connectionRefreshing: ["Sprawdzanie i odtwarzanie połączenia z Pi…", "Checking and recovering the Pi connection…", "Pi-Verbindung wird geprüft und wiederhergestellt…"],
+  connectionRefreshed: ["Odczytano aktualny stan Pi. Sterowanie wymaga aktualnej zgody operatora.", "Current Pi state loaded. Control requires current operator permission.", "Aktueller Pi-Status geladen. Steuerung erfordert eine aktuelle Bedienerfreigabe."],
+  connectionRefreshFailed: ["Nie udało się potwierdzić połączenia z Pi. Sprawdź zasilanie i sieć urządzenia; potem użyj Odśwież.", "Pi connection could not be confirmed. Check device power and network, then use Refresh.", "Pi-Verbindung nicht bestätigt. Stromversorgung und Netzwerk prüfen, dann Aktualisieren verwenden."],
   operatorPauseHint: ["Zatrzymuje ruch i pauzuje automat; kamera i analiza pozostają aktywne.", "Stops motion and pauses automatic control; camera and analysis stay active.", "Stoppt die Bewegung und pausiert die Automatik; Kamera und Analyse bleiben aktiv."],
   operatorTakeoverHint: ["Przejmuje ruch i pozostawia automat w pauzie, bez zmiany kamery i analizy.", "Takes motion control and leaves automatic control paused, preserving camera and analysis.", "Übernimmt die Bewegung und pausiert die Automatik; Kamera und Analyse bleiben aktiv."],
   operatorResume: ["Wznów automat", "Resume automatic control", "Automatik fortsetzen"],
@@ -529,7 +535,7 @@ export const messages = {
   online: ["Połączono", "Connected", "Verbunden"],
   degraded: ["Część danych niedostępna", "Some data is unavailable", "Einige Daten sind nicht verfügbar"],
   demo: ["DEMO — symulowane urządzenie. Polecenia i pomiary są fikcyjne.", "DEMO — simulated device. Commands and measurements are fictional.", "DEMO — simuliertes Gerät. Befehle und Messwerte sind fiktiv."],
-  offlineHint: ["Ostatni znany stan. Nowe polecenie sprawdzi połączenie; stare polecenia nie są ponawiane.", "Last known state. A new command checks the connection; old commands are not retried.", "Letzter bekannter Status. Ein neuer Befehl prüft die Verbindung; alte Befehle werden nicht wiederholt."],
+  offlineHint: ["Ostatni znany stan. Użyj Odśwież, aby sprawdzić i odzyskać połączenie. Stare polecenia nie są ponawiane.", "Last known state. Use Refresh to check and recover the connection. Old commands are not retried.", "Letzter bekannter Status. Mit Aktualisieren die Verbindung prüfen und wiederherstellen. Alte Befehle werden nicht wiederholt."],
   demoTag: ["Demo", "Demo", "Demo"],
   arm: ["Uzbrój ręcznie", "Arm manual control", "Manuell aktivieren"],
   disarm: ["Rozbrój", "Disarm", "Deaktivieren"],
