@@ -10,7 +10,7 @@ export function readTimeline(value:unknown):MotionTimeline {
   let total=0;
   for(const value of r.streams){
     const s=record(value);
-    if(!str(s.id)||!Array.isArray(s.points)||!Array.isArray(s.events)||!Array.isArray(s.outputs)||!Array.isArray(s.range)||s.range.length!==2||!s.range.every(finite))throw new Error("motion_timeline_invalid");
+    if(!str(s.id)||!Array.isArray(s.points)||!Array.isArray(s.events)||!Array.isArray(s.outputs)||!Array.isArray(s.range)||s.range.length!==2||!s.range.every(finite)||s.range[1]<s.range[0]||!finite(s.range[1]-s.range[0]))throw new Error("motion_timeline_invalid");
     total+=s.points.length+s.events.length+s.outputs.length;
     if(total>2048)throw new Error("motion_timeline_invalid");
     for(const item of [...s.points,...s.events,...s.outputs])if(!finite(record(item).t))throw new Error("motion_timeline_invalid");

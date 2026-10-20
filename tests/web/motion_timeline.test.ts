@@ -22,6 +22,7 @@ test("archive selection validates bounds and preserves explicit empty streams",(
   assert.equal(readTimeline(data).streams.length,1);
   assert.throws(()=>readTimeline({...data,schema_version:2}));
   assert.throws(()=>readTimeline({...data,streams:[{...stream(),range:[NaN,1]}]}));
+  assert.throws(()=>readTimeline({...data,streams:[{...stream(),range:[-1e308,1e308]}]}));
   assert.throws(()=>readTimeline({...data,streams:[{...stream(),points:[{...point(0),t:Infinity}]}]}));
 });
 test("profile follows recorded request identity, never current application settings",()=>{
