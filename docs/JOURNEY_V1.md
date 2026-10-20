@@ -107,7 +107,9 @@ Navigation status retains `journey` with `version`, `id`, `active`, `state`,
 States distinguish qualification, forward, steering, waiting and termination.
 The panel shows current image assessment separately from Pi actuation state.
 
-Stop journey sends the existing global control STOP and retains observation;
+The manual pad STOP also revokes a pending journey preparation, including its
+initial control read before the Start request is sent. A delayed Start cannot
+re-arm after this STOP. Stop journey sends the same global control STOP and retains observation;
 Stop loop and camera keeps its resource shutdown meaning. The fixed header STOP
 remains available. On a Pi advertising `safety.operator_intervention_version:1`,
 a direction gesture carries fresh explicit manual consent and atomically ends

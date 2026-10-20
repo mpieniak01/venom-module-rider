@@ -7,7 +7,7 @@ async page => {
   const wait=async(fn,message)=>{const end=Date.now()+8000;while(!await fn()){check(Date.now()<end,message);await new Promise(resolve=>setTimeout(resolve,30));}};
   const calls=[],scenarios=[],sha="a".repeat(64),cancelled=new Set(),arrived=[];
   let version=true,online=true,controlStale=false,state="DISARMED",owner=null,holder=null,arming=null,generation="fixture-0",serial=0,operation="idle",seq=0;
-  let statusDelay=0,slowReads=0,frameSequence=0;
+  let statusDelay=0,slowReads=0,statusPending=0,frameSequence=0;
   let journey=null,journeyPending=null,journeyDelay=0,moveDelay=false,delayAfterExecute=false,generationRace=false,releaseMove=null;
   const advance=()=>{generation="fixture-"+(++serial);seq=0;};
   const settings={revision:1,directions:Object.fromEntries(["forward","backward","left","right"].map(direction=>[direction,{speed:.2,duration:.25,minimum:0,maximum:1,step:.01}])),parameter_schema:{direction_fields:{speed:{display_factor:100,display_precision:0,display_unit:"%"}}},control_modes:{version:1,supported:["pulse","hold","release"],hold_renewal_ms:150,hold_timeout_ms:500,click_threshold_ms:180,request_ttl_ms:500}};
@@ -64,7 +64,7 @@ async page => {
     }
     if(path==="/config")return json({devices:[{id:"fixture",label:"Fixture",mode:"demo"}],device_id:"fixture",session:"operator-journey-fixture"});
     if(path==="/status"){
-      if(statusDelay){await new Promise(resolve=>setTimeout(resolve,statusDelay));slowReads++;}
+      if(statusDelay){statusPending++;await new Promise(resolve=>setTimeout(resolve,statusDelay));slowReads++;statusPending--;}
       return json({connection:{configured:true,status:online?"online":"offline",session:"operator-journey-fixture",device_id:"fixture",mode:"demo"},polling:{control_ms:100},settings,errors:{},control:{server_time:Date.now()/1000,safety:safety()},telemetry:{},health:{},resources:{},catalog:{features:[]},logic:{},face:{}});
     }
     if(path.startsWith("/navigation/"))return json(navigation());
@@ -85,6 +85,28 @@ async page => {
     await forward.click();await wait(()=>owner==="manual","one disarmed click did not take manual authority");
     check(calls.length===1&&calls[0].body.mode==="pulse"&&calls[0].body.operator_consent===true,"disarmed click queued ARM/poll/pause");
     scenarios.push("normal DISARMED accepts one explicit direction; startup never grants consent");
+    const manualPanel=holder;
+    state="DISARMED";owner=null;holder=null;arming=null;advance();await enterJourney();
+    statusDelay=800;const earlyStopAt=calls.length,readsBefore=slowReads;
+    await page.getByTestId("journey-start").click();await wait(()=>statusPending>0,"initial preparation read not delayed");
+    await page.getByTestId("rider-pad-stop").click();
+    await wait(()=>calls.slice(earlyStopAt).some(c=>c.body.action==="stop"),"pad STOP failed during initial preparation read");
+    statusDelay=0;await wait(()=>slowReads>readsBefore,"initial read never completed");await new Promise(r=>setTimeout(r,120));
+    check(!calls.slice(earlyStopAt).some(c=>c.path==="/navigation/journey"),"stopped initial read submitted delayed Start");
+    check(state==="DISARMED"&&owner===null,"early pad STOP did not preserve DISARMED");
+    scenarios.push("pad STOP during the initial control read cancels preparation before a Start request is admitted");
+    for(const before of ["DISARMED","manual"]){
+      state=before==="manual"?"ARMED":"DISARMED";owner=before==="manual"?"manual":null;
+      holder=before==="manual"?manualPanel:null;arming=before==="manual"?"operator":null;advance();
+      await enterJourney();journeyDelay=1100;
+      const stopAt=calls.length;await page.getByTestId("journey-start").click();
+      await wait(()=>!!journeyPending,"pending Start absent for pad STOP test");
+      await page.getByTestId("rider-pad-stop").click();
+      await wait(()=>calls.slice(stopAt).some(c=>c.path==="/control"&&c.body.action==="stop"),"pad STOP failed to cancel preparing Start from "+before);
+      await wait(()=>journeyPending===null,"cancelled Start still pending");
+      check(state==="DISARMED"&&owner===null&&!journey?.active,"Start armed after pad STOP from "+before);
+      scenarios.push("pad STOP revokes pending Start before navigation ownership appears from "+before);
+    }
     state="DISARMED";owner=null;holder=null;arming=null;advance();await enterJourney();journeyDelay=1100;
     const prepareStart=calls.length;await page.getByTestId("journey-start").click();
     await wait(()=>!!journeyPending,"preparation did not start");

@@ -374,7 +374,7 @@ export function useRider(section: Section) {
   const stopManual = useCallback(async () => {
     motionEpoch.current += 1;
     hold.cancel();
-    if (journeyOwnsMotion(statusRef.current)) return command({ action: "stop" }, true);
+    if (journeyPreparing.current > 0 || pendingJourney.current || journeyOwnsMotion(statusRef.current)) return command({ action: "stop" }, true);
     if (operatorSessionActive(statusRef.current) || pendingResume.current) return command({ action: "navigation_pause" }, true);
     if (!navigationAvailable(statusRef.current, panelId)) return null;
     return command({ action: "move", device_settings: true, direction: "forward", mode: "release" });
