@@ -7,6 +7,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .motion_contract import MotionCommand, MotionProfile
+
 EVIDENCE_SCHEMA_VERSION = 1
 MAX_EVIDENCE_RECORD_BYTES = 8192
 MAX_EVIDENCE_RAM_BYTES = 64 * 1024
@@ -17,26 +19,36 @@ MAX_EVIDENCE_SESSION_RECORDS = 2048
 EVIDENCE_ASSOCIATION = "host-reception-window-unmatched-exposure"
 
 
-class EvidenceRecord(BaseModel):
+class EvidenceBase(BaseModel):
     """Original clocks and observations, without physical-motion assertions."""
 
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
-    schema_version: Literal[1] = 1
     record_id: str = Field(pattern=r"^[a-f0-9]{64}$")
-    kind: Literal["imu", "executor"]
     device_id: str = Field(min_length=1, max_length=128)
     source_session: str = Field(min_length=1, max_length=128)
     source_instance_id: str | None = Field(default=None, max_length=128)
     source_observed_at: float | None = None
-    source_clock_domain: Literal["device-wall-unsynchronised"] = (
-        "device-wall-unsynchronised"
-    )
     received_mono: float
     received_at: float
     values: dict[str, float | None] = Field(default_factory=dict)
     units: dict[str, str] = Field(default_factory=dict)
     quality: dict[str, Any] = Field(default_factory=dict)
     executor: dict[str, Any] | None = None
+
+
+class EvidenceRecord(EvidenceBase):
+    schema_version: Literal[1] = 1
+    kind: Literal["imu", "executor"]
+    source_clock_domain: Literal["device-wall-unsynchronised"] = (
+        "device-wall-unsynchronised"
+    )
+
+
+class HostEvidenceRecord(EvidenceBase):
+    schema_version: Literal[2]
+    kind: Literal["command", "profile"]
+    source_clock_domain: Literal["host-monotonic"]
+    host: MotionCommand | MotionProfile
 
 
 def validate_evidence(value: object) -> dict[str, Any]:
@@ -51,7 +63,17 @@ def validate_evidence(value: object) -> dict[str, Any]:
         raise ValueError("evidence_record_invalid") from exc
     if len(original.encode()) > MAX_EVIDENCE_RECORD_BYTES:
         raise ValueError("evidence_record_size")
-    result = EvidenceRecord.model_validate(value).model_dump(mode="json")
+    model = HostEvidenceRecord if value.get("schema_version") == 2 else EvidenceRecord
+    result = model.model_validate(value).model_dump(mode="json")
+    if result["schema_version"] == 2:
+        if (
+            result["kind"] != result["host"]["type"]
+            or result["source_observed_at"] is not None
+            or result["values"]
+            or result["units"]
+            or result["executor"] is not None
+        ):
+            raise ValueError("evidence_host_invalid")
     encoded = json.dumps(result, allow_nan=False, separators=(",", ":"))
     if len(encoded.encode()) > MAX_EVIDENCE_RECORD_BYTES:
         raise ValueError("evidence_record_size")

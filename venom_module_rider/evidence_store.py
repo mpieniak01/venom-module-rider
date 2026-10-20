@@ -176,7 +176,13 @@ class EvidenceStore:
             saved=len(records),
             bytes=sum(len(canonical(row).encode()) for row in records),
         )
-        return {"schema_version": 1, "records": records, "status": result}
+        return {
+            "schema_version": 2
+            if any(row["schema_version"] == 2 for row in records)
+            else 1,
+            "records": records,
+            "status": result,
+        }
 
 
 def validate_extension(extension):
@@ -184,7 +190,7 @@ def validate_extension(extension):
         not isinstance(extension, dict)
         or set(extension) != {"schema_version", "records", "status"}
         or type(extension["schema_version"]) is not int
-        or extension["schema_version"] != 1
+        or extension["schema_version"] not in {1, 2}
         or not isinstance(extension["records"], list)
         or not isinstance(extension["status"], dict)
         or len(extension["records"]) > MAX_EVIDENCE_SESSION_RECORDS
@@ -196,6 +202,10 @@ def validate_extension(extension):
             if type(value) is not int or value < 0:
                 raise ValueError("invalid evidence counter")
         records = [validate_evidence(row) for row in extension["records"]]
+        if extension["schema_version"] == 1 and any(
+            row["schema_version"] != 1 for row in records
+        ):
+            raise ValueError("evidence_version_mismatch")
         if (
             len(records) > MAX_EVIDENCE_SESSION_RECORDS
             or len({row["record_id"] for row in records}) != len(records)

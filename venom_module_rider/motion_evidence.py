@@ -551,10 +551,11 @@ def analyze_evidence(
     """
     config = _settings(settings)
     rows, summary = _validate_records(records)
-    channels, raw_norm = _channel_report(rows)
-    timing = _timing_report(rows, config)
+    sensor_rows = [row for row in rows if row["schema_version"] == 1]
+    channels, raw_norm = _channel_report(sensor_rows)
+    timing = _timing_report(sensor_rows, config)
     imu_count = sum(row["kind"] == "imu" for row in rows)
-    quality = _quality_summary(rows)
+    quality = _quality_summary(sensor_rows)
     report = {
         "schema_version": REPORT_SCHEMA_VERSION,
         "analyzer_version": ANALYZER_VERSION,
@@ -575,7 +576,11 @@ def analyze_evidence(
             "dataset_revision": None,
         },
         "settings": asdict(config),
-        "counts": {"imu_records": imu_count, "executor_records": len(rows) - imu_count},
+        "counts": {
+            "imu_records": imu_count,
+            "executor_records": sum(row["kind"] == "executor" for row in rows),
+        },
+        "host_record_count": sum(row["schema_version"] == 2 for row in rows),
         "clocks": {
             "source_domain": "device-wall-unsynchronised",
             "host_gap_clock": "received_mono",
@@ -649,7 +654,7 @@ def analyze_manifest(
         if (
             not isinstance(evidence, dict)
             or type(evidence.get("schema_version")) is not int
-            or evidence["schema_version"] != 1
+            or evidence["schema_version"] not in {1, 2}
             or not isinstance(evidence.get("records"), list)
             or not isinstance(evidence.get("status", {}), dict)
         ):

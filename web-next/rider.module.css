@@ -573,3 +573,20 @@
 }
 
 .cameraEmbedded [data-testid="camera-power-toggle"] { width:44px; padding:0 4px; }
+
+.calibrationTop { display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:16px;align-items:start; }
+.calibrationOperator { grid-column:2;grid-row:1;min-width:0;display:grid;gap:16px; }
+.calibrationForms { grid-column:1;grid-row:1;min-width:0;display:grid;gap:16px; }
+.calibrationBottom { display:grid;grid-template-columns:minmax(0,2fr) minmax(0,3fr);gap:16px;align-items:start; }
+.numericInput.formControl { width:12ch;max-width:100%; }
+.motionTrace { min-width:0;max-width:100%; }
+.motionTrace svg, .motionPlotFrame { overflow:visible; }
+.motionTrace text, .motionTrace ~ div svg text { fill:var(--text-primary);font-size:12px; }
+.motionPlotFrame { fill:none;stroke:var(--ui-border);stroke-width:1; }
+.motionSeriesA { stroke:var(--primary);fill:var(--primary);stroke-width:1.5; }
+.motionSeriesB { stroke:var(--tone-warning-text);fill:var(--tone-warning-text);stroke-width:1.5; }
+.motionCursor { stroke:var(--text-secondary);stroke-width:1;stroke-dasharray:3 3; }
+@container rider (max-width:900px) {
+  .calibrationTop,.calibrationBottom { grid-template-columns:minmax(0,1fr); }
+  .calibrationOperator,.calibrationForms { grid-column:auto;grid-row:auto; }
+}

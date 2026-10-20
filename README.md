@@ -513,3 +513,9 @@ See [Journey v1](docs/JOURNEY_V1.md) for protocol, limits and operator acceptanc
 fixture optionally accepts `RIDER_TEST_PI_LEASE` pointing to the actual matching
 Pi source, with its repository root on `PYTHONPATH`; ordinary tests never locate
 or connect to a robot. Physical acceptance remains a separate operator step.
+
+## Recorded motion study
+
+Calibration offers compact fields and synchronized recorded motion comparison.
+See [Motion study v1](docs/MOTION_STUDY_V1.md) for capture, A/B, archive contracts,
+quality limits and isolated acceptance.
