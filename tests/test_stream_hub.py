@@ -334,3 +334,34 @@ async def test_slow_canonical_jobs_remain_bounded_across_expiry_cancel_and_retir
             return_exceptions=True,
         )
         await hub.close()
+
+
+async def test_missing_past_reference_is_rejected_without_waiting_for_new_frames():
+    client, domain, profile, hub = setup()
+    try:
+        async with hub.lease(domain, profile) as connection:
+            await emit(client, native())
+            current = await hub.frame(connection)
+            altered = current.source.reference().model_copy(update={"sha256": "b" * 64})
+            with pytest.raises(RiderError, match="stream_frame_unavailable"):
+                await asyncio.wait_for(
+                    hub.frame(connection, source=altered, timeout=1), 0.05
+                )
+    finally:
+        await hub.close()
+
+
+async def test_canonical_frame_uses_its_own_lane_not_the_global_queue(monkeypatch):
+    client, domain, profile, hub = setup()
+    try:
+        async with hub.lease(domain, profile) as connection:
+            await emit(client, native())
+            current = await hub.frame(connection)
+
+            async def shared_queue(*_args, **_kwargs):
+                raise AssertionError("shared application queue is busy")
+
+            monkeypatch.setattr(asyncio, "to_thread", shared_queue)
+            assert await hub.canonical_frame(connection, current) == current.payload
+    finally:
+        await hub.close()

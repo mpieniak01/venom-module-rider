@@ -351,3 +351,223 @@
   .page:not(.pageFocused)[data-section="control"] .controlPanel { overflow-y: auto; }
   .page:not(.pageFocused)[data-section="control"] .controlWorkspace { min-height: 400px; }
 }
+
+/* Operational cockpit: modes share one mounted camera and one input surface.
+   Only explicitly opened details scroll; command targets never join that flow. */
+.controlWorkspace { position:relative; grid-template-rows:44px 98px minmax(0,1fr); gap:6px; }
+.controlWorkspace [hidden] { display:none !important; }
+.commandDeck { position:relative; min-width:0; padding-right:205px; display:grid; grid-template-rows:66px 26px; gap:4px; }
+.commandDeck > [data-testid$="-commands"] { min-width:0; }
+.commandDeck .panel { padding:0; margin:0; background:none; border:0; box-shadow:none; }
+.commandDeck .panelHeader { display:none; }
+.commandDeck .loopStatus { height:22px; margin:0; gap:6px; flex-wrap:nowrap; overflow:hidden; white-space:nowrap; font-size:12px; }
+.commandDeck .loopStatus > * { flex-shrink:0; }
+.commandDeck [data-testid="active-perception-method"], .commandDeck [data-testid="venom-permission"] { display:none; }
+.commandDeck .loopToolbar { padding:0; margin:0; background:none; border:0; }
+.commandDeck .loopActions { margin:0; display:flex; flex-wrap:nowrap; gap:8px; align-items:center; }
+.commandDeck .loopActions .button { height:44px; min-height:44px; padding:0 12px; }
+.commandDeck .loopActions .small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.commandReason { grid-row:2; font-size:12px; line-height:24px; overflow:auto; white-space:nowrap; color:var(--r-warning,#fbbf24); scrollbar-width:thin; }
+.commandAccess { position:absolute; top:25px; right:0; }
+.manualCommandHint { grid-row:1; display:flex; align-items:center; font-size:12px; color:var(--r-muted); }
+.driveWorkspace { position:relative; grid-template-columns:minmax(0,1fr) 310px; min-height:0; }
+.workspaceContent { position:relative; overflow:hidden; padding:0; display:flex; flex-direction:column; }
+.workspaceContent > .loopCamera { flex:1; min-height:0; margin:0; padding:8px; overflow:hidden; }
+.cameraEmbedded { height:100%; min-height:0; padding:0; display:flex; flex-direction:column; gap:3px; background:none; border:0; box-shadow:none; }
+.cameraEmbedded > .panelHeader { flex:0 0 40px; margin:0; gap:6px; }
+.cameraEmbedded .panelTitle { font-size:14px; }
+.cameraEmbedded > .panelHeader > .flex { gap:6px; flex-wrap:nowrap; }
+.cameraEmbedded .button { min-height:36px; height:36px; padding:0 10px; }
+.cameraSources { display:flex; flex:0 0 36px; gap:6px; }
+.workspaceContent .loopCamera .cameraEmbedded .camera { flex:1 1 0; width:100%; height:auto; min-height:100px; max-height:none; aspect-ratio:auto; }
+.cameraEmbedded .camera img { width:100%; height:100%; object-fit:contain; }
+.cameraEmbedded .camera > .empty { min-height:0; height:100%; padding:8px; }
+.cameraEmbedded .cameraPaused { font-size:11px; line-height:15px; padding:5px; top:4px; left:4px; right:4px; }
+.cameraEmbedded .sectorLegend { flex:0 0 48px; overflow:hidden; margin:0; }
+.cameraEmbedded .sectorGrid { gap:4px; }
+.cameraEmbedded .sectorCard { padding:4px 6px; min-height:44px; overflow:hidden; }
+.cameraEmbedded .sectorCard b { font-size:11px; white-space:nowrap; }
+.cameraEmbedded .sectorCard p { font-size:11px; line-height:16px; margin:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.cameraEmbedded .sectorBadge { margin-right:4px; }
+.sampleCapture[data-compact="true"] { flex:0 0 44px; display:flex; align-items:center; gap:6px; margin:0; padding:0; border:0; }
+.sampleCapture[data-compact="true"] .sampleHeading { display:none; }
+.sampleActions { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+.sampleCapture[data-compact="true"] .sampleActions { flex-wrap:nowrap; }
+.sampleCapture[data-compact="true"] .sampleDetails { margin-left:auto; font-size:11px; }
+.sampleCapture[data-compact="true"] .sampleDetails[open], .cameraEmbedded > .cameraTools[open] { position:absolute; left:8px; right:8px; bottom:8px; max-height:70%; overflow:auto; background:var(--r-panel,#07121f); border:1px solid var(--r-border,#334155); padding:12px; z-index:8; border-radius:10px; }
+.cameraEmbedded > .cameraTools { flex:0 0 20px; margin:0; padding:0; border:0; font-size:11px; }
+.workspaceDetails { position:absolute; z-index:10; inset:0; pointer-events:none; }
+.workspaceDetails > summary { display:none; }
+.workspaceDetails[open] { pointer-events:auto; background:var(--r-panel,#07121f); border:1px solid var(--r-border,#334155); border-radius:12px; overflow:auto; }
+.workspaceDetails[open] > summary { display:list-item; position:sticky; top:0; padding:12px; background:var(--r-panel,#07121f); z-index:2; cursor:pointer; }
+.workspaceDetailsBody { padding:10px; }
+.workspaceDetailsBody .panel { padding:12px; }
+.controlWorkspace .button { border-radius:9px; box-shadow:none; font-weight:600; font-size:12px; }
+.controlWorkspace .button:focus-visible { outline:2px solid var(--r-accent,#7c3aed); outline-offset:2px; }
+.controlWorkspace .button:hover { transform:none; }
+@container rider (max-width:720px) {
+  .controlWorkspace { grid-template-rows:40px 96px minmax(0,1fr); }
+  .controlModeRow { gap:4px; }
+  .controlModes { gap:4px; flex-wrap:nowrap; }
+  .controlModes .button { padding:0 8px; }
+  .workspaceOwner { display:none; }
+  .commandDeck { padding-right:0; }
+  .commandAccess { right:0; top:0; }
+  .commandAccess .button { height:24px; min-height:24px; font-size:10px; padding:0 6px; }
+  .commandDeck .loopActions .button { height:44px; min-height:44px; }
+  .commandDeck .loopActions .small { font-size:10px; }
+  .commandDeck .loopStatus { height:18px; max-width:calc(100% - 155px); padding-right:0; }
+  .driveWorkspace { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(170px,1fr) 218px; gap:6px; }
+  .workspaceContent { grid-row:1; }
+  .operatorConsole { grid-row:2; }
+  .operatorPanel { padding:6px; grid-template-rows:36px minmax(0,1fr); gap:4px; }
+  .operatorPanel > .panelHeader { height:36px; }
+  .operatorPanel .panelTitle { font-size:13px; }
+  .operatorPanel .manualPad { grid-template-columns:190px minmax(0,1fr); grid-template-rows:32px minmax(0,1fr); column-gap:6px; }
+  .operatorPanel .padMode { grid-column:1 / -1; height:32px; }
+  .operatorPanel .pad { grid-row:2; grid-column:1; grid-template-columns:repeat(3,58px); grid-template-rows:repeat(3,44px); margin:0; }
+  .operatorPanel .padDetails { grid-row:2; grid-column:2; }
+  .operatorPanel .padHelp { display:none; }
+  .operatorPanel .manualFeedback { font-size:10px; margin:0 0 4px; padding:4px; }
+  .operatorPanel .manualFeedback > span { display:block; }
+  .operatorPanel .padStatus { gap:3px; }
+  .operatorPanel .pill { font-size:10px; padding:3px 4px; }
+  .cameraEmbedded > .panelHeader { flex-basis:32px; }
+  .cameraEmbedded .panelTitle, .cameraEmbedded [data-testid="camera-power-state"] { display:none; }
+  .cameraEmbedded > .panelHeader > .flex { width:100%; justify-content:space-between; }
+  .cameraEmbedded .button { height:32px; min-height:32px; padding:0 7px; font-size:11px; }
+  .cameraSources { flex-basis:32px; }
+  .cameraEmbedded .sectorCard b { font-size:10px; }
+  .cameraEmbedded .sectorCard p { font-size:10px; }
+  .sampleCapture[data-compact="true"] { flex-basis:36px; }
+  .sampleCapture[data-compact="true"] .sampleDetails { max-width:100px; }
+}
+@media (max-height:620px) and (min-width:721px) {
+  .pageFocused[data-section="control"] { padding:4px 8px; }
+  .pageFocused .controlWorkspace { grid-template-rows:36px 72px minmax(0,1fr); gap:4px; }
+  .pageFocused .commandDeck { grid-template-rows:44px 24px; }
+  .pageFocused .commandDeck .loopStatus { display:none; }
+  .pageFocused .commandAccess { top:0; }
+  .pageFocused .cameraEmbedded > .panelHeader, .pageFocused .cameraSources { display:none; }
+  .pageFocused .cameraEmbedded .sectorLegend { flex-basis:44px; }
+  .pageFocused .cameraEmbedded > .cameraTools { display:none; }
+  .pageFocused .operatorPanel .padDetails { font-size:11px; }
+}
+
+.cameraEmbedded { position:relative; }
+.cameraEmbedded > .panelHeader { justify-content:flex-end; flex:0 0 44px; }
+.cameraEmbedded > .panelHeader .panelTitle { display:none; }
+.cameraEmbedded > .panelHeader [data-testid="camera-power-state"] { display:none; }
+.cameraEmbedded .cameraSources { position:absolute; top:0; left:0; height:44px; align-items:center; }
+.cameraEmbedded .cameraSources .button, .cameraEmbedded > .panelHeader .button { min-height:44px; height:44px; }
+.sampleCapture[data-compact="true"] .button { min-height:44px; height:44px; }
+@container rider (min-width:721px) and (max-width:899px) {
+  .header { flex-wrap:nowrap; gap:8px; padding:6px 8px; }
+  .brand { flex:0 0 auto; }
+  .brandIcon, .subtitle { display:none; }
+  .title { font-size:17px; white-space:nowrap; }
+  .toolbar { flex:1; flex-wrap:nowrap; justify-content:flex-end; gap:6px; }
+  .toolbar .field > span { display:none; }
+  .toolbar select { width:76px; }
+  .toolbar > .pill { width:100px; min-width:0; }
+  .toolbar [data-testid="rider-arm"] { width:155px; }
+  .toolbar [data-testid="rider-stop"] { padding:0 12px; }
+}
+@container rider (max-width:720px) {
+  .header { display:grid; grid-template-columns:1fr; padding:6px 8px; gap:4px; }
+  .brand { display:none; }
+  .toolbar { display:grid; grid-template-columns:76px minmax(0,1fr) 44px 44px; gap:4px; }
+  .toolbar .field { margin:0; }
+  .toolbar > .pill { width:auto; max-width:none; }
+  .toolbar [data-testid="rider-arm"] { grid-column:1 / 3; width:100%; min-height:44px; height:44px; }
+  .toolbar [data-testid="rider-stop"] { grid-column:3 / 5; width:100%; min-height:44px; height:44px; }
+  .toolbar [data-testid="workspace-expand"] { grid-column:4; grid-row:1; }
+  .toolbar [data-testid="rider-refresh"] { grid-column:3; grid-row:1; }
+  .controlWorkspace { grid-template-rows:40px 82px minmax(0,1fr); }
+  .commandDeck { grid-template-rows:62px 20px; gap:0; }
+  .manualCommandHint { align-items:flex-end; padding-bottom:8px; }
+  .driveWorkspace { grid-template-rows:minmax(170px,1fr) 222px; }
+  .cameraEmbedded > .panelHeader { flex-basis:44px; }
+  .cameraEmbedded > .panelHeader > .flex { width:auto; }
+  .cameraEmbedded .sectorLegend { flex-basis:46px; }
+  .sampleCapture[data-compact="true"] { flex-basis:44px; }
+  .sampleCapture[data-compact="true"] .button { padding:0 6px; font-size:10px; }
+  .sampleCapture[data-compact="true"] .sampleDetails { max-width:90px; }
+}
+@media (max-height:620px) and (min-width:721px) {
+  .pageFocused > .header { margin-bottom:4px; }
+  .pageFocused > .tabs { margin-bottom:4px; }
+  .pageFocused > .tabs .tab { padding:5px 10px; }
+  .pageFocused .controlWorkspace { grid-template-rows:36px 48px minmax(0,1fr); }
+  .pageFocused .commandDeck { grid-template-rows:44px; padding-right:200px; }
+  .pageFocused .commandReason { grid-row:auto; position:absolute; left:300px; right:205px; top:0; height:44px; max-width:none; display:flex; align-items:center; background:var(--bg-panel); font-size:10px; }
+  .pageFocused .commandDeck .loopActions .small { display:none; }
+  .pageFocused .manualCommandHint { align-items:center; }
+  .pageFocused .operatorPanel > .panelHeader { height:32px; }
+  .pageFocused .operatorPanel { grid-template-rows:32px minmax(0,1fr); }
+  .pageFocused .operatorPanel .manualPad { grid-template-columns:190px minmax(0,1fr); grid-template-rows:32px minmax(0,1fr); }
+  .pageFocused .operatorPanel .padMode { grid-column:1 / -1; height:32px; }
+  .pageFocused .operatorPanel .pad { grid-column:1; grid-row:2; grid-template-columns:repeat(3,58px); grid-template-rows:repeat(3,44px); gap:4px; margin:0; }
+  .pageFocused .operatorPanel .padDetails { grid-column:2; grid-row:2; }
+  .pageFocused .driveWorkspace { grid-template-columns:minmax(0,1fr) 390px; gap:8px; }
+  .pageFocused .cameraEmbedded .cameraSources { display:none; }
+  .pageFocused .operatorPanel .panelTitle { font-size:12px; }
+}
+
+@media (max-height:620px) and (min-width:721px) {
+  .pageFocused .header { min-height:44px; height:44px; box-sizing:border-box; padding:0 6px; gap:6px; }
+  .pageFocused .toolbar { gap:4px; }
+  .pageFocused .toolbar > .pill { height:28px; }
+  .pageFocused .header .brand { flex-basis:76px; }
+  .pageFocused .header .title { font-size:14px; }
+  .pageFocused .toolbar .button { min-height:36px; height:36px; }
+  .pageFocused .operatorPanel { padding:2px 4px; grid-template-rows:28px minmax(0,1fr); gap:2px; }
+  .pageFocused .operatorPanel > .panelHeader { height:28px; }
+  .pageFocused .operatorPanel > .panelHeader .button { min-height:28px; height:28px; }
+  .pageFocused .operatorPanel .manualPad { grid-template-rows:28px minmax(0,1fr); }
+  .pageFocused .operatorPanel .padMode { height:28px; }
+  .pageFocused .operatorPanel .padMode select { height:28px; min-height:28px; }
+  .pageFocused .cameraEmbedded .camera { min-height:100px; }
+}
+@container rider (max-width:720px) {
+  .cameraEmbedded .sectorLegend { flex-basis:44px; }
+  .cameraEmbedded .sectorCard { min-height:40px; }
+}
+
+@container rider (max-width:720px) {
+  /* Restoring host navigation explicitly trades image space for its chrome.
+     Keep manual intervention first; the default focused view shows both. */
+  .page:not(.pageFocused)[data-section="control"] { min-height:0; }
+  .page:not(.pageFocused) .driveWorkspace { grid-template-rows:222px minmax(40px,1fr); }
+  .page:not(.pageFocused) .operatorConsole { grid-row:1; }
+  .page:not(.pageFocused) .workspaceContent { grid-row:2; }
+}
+
+@container rider (max-width:720px) {
+  .operatorPanel .manualPad { grid-template-columns:minmax(0,1fr) 190px; }
+  .operatorPanel .pad { grid-column:2; }
+  .operatorPanel .padDetails { grid-column:1; }
+}
+
+@container rider (max-width:720px) {
+  .cameraEmbedded { gap:3px; }
+}
+@media (max-height:620px) and (min-width:721px) {
+  .pageFocused .workspaceContent > .loopCamera { padding:4px; }
+  .pageFocused .cameraEmbedded .sectorLegend { flex-basis:24px; }
+  .pageFocused .cameraEmbedded .sectorCard { display:flex; align-items:center; gap:3px; padding:0 3px; min-height:24px; height:24px; }
+  .pageFocused .cameraEmbedded .sectorCard b { font-size:0; }
+  .pageFocused .cameraEmbedded .sectorBadge { font-size:11px; margin:0; }
+  .pageFocused .cameraEmbedded .sectorCard p { font-size:10px; }
+}
+
+.sampleCapture[data-compact="true"] .sampleDetails { flex:0 0 120px; width:120px; max-width:120px; }
+.sampleCapture[data-compact="true"] .sampleActions { min-width:0; flex:1 1 auto; }
+.sampleCapture[data-compact="true"] .sampleActions .button { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+@container rider (max-width:720px) {
+  .sampleCapture[data-compact="true"] .sampleDetails { flex-basis:90px; width:90px; max-width:90px; }
+}
+
+@container rider (max-width:720px) {
+  .commandDeck .loopStatus .small, .commandDeck .loopActions .small { display:none; }
+}
