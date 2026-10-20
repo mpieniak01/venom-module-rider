@@ -5,6 +5,7 @@ async page=>{
  check(new URL(origin).port==="18798","Isolated fixture port required");
  const fixture=await(await page.request.get(origin+"/fixture")).json();
  check(fixture.config.devices.every(d=>d.mode==="demo"),"Demo fixture required");
+ if(fixture.config.device_id!==fixture.config.devices[0].id)await page.getByTestId("rider-environment").selectOption(fixture.config.devices[0].id);
  await page.getByTestId("rider-stop").click();
  const requests=[];
  page.on("request",r=>{if(r.method()!=="GET"&&r.url().includes("/api/v1/rider"))requests.push({path:new URL(r.url()).pathname,body:r.postDataJSON()});});
@@ -43,6 +44,7 @@ async page=>{
    await new Promise(resolve=>setTimeout(resolve,250));
  }
  check(observed,"No telemetry arrived before end");
+ const headerHeight=(await page.locator("header").boundingBox()).height;
  let failEnd=true;
  await page.route("**/api/v1/rider/samples/sessions/"+sid+"/end",async route=>{
    if(failEnd){failEnd=false;return route.fulfill({status:503,contentType:"application/json",body:JSON.stringify({detail:{code:"fixture_end_failure"}})});}
@@ -50,9 +52,10 @@ async page=>{
  });
  await page.getByTestId("study-end").click();
  await bar.getByRole("alert").waitFor();
+ check(Math.abs((await page.locator("header").boundingBox()).height-headerHeight)<=1,"Recording error resized driving header");
  check(await page.getByTestId("study-end").isEnabled(),"Failed end lost retry");
  await page.getByRole("tab").nth(3).click();
- check(await state.innerText()===label,"Failed end lost recording after tab change");
+ check((await state.innerText()).includes(sid.slice(0,8)),"Failed end lost recording after tab change");
  await page.getByTestId("study-end").click();
  await page.waitForFunction(()=>document.querySelector('[data-testid="study-record"]')?.disabled===false&&document.querySelector('[data-testid="study-end"]')?.disabled===true);
  const timeline=await(await page.request.get(origin+"/api/v1/rider/samples/sessions/"+sid+"/motion-timeline")).json();

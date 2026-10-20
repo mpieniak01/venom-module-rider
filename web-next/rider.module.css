@@ -605,12 +605,11 @@
 /* Page-owned actions remain in the sticky header above every module tab. */
 .page .header { height:auto; flex-wrap:wrap; }
 .recordingBar { grid-column:1 / -1; flex-basis:100%; width:100%; min-width:0; display:flex; flex-wrap:wrap; gap:6px 12px; align-items:center; justify-content:space-between; padding-top:6px; border-top:1px solid var(--r-border); }
-.recordingState { min-width:0; font-size:12px; overflow-wrap:anywhere; }
+.recordingState { min-width:0; max-width:100%; flex:1 1 220px; font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .recordingActions { display:flex; flex-wrap:wrap; gap:6px; min-width:0; }
-.recordingError { flex-basis:100%; overflow-wrap:anywhere; font-size:12px; }
 @container rider (max-width:720px) {
   .recordingBar { gap:4px; }
-  .recordingState { font-size:11px; }
+  .recordingState { flex-basis:100%; font-size:11px; }
   .recordingActions { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); width:100%; gap:4px; }
   .recordingActions .button { min-width:0; padding:4px; font-size:11px; white-space:normal; }
   .recordingActions [data-testid="rider-pause"] { grid-column:auto; }
