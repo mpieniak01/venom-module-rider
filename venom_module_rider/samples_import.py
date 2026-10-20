@@ -12,6 +12,7 @@ from PIL import Image
 from pydantic import ValidationError
 
 from .errors import RiderError
+from .evidence_store import canonical as evidence_canonical
 from .samples_archive import MAX_MANIFEST_BYTES, SampleArchive, canonical
 from .samples_contract import LabelValues
 
@@ -100,8 +101,14 @@ class SampleImporter:
         return self.preflight(catalog)
 
     def preflight(self, catalog):
+        evidence_bytes = sum(
+            len(evidence_canonical(row).encode())
+            for row in (catalog["manifest"] or {})
+            .get("evidence", {})
+            .get("records", [])
+        )
         if (
-            sum(item["raw"]["bytes"] for item in catalog["items"])
+            evidence_bytes + sum(item["raw"]["bytes"] for item in catalog["items"])
             > self.store.limits.session_bytes
         ):
             raise RiderError("samples_import_size", 413)
@@ -221,6 +228,14 @@ class SampleImporter:
             return session  # idempotent completed import, not another archive
         failed = False
         try:
+            evidence = (catalog["manifest"] or {}).get("evidence")
+            if evidence is not None:
+                await self.registry.read(
+                    self.store.evidence.append, sid, evidence["records"], imported=True
+                )
+                await self.registry.read(
+                    self.store.evidence.status, sid, evidence["status"]
+                )
             for index, item in enumerate(catalog["items"]):
                 payload, mime, context = await self.registry.read(
                     self.read, catalog, index

@@ -56,6 +56,9 @@ class SamplesRegistry:
         from .automatic_capture import AutomaticCapture
 
         self.automatic = AutomaticCapture(self)
+        from .sample_evidence import SampleEvidenceCollector
+
+        self.evidence = SampleEvidenceCollector(self)
 
     def _open(self):
         if self.closed:
@@ -135,6 +138,7 @@ class SamplesRegistry:
                 )
                 if session["state"] == "collecting":
                     self.active.add(session["session_id"])
+                    self.evidence.start(session)
                     self.session_requests[request_id] = session["session_id"]
                     if values["kind"] == "sequence":
                         self._sequence(session)
@@ -206,6 +210,7 @@ class SamplesRegistry:
         async with self.operations:
             self._open()
             self.closing.add(session_id)
+            self.evidence.retire("collection_ended", session_id)
             deadline = self.deadlines.pop(session_id, None)
             if deadline is not None:
                 deadline.cancel()
@@ -213,13 +218,14 @@ class SamplesRegistry:
             if row and row["timer"] is not None:
                 row["timer"].cancel()
                 incomplete = incomplete or row["incomplete"]
+
             # One serialized close marker follows admitted writes even when all
             # capture slots are occupied. It is not another source-data job.
-            result = await asyncio.wrap_future(
-                self.io.submit(
-                    partial(self.store.end, session_id, incomplete=incomplete)
-                )
-            )
+            def finish():
+                self.evidence.finish(session_id)
+                return self.store.end(session_id, incomplete=incomplete)
+
+            result = await asyncio.wrap_future(self.io.submit(finish))
             self.active.discard(session_id)
             self.closing.discard(session_id)
             if not self.active and not self.writer_owners:
@@ -320,9 +326,26 @@ class SamplesRegistry:
                 return self._public(row)
         return self._public(await self.read(self.store.request, request_id))
 
+    def observe_evidence(
+        self,
+        path,
+        payload,
+        device_id,
+        source_session,
+        received_mono=None,
+        received_at=None,
+    ):
+        self.evidence.observe(
+            path, payload, device_id, source_session, received_mono, received_at
+        )
+
+    def retire_evidence(self, reason="source_changed"):
+        self.evidence.retire(reason)
+
     def offer(self, device_id, payload, mime, context=None):
         if self.closed:
             return None
+        context = self.evidence.enrich(device_id, context)
         key = self.frames.offer(device_id, payload, mime, context)
         if key is None or self.closed:
             return key
@@ -353,6 +376,7 @@ class SamplesRegistry:
         return {
             **await self.read(self.store.status),
             "buffer": self.frames.status(),
+            "evidence": self.evidence.status(),
             "writer_queue_slots": self.queue_slots,
             "failures": self.failures,
             "active": list(self.active),
@@ -382,6 +406,7 @@ class SamplesRegistry:
             if self.closed:
                 return
             self.closed = True
+            self.evidence.retire("registry_closed")
             for row in self.sequences.values():
                 row["timer"].cancel()
             self.sequences.clear()
@@ -392,6 +417,8 @@ class SamplesRegistry:
             def finish():
                 try:
                     if self.lease is not None:
+                        for session_id in tuple(self.evidence.sessions):
+                            self.evidence.finish(session_id)
                         self.store.recover_interrupted()
                 finally:
                     self.active.clear()

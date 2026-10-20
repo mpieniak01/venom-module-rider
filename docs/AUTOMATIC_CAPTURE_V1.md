@@ -75,3 +75,17 @@ available while Pi is disconnected.
 Rollback to manual-only collection leaves source samples and label revisions
 intact. Additive automatic metadata uses the existing registry schema version;
 it does not authorize motion or require a Pi deployment.
+
+## Passive host evidence
+
+Explicit sample collection also records bounded observations from existing
+/state and /api/control/state responses in Venom. Automatic event capture does
+not start another telemetry poll, camera reader or model for this evidence.
+The evidence extension and telemetry-only export/import are described in
+SAMPLES_V1.md and DATA_EVIDENCE_V1.md.
+
+Event frames can reference recent durable evidence with an explicitly unmatched
+exposure association. A recent host receipt cannot qualify stale sensor data,
+establish a physical unit or verify motion. Exact image source provenance is
+preserved independently. STOP/source teardown retires pending evidence recording;
+neither an event nor subsequent telemetry resumes the old collection binding.
