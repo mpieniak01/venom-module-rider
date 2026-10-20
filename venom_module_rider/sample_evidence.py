@@ -37,6 +37,7 @@ def observations(path, payload, device, source_session, mono, wall):
     if not isinstance(payload, dict) or not isinstance(payload.get("data"), dict):
         return []
     data = payload["data"]
+    identity: object
     if path == "/state":
         source = data.get("devices", {}).get("xgo", {})
         if not isinstance(source, dict):

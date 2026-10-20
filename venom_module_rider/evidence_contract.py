@@ -41,6 +41,16 @@ class EvidenceRecord(BaseModel):
 
 def validate_evidence(value: object) -> dict[str, Any]:
     """Validate both online admission and untrusted session imports identically."""
+    if not isinstance(value, dict) or type(value.get("schema_version", 1)) is not int:
+        raise ValueError("evidence_record_invalid")
+    # Validate arbitrary nested quality before Pydantic's JSON conversion can
+    # normalise nonfinite values to null and lose the source error.
+    try:
+        original = json.dumps(value, allow_nan=False, separators=(",", ":"))
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise ValueError("evidence_record_invalid") from exc
+    if len(original.encode()) > MAX_EVIDENCE_RECORD_BYTES:
+        raise ValueError("evidence_record_size")
     result = EvidenceRecord.model_validate(value).model_dump(mode="json")
     encoded = json.dumps(result, allow_nan=False, separators=(",", ":"))
     if len(encoded.encode()) > MAX_EVIDENCE_RECORD_BYTES:

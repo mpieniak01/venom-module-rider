@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api-client";
-import { AUTO_BASE, autoIntent, autoStatus, recoveredAutoEnable, defaultEventProfile, eventNames, type AutoStatus, type EventProfile } from "../lib/automatic";
+import { AUTO_BASE, autoIntent, autoStatus, recoveredAutoEnable, defaultEventProfile, tuningEventProfile, eventNames, type AutoStatus, type EventProfile } from "../lib/automatic";
 import { errorCode, record, str } from "../lib/model";
 import { SAMPLES_BASE, type Collection } from "../lib/samples";
 import { getApiBaseUrl } from "@/lib/env";
@@ -68,6 +68,8 @@ export function AutomaticCapture({collection,sourceSession,t}:{collection:Collec
     {!collection&&<p className={styles.hint}>{t("auto.collectionRequired")}</p>}
     <details className={styles.details}><summary>{t("auto.profile")}</summary>
       <fieldset className={styles.autoSettings} disabled={active||busy}>
+        <Button data-testid="auto-tuning-preset" disabled={active||busy} onClick={()=>setProfile(tuningEventProfile())}>{t("auto.tuningPreset")}</Button>
+        <p className={styles.hint}>{t("auto.tuningHint")}</p>
         <div className={styles.autoEvents}>{eventNames.map(name=><label className={styles.check} key={name}><Checkbox type="checkbox" checked={profile.events.includes(name)} onChange={e=>setProfile(p=>({...p,events:e.target.checked?[...p.events,name]:p.events.filter(n=>n!==name)}))}/>{t("auto.event."+name)}</label>)}</div>
         <div className={styles.grid}>{fields.map(([name,min,max,step])=><label className={styles.field} key={name}>{t("auto.field."+name)}<Input aria-label={t("auto.field."+name)} type="number" min={min} max={max} step={step} value={profile[name]} onChange={e=>setProfile(p=>({...p,[name]:Number(e.target.value)}))}/></label>)}</div>
       </fieldset>

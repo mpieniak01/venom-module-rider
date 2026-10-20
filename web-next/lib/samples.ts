@@ -3,7 +3,7 @@ import { record, str, type JsonRecord } from "./model";
 import type { Frame } from "./use-rider";
 
 export const SAMPLES_BASE = "/api/v1/rider/samples";
-export type Collection = { session_id:string; source_device_id:string; state:string; started_at:number; policy:JsonRecord; counts:Record<string,number> };
+export type Collection = { session_id:string; source_device_id:string; state:string; started_at:number; policy:JsonRecord; counts:Record<string,number>; evidence?:JsonRecord };
 export type CaptureIntent = { session_id:string; capture_request_id:string; frame_key:string; allow_historical:boolean };
 export type CaptureOutcome = { id:string; state:string; sample_id?:string|null; error?:string|null; saved_at?:number|null };
 export type Sample = JsonRecord & { sample_id:string; frame_id?:string|null; sequence?:number|null; raw:JsonRecord; quality:JsonRecord };
