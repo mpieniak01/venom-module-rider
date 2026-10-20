@@ -6,6 +6,7 @@ export type DeviceConfig = { devices: { id: string; label: string; mode: "demo" 
 export type RiderStatus = {
   connection: { status: "unconfigured" | "offline" | "online" | "degraded"; configured: boolean; device_id: string | null; label?: string; session: string; mode: "demo" | "device"; error?: string | null; last_seen?: number | null };
   polling: Record<string, number>;
+  loop_timing?: JsonRecord;
   telemetry: JsonRecord | null;
   health: JsonRecord | null;
   system: JsonRecord | null;

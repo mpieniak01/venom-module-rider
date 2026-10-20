@@ -15,6 +15,7 @@ from typing import Any
 from .client import PiClient
 from .config import Device, persist_device, restored_device
 from .errors import RiderError
+from .loop_timing import LoopTiming, ReadMetrics
 
 POLLING = {
     "overview_ms": 2000,
@@ -64,6 +65,10 @@ class RiderService:
         client_factory=PiClient,
         selection_file: Path | None = None,
     ):
+        self.timing = LoopTiming(
+            selection_file.with_name("loop-timing.json") if selection_file else None
+        )
+        self.read_metrics = ReadMetrics()
         self.devices = {device.id: device for device in devices}
         self.device: Device | None = None
         self.client: PiClient | None = None
@@ -208,15 +213,21 @@ class RiderService:
     async def read(self, path: str, ttl: float, *, force=False) -> dict:
         now = time.monotonic()
         cached = self.cache.get(path)
+        metric = next((key for key, item in READS.items() if item[0] == path), "other")
         if cached and not force and now - cached[0] < ttl:
+            self.read_metrics.count(metric, "cache_hits")
             return copy.deepcopy(cached[1])
         session = self.session
         epoch = self.epoch
         task = self.inflight.get(path)
         if task is None:
             client = self.transport()
-            task = asyncio.create_task(client.json(path))
+            task = asyncio.create_task(
+                self.read_metrics.measure(metric, lambda: client.json(path))
+            )
             self.inflight[path] = task
+        else:
+            self.read_metrics.count(metric, "coalesced")
         try:
             payload = await asyncio.shield(task)
             self.check_session(session)
@@ -275,7 +286,11 @@ class RiderService:
                 "last_seen": self.last_seen,
                 "error": None,
             },
-            "polling": dict(POLLING),
+            "polling": self.timing.polling(POLLING),
+            "loop_timing": {
+                **self.timing.snapshot(),
+                "reads": self.read_metrics.snapshot(),
+            },
             "errors": {},
             **dict.fromkeys(READS),
             "resources": {},
@@ -289,7 +304,11 @@ class RiderService:
         calls = [
             self.read(
                 READS[key][0],
-                READS[key][1],
+                (
+                    self.timing.values["telemetry_ms"] / 1000
+                    if key == "telemetry"
+                    else READS[key][1]
+                ),
                 force=key == "control" or section == "navigation",
             )
             for key in keys
