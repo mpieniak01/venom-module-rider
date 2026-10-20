@@ -568,12 +568,22 @@ class VisionLoop:
             state["count"] = 0
             if "avoidance" in state:
                 state["avoidance"].update(front=0, counts={"left": 0, "right": 0})
+            if frame.journey is not None:
+                state["journey_completed"] = False
+            if "maneuver_clear_count" in response:
+                response.update(
+                    maneuver_clear_count=0, maneuver_phase="vision_decision_expired"
+                )
             self.previews.pop(device_id, None)
             if capture_key and self.samples is not None:
                 self.samples.annotate_prediction(
                     capture_key,
                     {
-                        **response,
+                        **{
+                            key: value
+                            for key, value in response.items()
+                            if not key.startswith("_")
+                        },
                         "input_frame": frame.model_dump(mode="json"),
                         "diagnostic": with_preview,
                     },

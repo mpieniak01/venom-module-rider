@@ -144,6 +144,8 @@ export function CameraPanel({ client, t, language, compact = false, onObservatio
   };
   const power = client.pipeline.status;
   const cameraOn = !!power && ["active", "starting", "waiting_frame"].includes(power.state);
+  const cameraButtonLabel = t(compact ? !power ? "cockpitCameraUnknown" : cameraOn ? "cockpitCameraOff" : "cockpitCameraOn" : !power || cameraOn ? "cameraSwitchOff" : "cameraSwitchOn");
+  const cameraButtonName = compact ? cameraButtonLabel + " · " + t(!power ? "unknown" : cameraOn ? "cameraSwitchOff" : "cameraSwitchOn") : cameraButtonLabel;
   const changePower = async () => {
     setPreviewFailure("");
     try {
@@ -162,7 +164,7 @@ export function CameraPanel({ client, t, language, compact = false, onObservatio
   const streams = client.pipeline.status?.profile.analysis_location === "local"
     ? (["raw", "proc"] as const) : compact ? (["raw", "venom"] as const) : (["raw", "venom", "proc"] as const);
   return <Panel className={compact?styles.cameraEmbedded:""} title={t("camera")} hint={compact?undefined:t("cameraHint")} extra={<div className={styles.flex}>
-      <span data-testid="camera-power-state"><Pill tone={power?.state === "active" ? "good" : "warning"}>{t(power ? "pipeline.state." + power.state : "unknown")}</Pill></span><Button aria-label={t(!power || cameraOn ? "cameraSwitchOff" : "cameraSwitchOn")} data-testid="camera-power-toggle" tone={cameraOn ? "caution" : undefined} title={t(!power ? client.pipeline.supported === false ? "pipeline.legacy" : client.pipeline.error ? "pipeline.readFailed" : "pipeline.loading" : "cameraHint")} onClick={() => void changePower()} disabled={!power||!client.canMutate||client.pipeline.busy||power.state === "stopping"}>{compact ? cameraOn ? "OFF" : "ON" : t(!power || cameraOn ? "cameraSwitchOff" : "cameraSwitchOn")}</Button>
+      <span data-testid="camera-power-state"><Pill tone={power?.state === "active" ? "good" : "warning"}>{t(power ? "pipeline.state." + power.state : "unknown")}</Pill></span><Button aria-label={cameraButtonName} data-testid="camera-power-toggle" tone={cameraOn ? "caution" : undefined} title={t(!power ? client.pipeline.supported === false ? "pipeline.legacy" : client.pipeline.error ? "pipeline.readFailed" : "pipeline.loading" : "cameraHint")} onClick={() => void changePower()} disabled={!power||!client.canMutate||client.pipeline.busy||power.state === "stopping"}>{cameraButtonLabel}</Button>
       <Button aria-label={t(client.cameraStream ? "hidePreview" : "showPreview")} data-testid="camera-preview-toggle" onClick={() => void chooseStream(client.cameraStream ? null : "raw")} disabled={!client.canMutate||previewBusy}><Camera size={15} />{!compact && t(client.cameraStream ? "hidePreview" : "showPreview")}</Button>
     </div>}>
     <div className={styles.cameraSources}>{streams.map(stream => <Button key={stream} tone={selected === stream ? "primary" : undefined} aria-pressed={selected === stream} onClick={() => void chooseStream(stream)} disabled={!client.canMutate||previewBusy}>{t(stream === "venom" ? "visionVenom" : stream === "proc" ? "visionPi" : stream)}</Button>)}</div>

@@ -112,3 +112,38 @@ async def test_reference_budget_also_bounds_source_preparation(monkeypatch):
     with pytest.raises(RiderError, match="vision_frame_expired"):
         await asyncio.wait_for(vision_routes.reference_decision(request), 0.5)
     assert cancelled == [True]
+
+
+async def test_expired_annotation_remains_serializable_without_detector_private_arrays(
+    monkeypatch,
+):
+    import json
+
+    import numpy as np
+
+    from venom_module_rider import sample_sources
+
+    now, predictions = [0.0], []
+
+    class PrivateDetector(Detector):
+        def detect(self, *args):
+            return {**super().detect(*args), "_errors": np.zeros((2, 2))}
+
+    class Samples:
+        def annotate_prediction(self, _key, prediction):
+            json.dumps(prediction)
+            predictions.append(prediction)
+            if len(predictions) == 1:
+                now[0] += 0.31
+
+    monkeypatch.setattr(sample_sources, "vision", lambda *_a, **_k: "capture-key")
+    loop = VisionLoop(PrivateDetector(), clock=lambda: now[0])
+    loop.samples = Samples()
+    try:
+        result = await loop.decide("pi", frame(), b"fixture")
+        assert result["reason"] == "vision_decision_expired"
+        assert len(predictions) == 2
+        assert predictions[-1]["action"] == "stop"
+        assert not any(key.startswith("_") for key in predictions[-1])
+    finally:
+        await loop.close()

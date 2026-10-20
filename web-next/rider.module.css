@@ -571,3 +571,5 @@
 @container rider (max-width:720px) {
   .commandDeck .loopStatus .small, .commandDeck .loopActions .small { display:none; }
 }
+
+.cameraEmbedded [data-testid="camera-power-toggle"] { width:44px; padding:0 4px; }

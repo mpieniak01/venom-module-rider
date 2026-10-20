@@ -334,7 +334,9 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
   const automaticActive = priority ? operator.state === "active" || operator.state === "qualifying" : phase === "running" && goals.drive === true;
   let commandReason = "";
   if (view === "journey") {
-    commandReason = journeyError || journey.reason || (journeyUnavailable[0] ? t(journeyUnavailable[0]) : "");
+    if (journeyError) commandReason = t("journeyRequestError") + " · " + journeyError;
+    else if (journey.reason) commandReason = t("state") + ": " + journey.reason;
+    else if (journeyUnavailable[0]) commandReason = t(journeyUnavailable[0]);
   } else if (view === "automatic") {
     commandReason = visibleError || readError;
     if (!commandReason && preparation?.state === "failed") commandReason = t(trialPreparationErrorKey(preparation));
