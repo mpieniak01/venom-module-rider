@@ -14,6 +14,7 @@ import zipfile
 from pathlib import Path, PurePosixPath
 
 from .errors import RiderError
+from .evidence_store import EvidenceStore, validate_extension
 
 MAX_MANIFEST_BYTES = 40 * 1024 * 1024
 MAX_EXPORTS = 2
@@ -67,12 +68,15 @@ class SampleArchive:
                     "file": f"raw/{sample['raw']['sha256']}.bin",
                 }
                 samples.append(sample)
+            evidence = EvidenceStore.snapshot(db, session_id)
         dataset = {
             "schema_version": 1,
             "kind": "rider-sample-session",
             "session": session,
             "samples": samples,
         }
+        if evidence is not None:
+            dataset["evidence"] = evidence
         raw = canonical(dataset)
         if len(raw) > MAX_MANIFEST_BYTES:
             raise RiderError("samples_export_size", 413)
@@ -215,6 +219,8 @@ class SampleArchive:
             or not isinstance(manifest["session"].get("policy", {}), dict)
         ):
             raise RiderError("samples_import_invalid", 400)
+        if "evidence" in manifest:
+            validate_extension(manifest["evidence"])
         seen = set()
         for sample in manifest["samples"]:
             if (

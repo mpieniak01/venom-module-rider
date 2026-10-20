@@ -5,6 +5,7 @@ import { getApiBaseUrl } from "@/lib/env";
 import { errorCode, formatTime, record, str, type JsonRecord } from "../lib/model";
 import { SAMPLES_BASE, type Collection, type Sample, type SamplePage } from "../lib/samples";
 import type { Translator } from "../lib/i18n";
+import { EvidenceSummary } from "./evidence-summary";
 import { AnalysisPanel } from "./analysis-panel";
 import { Button, Details, Empty, Field, Input, Panel, Select, Textarea } from "./primitives";
 import styles from "../rider.module.css";
@@ -69,6 +70,7 @@ function SampleLibrary({t,language}:{t:Translator;language:string}) {
     {error&&<p role="alert">{t("samples.failure")} · <code>{error}</code></p>}
     <Field label={t("samples.session")}><Select data-testid="samples-session" value={selected} onChange={event=>{inspectEpoch.current++;setSelected(event.target.value);setOffset(0);setPage(null);setSample(null);}}><option value="">{t("samples.choose")}</option>{sessions.map(row=><option key={row.session_id} value={row.session_id}>{formatTime(row.started_at,language)} · {row.source_device_id} · {t("samples.session."+row.state)} · {row.counts.saved??0} · {row.session_id.slice(0,8)}</option>)}</Select></Field>
     {page&&<>
+      <EvidenceSummary value={page.session.evidence} t={t}/>
       <p className={styles.meta}>{t("samples.savedCount")}: {page.total} · {t("samples.request.failed")}: {page.session.counts.failed??0}</p>
       <div className={styles.samplesGrid}>{page.samples.map((item:Sample)=><button type="button" key={item.sample_id} data-testid="sample-thumbnail" className={styles.sampleThumb} disabled={writing} aria-pressed={sample?.sample_id===item.sample_id} onClick={()=>void inspect(item.sample_id)}><img src={source(item.sample_id)} alt={t("samples.original")} loading="lazy"/><span>#{String(item.ordinal)} · {String(item.frame_id??"—").slice(0,12)}</span>{Array.isArray(item.quality.flags)&&item.quality.flags.length>0&&<span>{t("samples.quality")}: {qualityText(item.quality)}</span>}</button>)}</div>
       {page.total===0&&<Empty>{t("samples.empty")}</Empty>}

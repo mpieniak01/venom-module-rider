@@ -144,3 +144,56 @@ root or overwrite its SQLite database to roll back. Export sessions before any
 future incompatible migration. This increment introduces schema version 1 only.
 
 Derived analysis files retained by a newer optional feature also count toward the shared byte quota after rolling back to this registry version. Temporary hardlinks count once; unsafe symlinks are rejected. Sources and derived files are never deleted automatically to make room.
+
+## Host evidence from existing responses
+
+An explicitly opened collection also admits bounded IMU and executor observations
+already returned by the existing Venom reads of /state and /api/control/state.
+This adds no polling, UART access, camera reads, inference or device storage.
+Telemetry-only collections are valid and can be exported with zero RAW images.
+
+Source samples are identified by device, the selected-device host session,
+producer instance, original observation timestamp and source values. Host receipt
+time and changes in cache-age/stale metadata do not create another sample. A
+duplicate retains its first admitted receipt even after its RAM window expires.
+Raw yaw is copied from sensor_quality.sensors.yaw; display wrapping is not applied.
+Unknown, stale and physically unverified quality remains explicit.
+
+Evidence uses the existing process lease and single disk writer. At most one
+evidence job occupies its bounded queue. Saturation drops evidence immediately;
+manual capture and STOP do not wait for evidence admission. Each record is at most
+8 KiB, the recent window is 64 records / 64 KiB / 30 seconds, and each collection
+admits at most 2048 distinct records / 2 MiB within the shared 2 GiB and per-session
+128 MiB archive quotas. The per-collection deduplication index is separately
+bounded by those 2048 admitted identities. There is no automatic retry that
+changes the original receipt.
+
+Frames may reference up to eight recent durable records in source_context.evidence.
+Telemetry and executor snapshots carry the association
+host-reception-window-unmatched-exposure and unknown clock synchronization
+uncertainty. This is a host receipt window, not proof that telemetry matches image
+exposure. Existing camera source references and exact image associations remain
+unchanged. Failed/dropped evidence never creates a dangling frame reference.
+
+Collection end, STOP, source switch and registry close retire the old evidence
+binding and pending evidence. They clear the recent window; recording requires a
+new explicit collection. A restart does not resume a collection. Closing one
+collection leaves other explicitly opened collections eligible for the same source.
+The session summary exposes saved, dropped, failed and bytes plus storage limits.
+The active storage status also exposes bounded RAM usage. Durable summaries remain
+available when browsing without a connected Pi.
+
+Exports optionally contain evidence={schema_version:1,records:[...],status:{...}}.
+All evidence participates in the same consistent SQLite snapshot and dataset
+revision hash as RAW manifests and labels. Import validates every record and
+evidence bounds before creating a session; telemetry-only archives preserve
+original source and receipt clocks. Legacy archives without the extension remain
+valid and do not fabricate telemetry. See DATA_EVIDENCE_V1.md for the shared
+record contract.
+
+A displayed ticket may be captured into several concurrent collections. At disk
+admission, live evidence references are filtered against records actually archived
+by the target collection. Missing references and their derived telemetry/commands
+are removed and availability is marked unavailable-for-collection or partial.
+This does not copy another collection's observations, change the original ticket
+or rewrite imported historical provenance.

@@ -112,6 +112,9 @@ class RiderService:
         await self.select(selected, self.session, persist=False)
 
     def stop_sample_events(self, reason):
+        from .evidence_observer import retire_received
+
+        retire_received(self, reason)
         if self.samples is not None:
             try:
                 self.samples.automatic.invalidate(reason)
@@ -222,6 +225,16 @@ class RiderService:
             self.cache[path] = (time.monotonic(), payload)
             self.last_seen = time.time()
             self.read_observations[path] = (self.cache[path][0], self.last_seen, True)
+            from .evidence_observer import observe_received
+
+            observe_received(
+                self,
+                path,
+                payload,
+                session=session,
+                received_mono=self.cache[path][0],
+                received_at=self.last_seen,
+            )
             return copy.deepcopy(payload)
         except Exception as exc:
             if session == self.session and epoch == self.epoch:
@@ -808,6 +821,9 @@ class RiderService:
         self.client = None
 
     async def close(self):
+        from .evidence_observer import retire_received
+
+        retire_received(self, "module_closed")
         self.epoch += 1
         if self.conversation_invalidator:
             self.conversation_invalidator()

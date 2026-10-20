@@ -1,3 +1,4 @@
+import { EvidenceSummary } from "./evidence-summary";
 import { AutomaticCapture } from "./automatic-capture";
 import { Camera, CircleStop } from "lucide-react";
 import { captureIntent, historicalFrame } from "../lib/samples";
@@ -30,6 +31,7 @@ export function SampleCapture({sourceSession,deviceId,frame,visible,t}:{sourceSe
       <strong>{t("samples.request."+data.outcome.state)}</strong><code>{data.outcome.id}</code>
       {data.outcome.state==="unknown"&&<><Button onClick={()=>void data.check()}>{t("samples.check")}</Button><Button onClick={data.dismiss}>{t("samples.dismiss")}</Button></>}
     </div>}
+    <EvidenceSummary value={data.session?.evidence} t={t}/>
     <AutomaticCapture collection={active?data.session:null} sourceSession={sourceSession} t={t}/>
     {data.error&&<p role="alert" className={styles.hint}>{t("samples.failure")} · <code>{data.error}</code></p>}
   </div>;

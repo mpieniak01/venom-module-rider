@@ -101,6 +101,9 @@ class SampleStore:
                 ON requests(session_id, state);
                 PRAGMA user_version=1;
             """)
+        from .evidence_store import EvidenceStore
+
+        self.evidence = EvidenceStore(self)
         # A previous crash may have left an uncommitted blob. Count it against
         # quota; never silently remove a source to create more free space.
         self.total_bytes = sum(p.stat().st_size for p in self.blobs.glob("*.bin"))
@@ -233,6 +236,7 @@ class SampleStore:
             "ended_at": row["ended"],
             "policy": json.loads(row["policy"]),
             "counts": counts,
+            "evidence": self.evidence.summary(db, session_id),
         }
 
     def session(self, session_id):
@@ -381,7 +385,7 @@ class SampleStore:
                 raise RiderError("samples_session_closed", 409)
             if admitted - session["started_at"] > self.limits.session_seconds:
                 raise RiderError("samples_session_expired", 409)
-            context = frame.context()
+            context = self.evidence.collection_context(session_id, frame.context())
             source_age = context.get("source_age_ms")
             age_lower_bound = receipt_age_ms + (
                 source_age
@@ -401,9 +405,11 @@ class SampleStore:
                     "WHERE session_id=?",
                     (session_id,),
                 ).fetchone()
+                evidence_bytes = self.evidence.size(db, session_id)
             if (
                 count >= self.limits.session_samples
-                or size + len(frame.payload) > self.limits.session_bytes
+                or size + evidence_bytes + len(frame.payload)
+                > self.limits.session_bytes
             ):
                 raise RiderError("samples_quota_reached", 507)
             self._space(MAX_CONTEXT_BYTES * 2)

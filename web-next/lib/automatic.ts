@@ -13,6 +13,9 @@ export const defaultEventProfile:EventProfile={
   cooldown_ms:3000,scene_distance_bits:10,burst_frames:1,burst_interval_ms:200,
   max_samples:50,duration_s:300,max_gap_ms:1500,
 };
+export function tuningEventProfile():EventProfile {
+  return {...defaultEventProfile,events:[...eventNames],stable_ms:500,cooldown_ms:10000,max_samples:20,duration_s:120};
+}
 export type AutoStatus=JsonRecord & {state:"on"|"off";id?:string;session_id?:string;reason?:string|null;events?:JsonRecord[]};
 export function autoStatus(value:unknown):AutoStatus {
   const row=record(value);
