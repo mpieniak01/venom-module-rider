@@ -450,3 +450,115 @@ async def test_inflight_write_cannot_repopulate_retired_source_window(
     finally:
         release.set()
         await registry.close()
+
+
+async def test_shared_ticket_filters_evidence_owned_by_other_collection(tmp_path):
+    registry = SamplesRegistry(tmp_path)
+    try:
+        first = (await registry.start("one", "pi"))["session_id"]
+        registry.observe_evidence("/state", imu(), "pi", "selected")
+        await drain(registry)
+        second = (await registry.start("two", "pi"))["session_id"]
+        source = frame()
+        key = registry.offer(
+            "pi",
+            source.payload,
+            source.mime,
+            {
+                "host_device_session": "selected",
+                "source_identity": {"original": "camera-source"},
+                "association": "exact-source-reference",
+            },
+        )
+        original = registry.frames.get(key).context()
+        assert original["evidence"]["record_ids"]
+        for sid in (first, second):
+            registry.capture(sid, "capture-" + sid, key)
+        await drain(registry)
+        one = registry.store.samples(first)[0]
+        two = registry.store.samples(second)[0]
+        one = registry.store.sample(one["sample_id"])
+        two = registry.store.sample(two["sample_id"])
+        assert (
+            one["source_context"]["evidence"]["record_ids"]
+            == original["evidence"]["record_ids"]
+        )
+        assert one["telemetry"]["values"]["yaw"] == 362.0
+        assert two["source_context"]["evidence"]["record_ids"] == []
+        assert (
+            two["source_context"]["evidence"]["availability"]
+            == "unavailable-for-collection"
+        )
+        assert two["telemetry"] is None
+        assert two["source_context"]["source_identity"] == original["source_identity"]
+        assert two["association"] == "exact-source-reference"
+        assert registry.frames.get(key).context() == original
+        exported, _ = SampleArchive(registry.store).export(second)
+        manifest = SampleArchive.validate_zip(
+            exported, registry.store.limits.session_bytes
+        )
+        assert manifest["samples"][0]["source_context"]["evidence"]["record_ids"] == []
+        assert "evidence" not in manifest
+    finally:
+        await registry.close()
+
+
+async def test_partial_collection_ownership_keeps_only_its_archived_metadata(tmp_path):
+    registry = SamplesRegistry(tmp_path)
+    try:
+        await registry.start("one", "pi")
+        registry.observe_evidence("/state", imu(), "pi", "selected")
+        await drain(registry)
+        second = (await registry.start("two", "pi"))["session_id"]
+        registry.observe_evidence(
+            "/api/control/state",
+            {
+                "data": {"safety": {"observed_at": 12.0, "state": "DISARMED"}},
+                "meta": {},
+            },
+            "pi",
+            "selected",
+        )
+        await drain(registry)
+        source = frame()
+        key = registry.offer(
+            "pi", source.payload, source.mime, {"host_device_session": "selected"}
+        )
+        registry.capture(second, "capture", key)
+        await drain(registry)
+        sample = registry.store.sample(registry.store.samples(second)[0]["sample_id"])
+        references = sample["source_context"]["evidence"]
+        assert references["availability"] == "partial"
+        assert references["unavailable_count"] == 1
+        assert len(references["record_ids"]) == 1
+        assert sample["telemetry"] is None
+        assert sample["commands"]["record_id"] in references["record_ids"]
+        assert sample["commands"]["executor"]["state"] == "DISARMED"
+    finally:
+        await registry.close()
+
+
+@pytest.mark.parametrize("invalid", [float("nan"), object()])
+async def test_invalid_context_during_enrichment_fails_closed(tmp_path, invalid):
+    registry = SamplesRegistry(tmp_path)
+    try:
+        await registry.start("one", "pi")
+        registry.observe_evidence("/state", imu(), "pi", "selected")
+        await drain(registry)
+        source = frame()
+        assert (
+            registry.offer(
+                "pi",
+                source.payload,
+                source.mime,
+                {
+                    "host_device_session": "selected",
+                    "invalid": invalid,
+                },
+            )
+            is None
+        )
+        assert registry.failures == 1
+        assert registry.frames.rejected == 1
+    finally:
+        await registry.close()

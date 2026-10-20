@@ -190,3 +190,10 @@ evidence bounds before creating a session; telemetry-only archives preserve
 original source and receipt clocks. Legacy archives without the extension remain
 valid and do not fabricate telemetry. See DATA_EVIDENCE_V1.md for the shared
 record contract.
+
+A displayed ticket may be captured into several concurrent collections. At disk
+admission, live evidence references are filtered against records actually archived
+by the target collection. Missing references and their derived telemetry/commands
+are removed and availability is marked unavailable-for-collection or partial.
+This does not copy another collection's observations, change the original ticket
+or rewrite imported historical provenance.

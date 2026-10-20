@@ -335,9 +335,12 @@ class SamplesRegistry:
         received_mono=None,
         received_at=None,
     ):
-        self.evidence.observe(
-            path, payload, device_id, source_session, received_mono, received_at
-        )
+        try:
+            self.evidence.observe(
+                path, payload, device_id, source_session, received_mono, received_at
+            )
+        except Exception:
+            self.failures += 1
 
     def retire_evidence(self, reason="source_changed"):
         self.evidence.retire(reason)
@@ -345,7 +348,12 @@ class SamplesRegistry:
     def offer(self, device_id, payload, mime, context=None):
         if self.closed:
             return None
-        context = self.evidence.enrich(device_id, context)
+        try:
+            context = self.evidence.enrich(device_id, context)
+        except Exception:
+            self.failures += 1
+            self.frames.rejected += 1
+            return None
         key = self.frames.offer(device_id, payload, mime, context)
         if key is None or self.closed:
             return key

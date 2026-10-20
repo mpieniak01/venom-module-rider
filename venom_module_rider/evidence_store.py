@@ -34,6 +34,54 @@ class EvidenceStore:
             (session_id,),
         ).fetchone()[0]
 
+    def collection_context(self, session_id, context):
+        """Filter live associations against the collection owning the sample.
+
+        A ticket is immutable and can be captured in several collections. Its
+        host receipt window is shared, but archived evidence ownership is not.
+        Historical contexts retain their original imported provenance.
+        """
+        evidence = context.get("evidence")
+        if context.get("input_kind") == "historical-import" or not isinstance(
+            evidence, dict
+        ):
+            return context
+        requested = evidence.get("record_ids")
+        if not isinstance(requested, list):
+            return context
+        references = [value for value in requested if isinstance(value, str)][:8]
+        with self.store.db() as db:
+            owned = {
+                value
+                for value in references
+                if db.execute(
+                    "SELECT 1 FROM evidence WHERE session_id=? AND record_id=?",
+                    (session_id, value),
+                ).fetchone()
+            }
+        kept = [value for value in references if value in owned]
+        missing = len(requested) - len(kept)
+        if missing == 0:
+            return context
+        result = {
+            **context,
+            "evidence": {
+                **evidence,
+                "record_ids": kept,
+                "availability": "partial" if kept else "unavailable-for-collection",
+                "unavailable_count": missing,
+            },
+        }
+        for name in ("telemetry", "commands"):
+            row = result.get(name)
+            if (
+                isinstance(row, dict)
+                and "record_id" in row
+                and row["record_id"] not in owned
+            ):
+                result[name] = None
+        return result
+
     def append(self, session_id, records, *, imported=False):
         checked = [validate_evidence(row) for row in records]
         saved = size = 0

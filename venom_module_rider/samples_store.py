@@ -385,7 +385,7 @@ class SampleStore:
                 raise RiderError("samples_session_closed", 409)
             if admitted - session["started_at"] > self.limits.session_seconds:
                 raise RiderError("samples_session_expired", 409)
-            context = frame.context()
+            context = self.evidence.collection_context(session_id, frame.context())
             source_age = context.get("source_age_ms")
             age_lower_bound = receipt_age_ms + (
                 source_age
