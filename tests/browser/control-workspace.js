@@ -15,14 +15,24 @@ async page => {
   let armed = false, owner = null, holder = null, generation = "fixture-0", serial = 0;
   let configured = true;
   let connection = "online", reject = false, output = {lx:0, az:0}, controlMissing = false;
-  const calls = [];
+  const calls = [], refreshes = [];
+  let recoverable = true;
   const policy = {revision:1,mode:"observe",speed:.1,max_motion_ms:150,decision_budget_ms:300,corridor:[.35,.65,.65,.95],verified:false,perception:{engine:"depth_plane"}};
   const safety = () => ({state:armed?"ARMED":"DISARMED",owner,generation,panel_motion_enabled:true,ready:true,can_move:armed,stale:false,observed_at:Date.now()/1000,output,capabilities:{move:{available:true}},panel_control:{version:1,holder},remote_decision_deadline_supported:true,scoped_stop_generation_supported:true});
   await page.route("**/api/v1/rider/**", async route => {
     const req = route.request(), path = new URL(req.url()).pathname.slice("/api/v1/rider".length);
     const json = (body,status=200) => route.fulfill({status,contentType:"application/json",body:JSON.stringify(body)});
     if (req.method() !== "GET") {
-      const body = req.postDataJSON(); calls.push({path,body});
+      const body = req.postDataJSON();
+      if (path === "/connection/refresh") {
+        refreshes.push({body,session:req.headers()["x-rider-session"]});
+        check(Object.keys(body).length===0,"refresh supplied actuator/transport arguments");
+        check(req.headers()["x-rider-session"]==="workspace-fixture","refresh used stale device session");
+        await new Promise(resolve=>setTimeout(resolve,250));
+        if(recoverable){connection="online";controlMissing=false;}
+        return json({connection:{status:connection},recovery:{attempted:true,state:recoverable?"recovered":"failed",...(recoverable?{}:{error:"connection_recovery_failed"})}});
+      }
+      calls.push({path,body});
       if (path === "/control") {
         if (reject) return json({detail:{code:"fixture_rejection_"+"details_".repeat(30)}},409);
         if (body.action === "arm") { armed=true; owner="manual";holder=body.panel_id;generation="fixture-"+(++serial); }
@@ -79,6 +89,28 @@ async page => {
     await page.getByTestId("workspace-manual").click();
     await same(initial,"manual view");
     check(calls.length===0,"view changed authority/resources");
+    connection="offline"; controlMissing=true;
+    await wait(async()=>(await page.getByTestId("operator-messages").innerText()).includes("Ostatni znany stan"),"offline state not observed before refresh");
+    await page.getByTestId("rider-refresh").click();
+    check(await page.getByTestId("rider-refresh").isDisabled(),"refresh can run twice concurrently");
+    await wait(async()=>!await page.getByTestId("rider-refresh").isDisabled(),"refresh stayed busy");
+    check(!await page.getByTestId("rider-arm").isDisabled(),"refresh failed to restore current controls");
+    check(await page.getByTestId("rider-forward").isDisabled(),"refresh armed robot");
+    check(refreshes.length===1 && calls.length===0,"refresh replayed a hardware command");
+    await same(initial,"refresh success");
+    recoverable=false; connection="offline";controlMissing=true;
+    await wait(async()=>(await page.getByTestId("operator-messages").innerText()).includes("Ostatni znany stan"),"offline state missing before failed refresh");
+    await page.getByTestId("rider-refresh").click();
+    await wait(async()=>!await page.getByTestId("rider-refresh").isDisabled(),"failed refresh stayed busy");
+    check(await page.getByTestId("rider-forward").isDisabled(),"failed refresh enabled motion");
+    check((await page.getByTestId("operator-messages").innerText()).includes("Ostatni znany stan"),"failed refresh hid offline state");
+    check((await page.getByTestId("rider-messages").innerText()).includes("Nie udało się potwierdzić połączenia"),"failed refresh did not explain recovery");
+    recoverable=true;
+    await page.getByTestId("rider-refresh").click();
+    await wait(async()=>!await page.getByTestId("rider-refresh").isDisabled(),"retry stayed busy");
+    check(!await page.getByTestId("rider-arm").isDisabled(),"retry did not restore current state");
+    check(calls.length===0,"reconnect retry replayed a hardware command");
+    scenarios.push("refresh: disconnected transport, bounded busy, failed recovery and retry; no ARM or command replay");
     await page.getByTestId("rider-arm").click();
     await wait(async()=>!await page.getByTestId("rider-forward").isDisabled(),"fixture manual permission missing");
     await page.getByTestId("rider-messages").getByRole("status").filter({hasText:"Polecenie przyjęte"}).waitFor();
@@ -184,7 +216,7 @@ async page => {
     await wait(async()=>await page.getByTestId("operator-console").count()===0,"unconfigured fallback not shown");
     check(await page.getByTestId("rider-messages").count()===1,"fallback lost operator messages");
     scenarios.push("unconfigured fallback retains messages");
-    return {result:"PASS",scenarios,fixtureOnly:true,mutations:calls.length,desktopTargets:initial};
+    return {result:"PASS",scenarios,fixtureOnly:true,transportRefreshes:refreshes.length,mutations:calls.length,desktopTargets:initial};
   } finally {
     await page.goto("about:blank");
     await page.unroute("**/api/v1/rider/**");

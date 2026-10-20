@@ -28,7 +28,14 @@ from . import (
     vision_routes,
 )
 from .routing import RiderRoute
-from .schemas import Command, GoalAction, ResourceAction, Selection, SettingsPatch
+from .schemas import (
+    Command,
+    ConnectionRefresh,
+    GoalAction,
+    ResourceAction,
+    Selection,
+    SettingsPatch,
+)
 
 UNIT = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9_@.-]{0,95}\.service")
 
@@ -237,6 +244,13 @@ async def status(
     if section == "compute" and result["connection"]["configured"]:
         result["compute"] = await compute_routes.operator_status(request)
     return result
+
+
+@router.post("/connection/refresh")
+async def refresh_connection(
+    payload: ConnectionRefresh, request: Request, session: Session = None
+):
+    return await service(request).refresh(session)
 
 
 @router.post("/control")

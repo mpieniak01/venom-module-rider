@@ -105,6 +105,31 @@ See [Integration observations](docs/INTEGRATION_OBSERVATIONS.md) and
 meeting the required runtime ABI remains independent of the optional inventory
 hook.
 
+## Reconnecting from the panel
+
+Use the header **Refresh** button after a connection failure. It re-reads the
+selected device/session, retires old observations and fetches current control
+and settings. It shows progress and a retryable failure if Pi is still unavailable.
+It never repeats motion, ARM, camera or navigation commands. Ordinary polling
+does not run transport recovery.
+
+For a device behind an administrator-managed tunnel, its private
+`RIDER_DEVICES_JSON` entry may include `reconnect_command`: an absolute path to
+an executable on the Venom host. The helper accepts no arguments, must return
+within 12 seconds, and must only ensure the configured transport is available.
+Keep credentials in the transport's existing private configuration. Use a
+supervised transport service so it also reconnects after network interruptions;
+keep its restart and connection timeouts within the helper budget. Direct HTTP
+connections need no helper. This option is unavailable for Demo devices and is
+not exposed as an executable or command input in the browser.
+
+`POST /api/v1/rider/connection/refresh` accepts only an empty JSON object and
+requires the current `X-Rider-Session` and the existing module access/origin
+checks. It coalesces simultaneous requests and invokes the configured helper
+only when a fresh control read reports `pi_unreachable`. A zero helper exit
+code is followed by a new negotiated Pi read before reporting recovery. Healthy
+connections are not restarted; device selection and Pi permissions stay intact.
+
 ## Device configuration
 
 Configure devices on the **server**, using private environment configuration:

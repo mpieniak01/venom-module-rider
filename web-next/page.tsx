@@ -103,7 +103,7 @@ export default function RiderPage() {
           })}
         </Select></label>
         <Pill tone={client.canMutate ? "good" : "warning"}>{client.canMutate ? <Wifi size={12} /> : <WifiOff size={12} />}{t(connection?.status ?? "unknown")}</Pill>
-        <Button data-testid="rider-refresh" aria-label={t("refresh")} title={t("refresh")} onClick={() => void client.poll()} disabled={client.loading}><RefreshCw size={15} /></Button>
+        <Button data-testid="rider-refresh" aria-label={t("refresh")} title={t(client.refreshing ? "connectionRefreshing" : "connectionRefreshHint")} aria-busy={client.refreshing} onClick={() => void client.refresh()} disabled={client.loading || !!client.busy}><RefreshCw size={15} /></Button>
         <Button size="large" className={armed ? styles.armArmed : styles.armDisarmed} title={t("armHint")} aria-pressed={armed} disabled={(!armed && !client.canArm) || !!client.busy} onClick={armToggle} data-testid="rider-arm"><ShieldCheck size={17} />{t(armed ? "disarm" : safety.state === "ESTOP" ? "clearStop" : "arm")}</Button>
         <Button size="large" tone="danger" className={styles.stop} onClick={stop} aria-label={t("emergencyStop")} title={t("stopHint")} data-testid="rider-stop"><CircleStop size={20} />{t("stop")}</Button>
         <Button aria-label={t(focused ? "workspaceRestore" : "workspaceExpand")} title={t(focused ? "workspaceRestore" : "workspaceExpand")} disabled={!!client.activeDirection} onClick={() => setFocused(!focused)} data-testid="workspace-expand">{focused ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</Button>

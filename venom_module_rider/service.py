@@ -90,6 +90,7 @@ class RiderService:
         self.samples: Any = None
         self.media_hub: Any = None
         self.pipeline_unavailable_until = 0.0
+        self.refresh_task: asyncio.Task | None = None
 
     def config(self):
         return {
@@ -340,6 +341,50 @@ class RiderService:
                 )
                 self.connection_observation = (latest[0], latest[1], status)
         return snapshot
+
+    async def refresh(self, session):
+        """Explicit reconnect, never an actuator retry or a background poll."""
+        self.check_session(session)
+        if self.refresh_task is None or self.refresh_task.done():
+            self.refresh_task = asyncio.create_task(self._refresh_connection(session))
+        result = await asyncio.shield(self.refresh_task)
+        self.check_session(session)
+        return result
+
+    async def _fresh_connection_status(self):
+        # Retire old GETs before clearing their cached results. Mutations and
+        # the independent STOP lane are deliberately untouched.
+        reads = list(self.inflight.values())
+        for task in reads:
+            task.cancel()
+        if reads:
+            await asyncio.gather(*reads, return_exceptions=True)
+        self.inflight.clear()
+        self.cache.clear()
+        self.pipeline_unavailable_until = 0.0
+        return await self.status("navigation")
+
+    async def _refresh_connection(self, session):
+        from .connection_recovery import recover_connection
+
+        async with self._selection_lock:
+            self.check_session(session)
+            snapshot = await self._fresh_connection_status()
+            recovery = {"attempted": False, "state": "not_needed"}
+            if snapshot["errors"].get("control") == "pi_unreachable":
+                executable = self.device.reconnect_command if self.device else None
+                recovery["state"] = "not_configured"
+                if executable:
+                    recovery = {"attempted": True, "state": "recovered"}
+                    try:
+                        await recover_connection(executable)
+                    except RiderError as exc:
+                        recovery.update(state="failed", error=exc.code)
+                    self.check_session(session)
+                    snapshot = await self._fresh_connection_status()
+                    if snapshot["errors"].get("control"):
+                        recovery.update(state="failed")
+            return {"connection": snapshot["connection"], "recovery": recovery}
 
     async def validate_intent(
         self, body, session, *, source="manual", require_ready=True
@@ -743,6 +788,9 @@ class RiderService:
         if self.conversation_drainer:
             await self.conversation_drainer()
         self.closed = True
+        if self.refresh_task is not None:
+            self.refresh_task.cancel()
+            await asyncio.gather(self.refresh_task, return_exceptions=True)
         await self._close_transport()
         self.cache.clear()
         self.read_observations.clear()

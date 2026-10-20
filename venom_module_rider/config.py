@@ -39,6 +39,7 @@ class Device:
     mode: str = "device"
     compute_token_env: str | None = None
     agent_token_env: str = "RIDER_AGENT_TOKEN"
+    reconnect_command: str | None = None
 
     def public(self) -> dict:
         return {"id": self.id, "label": self.label, "mode": self.mode}
@@ -62,6 +63,7 @@ def configured_devices(raw: str | None = None) -> tuple[Device, ...]:
             "mode",
             "compute_token_env",
             "agent_token_env",
+            "reconnect_command",
         }:
             raise RiderError("invalid_device_configuration", 503)
         id_ = row.get("id")
@@ -70,6 +72,15 @@ def configured_devices(raw: str | None = None) -> tuple[Device, ...]:
         mode = row.get("mode", "device")
         token_env = row.get("compute_token_env")
         agent_env = row.get("agent_token_env", "RIDER_AGENT_TOKEN")
+        reconnect = row.get("reconnect_command")
+        if reconnect is not None and (
+            not isinstance(reconnect, str)
+            or not reconnect.startswith("/")
+            or len(reconnect) > 4096
+            or any(ord(character) < 32 for character in reconnect)
+            or mode != "device"
+        ):
+            raise RiderError("invalid_device_configuration", 503)
         if (
             not isinstance(id_, str)
             or not IDENTIFIER.fullmatch(id_)
@@ -109,7 +120,9 @@ def configured_devices(raw: str | None = None) -> tuple[Device, ...]:
             raise RiderError("demo_requires_loopback", 503)
         if id_ in {device.id for device in devices}:
             raise RiderError("duplicate_device_id", 503)
-        devices.append(Device(id_, label, url.rstrip("/"), mode, token_env, agent_env))
+        devices.append(
+            Device(id_, label, url.rstrip("/"), mode, token_env, agent_env, reconnect)
+        )
     return tuple(devices)
 
 

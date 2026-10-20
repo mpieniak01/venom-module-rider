@@ -49,6 +49,8 @@ export function useRider(section: Section) {
   const sectionRef = useRef(section);
   const mediaRef = useRef<{ camera: "raw" | "proc" | "venom" | null; face: boolean }>({ camera: null, face: false });
   const pollPromise = useRef<Promise<void> | null>(null);
+  const refreshPromise = useRef<Promise<void> | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const controlPollPromise = useRef<Promise<void> | null>(null);
   const controlAbortRef = useRef<AbortController | null>(null);
@@ -117,7 +119,8 @@ export function useRider(section: Section) {
       throw error;
     }
   }, [replaceFrame]);
-  const poll = useCallback(async (target?: Section, fast = false) => {
+  const poll = useCallback(async (target?: Section, fast = false, explicit = false) => {
+    if (refreshPromise.current && !explicit) return;
     const pending = fast ? controlPollPromise : pollPromise;
     const controller = fast ? controlAbortRef : abortRef;
     while (pending.current) { await pending.current; if (!target || fast) return; }
@@ -131,7 +134,7 @@ export function useRider(section: Section) {
           configRef.current = nextConfig; sessionRef.current = nextConfig.session; setConfig(nextConfig);
         }
         const started = Date.now();
-        let next = await apiFetch<RiderStatus>(`${BASE}/status?section=${fast ? "navigation" : requestedSection}`, { signal: abort.signal });
+        let next = await apiFetch<RiderStatus>(`${BASE}/status?section=${fast ? "navigation" : requestedSection}`, { signal: abort.signal, cache: "no-store" });
         const received = Date.now();
         if (abort.signal.aborted) return;
         const nextConfig = await configForConnection(configRef.current!, next.connection, () => apiFetch<DeviceConfig>(`${BASE}/config`, { signal: abort.signal }));
@@ -188,6 +191,44 @@ export function useRider(section: Section) {
     pending.current = task().finally(() => { pending.current = null; if (controller.current === abort) controller.current = null; });
     return pending.current;
   }, [fetchFrame, hold, panelId, replaceFrame]);
+  const refresh = useCallback((): Promise<void> => {
+    if (refreshPromise.current) return refreshPromise.current;
+    if (busy) return Promise.resolve();
+    motionEpoch.current += 1; motionBlocked.current += 1;
+    hold.cancel(); pendingHandoff.current = null; pendingResume.current = null;
+    abortReads(); setRefreshing(true); setBusy("/connection/refresh");
+    setNotice({ key: "connectionRefreshing", tone: "info" });
+    const task = async () => {
+      let failure = "";
+      const controller = new AbortController();
+      const deadline = setTimeout(() => controller.abort(), 20000);
+      try {
+        await Promise.all([pollPromise.current, controlPollPromise.current]);
+        clockRef.current = null;
+        const next = await apiFetch<DeviceConfig>(`${BASE}/config`, { cache: "no-store", signal: controller.signal });
+        configRef.current = next; sessionRef.current = next.session; setConfig(next);
+        if (next.device_id) {
+          const response = await apiFetch<JsonRecord>(`${BASE}/connection/refresh`, {
+            method: "POST", headers: { "X-Rider-Session": next.session }, body: "{}", signal: controller.signal,
+          });
+          const recovery = record(data(response).recovery);
+          if (recovery.state === "failed") failure = str(recovery.error) || "pi_unreachable";
+        }
+      } catch (error) { failure = errorCode(error); }
+      finally {
+        clearTimeout(deadline);
+        await poll(undefined, false, true);
+        const online = ["online", "degraded"].includes(statusRef.current?.connection.status ?? "");
+        setNotice(online && !failure
+          ? { key: "connectionRefreshed", tone: "success" }
+          : { key: "connectionRefreshFailed", code: failure || str(statusRef.current?.connection.error), tone: "error" });
+        motionBlocked.current = Math.max(0, motionBlocked.current - 1);
+        setRefreshing(false); setBusy(null);
+      }
+    };
+    refreshPromise.current = task().finally(() => { refreshPromise.current = null; });
+    return refreshPromise.current;
+  }, [abortReads, busy, hold, poll]);
   const mutation = useCallback(async (path: string, body: JsonRecord = {}, method = "POST", quiet = false): Promise<JsonRecord> => {
     const session = sessionRef.current;
     if ((!session && !(path === "/control" && body.action === "stop")) || (!isConnected() && path !== "/control" && path !== "/config")) throw Object.assign(new Error("offline"), { data: { error: "offline" } });
@@ -529,6 +570,6 @@ export function useRider(section: Section) {
   // ARM always refreshes the fast control endpoint before making its envelope.
   // The latency of a diagnostics view must not prevent that refresh request.
   const canArm = canRequestArm(status);
-  return { pipeline, config, status, loading, notice, setNotice, busy, activeDirection, manualMode, manualRequest, panelId, canContinuous: continuousAvailable(status, panelId), controlFresh: hasFreshControl(), canMutate: isConnected(), canArm, canNavigate: canNavigate(), canMove: movementReady(), poll, command, stopManual, startNavigationTrial, currentSession, currentMotionEpoch, currentGeneration, currentCamera, mutate: runMutation, takeManual, selectDevice, hold, camera, cameraStream, setCameraStream, cameraTransition, setCameraTransition, markCameraDecoded, runtimeFrame, showRuntimeFrame, setShowRuntimeFrame, mediaError };
+  return { pipeline, config, status, loading, notice, setNotice, busy, activeDirection, manualMode, manualRequest, panelId, canContinuous: continuousAvailable(status, panelId), controlFresh: hasFreshControl(), canMutate: isConnected(), canArm, canNavigate: canNavigate(), canMove: movementReady(), poll, refresh, refreshing, command, stopManual, startNavigationTrial, currentSession, currentMotionEpoch, currentGeneration, currentCamera, mutate: runMutation, takeManual, selectDevice, hold, camera, cameraStream, setCameraStream, cameraTransition, setCameraTransition, markCameraDecoded, runtimeFrame, showRuntimeFrame, setShowRuntimeFrame, mediaError };
 }
 export type RiderClient = ReturnType<typeof useRider>;
