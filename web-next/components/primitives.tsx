@@ -62,12 +62,12 @@ export function Checkbox({ className = "", ...props }: InputHTMLAttributes<HTMLI
 export function Range({ className = "", ...props }: InputHTMLAttributes<HTMLInputElement>) {
   return <input className={`${styles.formRange} ${className}`} data-rider-control="range" {...props} type="range"/>;
 }
-export function NumberField({ label, value, descriptor, onChange, disabled }: { label: string; value: number; descriptor: NumericDescriptor; onChange: (value: number) => void; disabled?: boolean }) {
+export function NumberField({ label, value, descriptor, onChange, disabled, compact = false }: { label: string; value: number; descriptor: NumericDescriptor; onChange: (value: number) => void; disabled?: boolean; compact?: boolean }) {
   const factor = descriptor.display_factor ?? 1;
   const min = descriptor.minimum === undefined ? undefined : descriptor.minimum * factor;
   const max = descriptor.maximum === undefined ? undefined : descriptor.maximum * factor;
   const step = (descriptor.step ?? 10 ** -(descriptor.display_precision ?? 2) / factor) * factor;
-  return <Field label={`${label}${descriptor.display_unit ? ` · ${descriptor.display_unit}` : ""}`}><Input type="number" value={Number.isFinite(value) ? Number((value * factor).toFixed(6)) : ""} min={min} max={max} step={step} onChange={event => onChange(event.target.value === "" ? Number.NaN : Number(event.target.value) / factor)} disabled={disabled} /></Field>;
+  return <Field label={`${label}${descriptor.display_unit ? ` · ${descriptor.display_unit}` : ""}`}><Input className={compact ? styles.numericInput : undefined} type="number" value={Number.isFinite(value) ? Number((value * factor).toFixed(6)) : ""} min={min} max={max} step={step} onChange={event => onChange(event.target.value === "" ? Number.NaN : Number(event.target.value) / factor)} disabled={disabled} /></Field>;
 }
 export function Details({ value, t }: { value: unknown; t: Translator }) { return <details className={styles.details}><summary>{t("details")}</summary><pre className={styles.pre}>{JSON.stringify(value, null, 2)}</pre></details>; }
 export function Empty({ children }: { children: ReactNode }) { return <div className={styles.empty}>{children}</div>; }

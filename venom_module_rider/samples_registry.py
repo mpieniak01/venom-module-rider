@@ -59,6 +59,9 @@ class SamplesRegistry:
         from .sample_evidence import SampleEvidenceCollector
 
         self.evidence = SampleEvidenceCollector(self)
+        from .motion_capture import MotionWriter
+
+        self.motion_writer = MotionWriter(self)
 
     def _open(self):
         if self.closed:

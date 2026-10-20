@@ -301,6 +301,22 @@ class RiderService:
             return snapshot
         session = self.session
         keys = SECTIONS[section]
+        # Explicit motion collection borrows the same demand-driven telemetry
+        # reader/cache; no extra timer, UART owner, force read or camera.
+        collector = getattr(self.samples, "evidence", None)
+        if section == "calibration" and collector is not None:
+            with collector.lock:
+                collecting = any(
+                    sid in self.samples.active
+                    and sid not in self.samples.closing
+                    and not state["retired"]
+                    and str(state.get("purpose", "")).startswith("motion-study-v1:")
+                    and self.device is not None
+                    and state["device"] == self.device.id
+                    for sid, state in self.samples.evidence.sessions.items()
+                )
+            if collecting:
+                keys = (*keys, "telemetry")
         calls = [
             self.read(
                 READS[key][0],
@@ -453,6 +469,18 @@ class RiderService:
             task.cancel()
 
     async def control(self, body: dict, session):
+        from .motion_capture import safe_begin, safe_finish
+
+        ticket = safe_begin(self, body, session)
+        try:
+            result = await self._control(body, session)
+        except BaseException as exc:
+            safe_finish(self, ticket, error=exc)
+            raise
+        safe_finish(self, ticket, result=result)
+        return result
+
+    async def _control(self, body: dict, session):
         action = body.get("action")
         stop = action in {"stop", "disarm"}
         intervention = (

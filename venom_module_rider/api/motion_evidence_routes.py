@@ -25,3 +25,20 @@ def session_report(store, session_id):
 async def motion_report(request: Request, session_id: str):
     domain = registry(request)
     return await domain.read(session_report, domain.store, session_id)
+
+
+def session_timeline(store, session_id):
+    from ..motion_timeline import build_timeline
+
+    manifest, revision = SampleArchive(store).snapshot(session_id)
+    manifest["dataset_revision"] = revision
+    try:
+        return build_timeline(manifest)
+    except ValueError as exc:
+        raise RiderError("motion_timeline_invalid", 409) from exc
+
+
+@router.get("/sessions/{session_id}/motion-timeline")
+async def motion_timeline(request: Request, session_id: str):
+    domain = registry(request)
+    return await domain.read(session_timeline, domain.store, session_id)

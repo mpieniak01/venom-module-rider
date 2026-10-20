@@ -17,7 +17,7 @@ function finishDetached(id:string) {
     body:JSON.stringify({interrupted:true}),keepalive:true,
   }).catch(()=>undefined);
 }
-export function useSamples(deviceId:string|null, previewVisible:boolean) {
+export function useSamples(deviceId:string|null, previewVisible:boolean, purpose?:string) {
   const [session,setSession]=useState<Collection|null>(null);
   const [outcome,setOutcome]=useState<CaptureOutcome|null>(null);
   const [error,setError]=useState("");
@@ -53,13 +53,13 @@ export function useSamples(deviceId:string|null, previewVisible:boolean) {
     try{
       const next=await apiFetch<Collection>(SAMPLES_BASE+"/sessions",{method:"POST",body:JSON.stringify({
         request_id:crypto.randomUUID(),source_device_id:deviceId,
-        policy:{kind,duration_s:10,interval_ms:200,max_frames:50},
+        policy:{kind,duration_s:10,interval_ms:200,max_frames:50,...(purpose?{scene_group:purpose}:{})},
       })});
       if(requestEpoch!==epoch.current||!alive.current){finishDetached(next.session_id);return;}
       syncSession(next);
     }catch(err){if(alive.current&&requestEpoch===epoch.current)setError(errorCode(err));}
     finally{if(alive.current&&requestEpoch===epoch.current)setBusy(false);}
-  },[deviceId,end,invalidate,syncSession]);
+  },[deviceId,end,invalidate,syncSession,purpose]);
   const save=useCallback(async(frame:Frame|null)=>{
     if(unresolved.current)return;
     const intent=captureIntent(sessionRef.current,frame,crypto.randomUUID());

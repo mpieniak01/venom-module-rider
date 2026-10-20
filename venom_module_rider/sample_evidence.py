@@ -180,6 +180,7 @@ class SampleEvidenceCollector:
                 session["session_id"],
                 {
                     "device": session["source_device_id"],
+                    "purpose": session["policy"].get("scene_group"),
                     "source_session": None,
                     "retired": False,
                     "seen": set(),
