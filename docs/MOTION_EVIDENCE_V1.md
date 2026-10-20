@@ -112,7 +112,9 @@ heading rate. It is disabled by default (`calibration_required`). With a validat
 
 - Original `values.yaw` and matching unit; `sdk_raw` remains unsupported.
 - The same device, host session and known source instance, increasing source and
-  host receipt times, and an interval within the contiguous limit.
+  host receipt times, and an interval within the contiguous limit. If a yaw
+  channel explicitly supplies `instance_id`, it must agree with that known
+  source instance; disagreement excludes the pair as `source_yaw_instance_mismatch`.
 - Source/channel `ready=true`, no stale/offline/simulated flag, and no invalid or
   wrapped-display channel marker. `physical_validation=unverified` is retained
   separately and never promoted to physical verification.
@@ -161,3 +163,29 @@ PYTHONPATH=/home/ubuntu/venom:. python -m pytest -q tests/test_motion_evidence*.
 PYTHONPATH=/home/ubuntu/venom:. python -m mypy \
   venom_module_rider/motion_evidence.py venom_module_rider/motion_evidence_cli.py
 ```
+
+## Operator report
+
+In Samples and sessions in Venom, select a saved session, expand Motion telemetry
+analysis and choose Analyze saved session. This is an explicit local operation,
+not a new polling loop. It reads the same stored dataset revision even when Pi
+is disconnected. It uses no model, camera or control request.
+
+GET /api/v1/rider/samples/sessions/{session_id}/motion-evidence computes the
+bounded report through the existing sample worker. The operator endpoint uses
+conservative default settings: no assumed angle calibration or physical velocity.
+The library displays sample counts, source-time gaps, raw acceleration norm and
+unit qualification. The detailed report retains source quality, loss counters,
+settings and input hashes. A report's available status means diagnostic data is
+available; it is never permission to move or proof of physical progress.
+
+The local CLI accepts a session ZIP or validated manifest JSON and creates a new
+report file without overwriting an existing report:
+
+```sh
+python -m venom_module_rider.motion_evidence_cli /absolute/session.zip --output /absolute/new-report.json
+```
+
+Use the existing host environment. Optional analysis settings are explicit and
+never modify robot configuration. SDK-raw angles remain unqualified until an
+actual documented conversion exists; setting a flag alone does not convert them.

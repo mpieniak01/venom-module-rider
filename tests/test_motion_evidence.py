@@ -361,3 +361,30 @@ def test_nonincreasing_host_receipt_excludes_yaw_derivative():
     assert clocks["yaw_angular_rate"]["excluded_pairs"] == {
         "host_receipt_nonincreasing": 1
     }
+
+
+@pytest.mark.parametrize(
+    "instances",
+    [
+        ("other-boot", "other-boot"),
+        ("source-boot", "other-boot"),
+        (None, "other-boot"),
+        ("", "source-boot"),
+    ],
+)
+def test_explicit_yaw_producer_must_agree_with_source_instance(instances):
+    rows = [record(0, 1.0), record(1, 1.1)]
+    for row, instance in zip(rows, instances, strict=True):
+        if instance is not None:
+            row["quality"]["sensors"]["yaw"]["instance_id"] = instance
+    rate = analyze_evidence(rows, yaw_settings())["clocks"]["yaw_angular_rate"]
+    assert rate["status"] == "unavailable"
+    assert rate["excluded_pairs"] == {"source_yaw_instance_mismatch": 1}
+
+
+def test_matching_explicit_yaw_producer_allows_qualified_rate():
+    rows = [record(0, 1.0), record(1, 1.1)]
+    for row in rows:
+        row["quality"]["sensors"]["yaw"]["instance_id"] = "source-boot"
+    rate = analyze_evidence(rows, yaw_settings())["clocks"]["yaw_angular_rate"]
+    assert rate["status"] == "available"

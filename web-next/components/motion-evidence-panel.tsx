@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api-client";
 import { errorCode, formatNumber, record, str, type JsonRecord } from "../lib/model";
 import { SAMPLES_BASE } from "../lib/samples";
@@ -11,7 +11,8 @@ export function MotionEvidencePanel({session,t,language}:{session:string;t:Trans
   const [error,setError]=useState("");
   const [busy,setBusy]=useState(false);
   const epoch=useRef(0);
-  useEffect(()=>{++epoch.current;setReport(null);setError("");setBusy(false);return()=>{++epoch.current;};},[session]);
+  const invalidate=useCallback(()=>++epoch.current,[]);
+  useEffect(()=>{invalidate();setReport(null);setError("");setBusy(false);return()=>{invalidate();};},[session,invalidate]);
   const run=async()=>{
     const current=++epoch.current;setBusy(true);setError("");
     try{

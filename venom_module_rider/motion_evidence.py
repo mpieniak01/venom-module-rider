@@ -159,6 +159,11 @@ def _angle_reason(
             return "source_yaw_unit_unqualified"
         yaw_quality = _channel_quality(record, "yaw")
         if (
+            "instance_id" in yaw_quality
+            and yaw_quality["instance_id"] != record["source_instance_id"]
+        ):
+            return "source_yaw_instance_mismatch"
+        if (
             yaw_quality.get("ready") is False
             or yaw_quality.get("stale") is True
             or yaw_quality.get("valid") is False
