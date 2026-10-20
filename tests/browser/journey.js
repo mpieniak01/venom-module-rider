@@ -58,6 +58,12 @@ async page => {
     await wait(async()=>!(await page.getByTestId("journey-blocks").innerText()).includes("obsługi podróży"),"capability not refreshed");
     check(await page.getByTestId("journey-start").isDisabled(),"disabled avoidance allowed journey");
     check((await page.getByTestId("journey-blocks").innerText()).includes("Włącz omijanie"),"avoidance gap not explained");
+    const calibratedModel=policy.model_sha256;
+    policy.model_sha256="b".repeat(64);policy.revision+=1;
+    await wait(async()=>await page.getByTestId("calibration-acceptance-help").isVisible(),"missing calibration guidance");
+    const acceptance=await page.getByTestId("calibration-acceptance-help").innerText();
+    check(acceptance.includes("Rozpocznij podróż")&&!acceptance.includes("10 s"),"journey calibration points to bounded trial");
+    policy.model_sha256=calibratedModel;
     policy.avoidance.enabled=true;policy.revision+=1;
     await wait(async()=>!await page.getByTestId("journey-start").isDisabled(),"valid existing image policy blocked journey");
     await page.getByTestId("journey-start").click();
@@ -100,6 +106,11 @@ async page => {
     check(calls.slice(takeover).map(call=>call.body.action).join(",")==="stop,arm","takeover did not serialize STOP then manual ARM");
     check(calls.every(call=>!["navigation_pause","navigation_resume"].includes(call.body.action)),"journey used trial warm authority");
     scenarios.push("manual takeover requires successful STOP, fresh state, then explicit manual ARM; rejected STOP never arms");
+    await page.setViewportSize({width:390,height:844});
+    const modeRow=page.getByRole("group",{name:"Widok sterowania"});
+    const manualPanel=page.getByRole("complementary",{name:"Sterowanie ręczne"});
+    await wait(async()=>{const modes=await modeRow.boundingBox(),pad=await manualPanel.boundingBox();return modes&&pad&&modes.y+modes.height<=pad.y+1;},"wrapped journey modes overlap manual controls");
+    scenarios.push("three workspace modes fit phone layout without overlapping manual controls");
     return {passed:scenarios,mutations:calls.map(call=>({path:call.path,action:call.body.action??(call.path==="/navigation/journey"?"journey":"refresh")})),fixtureOnly:true};
   }finally{await page.goto("about:blank");await page.unrouteAll({behavior:"wait"});}
 }
