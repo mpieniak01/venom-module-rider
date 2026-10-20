@@ -97,12 +97,27 @@ def observations(path, payload, device, source_session, mono, wall):
             "source": source.get("source", "unknown"),
             "clock_sync_uncertainty_ms": None,
         }
+        orientation = quality.get("orientation", observation.get("orientation"))
+        if isinstance(orientation, dict):
+            details["orientation"] = {
+                key: value
+                for key in ("convention", "qualification_ref", "instance_id", "unit")
+                if isinstance(value := orientation.get(key), str)
+                and 0 < len(value) <= 128
+            }
+            for key, value_type in (("revision", int), ("verified", bool)):
+                if type(orientation.get(key)) is value_type and (
+                    key != "revision" or 0 <= orientation[key] <= 1000000
+                ):
+                    details["orientation"][key] = orientation[key]
         instance = observation.get("instance_id", source.get("instance_id"))
         if not isinstance(instance, str):
             instances = {row.get("instance_id") for row in selected.values()}
             instance = next(iter(instances)) if len(instances) == 1 else None
         kind, executor = "imu", None
         identity = [values, units, stamps]
+        if "orientation" in details:
+            identity.append(details["orientation"])
     elif path == "/api/control/state":
         source = data.get("safety", data)
         if not isinstance(source, dict):

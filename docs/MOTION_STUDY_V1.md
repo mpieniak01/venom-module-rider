@@ -66,7 +66,7 @@ closure is omitted; a request without a result has unknown outcome.
 Lines break on missing units, invalid/stale/offline state, source reset,
 unknown/changed boot identity, nonpositive time or gaps over one second. No
 interpolation fills gaps. sdk_raw is preserved, never relabelled as degrees.
-The 3D follow-up consumes this same timeline and must qualify its convention.
+The [3D view](ATTITUDE_REPLAY_V1.md) consumes this same timeline and requires its qualified producer convention.
 
 ## Verification and deployment
 

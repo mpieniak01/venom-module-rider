@@ -1,8 +1,10 @@
+import {AttitudeComparison} from "./attitude-view";
+import {replayStep} from "../lib/attitude";
 import {useEffect,useState} from "react";
 import {apiFetch} from "@/lib/api-client";
 import {getApiBaseUrl} from "@/lib/env";
 import {errorCode,formatNumber,formatTime,record} from "../lib/model";
-import {readTimeline,pointAt,profileAt,streamTimes,trialRequests,alignTrial,pulseEvidence,type MotionStream,type MotionTimeline} from "../lib/motion-timeline";
+import {readTimeline,pointAt,profileAt,streamTimes,nearestTime,trialRequests,alignTrial,pulseEvidence,type MotionStream,type MotionTimeline} from "../lib/motion-timeline";
 import {SAMPLES_BASE,type Collection} from "../lib/samples";
 import {useSamples} from "../lib/use-samples";
 import type {RiderClient} from "../lib/use-rider";
@@ -70,14 +72,25 @@ export function MotionStudy({client,t,language}:{client:RiderClient;t:Translator
     </div>
   </Panel>;
 }
-export function MotionTimelineView({a,b,streamA,streamB,t,language,orientation}:{a:MotionTimeline;b:MotionTimeline|null;streamA:MotionStream|null;streamB:MotionStream|null;t:Translator;language:string;orientation?:(a:MotionStream|null,b:MotionStream|null,time:number)=>React.ReactNode}){
+export function MotionTimelineView({a,b,streamA,streamB,t,language}:{a:MotionTimeline;b:MotionTimeline|null;streamA:MotionStream|null;streamB:MotionStream|null;t:Translator;language:string}){
   const times=streamTimes(streamA,streamB);
   const [cursor,setCursor]=useState(times[0]??0),[zoom,setZoom]=useState("all");
+  const [playing,setPlaying]=useState(false);
   const min=times[0]??0,max=times.at(-1)??0;
+  const [reducedMotion,setReducedMotion]=useState(false);
+  const step=replayStep(times,cursor);
+  useEffect(()=>{const query=window.matchMedia("(prefers-reduced-motion: reduce)");const update=()=>{setReducedMotion(query.matches);setPlaying(false);};update();query.addEventListener("change",update);return()=>query.removeEventListener("change",update);},[]);
+  useEffect(()=>{const hidden=()=>{if(document.hidden)setPlaying(false);};document.addEventListener("visibilitychange",hidden);return()=>document.removeEventListener("visibilitychange",hidden);},[]);
+  useEffect(()=>{
+    if(!playing||step.next===null||step.gap)return;
+    const timer=setTimeout(()=>setCursor(step.next!),step.delay);
+    return()=>clearTimeout(timer);
+  },[playing,step.next,step.delay,step.gap]);
+  const chooseTime=(value:number)=>{setPlaying(false);setCursor(value);};
   const radius=zoom==="all"?null:Number(zoom)/2;
   const range:[number,number]=radius===null?[min,max]:[Math.max(min,cursor-radius),Math.min(max,cursor+radius)];
   const pA=pointAt(streamA,cursor),pB=pointAt(streamB,cursor);
-  const next=(direction:number)=>{const n=direction>0?times.find(v=>v>cursor+.0006):times.findLast(v=>v<cursor-.0006);if(n!==undefined)setCursor(n);};
+  const next=(direction:number)=>{const n=direction>0?times.find(v=>v>cursor+1e-9):times.findLast(v=>v<cursor-1e-9);if(n!==undefined)chooseTime(n);};
   const readout=(p:typeof pA)=>p?["roll","pitch","yaw"].map(key=>key+" "+formatNumber(p.values[key],language,2)+" "+p.units[key]).join(" · "):t("study.noSample");
   const profileA=profileAt(streamA,cursor),profileB=profileAt(streamB,cursor);
   const trialA=pulseEvidence(streamA),trialB=pulseEvidence(streamB);
@@ -92,20 +105,22 @@ export function MotionTimelineView({a,b,streamA,streamB,t,language,orientation}:
     <Details t={t} value={{A:condition(trialA),...(b?{B:condition(trialB)}:{})}}/>
     {!times.length?<Empty>{t("study.noData")}</Empty>:<>
       <div className={styles.flex}>
+        <Button data-testid="study-play" disabled={cursor>=max} aria-pressed={playing&&step.next!==null&&!step.gap} onClick={()=>{if(step.gap){chooseTime(step.next!);return;}setPlaying(p=>!p);}}>{t(playing&&step.next!==null&&!step.gap?"attitude.pause":"attitude.play")}</Button>
         <Button data-testid="study-prev" onClick={()=>next(-1)} disabled={cursor<=min}>{t("study.previous")}</Button>
         <Button data-testid="study-next" onClick={()=>next(1)} disabled={cursor>=max}>{t("study.next")}</Button>
         <span className={styles.small}>A ━ · B ┄</span>
       </div>
-      <Field label={t("study.time")+" · "+formatNumber(cursor,language,3)+" s"}><Range data-testid="study-time" min={min} max={Math.max(min+.001,max)} step={.001} value={cursor} onChange={e=>setCursor(Number(e.target.value))}/></Field>
+      <Field label={t("study.time")+" · "+formatNumber(cursor,language,3)+" s"}><Range data-testid="study-time" min={min} max={Math.max(min+.001,max)} step="any" value={cursor} onChange={e=>chooseTime(nearestTime(times,Number(e.target.value)))} onKeyDown={e=>{if(["ArrowLeft","ArrowDown","ArrowRight","ArrowUp","Home","End"].includes(e.key)){e.preventDefault();if(e.key==="Home")chooseTime(min);else if(e.key==="End")chooseTime(max);else next(e.key==="ArrowRight"||e.key==="ArrowUp"?1:-1);}}}/></Field>
       <Field label={t("study.window")}><Select value={zoom} onChange={e=>setZoom(e.target.value)}><option value="all">{t("study.all")}</option>{[1,5,10].map(v=><option key={v} value={v}>{v} s</option>)}</Select></Field>
       <p className={styles.small} aria-live="polite">A: {readout(pA)}{b?<><br/>B: {readout(pB)}</>:null}</p>
-      {orientation?.(streamA,streamB,cursor)}
+      {(reducedMotion||step.gap)&&<p role="status" className={styles.hint}>{t(step.gap?"attitude.gap":"attitude.reducedMotion")}</p>}
+      <AttitudeComparison a={streamA} b={streamB} time={cursor} t={t} language={language}/>
       <CommandTrace stream={streamA} range={range} cursor={cursor} t={t} language={language}/>
       {streamB&&<CommandTrace series="B" stream={streamB} range={range} cursor={cursor} t={t} language={language}/>}
-      {["roll","pitch","yaw"].map(channel=><MotionTrace key={channel} a={streamA} b={streamB} channel={channel} range={range} cursor={cursor} onTime={setCursor} t={t} language={language}/>)}
-      <details className={styles.details}><summary>{t("study.acceleration")}</summary>{["accel_x","accel_y","accel_z"].map(channel=><MotionTrace key={channel} a={streamA} b={streamB} channel={channel} range={range} cursor={cursor} onTime={setCursor} t={t} language={language}/>)}</details>
-      <details className={styles.details}><summary>{t("study.outputs")}</summary>{["lx","az"].map(channel=><MotionTrace key={channel} a={outputStream(streamA)} b={outputStream(streamB)} channel={channel} range={range} cursor={cursor} onTime={setCursor} t={t} language={language}/>)}</details>
-      <Details t={t} value={{profiles:{A:profileA,B:profileB},events:{A:streamA?.events.filter(e=>Math.abs(e.t-cursor)<.0006),B:streamB?.events.filter(e=>Math.abs(e.t-cursor)<.0006)},origin_a:streamA?.origin}}/>
+      {["roll","pitch","yaw"].map(channel=><MotionTrace key={channel} a={streamA} b={streamB} channel={channel} range={range} cursor={cursor} onTime={chooseTime} t={t} language={language}/>)}
+      <details className={styles.details}><summary>{t("study.acceleration")}</summary>{["accel_x","accel_y","accel_z"].map(channel=><MotionTrace key={channel} a={streamA} b={streamB} channel={channel} range={range} cursor={cursor} onTime={chooseTime} t={t} language={language}/>)}</details>
+      <details className={styles.details}><summary>{t("study.outputs")}</summary>{["lx","az"].map(channel=><MotionTrace key={channel} a={outputStream(streamA)} b={outputStream(streamB)} channel={channel} range={range} cursor={cursor} onTime={chooseTime} t={t} language={language}/>)}</details>
+      <Details t={t} value={{profiles:{A:profileA,B:profileB},events:{A:streamA?.events.filter(e=>Math.abs(e.t-cursor)<1e-9),B:streamB?.events.filter(e=>Math.abs(e.t-cursor)<1e-9)},origin_a:streamA?.origin}}/>
     </>}
     <p className={styles.hint}>{t("study.limits")}</p>
     {(!profileA||b&&!profileB)&&<p className={styles.hint}>{t("study.noProfile")}</p>}

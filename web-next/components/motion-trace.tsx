@@ -1,6 +1,6 @@
 import {useEffect,useRef,useState} from "react";
 import {finite,formatNumber,record,str} from "../lib/model";
-import {nearestTime,seriesSegments,type MotionStream} from "../lib/motion-timeline";
+import {markerIds,nearestTime,seriesSegments,type MotionStream} from "../lib/motion-timeline";
 import type {Translator} from "../lib/i18n";
 import {Field,Select} from "./primitives";
 import styles from "../rider.module.css";
@@ -33,14 +33,22 @@ export function MotionTrace({a,b,channel,range,cursor,onTime,t,language}:{a:Moti
       <rect x={left} y={top} width={Math.max(1,right-left)} height={bottom-top} className={styles.motionPlotFrame}/>
       {[lo,hi].map((v,i)=><text key={i} x={left-5} y={top+(1-i)*(bottom-top)+4} textAnchor="end">{tick(v)}</text>)}
       {[0,1,2,3].map(i=>{const v=xmin+i*span/3;return <text key={i} x={x(v)} y={101} textAnchor={i===0?"start":i===3?"end":"middle"}>{formatNumber(v,language,2)} s</text>;})}
-      {[a,b].map((s,index)=>s&&<g key={index} className={index?styles.motionSeriesB:styles.motionSeriesA}>
-        {seriesSegments(s.points,channel,unit).map((points,key)=><g key={key}>
-          {points.length>1&&<polyline points={points.filter(p=>p.t>=range[0]&&p.t<=range[1]).map(p=>`${x(p.t)},${y(p.values[channel] as number)}`).join(" ")} fill="none" strokeDasharray={index?"4 3":undefined}/>}
-          {points.filter(p=>p.t>=range[0]&&p.t<=range[1]).map(p=><circle key={p.id} cx={x(p.t)} cy={y(p.values[channel] as number)} r={3} fillOpacity={p.valid?1:.35}><title>{`${index?"B":"A"} · ${formatNumber(p.t,language,3)} s · ${p.values[channel]} ${unit}`}</title></circle>)}
-        </g>)}
-      </g>)}
+      {[a,b].map((s,index)=>{
+        if(!s)return null;
+        const ids=markerIds(s.points.filter(p=>p.t>=range[0]&&p.t<=range[1]),cursor);
+        return <g key={index} className={index?styles.motionSeriesB:styles.motionSeriesA}>
+        {seriesSegments(s.points,channel,unit).map((points,key)=>{
+          const visible=points.filter(p=>p.t>=range[0]&&p.t<=range[1]);
+          const markers=visible.filter(p=>ids.has(p.id));
+          if(visible.length<2&&!markers.length)return null;
+          return <g key={key}>
+          {visible.length>1&&<polyline points={visible.map(p=>`${x(p.t)},${y(p.values[channel] as number)}`).join(" ")} fill="none" strokeDasharray={index?"4 3":undefined}/>}
+          {markers.map(p=><circle key={p.id} cx={x(p.t)} cy={y(p.values[channel] as number)} r={3} fillOpacity={p.valid?1:.35}><title>{`${index?"B":"A"} · ${formatNumber(p.t,language,3)} s · ${p.values[channel]} ${unit}`}</title></circle>)}
+        </g>;})}
+      </g>;})}
       <line x1={x(cursor)} x2={x(cursor)} y1={top} y2={bottom} className={styles.motionCursor}/>
     </svg>
+    {[a,b].some(s=>(s?.points.length??0)>256)&&<p className={styles.small}>{t("attitude.markers")}</p>}
   </div>;
 }
 export function CommandTrace({stream,range,cursor,t,language,series="A"}:{stream:MotionStream|null;range:[number,number];cursor:number;t:Translator;language:string;series?:"A"|"B"}){

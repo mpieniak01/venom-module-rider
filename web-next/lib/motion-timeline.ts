@@ -19,7 +19,8 @@ export function readTimeline(value:unknown):MotionTimeline {
 }
 export const streamTimes=(a:MotionStream|null,b:MotionStream|null)=>[...new Set([a,b].flatMap(s=>s?[...s.points,...s.events,...s.outputs].map(p=>p.t):[]))].sort((x,y)=>x-y);
 export function pointAt(stream:MotionStream|null,time:number):MotionPoint|null {
-  return stream?.points.find(p=>Math.abs(p.t-time)<.0006)??null;
+  const matches=stream?.points.filter(p=>Math.abs(p.t-time)<1e-9)??[];
+  return matches.length===1?matches[0]:null;
 }
 export function nearestTime(times:number[],value:number):number {
   return times.reduce((best,t)=>Math.abs(t-value)<Math.abs(best-value)?t:best,times[0]??0);
@@ -51,7 +52,7 @@ export function alignTrial(stream:MotionStream|null,id:string):MotionStream|null
     points:stream.points.map(p=>({...p,t:p.t-offset})),events:stream.events.map(e=>({...e,t:e.t-offset})),outputs:stream.outputs.map(o=>({...o,t:o.t-offset}))};
 }
 export function pulseEvidence(stream:MotionStream|null){
-  const event=trialRequests(stream).find(e=>Math.abs(e.t)<.0006);
+  const event=trialRequests(stream).find(e=>Math.abs(e.t)<1e-9);
   const duration=event?.intent.duration_s;
   const profile=event?.profile_ref?stream?.profiles[event.profile_ref]??null:null;
   if(!event||!finite(duration)||duration<=0)return {event,result:stream?.events.find(e=>e.phase==="result"&&e.operation_id===event?.operation_id)??null,profile,peaks:null};
@@ -66,4 +67,11 @@ export function pulseEvidence(stream:MotionStream|null){
     if(finite(value))peaks[axis]={value,unit};
   }
   return {event,result:stream?.events.find(e=>e.phase==="result"&&e.operation_id===event?.operation_id)??null,profile,peaks:Object.keys(peaks).length?peaks:null};
+}
+
+/** Bound marker DOM only; original points and every polyline vertex stay intact. */
+export function markerIds(points:MotionPoint[],cursor:number,maximum=256):Set<string>{
+  const stride=Math.max(1,Math.ceil(points.length/maximum));
+  const current=points.find(p=>Math.abs(p.t-cursor)<1e-9)?.id;
+  return new Set(points.filter((p,i)=>i%stride===0||i===points.length-1||p.id===current).map(p=>p.id));
 }
