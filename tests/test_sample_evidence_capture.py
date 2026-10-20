@@ -625,3 +625,40 @@ async def test_optional_evidence_status_failure_does_not_skip_close_recovery(
             await replacement.close()
     finally:
         await registry.close()
+
+
+@pytest.mark.parametrize("finish_remaining", ["end", "global_stop"])
+async def test_ending_one_collection_preserves_other_live_evidence_associations(
+    tmp_path, finish_remaining
+):
+    registry = SamplesRegistry(tmp_path)
+    try:
+        first = (await registry.start("one", "pi"))["session_id"]
+        second = (await registry.start("two", "pi"))["session_id"]
+        registry.observe_evidence("/state", imu(), "pi", "selected")
+        await drain(registry)
+        archived_ids = {
+            row["record_id"]
+            for row in snapshot(registry, second)["evidence"]["records"]
+        }
+        assert archived_ids and registry.evidence.status()["ram_records"] == 1
+
+        await registry.end(first)
+        source = frame()
+        key = registry.offer(
+            "pi", source.payload, source.mime, {"host_device_session": "selected"}
+        )
+        registry.capture(second, "capture-second", key)
+        await drain(registry)
+        sample = registry.store.sample(registry.store.samples(second)[0]["sample_id"])
+        assert set(sample["source_context"]["evidence"]["record_ids"]) == archived_ids
+        assert sample["telemetry"]["record_id"] in archived_ids
+
+        if finish_remaining == "end":
+            await registry.end(second)
+        else:
+            registry.retire_evidence("stop")
+        assert registry.evidence.status()["ram_records"] == 0
+        assert registry.evidence.status()["ram_bytes"] == 0
+    finally:
+        await registry.close()
