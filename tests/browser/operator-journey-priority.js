@@ -3,14 +3,16 @@ async page => {
   const base=page.url()==="about:blank"?"http://localhost:3300":new URL(page.url()).origin,check=(ok,message)=>{if(!ok)throw new Error(message);};
   check(["localhost","127.0.0.1","[::1]"].includes(new URL(base).hostname),"loopback UI required");
   await page.goto("about:blank");
+  const imageBase64=await page.evaluate(()=>{const canvas=document.createElement("canvas");canvas.width=64;canvas.height=48;const context=canvas.getContext("2d");context.fillStyle="#395539";context.fillRect(0,0,64,48);return canvas.toDataURL("image/png").split(",")[1];});
   const wait=async(fn,message)=>{const end=Date.now()+8000;while(!await fn()){check(Date.now()<end,message);await new Promise(resolve=>setTimeout(resolve,30));}};
   const calls=[],scenarios=[],sha="a".repeat(64),cancelled=new Set(),arrived=[];
-  let version=true,online=true,state="DISARMED",owner=null,holder=null,arming=null,generation="fixture-0",serial=0,operation="idle",seq=0;
+  let version=true,online=true,controlStale=false,state="DISARMED",owner=null,holder=null,arming=null,generation="fixture-0",serial=0,operation="idle",seq=0;
+  let statusDelay=0,slowReads=0,frameSequence=0;
   let journey=null,journeyPending=null,journeyDelay=0,moveDelay=false,delayAfterExecute=false,generationRace=false,releaseMove=null;
   const advance=()=>{generation="fixture-"+(++serial);seq=0;};
   const settings={revision:1,directions:Object.fromEntries(["forward","backward","left","right"].map(direction=>[direction,{speed:.2,duration:.25,minimum:0,maximum:1,step:.01}])),parameter_schema:{direction_fields:{speed:{display_factor:100,display_precision:0,display_unit:"%"}}},control_modes:{version:1,supported:["pulse","hold","release"],hold_renewal_ms:150,hold_timeout_ms:500,click_threshold_ms:180,request_ttl_ms:500}};
   const policy={revision:1,mode:"observe",speed:.1,max_motion_ms:150,decision_budget_ms:300,corridor:[.35,.8,.65,.95],perception:{engine:"depth_plane"},verified:true,calibration_id:"operator-fixture",model_sha256:sha,avoidance:{enabled:true,protocol_version:3,sweep_verified:true,turn_speed:.05,turn_ms:100,max_turn_pulses:3,geometry:{mode:"image"}}};
-  const safety=()=>({state,owner,arming_mode:arming,generation,last_seq:seq,operator_intervention_version:version?1:undefined,navigation_journey_version:1,panel_motion_enabled:state==="ARMED",ready:true,can_move:state==="ARMED",stale:false,observed_at:Date.now()/1000,capabilities:{move:{available:true}},panel_control:{version:1,holder},operator_control:{version:1,state:owner==="navigation"?"active":"paused",operation_id:operation,generation},remote_decision_deadline_supported:true,scoped_stop_generation_supported:true});
+  const safety=()=>({state,owner,arming_mode:arming,generation,last_seq:seq,operator_intervention_version:version?1:undefined,navigation_journey_version:1,panel_motion_enabled:state==="ARMED",ready:true,can_move:state==="ARMED",stale:controlStale,observed_at:Date.now()/1000,capabilities:{move:{available:true}},panel_control:{version:1,holder},operator_control:{version:1,state:owner==="navigation"?"active":"paused",operation_id:operation,generation},remote_decision_deadline_supported:true,scoped_stop_generation_supported:true});
   const navigation=()=>({config:policy,status:{running:true,mode:journey?.active?"drive":"observe",stale:false,run_id:"warm-source",operator_control_version:1,journey,decision:{state:"clear",clear_count:3,vision_action:"go",action:journey?.active?"go":"stop"}},goals:{drive:!!journey?.active,observe:!journey?.active},runtime:{drive:true,observe:true,known:true},detector:{configured:true,loaded:true,sha256:sha,drive_supported:true,navigation_journey_version:1,supported_protocol_versions:[3]}});
   await page.route("**/api/v1/rider/**",async route=>{
     const req=route.request(),path=new URL(req.url()).pathname.slice("/api/v1/rider".length);
@@ -61,10 +63,17 @@ async page => {
       return json(response);
     }
     if(path==="/config")return json({devices:[{id:"fixture",label:"Fixture",mode:"demo"}],device_id:"fixture",session:"operator-journey-fixture"});
-    if(path==="/status")return json({connection:{configured:true,status:online?"online":"offline",session:"operator-journey-fixture",device_id:"fixture",mode:"demo"},polling:{control_ms:100},settings,errors:{},control:{server_time:Date.now()/1000,safety:safety()},telemetry:{},health:{},resources:{},catalog:{features:[]},logic:{},face:{}});
+    if(path==="/status"){
+      if(statusDelay){await new Promise(resolve=>setTimeout(resolve,statusDelay));slowReads++;}
+      return json({connection:{configured:true,status:online?"online":"offline",session:"operator-journey-fixture",device_id:"fixture",mode:"demo"},polling:{control_ms:100},settings,errors:{},control:{server_time:Date.now()/1000,safety:safety()},telemetry:{},health:{},resources:{},catalog:{features:[]},logic:{},face:{}});
+    }
     if(path.startsWith("/navigation/"))return json(navigation());
     if(path==="/camera/pipeline")return json({supported:false});
-    if(path.startsWith("/camera/"))return json({detail:{code:"camera_off"}},404);
+    if(path.startsWith("/camera/")){
+      const sequence=++frameSequence,source={contract_version:1,camera_session:"priority-camera",transport_epoch:1,pipeline_revision:1,sequence,frame_id:"priority-frame-"+sequence,captured_monotonic_ns:Date.now()*1e6,sha256:"b".repeat(64)};
+      const analysis={run_id:"warm-source",frame_id:"decision-"+sequence,sequence,config_revision:policy.revision,state:"clear",vision_action:"go",source};
+      return route.fulfill({contentType:"image/png",body:Buffer.from(imageBase64,"base64"),headers:{"X-Rider-Stale":"false","X-Rider-Frame-Age-Ms":"20","X-Rider-Frame-Age-Source":"pi-status-anchor-plus-host-elapsed","X-Rider-Frame-Id":source.frame_id,"X-Rider-Analysis-Json":JSON.stringify(analysis),"X-Rider-Vision-State":"clear","X-Rider-Source":"venom"}});
+    }
     return json({});
   });
   const forward=page.getByTestId("rider-forward"),left=page.getByTestId("rider-left");
@@ -102,7 +111,8 @@ async page => {
     scenarios.push("active journey ends on a single pulse with no separate takeover or ARM");
     state="DISARMED";owner=null;holder=null;arming=null;advance();await enterJourney();await page.getByTestId("journey-start").click();await wait(()=>journey?.active,"next journey unavailable");
     await wait(async()=>!await forward.isDisabled(),"hold intervention unavailable");moveDelay=true;
-    const box=await forward.boundingBox();await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();
+    const pressForward=async()=>{const box=await forward.boundingBox();check(!!box,"forward arrow not laid out");await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();};
+    await pressForward();
     await wait(()=>!!releaseMove,"delayed takeover not captured");const pending=calls.at(-1).body;
     await page.mouse.up();await wait(()=>cancelled.has(pending.request_id),"release queued cancellation behind ACK");
     check(!arrived.includes(pending.request_id),"test did not exercise cancellation before device arrival");
@@ -113,7 +123,7 @@ async page => {
     await enterJourney();await page.getByTestId("journey-start").click();await wait(()=>journey?.active,"journey after cancellation unavailable");
     await wait(async()=>!await forward.isDisabled(),"next intervention unavailable");
     delayAfterExecute=true;const stopStart=calls.length;
-    await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();
+    await pressForward();
     await wait(()=>!!releaseMove&&owner==="manual","executed delayed ACK not captured");
     await page.getByTestId("rider-stop").focus();await page.keyboard.press("Enter");await wait(()=>state==="DISARMED","STOP queued behind takeover ACK");
     delayAfterExecute=false;releaseMove();releaseMove=null;await page.mouse.up();
@@ -131,9 +141,20 @@ async page => {
     check(calls.slice(blurStart).filter(call=>call.body.mode==="hold").length===1,"blur replayed continuous renewal");
     await page.getByTestId("rider-manual-mode").selectOption("pulse");
     scenarios.push("global blur cancels pending continuous gesture with a scoped independent request and no queued renewal");
-    state="ESTOP";advance();await wait(async()=>await forward.isDisabled(),"ESTOP enabled arrows");
+    await wait(async()=>await page.getByRole("img",{name:"Klatka kamery Rider"}).isVisible(),"camera image not rendered during jitter test");
+    const firstFrame=frameSequence;statusDelay=650;await wait(()=>slowReads>=2,"slow control reads not exercised");
+    check(frameSequence>firstFrame,"camera did not keep refreshing during slow diagnostics");
+    check(!await forward.isDisabled(),"diagnostic RTT jitter hid the explicit manual gesture");
+    const jitterStart=calls.length;await forward.click();await wait(()=>calls.length>jitterStart,"fresh gesture was queued behind slow polling");
+    check(calls.length===jitterStart+1&&calls.at(-1).body.action==="move"&&calls.at(-1).body.operator_consent===true&&calls.at(-1).body.ttl_ms===500,"jitter gesture added a poll/ARM/pause workflow");
+    statusDelay=0;
+    scenarios.push("camera keeps rendering while two 650 ms diagnostic reads cannot update the clock; one explicit gesture still submits one bounded move without queueing");
+    controlStale=true;await wait(async()=>await forward.isDisabled(),"Pi stale input enabled arrows");
+    controlStale=false;state="ESTOP";advance();await wait(async()=>await forward.isDisabled(),"ESTOP enabled arrows");
     state="DISARMED";owner=null;arming=null;advance();online=false;await wait(async()=>await forward.isDisabled(),"offline enabled arrows");
-    online=true;version=false;await wait(async()=>await forward.isDisabled(),"unsupported Pi granted fresh DISARMED consent");
+    online=true;state="DISARMED";owner=null;arming=null;advance();
+    await wait(async()=>!await forward.isDisabled(),"normal connection did not recover");
+    version=false;await wait(async()=>await forward.isDisabled(),"unsupported Pi granted fresh DISARMED consent");
     state="ARMED";owner="navigation";arming="journey";advance();
     await wait(async()=>(await page.getByTestId("operator-messages").innerText()).includes("Pi wymaga aktualizacji"),"unsupported journey intervention not explained");
     check(calls.every(call=>!['arm','navigation_pause','navigation_resume'].includes(call.body.action)),"one gesture required extra lifecycle mutation");

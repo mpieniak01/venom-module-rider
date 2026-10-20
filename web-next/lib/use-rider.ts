@@ -62,7 +62,7 @@ export function useRider(section: Section) {
   const abortReads = useCallback(() => { abortRef.current?.abort(); controlAbortRef.current?.abort(); }, []);
   const isConnected = useCallback(() => ["online", "degraded"].includes(statusRef.current?.connection.status ?? ""), []);
   const hasFreshControl = useCallback(() => freshControl(statusRef.current, clockRef.current, Date.now(), statusRef.current?.polling[`${sectionRef.current}_ms`] ?? 0), []);
-  const canNavigate = useCallback(() => (motionBlocked.current === 0 || motionBlocked.current === journeyPreparing.current && manualInterventionAvailable(statusRef.current, panelId)) && navigationAvailable(statusRef.current, panelId) && (!manualInterventionSupported(statusRef.current) || hasFreshControl()), [hasFreshControl, panelId]);
+  const canNavigate = useCallback(() => (motionBlocked.current === 0 || motionBlocked.current === journeyPreparing.current && manualInterventionAvailable(statusRef.current, panelId)) && navigationAvailable(statusRef.current, panelId), [panelId]);
   const movementReady = useCallback(() => canNavigate() && safetyOf(statusRef.current).owner === "manual", [canNavigate]);
   const [hold] = useState(() => new HoldController({
     timing: () => readHoldTiming(settingsOf(statusRef.current).control_modes),

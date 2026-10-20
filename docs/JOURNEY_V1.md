@@ -115,7 +115,10 @@ preparation/navigation, zeros the previous goal, establishes manual ownership an
 executes only that direction. This also works from normal DISARMED after a fault;
 ESTOP, unavailable hardware and stale/offline state remain blocked. A separate
 Take manual button is optional, not a prerequisite for the arrows. Opening a
-page or reconnecting grants no authority.
+page or reconnecting grants no authority. Button availability uses the reported
+Pi state and capabilities; one slower dashboard poll does not disable a new
+explicit gesture. Pi still checks its original envelope TTL, generation and
+sequence, and the existing hold watchdog remains unchanged.
 
 A pending gesture is cancelled by an independent, cancel-only release containing
 its request ID, original generation and panel. During preparation/navigation it
