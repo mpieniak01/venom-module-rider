@@ -6,6 +6,7 @@ import { errorCode, formatTime, record, str, type JsonRecord } from "../lib/mode
 import { SAMPLES_BASE, type Collection, type Sample, type SamplePage } from "../lib/samples";
 import type { Translator } from "../lib/i18n";
 import { EvidenceSummary } from "./evidence-summary";
+import { MotionEvidencePanel } from "./motion-evidence-panel";
 import { AnalysisPanel } from "./analysis-panel";
 import { Button, Details, Empty, Field, Input, Panel, Select, Textarea } from "./primitives";
 import styles from "../rider.module.css";
@@ -76,6 +77,7 @@ function SampleLibrary({t,language}:{t:Translator;language:string}) {
       {page.total===0&&<Empty>{t("samples.empty")}</Empty>}
       <div className={styles.flex}><Button disabled={offset===0} onClick={()=>setOffset(value=>Math.max(0,value-12))}>{t("samples.previous")}</Button><span className={styles.small}>{page.total?offset+1:0}–{Math.min(offset+12,page.total)} / {page.total}</span><Button disabled={offset+12>=page.total} onClick={()=>setOffset(value=>value+12)}>{t("samples.next")}</Button><a className={styles.button} data-testid="samples-export" href={getApiBaseUrl()+SAMPLES_BASE+"/sessions/"+page.session.session_id+"/export"} download>{t("samples.export")}</a></div>
     </>}
+    {selected&&<MotionEvidencePanel key={"motion-"+selected} session={selected} t={t} language={language}/>}
     {selected&&<AnalysisPanel key={selected} session={selected} t={t} language={language}/>}
     {sample&&<div className={styles.sampleEditor} data-testid="sample-editor">
       <div><img className={styles.sampleOriginal} src={source(str(sample.sample_id))} alt={t("samples.original")}/><a className={styles.button} href={source(str(sample.sample_id))} download>{t("samples.original")}</a><p className={styles.small}>{t("samples.quality")}: {qualityText(record(sample.quality))}</p><code className={styles.small}>{str(record(sample.raw).sha256)}</code></div>
