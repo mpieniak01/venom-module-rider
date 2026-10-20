@@ -35,6 +35,7 @@ export function MotionStudy({client,t,language}:{client:RiderClient;t:Translator
   const [revision,refresh]=useState(0);
   const [error,setError]=useState("");
   const active=capture.session?.state==="collecting";
+  const retired=record(capture.session?.evidence).retired===true;
   const currentId=capture.session?.session_id;
   const aId=selectedA??currentId??"";
   useEffect(()=>{
@@ -50,12 +51,11 @@ export function MotionStudy({client,t,language}:{client:RiderClient;t:Translator
     <div data-testid="motion-study">
       <Field label={t("study.surface")}><Input value={surface} maxLength={80} disabled={active||capture.busy} onChange={e=>setSurface(e.target.value)}/></Field>
       <div className={styles.flex} style={{marginTop:12}}>
-        <Button data-testid="study-record" disabled={!client.canMutate||capture.busy||active} onClick={()=>{setA(null);void capture.start("manual");}}>{t("study.record")}</Button>
+        <Button data-testid="study-record" disabled={!client.canMutate||capture.busy||active&&!retired} onClick={()=>{setA(null);void capture.start("manual");}}>{t("study.record")}</Button>
         <Button data-testid="study-end" disabled={!active||capture.busy} onClick={()=>void capture.end().then(()=>refresh(r=>r+1))}>{t("study.end")}</Button>
         <Button data-testid="study-refresh" onClick={()=>refresh(r=>r+1)}>{t("refresh")}</Button>
       </div>
-      <p role="status" className={styles.hint}>{t(active?"study.recording":"study.passive")}</p>
-      {record(capture.session?.evidence).retired===true&&<p role="alert">{t("study.retired")}</p>}
+      <p role="status" className={styles.hint}>{t(retired?"study.retired":active?"study.recording":"study.passive")}</p>
       {(error||capture.error||a.error||b.error)&&<p role="alert">{t("requestFailed")} · {error||capture.error||a.error||b.error}</p>}
       <div className={styles.grid}>{(["A","B"] as const).map(name=><Field key={name} label={t("study.session")+" "+name}>
         <Select data-testid={"study-session-"+name} value={name==="A"?aId:bId} onChange={e=>{if(name==="A"){setA(e.target.value);setAStream("");}else{setB(e.target.value);setBStream("");}}}>
@@ -85,7 +85,7 @@ export function MotionTimelineView({a,b,streamA,streamB,t,language,orientation}:
   return <div data-testid="motion-timeline">
     <p className={styles.hint}>{t("study.reception")} · {t("study.revision")} A {a.dataset_revision.slice(0,8)}{b?" · B "+b.dataset_revision.slice(0,8):""}</p>
     <p>{t("study.context")} A: {a.context?.replace("motion-study-v1:","")||t("unknown")}{b?" · B: "+(b.context?.replace("motion-study-v1:","")||t("unknown")):""}</p>
-    <p className={styles.hint}>{t("study.quality",{samples:Number(a.counts.imu_records??0),drops:Number(a.collection_status.dropped??0),failed:Number(a.collection_status.failed??0),gap:formatNumber(a.source_gaps_s.p95,language,3)})}</p>
+    {([["A",a],["B",b]] as const).map(([name,data])=>data&&<p key={name} data-testid={"study-quality-"+name} className={styles.hint}>{name}: {t("study.quality",{samples:Number(data.counts.imu_records??0),drops:Number(data.collection_status.dropped??0),failed:Number(data.collection_status.failed??0),gap:formatNumber(data.source_gaps_s.p95,language,3)})}</p>)}
     {b&&(!a.context?.replace("motion-study-v1:","")||a.context!==b.context)&&<p role="status">{t("study.contextDifferent")}</p>}
     {b&&trialA.event?.intent.direction!==trialB.event?.intent.direction&&<p role="status">{t("study.directionDifferent")}</p>}
     <p className={styles.hint}>{t(trialA.peaks&&(!b||trialB.peaks)?"study.observedRange":"study.insufficient")}</p>
@@ -101,7 +101,7 @@ export function MotionTimelineView({a,b,streamA,streamB,t,language,orientation}:
       <p className={styles.small} aria-live="polite">A: {readout(pA)}{b?<><br/>B: {readout(pB)}</>:null}</p>
       {orientation?.(streamA,streamB,cursor)}
       <CommandTrace stream={streamA} range={range} cursor={cursor} t={t} language={language}/>
-      {streamB&&<CommandTrace stream={streamB} range={range} cursor={cursor} t={t} language={language}/>}
+      {streamB&&<CommandTrace series="B" stream={streamB} range={range} cursor={cursor} t={t} language={language}/>}
       {["roll","pitch","yaw"].map(channel=><MotionTrace key={channel} a={streamA} b={streamB} channel={channel} range={range} cursor={cursor} onTime={setCursor} t={t} language={language}/>)}
       <details className={styles.details}><summary>{t("study.acceleration")}</summary>{["accel_x","accel_y","accel_z"].map(channel=><MotionTrace key={channel} a={streamA} b={streamB} channel={channel} range={range} cursor={cursor} onTime={setCursor} t={t} language={language}/>)}</details>
       <details className={styles.details}><summary>{t("study.outputs")}</summary>{["lx","az"].map(channel=><MotionTrace key={channel} a={outputStream(streamA)} b={outputStream(streamB)} channel={channel} range={range} cursor={cursor} onTime={setCursor} t={t} language={language}/>)}</details>

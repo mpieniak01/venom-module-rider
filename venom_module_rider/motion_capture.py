@@ -288,8 +288,12 @@ def finish(domain, ticket, result=None, error=None):
             else "unknown"
         )
     elif isinstance(result, dict):
-        data = result.get("data", {})
-        ack = data.get("safety", {}).get("last_ack") or data.get("ack") or {}
+        data = result.get("data")
+        data = data if isinstance(data, dict) else {}
+        safety = data.get("safety")
+        safety = safety if isinstance(safety, dict) else {}
+        ack = safety.get("last_ack") or data.get("ack")
+        ack = ack if isinstance(ack, dict) else {}
         host["ack_status"] = text(ack.get("status"), 64)
         accepted = data.get("accepted", ack.get("accepted"))
         host["outcome"] = (

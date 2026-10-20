@@ -6,10 +6,12 @@ async page=>{
   const actions=[];
   page.on("request",r=>{if(r.method()!=="GET"&&/\/rider\/(control|goal|resource|safety)/.test(r.url()))actions.push(r.url());});
   const sessions=await(await page.request.get(origin+"/api/v1/rider/samples/sessions")).json();
-  const [a,b]=sessions.sessions;
+  const [a,b]=sessions.sessions.filter(s=>s.policy.scene_group==="motion-study-v1:wood");
   await page.getByTestId("study-session-A").selectOption(a.session_id);
   await page.getByTestId("motion-timeline").waitFor();
   await page.getByTestId("study-session-B").selectOption(b.session_id);
+  await page.getByTestId("study-quality-B").waitFor();
+  check(await page.getByRole("img",{name:"Polecenia i rezultaty HTTP · B",exact:true}).count()===1,"B command trace identity missing");
   const fields=page.getByTestId("calibration-forms").locator('input[type="number"]');
   const number=fields.first(),original=await number.inputValue();
   await number.fill("-1");

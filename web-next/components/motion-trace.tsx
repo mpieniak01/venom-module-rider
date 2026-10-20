@@ -43,13 +43,14 @@ export function MotionTrace({a,b,channel,range,cursor,onTime,t,language}:{a:Moti
     </svg>
   </div>;
 }
-export function CommandTrace({stream,range,cursor,t,language}:{stream:MotionStream|null;range:[number,number];cursor:number;t:Translator;language:string}){
+export function CommandTrace({stream,range,cursor,t,language,series="A"}:{stream:MotionStream|null;range:[number,number];cursor:number;t:Translator;language:string;series?:"A"|"B"}){
   const {ref,width}=usePlotWidth();
   const span=Math.max(.001,range[1]-range[0]),left=54,right=width-12,x=(v:number)=>left+(v-range[0])/span*(right-left);
-  return <div ref={ref} className={styles.motionTrace}><svg width="100%" height={82} viewBox={`0 0 ${width} 82`} role="img" aria-label={t("study.commands")}>
-    <text x={left} y={13}>{t("study.commands")}</text>
+  const label=t("study.commands")+" · "+series;
+  return <div ref={ref} className={styles.motionTrace}><svg width="100%" height={82} viewBox={`0 0 ${width} 82`} role="img" aria-label={label}>
+    <text x={left} y={13}>{label}</text>
     <line x1={left} x2={right} y1={48} y2={48} className={styles.motionCursor}/>
-    {stream?.events.filter(e=>e.t>=range[0]&&e.t<=range[1]).map(e=><g key={e.id} className={styles.motionSeriesA}>
+    {stream?.events.filter(e=>e.t>=range[0]&&e.t<=range[1]).map(e=><g key={e.id} className={series==="B"?styles.motionSeriesB:styles.motionSeriesA}>
       {e.phase==="requested"&&finite(record(e.intent).duration_s)&&<rect x={x(e.t)} y={25} width={Math.max(1,x(Math.min(range[1],e.t+Number(e.intent.duration_s)))-x(e.t))} height={10} opacity={.25}/>}
       <circle cx={x(e.t)} cy={e.phase==="requested"?30:48} r={3}><title>{formatNumber(e.t,language,3)+" s · "+str(e.intent.action)+" · "+str(e.intent.direction)+" · "+str(e.intent.mode)+" · "+e.phase+" · "+e.outcome+" · "+formatNumber(finite(e.intent.intensity)?e.intent.intensity*100:null,language,1)+" % · "+formatNumber(e.intent.duration_s,language,3)+" s"}</title></circle>
     </g>)}

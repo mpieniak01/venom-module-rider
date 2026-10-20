@@ -277,3 +277,40 @@ async def test_timeline_breaks_gaps_resets_and_mixed_sources(tmp_path):
     finally:
         await registry.close()
         await service.close()
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        None,
+        {"safety": None},
+        {"ack": "bad"},
+        {"safety": {"last_ack": True}},
+        {"accepted": True, "safety": None},
+    ],
+)
+async def test_malformed_optional_ack_still_records_explicit_result(tmp_path, data):
+    service, pi, registry, sid = await setup_study(tmp_path)
+    try:
+        ticket = safe_begin(
+            service,
+            command(pi, "move", direction="forward", mode="pulse"),
+            service.session,
+        )
+        safe_finish(service, ticket, result={"data": data})
+        await registry.end(sid)
+        events = [
+            r["host"]
+            for r in (await snapshot(registry, sid))["evidence"]["records"]
+            if r["kind"] == "command"
+        ]
+        result = next(e for e in events if e["phase"] == "result")
+        assert result["outcome"] == (
+            "accepted"
+            if isinstance(data, dict) and data.get("accepted") is True
+            else "unknown"
+        )
+        assert registry.failures == 0
+    finally:
+        await registry.close()
+        await service.close()
