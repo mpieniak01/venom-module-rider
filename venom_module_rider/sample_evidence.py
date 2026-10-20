@@ -208,8 +208,14 @@ class SampleEvidenceCollector:
                 if session_id is None or sid == session_id:
                     state["retired"] = True
                     state["retired_reason"] = reason
-            self.window.clear()
-            self.bytes = 0
+            if session_id is None or not any(
+                sid in self.registry.active
+                and sid not in self.registry.closing
+                and not state["retired"]
+                for sid, state in self.sessions.items()
+            ):
+                self.window.clear()
+                self.bytes = 0
 
     def session_status(self, state):
         return {

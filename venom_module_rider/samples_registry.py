@@ -205,6 +205,13 @@ class SamplesRegistry:
         if not task.cancelled() and task.exception() is not None:
             self.failures += 1
 
+    def _finish_evidence(self, session_id):
+        try:
+            self.evidence.finish(session_id)
+        except Exception:
+            # Optional evidence status cannot prevent core session cleanup.
+            self.failures += 1
+
     async def end(self, session_id, *, incomplete=False):
         await self.automatic.stop("auto_collection_ended", session_id=session_id)
         async with self.operations:
@@ -222,7 +229,7 @@ class SamplesRegistry:
             # One serialized close marker follows admitted writes even when all
             # capture slots are occupied. It is not another source-data job.
             def finish():
-                self.evidence.finish(session_id)
+                self._finish_evidence(session_id)
                 return self.store.end(session_id, incomplete=incomplete)
 
             result = await asyncio.wrap_future(self.io.submit(finish))
@@ -426,7 +433,7 @@ class SamplesRegistry:
                 try:
                     if self.lease is not None:
                         for session_id in tuple(self.evidence.sessions):
-                            self.evidence.finish(session_id)
+                            self._finish_evidence(session_id)
                         self.store.recover_interrupted()
                 finally:
                     self.active.clear()
