@@ -109,9 +109,28 @@ The panel shows current image assessment separately from Pi actuation state.
 
 Stop journey sends the existing global control STOP and retains observation;
 Stop loop and camera keeps its resource shutdown meaning. The fixed header STOP
-remains available. Manual takeover ends the journey, reads fresh Pi state, then
-requests explicit manual ARM under the existing takeover button. Journey never
-uses warm navigation pause/resume and never silently resumes after manual control.
+remains available. On a Pi advertising `safety.operator_intervention_version:1`,
+a direction gesture carries fresh explicit manual consent and atomically ends
+preparation/navigation, zeros the previous goal, establishes manual ownership and
+executes only that direction. This also works from normal DISARMED after a fault;
+ESTOP, unavailable hardware and stale/offline state remain blocked. A separate
+Take manual button is optional, not a prerequisite for the arrows. Opening a
+page or reconnecting grants no authority.
+
+A pending gesture is cancelled by an independent, cancel-only release containing
+its request ID, original generation and panel. During preparation/navigation it
+also carries the original navigation operation ID. Cancellation may precede the
+gesture: Pi records a bounded tombstone so a late arrival cannot actuate. It never
+grants ARM or cancels a newer owner/generation. Global STOP remains unconditional.
+Late Start/gesture acknowledgements cannot restore a superseded journey.
+
+After a journey ends, the requested observer may retain its single capture,
+transport and model. A new explicit Start can reuse it only when Pi reports
+`warm_navigation_version:1` and `warm_ready:true` for the same source and policy.
+It still binds a new journey/run/generation and qualifies new frames; old GO and
+TTL are never reused. Unready or mismatched sources use cold preparation. Stop
+loop and camera still shuts the producer down. Journey never silently resumes
+after manual control.
 
 ## Qualification and limits
 
@@ -160,3 +179,11 @@ for the same camera authority. Reuse is bounded to 2 s; source timestamps and al
 stored/header age floors still apply. Camera session/epoch/profile replacement
 always discards the preceding anchor. The source, cache, display and motor
 freshness limits are unchanged.
+
+## Model admission during handoff
+
+A production decision may wait only for an already-running diagnostic inference
+on its selected model. A single bounded waiter prevents preview requests from
+jumping ahead. Waiting consumes the original capture deadline, including cache
+expiry; expired frames are rejected. Other production contention remains bounded
+and does not create a queue. This does not change motion freshness thresholds.

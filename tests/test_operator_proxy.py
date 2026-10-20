@@ -632,3 +632,222 @@ async def test_demo_current_generation_can_target_initial_and_resumed_operation(
         assert pi.owner == "manual" and nav.operator_state == "paused"
     finally:
         await nav.close()
+
+
+def explicit_intervention(**changes):
+    return intent(
+        "move",
+        intervene=True,
+        operator_intervention_version=1,
+        direction="left",
+        mode="hold",
+        device_settings=True,
+        owner="manual",
+        arming_mode="operator",
+        operator_consent=True,
+        operator_plan="Manual left",
+        **changes,
+    )
+
+
+async def test_versioned_intervention_is_forwarded_once(monkeypatch):
+    received = []
+    service, client = await setup_proxy(
+        monkeypatch, lambda request: received.append(request) or packet()
+    )
+    try:
+        original = explicit_intervention()
+        response = await client.post(
+            "/api/v1/rider/control",
+            json=original,
+            headers={"X-Rider-Session": service.session},
+        )
+        assert response.status_code == 200
+        assert len(received) == 1 and json.loads(received[0].content) == original
+    finally:
+        await client.aclose()
+        await service.close()
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"operator_intervention_version": True},
+        {"operator_intervention_version": 2},
+        {"operator_consent": False},
+        {"operator_plan": " "},
+        {"owner": "navigation"},
+        {"arming_mode": "timed"},
+        {"action": "arm"},
+        {"intervene": False},
+        {"panel_id": None},
+        {"mode": "release", "operator_consent": None},
+    ],
+)
+def test_explicit_intervention_requires_fresh_specific_manual_scope(change):
+    with pytest.raises(ValidationError):
+        Command(**(explicit_intervention() | change))
+
+
+async def test_scoped_release_bypasses_pending_priority_request_without_global_epoch(
+    monkeypatch,
+):
+    entered, cancelled = asyncio.Event(), asyncio.Event()
+    received = []
+
+    async def handle(request):
+        data = json.loads(request.content)
+        received.append(data)
+        if data.get("request_id") == "takeover-a":
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+        return packet()
+
+    service, client = await setup_proxy(monkeypatch, handle)
+    pending = None
+    try:
+        pending = asyncio.create_task(
+            service.control(
+                explicit_intervention(request_id="takeover-a"), service.session
+            )
+        )
+        await asyncio.wait_for(entered.wait(), 1)
+        epoch = service.epoch
+        release = intent(
+            "move",
+            request_id="cancel-a",
+            seq=4,
+            mode="release",
+            direction="left",
+            device_settings=True,
+            intervene=True,
+            operator_intervention_version=1,
+            supersedes_operation_id="takeover-a",
+        )
+        result = await asyncio.wait_for(service.control(release, service.session), 1)
+        assert result["data"] == {"safety": {}} and service.epoch == epoch
+        assert cancelled.is_set() and received[-1] == release
+        with pytest.raises(RiderError, match="command_superseded"):
+            await pending
+        assert not service.client.operator_lane.locked()
+    finally:
+        if pending and not pending.done():
+            pending.cancel()
+        await client.aclose()
+        await service.close()
+
+
+async def test_old_scoped_release_does_not_cancel_newer_intervention(monkeypatch):
+    entered, finish = asyncio.Event(), asyncio.Event()
+
+    async def handle(request):
+        if json.loads(request.content).get("request_id") == "takeover-b":
+            entered.set()
+            await finish.wait()
+        return packet()
+
+    service, client = await setup_proxy(monkeypatch, handle)
+    pending = None
+    try:
+        pending = asyncio.create_task(
+            service.control(
+                explicit_intervention(request_id="takeover-b"), service.session
+            )
+        )
+        await asyncio.wait_for(entered.wait(), 1)
+        epoch = service.epoch
+        release = intent(
+            "move",
+            request_id="cancel-a",
+            seq=4,
+            mode="release",
+            direction="left",
+            device_settings=True,
+            intervene=True,
+            operator_intervention_version=1,
+            supersedes_operation_id="takeover-a",
+        )
+        await asyncio.wait_for(service.control(release, service.session), 1)
+        assert not pending.done() and service.epoch == epoch
+        finish.set()
+        assert (await pending)["data"] == {"safety": {}}
+    finally:
+        finish.set()
+        if pending and not pending.done():
+            pending.cancel()
+        await client.aclose()
+        await service.close()
+
+
+async def test_scoped_release_remains_available_when_environment_becomes_readonly(
+    monkeypatch,
+):
+    import venom_module_rider.api.routes as routes
+
+    def denied(**_):
+        raise PermissionError("readonly fixture")
+
+    received = []
+    service, client = await setup_proxy(
+        monkeypatch, lambda request: received.append(request) or packet()
+    )
+    monkeypatch.setattr(routes, "ensure_module_mutation_allowed", denied)
+    try:
+        headers = {"X-Rider-Session": service.session}
+        assert (
+            await client.post(
+                "/api/v1/rider/control", json=explicit_intervention(), headers=headers
+            )
+        ).status_code == 403
+        release = intent(
+            "move",
+            request_id="cancel-a",
+            mode="release",
+            direction="left",
+            device_settings=True,
+            intervene=True,
+            operator_intervention_version=1,
+            supersedes_operation_id="takeover-a",
+        )
+        assert (
+            await client.post("/api/v1/rider/control", json=release, headers=headers)
+        ).status_code == 200
+        assert len(received) == 1 and json.loads(received[0].content) == release
+        refused = await client.post(
+            "/api/v1/rider/control",
+            json=release | {"operator_consent": True},
+            headers=headers,
+        )
+        assert refused.status_code == 422 and len(received) == 1
+    finally:
+        await client.aclose()
+        await service.close()
+
+
+@pytest.mark.parametrize("value", ["", " ", "x" * 129, True, 7])
+def test_prior_navigation_scope_is_strict_and_cancellation_only(value):
+    with pytest.raises(ValidationError):
+        Command(
+            **(
+                explicit_intervention()
+                | {
+                    "mode": "release",
+                    "operator_consent": None,
+                    "supersedes_operation_id": "takeover",
+                    "supersedes_navigation_operation_id": value,
+                }
+            )
+        )
+
+
+def test_navigation_scope_cannot_be_added_to_a_movement_request():
+    with pytest.raises(ValidationError):
+        Command(
+            **(
+                explicit_intervention()
+                | {"supersedes_navigation_operation_id": "journey"}
+            )
+        )

@@ -176,10 +176,16 @@ async def guard(request: Request):
     if not isinstance(payload, dict):
         raise RiderError("invalid_request", 400)
     # A safety STOP must work in read-only environments as well.
-    if request.url.path.endswith("/control") and payload.get("action") in {
-        "stop",
-        "disarm",
-    }:
+    if request.url.path.endswith("/control") and (
+        payload.get("action") in {"stop", "disarm"}
+        or payload.get("action") == "move"
+        and payload.get("mode") == "release"
+        and payload.get("intervene") is True
+        and type(payload.get("operator_intervention_version")) is int
+        and payload["operator_intervention_version"] == 1
+    ):
+        # A scoped cancellation cannot grant authority or start output. Pi
+        # still requires the exact operation/panel; shape validation follows.
         return
     if request.url.path.endswith("/face/frame"):
         return

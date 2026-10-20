@@ -29,11 +29,13 @@ export class HoldController {
     onActive: (direction: Direction | null) => void;
     onMode?: (mode: "hold" | "continuous" | null) => void;
     onError: (error: unknown) => void;
+    cancelPending?: () => boolean | void;
     now?: () => number;
   }) {}
   start(direction: Direction, pointerId: number) {
     const timing = this.options.timing();
     if (!timing || !this.options.canMove()) return;
+    this.options.cancelPending?.();
     this.clearTimer();
     const token = ++this.token;
     this.press = { direction, pointerId, started: this.now(), held: false, token };
@@ -45,6 +47,7 @@ export class HoldController {
   toggle(direction: Direction) {
     if (this.press?.latched && this.press.direction === direction) { this.release(); return; }
     if (!this.options.timing() || !this.options.canMove()) return;
+    this.options.cancelPending?.();
     this.clearTimer();
     const token = ++this.token;
     this.press = { direction, pointerId: -3, started: this.now(), held: true, token, latched: true };
@@ -63,7 +66,7 @@ export class HoldController {
     this.options.onMode?.(null);
     const token = ++this.token;
     if (this.preparation?.token === press.token) this.preparation.token = token;
-    if (press.held) this.enqueueRelease(press.direction, token);
+    if (press.held) { if (!this.options.cancelPending?.()) this.enqueueRelease(press.direction, token); }
     else {
       void this.dispatch({ direction: press.direction, mode: "pulse" }, () => token === this.token && !this.press);
     }
@@ -71,16 +74,18 @@ export class HoldController {
   release(pointerId?: number) {
     if (pointerId !== undefined && this.press?.pointerId !== pointerId) return;
     const press = this.press;
-    if (!press) { if (this.sendingMode === "pulse") ++this.token; return; }
+    if (!press) { if (pointerId === undefined && this.sendingMode === "pulse") { ++this.token; this.options.cancelPending?.(); } return; }
     this.press = null;
     this.clearTimer();
     this.options.onActive(null);
     this.options.onMode?.(null);
     const token = ++this.token;
+    const cancelled = this.options.cancelPending?.();
     if (this.preparation?.token === press.token) this.preparation.token = token;
-    if (press?.held) this.enqueueRelease(press.direction, token);
+    if (press?.held && !cancelled) this.enqueueRelease(press.direction, token);
   }
   cancel() {
+    this.options.cancelPending?.();
     this.press = null; ++this.token; this.preparation = null; this.clearTimer();
     this.options.onActive(null); this.options.onMode?.(null);
   }

@@ -43,6 +43,8 @@ class VisionLoop:
         self.preview_changed = asyncio.Event()
         self.snapshot_tasks = {}
         self.inference_cache = OrderedDict()
+        self.diagnostic_inferences = set()
+        self.production_waiters = {False: 0, True: 0}
 
     def _detect_depth(self, payload, frame):
         if frame.protocol_version == 3 and frame.avoidance.geometry.mode == "ground":
@@ -98,7 +100,54 @@ class VisionLoop:
         row = self.inference_cache.get(key) if key is not None else None
         return row[1] if row is not None else None
 
-    def _start_inference(self, key, frame, payload):
+    async def _admit_inference(self, device_id, frame, source_key, diagnostic):
+        depth = frame.perception.engine == "depth_plane"
+        key = self._inference_key(device_id, frame, source_key)
+        cached = self._cached_inference(key)
+        busy = self.depth_busy if depth else self.busy
+        if cached is not None:
+            return frame, cached
+        if self.production_waiters[depth]:
+            raise RiderError("vision_busy", 429)
+        if busy is None:
+            return frame, None
+        if diagnostic or busy not in self.diagnostic_inferences:
+            raise RiderError("vision_busy", 429)
+        # A Pi handoff may finish the one already-running preview, but never
+        # queues captures or lets another preview jump ahead. Waiting consumes
+        # this request's original capture budget, just like model processing.
+        self.production_waiters[depth] += 1
+        started = self.clock()
+        try:
+            try:
+                await asyncio.wait_for(
+                    asyncio.shield(busy), (frame.deadline_ms - frame.age_ms) / 1000
+                )
+            except TimeoutError as exc:
+                raise RiderError("vision_frame_expired", 409) from exc
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # A failed diagnostic does not poison the next current source.
+                pass
+        finally:
+            self.production_waiters[depth] -= 1
+        frame = frame.model_copy(
+            update={
+                "age_ms": frame.age_ms + max(0.0, self.clock() - started) * 1000,
+            }
+        )
+        if busy.done():
+            self._drain(busy)
+        if self.closed:
+            raise RiderError("module_closed", 503)
+        if frame.age_ms >= frame.deadline_ms:
+            raise RiderError("vision_frame_expired", 409)
+        if (self.depth_busy if depth else self.busy) is not None:
+            raise RiderError("vision_busy", 429)
+        return frame, self._cached_inference(key)
+
+    def _start_inference(self, key, frame, payload, *, diagnostic=False):
         depth_mode = frame.perception.engine == "depth_plane"
         task = asyncio.create_task(
             asyncio.to_thread(
@@ -111,6 +160,8 @@ class VisionLoop:
             self.depth_busy = task
         else:
             self.busy = task
+        if diagnostic:
+            self.diagnostic_inferences.add(task)
         task.add_done_callback(self._drain)
         if key is not None:
             # The first receipt fixes expiry. Reusing a result cannot renew it.
@@ -147,12 +198,10 @@ class VisionLoop:
             for identity, row in self.runs.items()
         ):
             raise RiderError("vision_production_priority", 429)
+        frame, cached_task = await self._admit_inference(
+            device_id, frame, source_key, with_preview
+        )
         key = self._inference_key(device_id, frame, source_key)
-        cached_task = self._cached_inference(key)
-        if (
-            self.depth_busy if depth_mode else self.busy
-        ) is not None and cached_task is None:
-            raise RiderError("vision_busy", 429)
         identity = (device_id, frame.run_id)
         previous = self.runs.get(identity)
         signature = (
@@ -211,7 +260,9 @@ class VisionLoop:
                 # Optional offline scheduling must never break live decisions.
                 self.priority_errors += 1
         selected = self.depth_detector if depth_mode else self.detector
-        task = cached_task or self._start_inference(key, frame, payload)
+        task = cached_task or self._start_inference(
+            key, frame, payload, diagnostic=with_preview
+        )
         try:
             detected = await asyncio.wait_for(
                 asyncio.shield(task), (frame.deadline_ms - frame.age_ms) / 1000
@@ -542,6 +593,7 @@ class VisionLoop:
             task.exception()
 
     def _drain(self, task):
+        self.diagnostic_inferences.discard(task)
         if not task.cancelled():
             task.exception()
         if self.busy is task:

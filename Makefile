@@ -30,6 +30,7 @@ check-web:
 	node --check tests/browser/journey-acceptance.js
 	node --check tests/browser/journey-settings.js
 	node --check tests/browser/journey.js
+	node --check tests/browser/operator-journey-priority.js
 	$(WEB_BIN)/tsc --project web-next/tsconfig.json --noEmit
 	$(WEB_BIN)/eslint web-next tests/web --max-warnings 0 --config web-next/eslint.config.mjs
 	node --import $(HOST)/web-next/node_modules/tsx/dist/loader.mjs --test tests/web/*.test.ts

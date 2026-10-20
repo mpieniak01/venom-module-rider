@@ -265,7 +265,7 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
       const saved=record(result.config);if(Object.keys(saved).length)applyPolicy(saved);
       await readState();setJourneyRequested(true);
     })();startTask.current=task;
-    try{await task;}catch(err){if(!stopping.current)setJourneyError(errorCode(err));}
+    try{await task;}catch(err){if(!stopping.current&&client.currentMotionEpoch()===epoch&&client.currentSession()===origin)setJourneyError(errorCode(err));}
     finally{startTask.current=null;if(!stopping.current)setOperation(null);}
   };
   const stopJourney=async()=>{
