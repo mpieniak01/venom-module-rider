@@ -388,3 +388,129 @@ def test_matching_explicit_yaw_producer_allows_qualified_rate():
         row["quality"]["sensors"]["yaw"]["instance_id"] = "source-boot"
     rate = analyze_evidence(rows, yaw_settings())["clocks"]["yaw_angular_rate"]
     assert rate["status"] == "available"
+
+
+@pytest.mark.parametrize("timestamps", [[1.0, 1.1], [1.0, None, 1.1], [None], []])
+def test_short_retained_intervals_do_not_establish_event_coverage(timestamps):
+    rows = [record(index, stamp) for index, stamp in enumerate(timestamps)]
+    sampling = analyze_evidence(rows)["clocks"]["sampling"]
+    assert sampling["intervals_at_least_event_duration"] == 0
+    assert sampling["short_event_may_be_entirely_missed"] is None
+    assert sampling["event_coverage"] == "unverified"
+
+
+def test_identity_boundary_does_not_establish_short_event_coverage():
+    rows = [record(0, 1.0), record(1, 1.1), record(2, 3.0, source_session="new")]
+    sampling = analyze_evidence(rows)["clocks"]["sampling"]
+    assert sampling["short_event_may_be_entirely_missed"] is None
+
+
+@pytest.mark.parametrize(
+    "kind", ["string", "unicode", "list", "mapping", "depth", "cycle", "integer"]
+)
+def test_input_preflight_precedes_json_serialization(kind, monkeypatch):
+    import venom_module_rider.motion_evidence as module
+
+    row = record()
+    limit = module.MAX_EVIDENCE_SESSION_BYTES
+    if kind == "string":
+        value = "x" * (limit + 1)
+    elif kind == "unicode":
+        value = "é" * (limit // 6 + 1)
+    elif kind == "list":
+        value = [None] * (limit // 2 + 1)
+    elif kind == "mapping":
+        monkeypatch.setattr(module, "MAX_EVIDENCE_SESSION_BYTES", 4096)
+        value = {str(index): None for index in range(1000)}
+    elif kind == "depth":
+        value = None
+        for _ in range(40):
+            value = [value]
+    elif kind == "cycle":
+        value = []
+        value.append(value)
+    else:
+        value = 1 << 100_000
+    row["quality"]["extra"] = value
+    original = module.json.dumps
+
+    def guarded(value, *args, **kwargs):
+        if value is row:
+            raise AssertionError("unbounded record reached JSON serialization")
+        return original(value, *args, **kwargs)
+
+    monkeypatch.setattr(module.json, "dumps", guarded)
+    with pytest.raises(ValueError, match="motion_(records_limit|input_invalid)"):
+        analyze_evidence([row])
+
+
+def test_entire_session_budget_preflight_precedes_serialization(monkeypatch):
+    import venom_module_rider.motion_evidence as module
+
+    rows = [record(0), record(1, 1.1)]
+    for row in rows:
+        row["quality"]["extra"] = "x" * (module.MAX_EVIDENCE_SESSION_BYTES // 2)
+    original = module.json.dumps
+
+    def guarded(value, *args, **kwargs):
+        if any(value is row for row in rows):
+            raise AssertionError("over-budget session reached JSON serialization")
+        return original(value, *args, **kwargs)
+
+    monkeypatch.setattr(module.json, "dumps", guarded)
+    with pytest.raises(ValueError, match="motion_records_limit"):
+        analyze_evidence(rows)
+
+
+def test_invalid_nan_input_digest_retains_existing_deterministic_spelling():
+    row = record()
+    row["values"]["accel_x"] = float("nan")
+    expected = hashlib.sha256(
+        json.dumps(row, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+    ).hexdigest()
+    first = analyze_evidence([row])
+    second = analyze_evidence([row])
+    assert first["input"]["digest_sha256"] == expected
+    assert first["input"]["digest_sha256"] == second["input"]["digest_sha256"]
+    assert first["input"]["records_rejected"] == 1
+
+
+def test_repeated_container_references_are_not_cycles():
+    row = record()
+    shared = [None, True, 1, "value"]
+    row["quality"]["first"] = shared
+    row["quality"]["second"] = shared
+    assert analyze_evidence([row])["input"]["records_valid"] == 1
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "".join(chr(code) for code in range(128)),
+        "é漢😀\ud800",
+        [
+            None,
+            True,
+            False,
+            0,
+            -1,
+            10**100,
+            1e100,
+            -0.0,
+            float("nan"),
+            float("inf"),
+            -float("inf"),
+        ],
+        {"nested": [[], {}, {"": "value"}]},
+    ],
+)
+def test_json_preflight_exact_encoded_byte_boundary(value, monkeypatch):
+    import venom_module_rider.motion_evidence as module
+
+    row = {"value": value}
+    encoded_size = len(json.dumps(row, sort_keys=True, separators=(",", ":")).encode())
+    monkeypatch.setattr(module, "MAX_EVIDENCE_SESSION_BYTES", encoded_size)
+    module._preflight_records([row])
+    monkeypatch.setattr(module, "MAX_EVIDENCE_SESSION_BYTES", encoded_size - 1)
+    with pytest.raises(ValueError, match="motion_records_limit"):
+        module._preflight_records([row])

@@ -91,7 +91,10 @@ entirely miss a 150 ms pulse. This describes only the supplied dataset, not a
 promised Venom receive rate. Shorter observed intervals also cannot certify
 continuous coverage, pulse detection or camera exposure alignment. Event
 classification and coverage remain unavailable/unverified; no guessed pulse or
-motion labels are emitted.
+motion labels are emitted. `short_event_may_be_entirely_missed` is `true` when an
+observed interval is at least the event duration and `null` otherwise. It never
+becomes `false`: shorter retained intervals cannot exclude missed events at
+session boundaries, around missing timestamps or in unobserved periods.
 
 ## What acceleration and yaw can establish
 
@@ -152,7 +155,14 @@ error JSON; a valid unavailable report returns 0. The output parent must exist.
 
 Bounds: 2048 records / 2 MiB evidence, existing 40 MiB manifest limit, 512 MiB local
 ZIP file/expanded payload budget plus the shared manifest allowance, 16 KiB settings
-and 1 MiB report. These are limits, not automatic retention or deletion policies.
+and 1 MiB report. Before serializing any record, a full-session JSON preflight
+counts exact compact ASCII-escaped JSON bytes and traversal nodes, rejects cycles
+and unsupported non-JSON types, and limits nesting to 32 levels and integers to
+4096 bits. Oversized strings and containers are rejected before copying or sorting
+them. Shared container references are allowed and charged for every occurrence.
+NaN/Infinity rows still contribute their deterministic digest spelling and are
+rejected individually by canonical evidence validation. These are limits, not
+automatic retention or deletion policies.
 
 Focused checks use the existing environment and synthetic fixtures:
 

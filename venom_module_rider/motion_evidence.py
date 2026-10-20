@@ -22,6 +22,8 @@ from .evidence_contract import (
 REPORT_SCHEMA_VERSION = 1
 ANALYZER_VERSION = "motion-evidence-v1.0.0"
 MAX_REPORT_BYTES = 1024 * 1024
+MAX_INPUT_DEPTH = 32
+MAX_INPUT_INTEGER_BITS = 4096
 
 
 @dataclass(frozen=True)
@@ -202,11 +204,94 @@ def _yaw_rate(first: dict, second: dict, dt: float, unit: str) -> float | None:
     return rate if math.isfinite(rate) else None
 
 
+def _preflight_records(records: list) -> None:
+    """Bound JSON work before allocating encoded strings or sorting mappings.
+
+    Count the exact compact ensure_ascii JSON byte size, including NaN spelling
+    for rejected numeric rows. Ancestors detect cycles without rejecting shared
+    containers. Every visited node consumes at least one encoded byte, so the
+    session byte budget also bounds total traversal nodes.
+    """
+    remaining = MAX_EVIDENCE_SESSION_BYTES
+    nodes_left = MAX_EVIDENCE_SESSION_BYTES
+    ancestors: set[int] = set()
+
+    def consume(size: int) -> None:
+        nonlocal remaining
+        remaining -= size
+        if remaining < 0:
+            raise ValueError("motion_records_limit")
+
+    def visit(value: Any, depth: int) -> None:
+        nonlocal nodes_left
+        nodes_left -= 1
+        if nodes_left < 0 or depth > MAX_INPUT_DEPTH:
+            raise ValueError("motion_records_limit")
+        kind = type(value)
+        if value is None:
+            consume(4)
+        elif kind is bool:
+            consume(4 if value else 5)
+        elif kind is int:
+            if value.bit_length() > MAX_INPUT_INTEGER_BITS:
+                raise ValueError("motion_records_limit")
+            consume(len(str(value)))
+        elif kind is float:
+            if math.isfinite(value):
+                consume(len(repr(value)))
+            else:
+                consume(3 if math.isnan(value) else 8 if value > 0 else 9)
+        elif kind is str:
+            consume(2)
+            if len(value) > remaining:
+                raise ValueError("motion_records_limit")
+            for character in value:
+                code = ord(character)
+                if character in '"\\\b\f\n\r\t':
+                    consume(2)
+                elif code < 32 or code >= 127:
+                    consume(6 if code <= 0xFFFF else 12)
+                else:
+                    consume(1)
+        elif kind in (dict, list):
+            identity = id(value)
+            if identity in ancestors:
+                raise ValueError("motion_input_invalid")
+            count = len(value)
+            children = count * (2 if kind is dict else 1)
+            # Minimal key/value bytes plus punctuation, without enumerating a
+            # potentially enormous container just to discover it is too large.
+            minimum_size = 2 if not count else count * (5 if kind is dict else 2) + 1
+            if children > nodes_left or minimum_size > remaining:
+                raise ValueError("motion_records_limit")
+            consume(2 + max(0, count - 1))
+            ancestors.add(identity)
+            try:
+                if kind is dict:
+                    for key, child in value.items():
+                        if type(key) is not str:
+                            raise ValueError("motion_input_invalid")
+                        visit(key, depth + 1)
+                        consume(1)  # Colon.
+                        visit(child, depth + 1)
+                else:
+                    for child in value:
+                        visit(child, depth + 1)
+            finally:
+                ancestors.remove(identity)
+        else:
+            raise ValueError("motion_input_invalid")
+
+    for record in records:
+        visit(record, 0)
+
+
 def _validate_records(records: object) -> tuple[list[dict], dict]:
     if not isinstance(records, list):
         raise ValueError("motion_records_invalid")
     if len(records) > MAX_EVIDENCE_SESSION_RECORDS:
         raise ValueError("motion_records_limit")
+    _preflight_records(records)
     # Invalid numeric records are rejected individually, with bounded input size.
     size = 0
     input_digest = hashlib.sha256()
@@ -433,7 +518,7 @@ def _timing_report(records: list[dict], settings: MotionEvidenceSettings) -> dic
                 larger / len(source_gaps) if source_gaps else None
             ),
             "event_coverage": "unverified",
-            "short_event_may_be_entirely_missed": bool(larger) if source_gaps else None,
+            "short_event_may_be_entirely_missed": True if larger else None,
             "classification": "unavailable",
             "reason": "instantaneous_samples_do_not_establish_event_coverage",
         },
