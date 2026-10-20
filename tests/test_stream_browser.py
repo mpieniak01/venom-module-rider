@@ -364,7 +364,14 @@ async def test_diagnostic_revision_change_without_camera_restart_recovers_previe
 
 
 @pytest.mark.parametrize("stream", [False, True])
-async def test_ended_disarmed_journey_keeps_fresh_preview_without_goal_or_arm(stream):
+@pytest.mark.parametrize(
+    "manual_moving",
+    [None, False, True],
+    ids=["disarmed", "manual-idle", "manual-moving"],
+)
+async def test_ended_journey_keeps_fresh_preview_without_goal_or_arm(
+    stream, manual_moving
+):
     from venom_module_rider.api.vision_preview import processed_camera
 
     pi, domain, hub, loop, state = await setup()
@@ -399,10 +406,13 @@ async def test_ended_disarmed_journey_keeps_fresh_preview_without_goal_or_arm(st
             return {
                 "data": {
                     "safety": {
-                        "state": "DISARMED",
-                        "can_move": False,
-                        "moving": False,
+                        "state": "DISARMED" if manual_moving is None else "ARMED",
+                        "can_move": manual_moving is not None,
+                        "moving": manual_moving is True,
                         "stale": False,
+                        "owner": None if manual_moving is None else "manual",
+                        "arming_mode": None if manual_moving is None else "operator",
+                        "journey": {"active": False},
                     }
                 }
             }
@@ -445,6 +455,49 @@ async def test_ended_disarmed_journey_keeps_fresh_preview_without_goal_or_arm(st
         {"stale": True},
         {"moving": True},
         {"can_move": None},
+        {
+            "state": "ARMED",
+            "can_move": True,
+            "owner": "manual",
+            "arming_mode": "operator",
+            "journey": {"active": False},
+            "stale": True,
+        },
+        {
+            "state": "ARMED",
+            "can_move": True,
+            "owner": "navigation",
+            "arming_mode": "operator",
+            "journey": {"active": False},
+        },
+        {
+            "state": "ARMED",
+            "can_move": True,
+            "owner": "manual",
+            "arming_mode": "journey",
+            "journey": {"active": False},
+        },
+        {
+            "state": "ARMED",
+            "can_move": True,
+            "owner": "manual",
+            "arming_mode": "operator",
+            "journey": {"active": True},
+        },
+        {
+            "state": "ARMED",
+            "can_move": True,
+            "owner": "manual",
+            "arming_mode": "operator",
+            "journey": {},
+        },
+        {
+            "state": "ARMED",
+            "can_move": None,
+            "owner": "manual",
+            "arming_mode": "operator",
+            "journey": {"active": False},
+        },
     ],
 )
 async def test_retired_goal_never_bypasses_current_safety_for_diagnostic_inference(

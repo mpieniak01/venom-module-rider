@@ -12,7 +12,7 @@ from .vision_routes import loop_goals
 
 
 async def diagnostic_preview_allowed(domain, status, goals):
-    """A retired journey may display fresh input; it never regains actuation."""
+    """Retired navigation may show input during manual control, without actuation."""
     if all(goals.get(mode) is False for mode in ("observe", "drive")):
         return True
     journey = status.get("journey") or {}
@@ -29,11 +29,20 @@ async def diagnostic_preview_allowed(domain, status, goals):
         return False
     control = (await domain.read("/api/control/state", 0.2))["data"]
     safety = control.get("safety") or {}
+    if safety.get("stale") is True:
+        return False
+    if safety.get("state") == "DISARMED":
+        return safety.get("can_move") is False and safety.get("moving") is not True
+    # Manual takeover keeps the camera useful, including while the operator
+    # steers. This observe-only result has no Pi run/journey or motion grant.
+    # An active, preparing or unconfirmed navigation producer still owns its
+    # inference slot; neither stale control nor navigation ARM admits a fallback.
     return (
-        safety.get("state") == "DISARMED"
-        and safety.get("can_move") is False
-        and safety.get("moving") is not True
-        and safety.get("stale") is not True
+        safety.get("state") == "ARMED"
+        and safety.get("owner") == "manual"
+        and safety.get("arming_mode") == "operator"
+        and safety.get("can_move") is True
+        and (safety.get("journey") or {}).get("active") is False
     )
 
 
@@ -88,8 +97,9 @@ async def processed_camera(request: Request):
                 raise RiderError("vision_busy", 429)
         else:
             # A stopped or stale producer cannot validate its previous JPEG.
-            # Independent inference requires goals OFF or a confirmed retired,
-            # disarmed journey. It never starts or resumes the Pi producer.
+            # Independent inference requires goals OFF or a retired journey
+            # with confirmed disarmed or manual control. It never starts or
+            # resumes the Pi producer.
             goals = await loop_goals(domain, force=False)
             if not await diagnostic_preview_allowed(domain, status, goals):
                 raise RiderError("vision_busy", 429)

@@ -368,8 +368,6 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
               <Button size="large" tone="caution" data-testid="journey-stop" disabled={!connected||operation==="stop"} onClick={()=>void stopJourney()}><Square size={18}/>{t("journeyStop")}</Button>
               <span className={styles.small} data-testid="journey-motion-limits">{String(policy?.speed??"—")} SDK · ≤ {String(policy?.max_motion_ms??"—")} ms</span>
             </div>
-            <p className={styles.hint}>{t("journeyHelp")}</p>
-            <p className={styles.hint} data-testid="journey-setup-help">{t("journeySetupHelp")}</p>
             {journeyUnavailable.length>0&&<div data-testid="journey-blocks" className={styles.loopError} role="status"><ul>{journeyUnavailable.map(block=><li key={block}>{t(block)}</li>)}</ul><Button onClick={showJourneySettings}>{t("journeySettings")}</Button></div>}
             {policy&&calibrationMatches(policy,detector)&&record(policy.avoidance).sweep_verified===true&&<p className={styles.hint} role="status" data-testid="journey-acceptance-saved">{t("journeyAcceptanceSaved",{revision:String(policy.revision)})}</p>}
             {journey.reason&&<p className={styles.hint} data-testid="journey-reason">{t("state")}: <code>{journey.reason}</code></p>}

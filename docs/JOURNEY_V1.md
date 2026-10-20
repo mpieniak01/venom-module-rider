@@ -1,5 +1,7 @@
 # Automat2: continuous supervised journey v1
 
+[Instrukcja operatora (PL)](JOURNEY_OPERATOR_PL.md)
+
 Automat2 is a separate panel view and Pi contract. Manual controls and the
 existing ten-second trial retain their behavior. A journey has no overall time
 limit; every individual forward/steering pulse retains the configured low speed
@@ -40,6 +42,15 @@ panel explains which frame condition is missing. Motion deadlines do not change.
 executor meet the existing contract.
 A green image or saving parameters alone does not grant authority. Neither camera
 intrinsics nor physical acceptance are guessed or filled automatically.
+
+## Operator view after a journey
+
+The driving view keeps commands, live status and the camera together; setup
+instructions live in the operator guide above. After a journey ends, explicit
+manual takeover can continue displaying fresh analysis, even while manually
+steering. These host-only images are marked `preview_only` and contain no Pi
+journey authority. A running or preparing navigation producer still owns the
+analysis; the preview cannot restart it, arm motion or renew its decision lease.
 
 ## Start and authority
 
