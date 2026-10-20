@@ -206,6 +206,28 @@ router = APIRouter(
     dependencies=[Depends(guard)],
     lifespan=lifespan,
 )
+
+
+@router.get("/loop-timing")
+async def loop_timing(request: Request):
+    domain = request.app.state.rider
+    return {**domain.timing.snapshot(), "reads": domain.read_metrics.snapshot()}
+
+
+@router.put("/loop-timing")
+async def update_loop_timing(request: Request):
+    domain = request.app.state.rider
+    domain.check_session(request.headers.get("X-Rider-Session"))
+    try:
+        body = await request.json()
+    except ValueError as exc:
+        raise RiderError("loop_timing_invalid", 422) from exc
+    if not isinstance(body, dict) or set(body) != {"revision", "values"}:
+        raise RiderError("loop_timing_invalid", 422)
+    result = await domain.timing.update(body["revision"], body["values"])
+    return {**result, "reads": domain.read_metrics.snapshot()}
+
+
 router.include_router(compute_routes.router)
 router.include_router(conversation_routes.router)
 router.include_router(vision_routes.router)

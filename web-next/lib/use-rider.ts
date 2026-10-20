@@ -1,4 +1,5 @@
 "use client";
+import { freshnessCadence, previewInterval } from "./loop-timing";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api-client";
@@ -61,7 +62,7 @@ export function useRider(section: Section) {
   const commandRef = useRef<(body: JsonRecord, current?: () => boolean) => Promise<unknown>>(async () => undefined);
   const abortReads = useCallback(() => { abortRef.current?.abort(); controlAbortRef.current?.abort(); }, []);
   const isConnected = useCallback(() => ["online", "degraded"].includes(statusRef.current?.connection.status ?? ""), []);
-  const hasFreshControl = useCallback(() => freshControl(statusRef.current, clockRef.current, Date.now(), statusRef.current?.polling[`${sectionRef.current}_ms`] ?? 0), []);
+  const hasFreshControl = useCallback(() => freshControl(statusRef.current, clockRef.current, Date.now(), freshnessCadence(sectionRef.current)), []);
   const canNavigate = useCallback(() => (motionBlocked.current === 0 || motionBlocked.current === journeyPreparing.current && manualInterventionAvailable(statusRef.current, panelId)) && navigationAvailable(statusRef.current, panelId), [panelId]);
   const movementReady = useCallback(() => canNavigate() && safetyOf(statusRef.current).owner === "manual", [canNavigate]);
   const [hold] = useState(() => new HoldController({
@@ -580,7 +581,7 @@ export function useRider(section: Section) {
       const current = ++cycle, started = performance.now(), epoch = cameraTransitionEpoch.current; abort = new AbortController();
       try { await fetchFrame("/camera/" + cameraStream, abort.signal, "camera"); }
       catch { if (!abort.signal.aborted && alive && previewRequestCurrent("camera", "/camera/" + cameraStream, cameraTransitionRef.current, epoch, cameraTransitionEpoch.current)) { replaceFrame("camera", null, true); setMediaError("frameMissing"); } }
-      if (alive && current === cycle && !document.hidden) timer = setTimeout(() => void tick(), nextPreviewDelay(started, performance.now()));
+      if (alive && current === cycle && !document.hidden) timer = setTimeout(() => void tick(), nextPreviewDelay(started, performance.now(), previewInterval(statusRef.current?.loop_timing)));
     };
     const visibility = () => { cycle++; clearTimeout(timer); abort?.abort(); if (!document.hidden) void tick(); };
     document.addEventListener("visibilitychange", visibility); void tick();

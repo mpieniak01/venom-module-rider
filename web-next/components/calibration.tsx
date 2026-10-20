@@ -1,3 +1,4 @@
+import { LoopTimingPanel } from "./loop-timing";
 import { useState } from "react";
 import { SlidersHorizontal } from "lucide-react";
 import { calibrationDraft, calibrationValues, directionDescriptor, validCalibration, type CalibrationDraft } from "../lib/calibration";
@@ -51,5 +52,6 @@ export function Calibration({ client, t, language }: { client: RiderClient; t: T
       <div className={styles.flex} style={{ marginTop: 14 }}><Button disabled={!canEdit || !name.trim() || !valid || conflict} onClick={() => void save({ action: "create", name })}>{t("createProfile")}</Button><Button disabled={!canEdit || !selected || !valid || conflict} onClick={() => void save({ action: "save", id: selected, name })}>{t("saveProfile")}</Button><Button disabled={!canEdit || !selected || !name.trim() || !!draft} onClick={() => void profileAction("rename")}>{t("rename")}</Button><Button tone="danger" disabled={!canEdit || !selected || !!draft} onClick={() => setDeletePending(true)}>{t("delete")}</Button></div>
       {deletePending && <div className={`${styles.banner} ${styles.demo}`} style={{ marginTop: 14 }}><span className={styles.noticeText}>{t("deleteConfirm")}: {str(record(profiles[selected]).name)}</span><Button tone="danger" onClick={() => void profileAction("delete")}>{t("delete")}</Button><Button onClick={() => setDeletePending(false)}>{t("cancel")}</Button></div>}
     </Panel><Posture client={client} t={t} language={language} /></div><Panel title={t("testDirection")} hint={t("testHint")}><ManualPad client={client} t={t} language={language} compact /></Panel></div>
+    <LoopTimingPanel key={client.status?.connection.session} client={client} t={t} language={language}/>
   </div>;
 }

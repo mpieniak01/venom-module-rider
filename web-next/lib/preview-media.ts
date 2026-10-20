@@ -4,8 +4,8 @@ export const PREVIEW_INTERVAL_MS = 500;
 // Matches the existing LoopDecision display limit, not the Pi motion deadline.
 export const PREVIEW_MAX_AGE_MS = 1000;
 
-export function nextPreviewDelay(started: number, finished: number): number {
-  return Math.max(0, PREVIEW_INTERVAL_MS - Math.max(0, finished - started));
+export function nextPreviewDelay(started: number, finished: number, interval = PREVIEW_INTERVAL_MS): number {
+  return Math.max(0, interval - Math.max(0, finished - started));
 }
 
 export function previewLifetime(frame: FrameTiming | null, now = performance.now()): number | null {
