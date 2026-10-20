@@ -519,3 +519,7 @@ or connect to a robot. Physical acceptance remains a separate operator step.
 Calibration offers compact fields and synchronized recorded motion comparison.
 See [Motion study v1](docs/MOTION_STUDY_V1.md) for capture, A/B, archive contracts,
 quality limits and isolated acceptance.
+
+Qualified body orientation and replay share the same timeline. See
+[Attitude replay v1](docs/ATTITUDE_REPLAY_V1.md) for the producer convention,
+relative reference, unknown-data fallback and resource limits.

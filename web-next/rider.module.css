@@ -590,3 +590,14 @@
   .calibrationTop,.calibrationBottom { grid-template-columns:minmax(0,1fr); }
   .calibrationOperator,.calibrationForms { grid-column:auto;grid-row:auto; }
 }
+
+.attitudeGrid { display:grid;grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr));gap:12px;margin-top:12px; }
+.attitudeCard { overflow-wrap:anywhere;min-width:0;border:1px solid var(--ui-border);border-radius:8px;padding:12px; }
+.attitudeBody { width:100%;max-height:240px; }
+.attitudeBody text { fill:var(--text-primary);font-size:12px; }
+.attitudeBodyA { stroke:var(--primary);fill:var(--primary);stroke-width:1.5; }
+.attitudeBodyB { stroke:var(--tone-warning-text);fill:var(--tone-warning-text);stroke-width:1.5; }
+.attitudeFront { stroke:var(--text-primary);stroke-width:2; }
+.attitudeReference { stroke:var(--text-secondary);stroke-dasharray:3 3;fill:none; }
+.attitudeAxes { stroke:var(--text-primary);fill:var(--text-primary);stroke-width:1.5; }
+.attitudePlaceholder { min-height:130px;display:flex;flex-direction:column;justify-content:center;gap:10px;color:var(--text-secondary); }

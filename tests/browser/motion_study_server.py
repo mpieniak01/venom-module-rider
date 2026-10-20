@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[2]
 ASSETS = ROOT / "docs_dev" / "_reports" / "motion-study-browser"
 
 
-async def seed(service, registry, name, magnitude):
+async def seed(service, registry, name, magnitude, qualified=False):
     session = await registry.start(
         name, "fixture", {"scene_group": "motion-study-v1:wood"}
     )
@@ -68,6 +68,7 @@ async def seed(service, registry, name, magnitude):
     result = record(service, "command", event.model_dump(mode="json"), [name, "result"])
     result["received_mono"] = base + 0.035
     rows = [snap, requested, result]
+    unit = "deg" if qualified else "sdk_raw"
     for i in range(8):
         t = -0.34 + i * 0.34
         observed = 1000.0 + i * 0.34
@@ -78,10 +79,26 @@ async def seed(service, registry, name, magnitude):
             "simulated": True,
             "physical_validation": "unverified",
             "sensors": {
-                axis: {"ready": True, "unit": "sdk_raw", "observed_at": observed}
+                axis: {
+                    "ready": True,
+                    "stale": False,
+                    "offline": False,
+                    "instance_id": "fixture-boot",
+                    "unit": unit,
+                    "observed_at": observed,
+                }
                 for axis in ("roll", "pitch", "yaw")
             },
         }
+        if qualified:
+            quality["orientation"] = {
+                "convention": "rider-body-zyx-v1",
+                "revision": 1,
+                "verified": True,
+                "qualification_ref": "synthetic-known-poses-v1",
+                "instance_id": "fixture-boot",
+                "unit": unit,
+            }
         rows.append(
             validate_evidence(
                 {
@@ -102,9 +119,9 @@ async def seed(service, registry, name, magnitude):
                         "accel_z": 9.81,
                     },
                     "units": {
-                        "roll": "sdk_raw",
-                        "pitch": "sdk_raw",
-                        "yaw": "sdk_raw",
+                        "roll": unit,
+                        "pitch": unit,
+                        "yaw": unit,
                         "accel_x": "m/s^2",
                         "accel_y": "m/s^2",
                         "accel_z": "m/s^2",
@@ -116,6 +133,7 @@ async def seed(service, registry, name, magnitude):
     rows.sort(key=lambda r: r["received_mono"])
     await registry.read(registry.store.evidence.append, sid, rows)
     await registry.end(sid)
+    return sid
 
 
 @asynccontextmanager
@@ -133,8 +151,11 @@ async def lifespan(app):
         service.samples = registry
         app.state.rider = service
         app.state.rider_samples = registry
-        await seed(service, registry, "fixture-A", 1)
-        await seed(service, registry, "fixture-B", 0.5)
+        app.state.fixture_sessions = {
+            "A": await seed(service, registry, "fixture-A", 1, True),
+            "B": await seed(service, registry, "fixture-B", 0.5, True),
+            "raw": await seed(service, registry, "fixture-raw", 2),
+        }
         try:
             yield
         finally:
@@ -156,6 +177,7 @@ async def index():
 @app.get("/fixture")
 async def fixture():
     return {
+        "sessions": app.state.fixture_sessions,
         "config": app.state.rider.config(),
         "status": await app.state.rider.status("calibration"),
     }

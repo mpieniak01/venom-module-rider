@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import {test} from "node:test";
-import {alignTrial,pulseEvidence,nearestTime,pointAt,profileAt,readTimeline,seriesSegments,streamTimes,type MotionPoint,type MotionStream} from "../../web-next/lib/motion-timeline";
+import {markerIds,alignTrial,pulseEvidence,nearestTime,pointAt,profileAt,readTimeline,seriesSegments,streamTimes,type MotionPoint,type MotionStream} from "../../web-next/lib/motion-timeline";
 
 function point(t:number,segment=1,unit="deg",valid=true):MotionPoint {
   return {id:"p"+t,t,segment,valid,instance_id:"boot",source_time:t,values:{yaw:t},units:{yaw:unit},quality:{}};
@@ -9,6 +9,7 @@ function stream():MotionStream {return {id:"s",device_id:"d",source_session:"hos
 test("one cursor never invents a reading between received samples",()=>{
   const s=stream();
   assert.equal(pointAt(s,.5),null);
+  assert.equal(pointAt(s,.0004),null);
   assert.equal(pointAt(s,1)?.id,"p1");
   assert.equal(nearestTime([0,1,2],1.7),2);
   assert.deepEqual(streamTimes(s,null),[0,1,2]);
@@ -44,4 +45,20 @@ test("trial alignment moves every channel and sparse impulses remain insufficien
   assert.equal(s.events[0].t,1);
   assert.equal(pulseEvidence(aligned).peaks,null);
   assert.equal(pulseEvidence(aligned).profile?.motion_revision,3);
+});
+
+test("dense presentation bounds markers while retaining cursor and source points",()=>{
+  const points=Array.from({length:2048},(_,i)=>point(i));
+  const ids=markerIds(points,523);
+  assert.ok(ids.size<=258);
+  assert.ok(ids.has("p0")&&ids.has("p2047")&&ids.has("p523"));
+  assert.equal(points.length,2048);
+  assert.equal(seriesSegments(points,"yaw","deg")[0].length,2048);
+  assert.ok(markerIds(points.map(p=>({...p,t:0})),0).size<=258);
+});
+
+test("ambiguous duplicate receipt times do not choose an arbitrary orientation",()=>{
+  const s=stream();
+  s.points=[point(0),{...point(0),id:"other"}];
+  assert.equal(pointAt(s,0),null);
 });
