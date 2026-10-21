@@ -34,7 +34,13 @@ in a browser does not establish name resolution. The module resolves only the
 configured name, with a bounded DNS lookup and no subnet scan. It pins the result
 for the current transport generation while preserving the configured canonical
 HTTP Host and TLS SNI. Separate JSON, urgent STOP and media pools use this same
-verified target. A server may close each TCP response; keep-alive is not required.
+verified target. Unique A/AAAA candidates are tried in resolver order after a
+transport failure, with a separate identity check before using each target.
+A responding wrong/invalid peer or redirect ends the attempt without trying to
+hide it behind another candidate. IPv6 addresses requiring an interface scope
+are explicitly unsupported and skipped, never retried with the scope removed;
+provide an unscoped A/AAAA target. No usable target reports `pi_name_unresolved`.
+A server may close each TCP response; keep-alive is not required.
 
 Identity is checked before the first read/media request of a generation and
 freshly before each mutation or credential-bearing request. The preflight never
@@ -60,8 +66,11 @@ re-resolve the configured name and verify the peer. Normal UI polling cadence is
 unchanged. The urgent STOP lane bypasses transient retry cooldown and ordinary
 resolver contention, but retains its own bounded identity verification; it cannot
 send a command to an unverified target. DNS lookup is bounded to 750 ms and urgent
-identity to 500 ms, including a 100 ms pool wait limit. These limits are not a
-measured end-to-end physical braking guarantee.
+identity to 500 ms, including a 100 ms pool wait limit. One shared 1.25 s urgent
+connection budget includes admission, DNS and all candidate preflights (2.25 s
+for ordinary connections); another DNS result does not renew that budget. TCP
+connect remains capped at 500 ms. Resource cleanup and the subsequent STOP request
+are separate; these limits are not a measured physical braking guarantee.
 
 The header **Refresh** coalesces concurrent requests, retires old observations,
 commands and media handles, bypasses backoff once and obtains current Pi state.

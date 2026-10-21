@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import random
 import socket
@@ -19,17 +20,52 @@ from .transport_cleanup import finish_native_cleanup
 
 IDENTITY_PATH = "/api/v1/transport/identity"
 MAX_IDENTITY_BYTES = 4096
+DNS_TIMEOUT = 0.75
+IDENTITY_TIMEOUT = 1.5
+URGENT_IDENTITY_TIMEOUT = 0.5
+CONNECT_BUDGET = DNS_TIMEOUT + IDENTITY_TIMEOUT
+URGENT_CONNECT_BUDGET = DNS_TIMEOUT + URGENT_IDENTITY_TIMEOUT
 
 
-async def resolve_address(host: str, port: int) -> str:
-    """Resolve only the configured name; there is no discovery or subnet scan."""
+async def resolve_address(host: str, port: int) -> tuple[str, ...]:
+    """Return unique unscoped A/AAAA targets for this name in resolver order."""
     rows = await asyncio.wait_for(
         asyncio.get_running_loop().getaddrinfo(host, port, type=socket.SOCK_STREAM),
-        timeout=0.75,
+        timeout=DNS_TIMEOUT,
     )
-    if not rows:
-        raise socket.gaierror("no configured peer address")
-    return str(rows[0][4][0])
+    addresses = []
+    for family, _kind, _protocol, _name, endpoint in rows:
+        if family not in {socket.AF_INET, socket.AF_INET6}:
+            continue
+        # The URL-based pin does not carry sockaddr scope safely. Never drop
+        # the interface and accidentally dial a different link-local peer.
+        if "%" in endpoint[0] or (
+            family == socket.AF_INET6 and len(endpoint) > 3 and endpoint[3]
+        ):
+            continue
+        try:
+            address = ipaddress.ip_address(endpoint[0])
+        except ValueError:
+            continue
+        if (family == socket.AF_INET) != (address.version == 4):
+            continue
+        addresses.append(str(address))
+    return address_candidates(addresses)
+
+
+def address_candidates(resolved):
+    # Keep injected single-address resolvers compatible with existing callers.
+    values = (resolved,) if isinstance(resolved, str) else resolved
+    addresses = tuple(
+        dict.fromkeys(
+            value
+            for value in values
+            if isinstance(value, str) and value and "%" not in value
+        )
+    )
+    if not addresses:
+        raise socket.gaierror("no supported unscoped peer address")
+    return addresses
 
 
 class PinnedTransport(httpx.AsyncBaseTransport):
@@ -172,21 +208,45 @@ class LanConnection:
             return RiderError("pi_connection_timeout", 503)
         return RiderError("pi_connect_failed", 503)
 
+    async def _verify_identity(self, generation, *, urgent=False):
+        # A slow-drip body cannot extend a preflight one read timeout at a time.
+        try:
+            async with asyncio.timeout(
+                URGENT_IDENTITY_TIMEOUT if urgent else IDENTITY_TIMEOUT
+            ):
+                await self._identity(generation, urgent=urgent)
+        except TimeoutError as exc:
+            raise httpx.ReadTimeout("identity preflight deadline exceeded") from exc
+
     async def acquire(self, *, urgent=False):
         if self.closed:
             raise RiderError("module_closed", 503)
         if self.current is not None:
             return self.current
-        # STOP has its own bounded resolver/preflight. An ordinary stalled
-        # lookup or retry cooldown cannot occupy the urgent lane.
-        async with self.urgent_lock if urgent else self.lock:
-            if self.closed:
-                raise RiderError("module_closed", 503)
-            if self.current is not None:
-                return self.current
-            if not urgent and time.monotonic() < self.retry_at:
-                raise RiderError(self.error or "pi_connect_failed", 503)
-            return await self._connect(urgent=urgent)
+        revision, failures = self.revision, self.failures
+        try:
+            # One budget includes lock admission, DNS and ALL candidate probes;
+            # an additional A/AAAA record cannot multiply STOP's deadline.
+            async with asyncio.timeout(
+                URGENT_CONNECT_BUDGET if urgent else CONNECT_BUDGET
+            ):
+                # STOP has its own lane, bypassing ordinary resolver/backoff.
+                async with self.urgent_lock if urgent else self.lock:
+                    if self.closed:
+                        raise RiderError("module_closed", 503)
+                    if self.current is not None:
+                        return self.current
+                    if not urgent and time.monotonic() < self.retry_at:
+                        raise RiderError(self.error or "pi_connect_failed", 503)
+                    return await self._connect(urgent=urgent)
+        except TimeoutError as exc:
+            if revision == self.revision and not self.closed:
+                if self.current is not None:
+                    self.state = "online"
+                    return self.current
+                if self.failures == failures:
+                    self._backoff("pi_connection_timeout")
+            raise RiderError("pi_connection_timeout", 503) from exc
 
     async def _connect(self, *, urgent):
         generation, revision = None, self.revision
@@ -197,16 +257,34 @@ class LanConnection:
                 raise RiderError("invalid_device_configuration", 503)
             self.state = "resolving"
             # An explicitly supplied in-process test transport does not use DNS.
-            address = (
-                host
-                if self.transport is not None and self.resolver is resolve_address
-                else await self.resolver(
-                    host, parsed.port or (443 if parsed.scheme == "https" else 80)
+            resolved: str | tuple[str, ...]
+            if self.transport is not None and self.resolver is resolve_address:
+                resolved = host
+            else:
+                lookup = asyncio.wait_for(
+                    self.resolver(
+                        host, parsed.port or (443 if parsed.scheme == "https" else 80)
+                    ),
+                    timeout=DNS_TIMEOUT,
                 )
-            )
-            self.state = "connecting"
-            generation = self._pools(address)
-            await self._identity(generation, urgent=urgent)
+                resolved = await lookup
+            last_error = None
+            for address in address_candidates(resolved):
+                self.state = "connecting"
+                generation = self._pools(address)
+                try:
+                    await self._verify_identity(generation, urgent=urgent)
+                    break
+                except (httpx.HTTPError, httpx.InvalidURL) as exc:
+                    # Only transport failures allow another target. Responding
+                    # wrong/invalid identities or redirects stay fail-closed.
+                    last_error = exc
+                    await generation.close()
+                    generation = None
+            else:
+                if last_error is not None:
+                    raise last_error
+                raise socket.gaierror("no peer candidate available")
             if self.closed:
                 raise RiderError("module_closed", 503)
             if revision != self.revision:
@@ -218,7 +296,13 @@ class LanConnection:
             self.state, self.error = "online", None
             self.retry_at, self.failures = 0.0, 0
             return self.current
-        except (socket.gaierror, TimeoutError, httpx.HTTPError, RiderError) as exc:
+        except (
+            socket.gaierror,
+            TimeoutError,
+            httpx.HTTPError,
+            httpx.InvalidURL,
+            RiderError,
+        ) as exc:
             error = self._error(exc)
             if (
                 self.current is not None
@@ -226,8 +310,11 @@ class LanConnection:
                 and not self.closed
             ):
                 self.state = "online"
-                return self.current
-            if revision == self.revision and not self.closed:
+                # A parallel healthy generation can rescue transport failure,
+                # but cannot override this request's terminal identity result.
+                if not isinstance(exc, RiderError):
+                    return self.current
+            elif revision == self.revision and not self.closed:
                 self._backoff(error.code)
             raise error from exc
         finally:
@@ -240,10 +327,10 @@ class LanConnection:
         if generation.verified_mono >= started:
             return
         try:
-            await self._identity(generation, urgent=urgent)
+            await self._verify_identity(generation, urgent=urgent)
             self.check(generation)
             self.state = "online"
-        except (httpx.HTTPError, RiderError) as exc:
+        except (httpx.HTTPError, httpx.InvalidURL, RiderError) as exc:
             error = self._error(exc)
             await self.fail(generation, error.code, owner=asyncio.current_task())
             raise error from exc

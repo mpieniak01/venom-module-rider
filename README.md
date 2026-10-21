@@ -123,7 +123,8 @@ Use the header **Refresh** button after a connection failure. It re-reads the
 selected device/session, retires old observations and fetches current control
 and settings. It shows progress and a retryable failure if Pi is still unavailable.
 It never repeats motion, ARM, camera or navigation commands. Ordinary polling
-does not run transport recovery.
+never runs an external recovery helper. Trusted LAN reads can establish a fresh
+verified generation after bounded backoff.
 
 For a device behind an administrator-managed tunnel, its private
 `RIDER_DEVICES_JSON` entry may include `reconnect_command`: an absolute path to
@@ -141,7 +142,9 @@ checks. It coalesces simultaneous requests. In the secure profile it invokes the
 helper only when a fresh control read reports `pi_unreachable`. The trusted LAN
 profile instead rebuilds its named HTTP transport and verifies identity. A zero helper exit
 code is followed by a new negotiated Pi read before reporting recovery. Healthy
-connections are not restarted; device selection and Pi permissions stay intact.
+secure-profile connections are not restarted. Trusted LAN Refresh always retires
+the current pools and creates a newly verified transport generation, including
+when the connection is healthy. Device selection and Pi permissions stay intact.
 The final Pi read determines recovery even when the helper reports a diagnostic
 error. In read-only environments the recovery POST remains prohibited; Refresh
 falls back to the existing status GET and reports that transport recovery is

@@ -318,7 +318,7 @@ async def test_default_resolver_only_looks_up_configured_name(monkeypatch):
         return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.0.2.7", port))]
 
     monkeypatch.setattr(asyncio.get_running_loop(), "getaddrinfo", lookup)
-    assert await resolve_address("rider.test", 8080) == "192.0.2.7"
+    assert await resolve_address("rider.test", 8080) == ("192.0.2.7",)
     assert seen == [("rider.test", 8080, {"type": socket.SOCK_STREAM})]
 
     async def empty(*args, **kwargs):
