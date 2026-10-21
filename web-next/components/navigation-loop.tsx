@@ -1,3 +1,4 @@
+import { createBrowserUuid } from "@/lib/optional-modules/transport";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Play, Square, RefreshCw } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
@@ -223,7 +224,7 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
       const visible=client.currentCamera();
       if(current.revision!==policy.revision||calibrationScope(current,model)!==calibrationScope(policy,detector)||decisionView(record(loaded.status),model).vision!=="go"||!freshPolicyFrame(visible.frame,visible.stream,record(loaded.status),current))throw Object.assign(new Error("navigation_configuration_changed"),{data:{error:"navigation_configuration_changed"}});
       await stopGoals(origin);ensureOperation(origin);
-      await persist(calibrationAcceptance(current,model,"operator-"+crypto.randomUUID(),view==="journey"));ensureOperation(origin);
+      await persist(calibrationAcceptance(current,model,"operator-"+createBrowserUuid(),view==="journey"));ensureOperation(origin);
       setTrialResult("trialAcceptanceSaved");
       await ensureAnalysis(origin);
     })();startTask.current=task;

@@ -40,9 +40,20 @@ class Device:
     compute_token_env: str | None = None
     agent_token_env: str = "RIDER_AGENT_TOKEN"
     reconnect_command: str | None = None
+    transport_profile: str = "secure"
+    expected_peer_id: str | None = None
 
     def public(self) -> dict:
-        return {"id": self.id, "label": self.label, "mode": self.mode}
+        return {
+            "id": self.id,
+            "label": self.label,
+            "mode": self.mode,
+            **(
+                {"transport_profile": self.transport_profile}
+                if self.transport_profile != "secure"
+                else {}
+            ),
+        }
 
 
 def configured_devices(raw: str | None = None) -> tuple[Device, ...]:
@@ -64,6 +75,8 @@ def configured_devices(raw: str | None = None) -> tuple[Device, ...]:
             "compute_token_env",
             "agent_token_env",
             "reconnect_command",
+            "transport_profile",
+            "expected_peer_id",
         }:
             raise RiderError("invalid_device_configuration", 503)
         id_ = row.get("id")
@@ -73,6 +86,17 @@ def configured_devices(raw: str | None = None) -> tuple[Device, ...]:
         token_env = row.get("compute_token_env")
         agent_env = row.get("agent_token_env", "RIDER_AGENT_TOKEN")
         reconnect = row.get("reconnect_command")
+        profile = row.get("transport_profile", "secure")
+        peer = row.get("expected_peer_id")
+        if (
+            not isinstance(profile, str)
+            or profile not in {"secure", "trusted_lan"}
+            or peer is not None
+            and (not isinstance(peer, str) or not IDENTIFIER.fullmatch(peer))
+            or profile == "trusted_lan"
+            and (peer is None or mode != "device")
+        ):
+            raise RiderError("invalid_device_configuration", 503)
         if reconnect is not None and (
             not isinstance(reconnect, str)
             or not reconnect.startswith("/")
@@ -121,7 +145,17 @@ def configured_devices(raw: str | None = None) -> tuple[Device, ...]:
         if id_ in {device.id for device in devices}:
             raise RiderError("duplicate_device_id", 503)
         devices.append(
-            Device(id_, label, url.rstrip("/"), mode, token_env, agent_env, reconnect)
+            Device(
+                id_,
+                label,
+                url.rstrip("/"),
+                mode,
+                token_env,
+                agent_env,
+                reconnect,
+                profile,
+                peer,
+            )
         )
     return tuple(devices)
 

@@ -1,4 +1,5 @@
 "use client";
+import { createBrowserUuid } from "@/lib/optional-modules/transport";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api-client";
@@ -43,7 +44,7 @@ export function AutomaticCapture({collection,sourceSession,t}:{collection:Collec
   },[collection?.session_id,sourceSession,invalidate]);
   const active=status.state==="on";
   const start=async()=>{
-    const intent=autoIntent(collection?.session_id??null,sourceSession,profile,crypto.randomUUID());
+    const intent=autoIntent(collection?.session_id??null,sourceSession,profile,createBrowserUuid());
     if(!intent)return;
     const version=++epoch.current;
     pendingEnable.current=intent.body.request_id;

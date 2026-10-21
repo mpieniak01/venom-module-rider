@@ -91,3 +91,15 @@ The client works with the browser closed. Restart, OFF and executor/session
 change cancel in-flight intentions and drop late results. Operator ARM is not
 changed by inference health. Legacy PC configuration remains a rollback path;
 its heartbeat is isolated from the selected Venom executor.
+
+## Trusted LAN and persistent peer identity
+
+The passive core `GET /api/v1/transport/identity` is separate from authenticated
+compute capabilities: `{protocol_version:1,peer_id,service_role:"venom"}`. The Pi
+companion binds its explicit executor URL/profile to this persistent peer before
+sending a compute token; an executor session still identifies the running compute
+instance. DNS/DHCP changes do not select an executor. Job/session TTL, cancellation,
+no POST replay and bearer authentication remain unchanged. The module's opposite
+Pi connection uses `service_role:"rider_pi"` and its private expected peer.
+Configure matching Pi/core changes; see [HTTP LAN](TRANSPORT_HTTP_LAN.md) /
+[opis po polsku](TRANSPORT_HTTP_LAN_PL.md). SSH is a service/rollback path.

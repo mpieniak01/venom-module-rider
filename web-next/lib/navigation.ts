@@ -47,6 +47,7 @@ export function freshControl(status: RiderStatus | null, clock: ControlClock | n
 /** Missing diagnostics must not erase confirmed ARM or roll back a newer read. */
 export function retainControl(previous: RiderStatus | null, next: RiderStatus): RiderStatus {
   if (!previous || previous.connection.session !== next.connection.session || previous.connection.device_id !== next.connection.device_id || !next.connection.configured) return next;
+  if ((previous.connection.transport?.generation ?? 0) !== (next.connection.transport?.generation ?? 0)) return next;
   const oldTime = timestampMs(data(previous.control).server_time);
   const newTime = timestampMs(data(next.control).server_time);
   const older = oldTime !== null && newTime !== null && newTime < oldTime;

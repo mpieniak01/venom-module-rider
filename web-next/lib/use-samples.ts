@@ -1,4 +1,5 @@
 "use client";
+import { createBrowserUuid } from "@/lib/optional-modules/transport";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api-client";
@@ -52,7 +53,7 @@ export function useSamples(deviceId:string|null, previewVisible:boolean, purpose
     setBusy(true);setError("");
     try{
       const next=await apiFetch<Collection>(SAMPLES_BASE+"/sessions",{method:"POST",body:JSON.stringify({
-        request_id:crypto.randomUUID(),source_device_id:deviceId,
+        request_id:createBrowserUuid(),source_device_id:deviceId,
         policy:{kind,duration_s:10,interval_ms:200,max_frames:50,...(purpose?{scene_group:purpose}:{})},
       })});
       if(requestEpoch!==epoch.current||!alive.current){finishDetached(next.session_id);return;}
@@ -62,7 +63,7 @@ export function useSamples(deviceId:string|null, previewVisible:boolean, purpose
   },[deviceId,end,invalidate,syncSession,purpose]);
   const save=useCallback(async(frame:Frame|null)=>{
     if(unresolved.current)return;
-    const intent=captureIntent(sessionRef.current,frame,crypto.randomUUID());
+    const intent=captureIntent(sessionRef.current,frame,createBrowserUuid());
     if(!intent)return;
     unresolved.current=true;last.current=intent;remember(intent);setError("");
     setOutcome({id:intent.capture_request_id,state:"submitting"});

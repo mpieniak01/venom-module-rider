@@ -105,6 +105,18 @@ See [Integration observations](docs/INTEGRATION_OBSERVATIONS.md) and
 meeting the required runtime ABI remains independent of the optional inventory
 hook.
 
+## Explicit HTTP LAN
+
+An optional `transport_profile="trusted_lan"` device entry with an explicit
+`expected_peer_id` supports a named Pi over HTTP without an application SSH tunnel.
+It keeps backend tokens and checks passive identity before credential requests or
+commands. New connections re-resolve the configured name and retire old pools;
+Refresh coalesces recovery and does not call SSH in this profile. Existing entries
+retain the default secure profile. See [HTTP LAN](docs/TRANSPORT_HTTP_LAN.md) and
+[opis po polsku](docs/TRANSPORT_HTTP_LAN_PL.md) for configuration, limits, errors,
+rollback and the matching Pi/core requirements. Phone browser microphones still
+require a secure context.
+
 ## Reconnecting from the panel
 
 Use the header **Refresh** button after a connection failure. It re-reads the
@@ -119,14 +131,15 @@ an executable on the Venom host. The helper accepts no arguments, must return
 within 12 seconds, and must only ensure the configured transport is available.
 Keep credentials in the transport's existing private configuration. Use a
 supervised transport service so it also reconnects after network interruptions;
-keep its restart and connection timeouts within the helper budget. Direct HTTP
-connections need no helper. This option is unavailable for Demo devices and is
+keep its restart and connection timeouts within the helper budget. Explicit trusted LAN
+connections never invoke this helper. This option is unavailable for Demo devices and is
 not exposed as an executable or command input in the browser.
 
 `POST /api/v1/rider/connection/refresh` accepts only an empty JSON object and
 requires the current `X-Rider-Session` and the existing module access/origin
-checks. It coalesces simultaneous requests and invokes the configured helper
-only when a fresh control read reports `pi_unreachable`. A zero helper exit
+checks. It coalesces simultaneous requests. In the secure profile it invokes the configured
+helper only when a fresh control read reports `pi_unreachable`. The trusted LAN
+profile instead rebuilds its named HTTP transport and verifies identity. A zero helper exit
 code is followed by a new negotiated Pi read before reporting recovery. Healthy
 connections are not restarted; device selection and Pi permissions stay intact.
 The final Pi read determines recovery even when the helper reports a diagnostic

@@ -180,3 +180,16 @@ points expire and gaps remain visible; the panel does not stretch sample indices
 insert zero measurements or refresh the age of a stopped series.
 
 Camera session and frame identifiers contain only ASCII letters, digits, underscores and hyphens (1–160 characters), with no CR/LF. The shared stopped-status example lists the effective-stage names emitted by Pi.
+
+## Named HTTP LAN recovery
+
+An explicit trusted LAN profile verifies the configured Pi peer before media and
+commands, pins one resolved destination per generation and rebuilds pools after
+a connection failure. JSON, urgent STOP and media remain separate; browser clients
+share the existing single upstream MJPEG hub. Refresh retires old subscriptions
+and results, then restores passive reads. It never starts a camera, recording or
+inference. Reconnect does not renew capture age, sequence, source epoch or TTL.
+The browser uses relative Venom URLs; PC and phone do not open another Pi camera
+source. See [HTTP LAN](TRANSPORT_HTTP_LAN.md) /
+[opis po polsku](TRANSPORT_HTTP_LAN_PL.md), including identity mismatch, DNS errors
+and secure-profile rollback.

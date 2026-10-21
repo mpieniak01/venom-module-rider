@@ -115,3 +115,15 @@ playback, including a generation change between frames and a short drain afterwa
 ACK/SDK acceptance does not confirm physical motion or stopping. Scene descriptions
 are observations, not obstacle detection or permission to drive. Physical tests
 require the operator's separate authorization and are not automatic test fixtures.
+
+## Explicit trusted LAN
+
+Agent pulse, playback and cancellation retain the backend bearer token. Default
+secure transport still requires HTTPS/loopback. An explicitly configured
+`trusted_lan` peer is allowed only after fresh passive identity verification before
+a credential-bearing request; changed or unverified identity receives no token or
+command. Readiness exposes credential presence, allowed transport and verified
+identity separately. Reconnect invalidates pending intents without replaying speech
+or motion. See [HTTP LAN](TRANSPORT_HTTP_LAN.md) /
+[opis po polsku](TRANSPORT_HTTP_LAN_PL.md). Browser HTTP microphone restrictions
+are independent of Pi audio playback/capture.

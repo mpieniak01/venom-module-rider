@@ -13,6 +13,7 @@ check-python:
 	PYTHONPATH=$(HOST):. $(PYTHON) -m pytest -q --cov=venom_module_rider --cov-fail-under=90 --cov-report=term-missing --cov-report=xml:test-results/coverage.xml
 
 check-web:
+	node --check tests/browser/http-lan.js
 	node --check tests/browser/global-study.js
 	node --check tests/browser/axis-analysis.js
 	node --check tests/browser/attitude-replay.js

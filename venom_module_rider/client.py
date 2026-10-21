@@ -7,13 +7,14 @@ import hashlib
 import json
 import os
 import time
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from typing import cast
 
 import httpx
 
 from .config import Device, credential_transport_secure
 from .errors import RiderError
+from .transport_cleanup import finish_native_cleanup
 
 ACCEPT = "application/vnd.rider.api+json;version=1"
 MAX_JSON_BYTES = 2 * 1024 * 1024
@@ -140,25 +141,19 @@ def json_timeout(path: str, method: str, stop: bool) -> httpx.Timeout:
     return httpx.Timeout(duration, connect=0.5, pool=0.5)
 
 
-async def finish_native_cleanup(task):
-    """Finish owned cleanup even if its caller is cancelled again, then propagate it."""
-    cancelled = False
-    while not task.done():
-        try:
-            await asyncio.shield(task)
-        except asyncio.CancelledError:
-            cancelled = True
-            if task.cancelled():
-                raise
-    result = task.result()
-    if cancelled:
-        raise asyncio.CancelledError
-    return result
-
-
 class PiClient:
-    def __init__(self, device: Device, *, transport=None):
+    def __init__(self, device: Device, *, transport=None, resolver=None):
         self.device = device
+        from .lan_transport import LanConnection
+
+        self.lan = (
+            LanConnection(device, transport=transport, resolver=resolver)
+            if device.transport_profile == "trusted_lan"
+            else None
+        )
+        self.transport_invalidated: Callable | None = None
+        if self.lan is not None:
+            self.lan.invalidated = self._invalidated
         # ASGI fixtures are in-process and never transmit credentials on a network.
         self.credential_transport_secure = credential_transport_secure(
             device.url
@@ -186,6 +181,56 @@ class PiClient:
         self.operator_lane = asyncio.Lock()
         self.closed = False
 
+    @property
+    def credential_transport_allowed(self):
+        return bool(self.lan.current) if self.lan else self.credential_transport_secure
+
+    def transport_status(self):
+        return (
+            self.lan.snapshot()
+            if self.lan
+            else {
+                "profile": "secure",
+                "state": "configured",
+                "generation": 0,
+                "identity_verified": False,
+                "error": None,
+                "retry_in_ms": 0,
+            }
+        )
+
+    def _invalidated(self, owner=None):
+        if self.transport_invalidated is not None:
+            self.transport_invalidated(self, owner)
+
+    async def reconnect(self):
+        if self.lan is not None:
+            await self.lan.reconnect()
+
+    async def _lane(self, lane, *, urgent=False):
+        if self.closed:
+            raise RiderError("module_closed", 503)
+        if self.lan is None:
+            return {
+                "http": self.http,
+                "stop": self.stop_http,
+                "media": self.media_http,
+            }[lane], None
+        generation = await self.lan.acquire(urgent=urgent)
+        return getattr(generation, lane), generation
+
+    def _check_generation(self, generation):
+        if self.lan is not None:
+            self.lan.check(generation)
+
+    async def _failed(self, generation, error):
+        if self.lan is not None:
+            await finish_native_cleanup(
+                asyncio.create_task(
+                    self.lan.fail(generation, error, owner=asyncio.current_task())
+                )
+            )
+
     async def json(
         self,
         path: str,
@@ -208,14 +253,17 @@ class PiClient:
     async def _json(
         self, path: str, *, method="GET", body=None, stop=False, headers=None
     ) -> dict:
-        client = self.stop_http if stop else self.http
+        admitted = time.monotonic()
+        client, generation = await self._lane("stop" if stop else "http", urgent=stop)
+        if self.lan is not None and method != "GET":
+            await self.lan.revalidate(generation, started=admitted, urgent=stop)
         request_headers = {"Accept": ACCEPT, **(headers or {})}
         if method != "GET" and path in {
             "/api/control/agent/pulse",
             "/api/voice/playback",
             "/api/voice/playback/cancel",
         }:
-            if not self.credential_transport_secure:
+            if not self.credential_transport_allowed:
                 raise RiderError("agent_transport_insecure", 503)
             token = os.getenv(self.device.agent_token_env, "")
             if not token:
@@ -316,24 +364,37 @@ class PiClient:
                         "_rider_request_started_mono": request_started_mono,
                         "_rider_response_received_mono": time.monotonic(),
                     }
+                self._check_generation(generation)
                 return payload
         except httpx.TimeoutException as exc:
+            await self._failed(generation, "pi_connection_timeout")
             if method != "GET":
                 raise RiderError(
                     "pi_operation_timeout", 504, {"outcome": "unknown"}
                 ) from exc
-            raise RiderError("pi_unreachable", 503) from exc
+            raise RiderError(
+                "pi_connection_timeout" if self.lan else "pi_unreachable", 503
+            ) from exc
         except httpx.HTTPError as exc:
-            raise RiderError("pi_unreachable", 503) from exc
+            await self._failed(generation, "pi_connect_failed")
+            raise RiderError(
+                "pi_connect_failed" if self.lan else "pi_unreachable", 503
+            ) from exc
 
     async def image(self, path: str, *, body=None) -> tuple[bytes, str, dict]:
+        admitted = time.monotonic()
+        client, generation = await self._lane("http")
+        if self.lan is not None and body is not None:
+            await self.lan.revalidate(generation, started=admitted)
         try:
-            async with self.http.stream(
+            async with client.stream(
                 "POST" if body is not None else "GET",
                 path,
                 json=body,
                 headers={"Accept": "image/png,image/jpeg"},
             ) as response:
+                if response.is_redirect:
+                    raise RiderError("pi_redirect_refused", 502)
                 if response.status_code >= 400:
                     raise RiderError(
                         "frame_unavailable"
@@ -357,9 +418,13 @@ class PiClient:
                     if key.lower() in IMAGE_HEADERS
                 }
                 headers["Cache-Control"] = "no-store"
+                self._check_generation(generation)
                 return bytes(content), mime, headers
         except httpx.HTTPError as exc:
-            raise RiderError("pi_unreachable", 503) from exc
+            await self._failed(generation, "pi_connect_failed")
+            raise RiderError(
+                "pi_connect_failed" if self.lan else "pi_unreachable", 503
+            ) from exc
 
     async def mjpeg(self):
         """One persistent camera reader; opening it never starts the Pi camera."""
@@ -368,14 +433,15 @@ class PiClient:
         from .stream_contract import NativeFrame, SourceDescription
         from .stream_framing import MultipartJpegParser, boundary_from_type
 
+        client, generation = await self._lane("media")
         try:
-            request = self.media_http.build_request(
+            request = client.build_request(
                 "GET",
                 "/api/resource/camera/stream.mjpg",
                 headers={"Accept": "multipart/x-mixed-replace"},
                 timeout=httpx.Timeout(1.0, connect=0.5, pool=0.5),
             )
-            response = await self.media_http.send(request, stream=True)
+            response = await client.send(request, stream=True)
             chunks = cast(AsyncGenerator[bytes, None], response.aiter_bytes())
             reading = None
             try:
@@ -407,6 +473,7 @@ class PiClient:
                                 raise RiderError("stream_invalid_source", 502) from exc
                             frame = NativeFrame(source, payload, time.monotonic())
                             frame.validate_payload()
+                            self._check_generation(generation)
                             yield frame
                 parser.finish()
             finally:
@@ -420,11 +487,17 @@ class PiClient:
                         await chunks.aclose()
 
                 await finish_native_cleanup(asyncio.create_task(release()))
+            await self._failed(generation, "pi_connect_failed")
         except httpx.HTTPError as exc:
-            raise RiderError("stream_unavailable", 503) from exc
+            await self._failed(generation, "pi_connect_failed")
+            raise RiderError(
+                "pi_connect_failed" if self.lan else "stream_unavailable", 503
+            ) from exc
 
     async def close(self):
         self.closed = True
+        if self.lan is not None:
+            await self.lan.close()
         await self.http.aclose()
         await self.stop_http.aclose()
         await self.media_http.aclose()

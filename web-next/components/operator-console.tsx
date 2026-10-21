@@ -9,11 +9,14 @@ import styles from "../rider.module.css";
 
 export function RiderMessages({ client, t, language }: { client: RiderClient; t: Translator; language: string }) {
   const connection = client.status?.connection;
+  const errorKey = "transport.error." + connection?.error;
+  const errorMessage = t(errorKey);
   return <div className={styles.messages} data-testid="rider-messages">
     {client.notice && <div className={styles.banner + " " + styles[client.notice.tone]} role={client.notice.tone === "error" ? "alert" : "status"}><div className={styles.noticeText}>{t(client.notice.key)}{client.notice.code && <code className={styles.small}> · {client.notice.code}</code>}</div><Button aria-label={t("close")} onClick={() => client.setNotice(null)}><X size={14}/></Button></div>}
     {connection?.status === "offline" && <div className={styles.banner + " " + styles.demo} role="status"><WifiOff size={16}/><div><strong>{t("offline")}</strong><div>{t("offlineHint")}</div>{connection.last_seen && <div className={styles.small}>{t("lastSeen")}: {formatTime(connection.last_seen, language)}</div>}</div></div>}
     {connection?.mode === "demo" && <div className={styles.banner + " " + styles.demo} role="status">{t("demo")}</div>}
-    {str(connection?.error) && <p className={styles.small}>{t("state")}: <code>{connection?.error}</code></p>}
+    {str(connection?.error) && <p className={styles.small}>{t("state")}: {errorMessage === errorKey ? t("requestFailed") : errorMessage} <code>({connection?.error})</code></p>}
+    {connection?.transport?.profile === "trusted_lan" && <p className={styles.small} data-testid="rider-transport-state">{t("transport.trustedLan")} · {t("transport.state." + connection.transport.state)}</p>}
     {!!Object.keys(client.status?.errors ?? {}).length && <details><summary>{t("partial")}</summary><pre className={styles.pre}>{JSON.stringify(client.status?.errors, null, 2)}</pre></details>}
   </div>;
 }
