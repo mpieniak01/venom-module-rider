@@ -623,3 +623,67 @@ async def test_repeated_cancellation_finishes_all_owned_generation_pool_cleanup(
     assert len(completed) == 3
     assert all(c.is_closed for c in [previous.http, previous.stop, previous.media])
     await client.close()
+
+
+@pytest.mark.parametrize(
+    "error_class",
+    [
+        httpx.PoolTimeout,
+        httpx.ConnectTimeout,
+        httpx.ReadTimeout,
+        httpx.ConnectError,
+        httpx.ReadError,
+    ],
+)
+async def test_first_lan_json_failure_logs_exact_class_per_generation_without_secrets(
+    caplog, error_class
+):
+    failing, count = [False], [0]
+    release = asyncio.Event()
+
+    async def handle(request):
+        if request.url.path == IDENTITY_PATH:
+            return httpx.Response(200, json=identity())
+        if failing[0]:
+            count[0] += 1
+            if count[0] == 2:
+                release.set()
+            await release.wait()
+            raise error_class("Bearer private-body-secret", request=request)
+        return response(request.url.path)
+
+    client = PiClient(DEVICE, transport=httpx.MockTransport(handle))
+    try:
+        await client.json("/healthz")
+        failing[0] = True
+        with caplog.at_level("WARNING", logger="venom_module_rider.client"):
+            results = await asyncio.gather(
+                client.json("/state?access_token=private-query-secret"),
+                client.json("/healthz?token=private-query-secret"),
+                return_exceptions=True,
+            )
+        assert all(isinstance(row, RiderError) for row in results)
+        records = [
+            r.message for r in caplog.records if "Rider LAN JSON failure" in r.message
+        ]
+        assert len(records) == 1
+        assert "generation=1 method=GET path=/" in records[0]
+        assert "exception=" + error_class.__name__ in records[0]
+        assert all(
+            value not in records[0]
+            for value in ["secret", "Bearer", "access_token", "?", "rider.test"]
+        )
+
+        failing[0], client.lan.retry_at = False, 0
+        await client.json("/healthz")
+        failing[0] = True
+        with caplog.at_level("WARNING", logger="venom_module_rider.client"):
+            with pytest.raises(RiderError):
+                await client.json("/state?token=private-query-secret")
+        records = [
+            r.message for r in caplog.records if "Rider LAN JSON failure" in r.message
+        ]
+        assert len(records) == 2 and "generation=2 " in records[-1]
+    finally:
+        release.set()
+        await client.close()

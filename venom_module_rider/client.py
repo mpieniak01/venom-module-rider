@@ -5,10 +5,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import time
 from collections.abc import AsyncGenerator, Callable
 from typing import cast
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -152,6 +154,7 @@ class PiClient:
             else None
         )
         self.transport_invalidated: Callable | None = None
+        self._reported_lan_failure_generation: int | None = None
         if self.lan is not None:
             self.lan.invalidated = self._invalidated
         # ASGI fixtures are in-process and never transmit credentials on a network.
@@ -222,6 +225,34 @@ class PiClient:
     def _check_generation(self, generation):
         if self.lan is not None:
             self.lan.check(generation)
+
+    def _log_lan_json_failure(self, path, method, generation, error):
+        # One primary failure per generation; pool teardown may cause several
+        # secondary errors. Never log URL, query, exception text, body or headers.
+        if (
+            self.lan is None
+            or self.lan.current is not generation
+            or self._reported_lan_failure_generation == generation.number
+        ):
+            return
+        self._reported_lan_failure_generation = generation.number
+        safe_path = urlsplit(path).path
+        if (
+            not safe_path.startswith("/")
+            or len(safe_path) > 256
+            or not safe_path.isprintable()
+        ):
+            safe_path = "<invalid-path>"
+        safe_method = (
+            method if method in {"GET", "POST", "PUT", "PATCH", "DELETE"} else "OTHER"
+        )
+        logging.getLogger(__name__).warning(
+            "Rider LAN JSON failure generation=%s method=%s path=%s exception=%s",
+            generation.number,
+            safe_method,
+            safe_path,
+            type(error).__name__,
+        )
 
     async def _failed(self, generation, error):
         if self.lan is not None:
@@ -367,6 +398,7 @@ class PiClient:
                 self._check_generation(generation)
                 return payload
         except httpx.TimeoutException as exc:
+            self._log_lan_json_failure(path, method, generation, exc)
             await self._failed(generation, "pi_connection_timeout")
             if method != "GET":
                 raise RiderError(
@@ -376,6 +408,7 @@ class PiClient:
                 "pi_connection_timeout" if self.lan else "pi_unreachable", 503
             ) from exc
         except httpx.HTTPError as exc:
+            self._log_lan_json_failure(path, method, generation, exc)
             await self._failed(generation, "pi_connect_failed")
             raise RiderError(
                 "pi_connect_failed" if self.lan else "pi_unreachable", 503
