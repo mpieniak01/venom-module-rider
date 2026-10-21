@@ -9,3 +9,5 @@ Both panels use a fixed 60-second window and break curves on missing channel val
 Demand-driven sampling and hidden-tab pauses remain supported. This increment does not tune polling, timeouts, SSH or actuator safety. A failed Venom tunnel does not imply that a direct LAN panel failed. Transport root causes require separate evidence; diagnostic readouts never arm or move the robot.
 
 Roll out the paired Rider-Pi change to obtain full monotonic diagnostics. No dependency or hardware configuration changes are required.
+
+View changes retain the last system snapshot without starting background polling. If the first system read after returning to Measurements fails, that snapshot remains available with its original, increasing age. A view that does not request system data cannot clear an earlier read error.

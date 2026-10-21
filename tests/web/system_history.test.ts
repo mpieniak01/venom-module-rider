@@ -62,3 +62,18 @@ test("missing source generation is not a confirmed resume event",()=>{
  b.observation={instance_id:"api",generation:1,sequence:5,age_s:0};
  assert.notEqual(retainSystem(first,status(b),1000).system?.history_event,"systemSamplerResume");
 });
+
+test("view changes retain source history for a failed first read after returning",()=>{
+ const first=retainSystem(null,status(system()),0);
+ const elsewhere=retainSystem(first,status(null),5000);
+ assert.equal(systemAge(elsewhere.system!,5000),6);
+ assert.equal(elsewhere.system?.read_error,null);
+ const failed=status(null);failed.errors.system="pi_unreachable";
+ const returned=retainSystem(elsewhere,failed,10000);
+ assert.equal(returned.system?.read_error,"pi_unreachable");
+ assert.equal(systemAge(returned.system!,10000),11);
+ const continued=retainSystem(returned,status(null),12000);
+ assert.equal(continued.system?.read_error,"pi_unreachable");
+ assert.equal(systemAge(continued.system!,12000),13);
+ assert.equal(systemHistory(returned.system!,61000).length,0);
+});

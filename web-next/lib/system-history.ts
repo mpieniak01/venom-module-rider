@@ -10,7 +10,7 @@ export function retainSystem(previous:RiderStatus|null,next:RiderStatus,now=perf
   const same=previous?.connection.session===next.connection.session&&previous?.connection.device_id===next.connection.device_id;
   const old=same?data(previous?.system):{};
   if(!next.system){
-    if(next.errors.system&&Object.keys(old).length)return {...next,system:{...old,read_error:next.errors.system}};
+    if(Object.keys(old).length)return {...next,system:{...old,read_error:next.errors.system??old.read_error}};
     return next;
   }
   const system=data(next.system),observation=record(system.observation),before=record(old.observation);
