@@ -316,10 +316,12 @@ def test_invalid_settings_are_errors(settings):
 
 
 def test_record_container_and_count_limits():
+    from venom_module_rider.evidence_contract import MAX_EVIDENCE_SESSION_RECORDS
+
     with pytest.raises(ValueError, match="motion_records_invalid"):
         analyze_evidence({})
     with pytest.raises(ValueError, match="motion_records_limit"):
-        analyze_evidence([{}] * 2049)
+        analyze_evidence([{}] * (MAX_EVIDENCE_SESSION_RECORDS + 1))
 
 
 def test_no_network_or_control_imports():

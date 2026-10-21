@@ -16,7 +16,7 @@ from venom_module_rider.motion_timeline import build_timeline
 from venom_module_rider.samples_archive import SampleArchive
 from venom_module_rider.samples_import import SampleImporter
 from venom_module_rider.samples_registry import SamplesRegistry
-from venom_module_rider.service import POLLING
+from venom_module_rider.service import POLLING, SECTIONS
 
 
 async def setup_study(tmp_path):
@@ -341,9 +341,8 @@ async def test_study_records_across_tabs_with_shared_cache_and_bounded_cadence(
         first = await service.status(section)
         await service.status(section)
         assert sum(row["path"] == "/state" for row in pi.trace) == before + 1
-        assert first["telemetry"] is not None
-        key = "control_ms" if section == "navigation" else section + "_ms"
-        assert first["polling"][key] <= normal["calibration_ms"]
+        assert (first["telemetry"] is not None) == ("telemetry" in SECTIONS[section])
+        assert first["polling"] == normal
         assert (await snapshot(registry, sid))["evidence"]["records"]
         await registry.end(sid)
         after = await service.status(section)

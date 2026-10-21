@@ -59,8 +59,11 @@ export function retainControl(previous: RiderStatus | null, next: RiderStatus): 
 export function observationClock(previous: ControlClock | null, next: RiderStatus, started: number, received: number): ControlClock | null {
   const server = timestampMs(data(next.control).server_time);
   const timing = readHoldTiming(settingsOf(next).control_modes);
-  if (server === null || !timing || received - started >= timing.request_ttl_ms) return previous;
-  return { offset: server - (started + received) / 2, rtt: received - started, at: received };
+  if (server === null || !timing || received < started || received - started >= timing.request_ttl_ms) return previous;
+  // A combined status response can spend most of its RTT before Pi samples
+  // control. The midpoint can put a command in Pi's future. Receipt gives a
+  // conservative lower bound; Pi still enforces the original, unchanged TTL.
+  return { offset: server - received, rtt: received - started, at: received };
 }
 export function controlChanged(previous: RiderStatus | null, next: RiderStatus): boolean {
   return !!previous && controlIdentity(previous) !== controlIdentity(next);
@@ -74,4 +77,10 @@ export function navigationView(previous: RiderStatus, next: RiderStatus): RiderS
 
 export function continuousAvailable(status: RiderStatus | null, panelId: string): boolean {
   return !status?.errors.control && safetyOf(status).stale !== true && navigationAvailable(status, panelId) && ["online", "degraded"].includes(status?.connection.status ?? "") && record(safetyOf(status).panel_control).version === 1;
+}
+
+/** Stale navigation metadata cannot turn a manual release into an unsupported pause. */
+export function manualStopAction(status:RiderStatus|null):"stop"|"navigation_pause"|"release" {
+  if(journeyOwnsMotion(status))return "stop";
+  return safetyOf(status).owner==="navigation"&&operatorSessionActive(status)?"navigation_pause":"release";
 }
