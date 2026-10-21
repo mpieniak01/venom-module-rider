@@ -151,6 +151,6 @@ def build_timeline(manifest):
         "physical_distance": None,
         "cross_clock_latency_s": None,
     }
-    if len(json.dumps(report, allow_nan=False).encode()) > 4 * 1024**2:
+    if len(json.dumps(report, allow_nan=False).encode()) > 24 * 1024**2:
         raise ValueError("motion_timeline_size")
     return report

@@ -10,9 +10,16 @@ profile; manual commands continue to use saved Pi settings.
 Enter a surface/context and choose **Start study recording**. This starts an
 ordinary sample collection with policy scene_group=motion-study-v1:<context>.
 It does not arm, move, start a camera or change calibration. While this explicit
-collection is active, Calibration status includes telemetry through the existing
-shared cache and refresh interval. It creates no independent poller or UART
-reader. Closing the view ends its collection; STOP retires telemetry admission.
+collection is active, one host sampler requests telemetry at most every 100 ms,
+independently of the visible module tab. It shares the existing transport, cache
+and inflight reads; requests never overlap or catch up in bursts. Unchanged
+source observations are deduplicated. Actual device cadence and network delays
+can still miss a short impulse: the target HTTP cadence is not a sensor rate.
+Failures back off to at most one attempt per second. Ordinary collections and
+archive reads do not start this sampler. The normal view refresh intervals stay
+unchanged; recording does not add telemetry to fast control-status responses.
+Closing the browser tab, hiding it or leaving the module ends its collection;
+STOP, device/source change, module shutdown and exhausted quota stop admission.
 Start a new collection after retirement.
 
 Select saved collections A/B, an optional device/source-session stream, and the
@@ -59,7 +66,7 @@ control operation. Admission captures the original source identity, including
 for STOP and cancelled requests. Recording faults cannot block control. The
 existing single writer drains an additional bounded 64-record/64 KiB command
 queue; the telemetry window remains independently bounded at 64 records/64 KiB.
-All records share the session quota of 2048 records / 2 MiB and the existing
+All records share the session quota of 8192 records / 16 MiB and the existing
 disk quota. Drops/failures remain explicit. A result arriving after collection
 closure is omitted; a request without a result has unknown outcome.
 
@@ -81,3 +88,21 @@ the host esbuild dependency. Never point that scenario at a production robot.
 This increment changes the Venom module only. Deploy its merged revision into
 the canonical Venom checkout, regenerate optional-module mirrors and restart
 the module API through the existing launcher. Rider-Pi firmware needs no change.
+
+## Control and recording diagnostics
+
+`status.loop_timing.study_sampling` exposes the target interval, process-wide
+successful read/error counters, last error and age of the last successful read.
+These are transport diagnostics; use archive source gaps and per-pulse coverage
+for recorded data quality. Ending recording does not disarm the robot.
+
+The shared motion-stop button releases manual motion when manual authority owns
+the output, even if retained navigation metadata says paused. Active navigation
+uses its pause operation and journey authority uses STOP. A pause rejection must
+not be represented as a confirmed stop. Emergency STOP remains independent.
+
+Panel clock estimation anchors Pi server time to browser receipt instead of the
+midpoint of a combined status request. This prevents slow unrelated diagnostics
+from pushing a fresh command timestamp into Pi's future. Pi's 500 ms maximum TTL,
+future-time validation, generation, sequence and actuator authorization remain
+unchanged; rejected or timed-out motion is never automatically replayed.

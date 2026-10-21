@@ -49,7 +49,7 @@ test("a slow diagnostics response does not replace a good clock; command freshne
   assert.equal(freshControl(current, old, 10020, 500), true);
   assert.equal(freshControl(current, old, 11001, 500), false);
   const fresh = observationClock(null, current, 9990, 10010)!;
-  assert.equal(fresh.rtt, 20); assert.equal(fresh.offset, 0);
+  assert.equal(fresh.rtt, 20); assert.equal(fresh.offset, -10);
 });
 
 test("a successful short refresh clears control errors and preserves measurements", () => {
@@ -92,4 +92,14 @@ test("operator priority requires negotiated capability, current permission and t
   assert.equal(navigationAvailable(current,"panel-a"),false);
   current.errors={};safety.state="DISARMED";
   assert.equal(navigationAvailable(current,"panel-a"),false);
+});
+
+
+test("late Pi observation never produces a future command timestamp from midpoint RTT", () => {
+  const current=state(); current.control!.server_time=10.35;
+  const clock=observationClock(null,current,10000,10400)!;
+  // Pi sampled at the end of a combined status request; only 50 ms was return transit.
+  assert.equal(clock.offset,-50);
+  assert.equal((10400+clock.offset)/1000,10.35);
+  assert.equal(observationClock(clock,current,11000,10999),clock);
 });

@@ -334,9 +334,16 @@ async def test_full_writer_drops_without_waiting_and_oversize_is_rejected(tmp_pa
         await registry.close()
 
 
-def test_store_record_count_and_extension_size_limits_are_atomic(tmp_path):
+def test_store_record_count_and_extension_size_limits_are_atomic(tmp_path, monkeypatch):
     from venom_module_rider.evidence_store import validate_extension
     from venom_module_rider.sample_evidence import observations
+
+    monkeypatch.setattr(
+        "venom_module_rider.evidence_store.MAX_EVIDENCE_SESSION_RECORDS", 2048
+    )
+    monkeypatch.setattr(
+        "venom_module_rider.evidence_store.MAX_EVIDENCE_SESSION_BYTES", 2 * 1024**2
+    )
 
     store = SampleStore(tmp_path)
     sid = store.start("one", "pi")["session_id"]

@@ -38,9 +38,11 @@ async def sessions(request: Request):
 async def start(request: Request, body: CollectionCreate):
     if body.source_device_id not in request.app.state.rider.devices:
         raise RiderError("samples_source_unknown", 400)
-    return await registry(request).start(
+    result = await registry(request).start(
         body.request_id, body.source_device_id, body.policy.model_dump()
     )
+    request.app.state.rider.study_sampler.ensure()
+    return result
 
 
 @router.get("/sessions/{session_id}")

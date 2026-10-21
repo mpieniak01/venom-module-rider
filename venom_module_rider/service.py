@@ -93,6 +93,9 @@ class RiderService:
         self.selection_warning: str | None = None
         self.conversation_invalidator = None
         self.conversation_drainer = None
+        from .study_sampling import StudySampler
+
+        self.study_sampler = StudySampler(self)
         self.samples: Any = None
         self.media_hub: Any = None
         self.pipeline_unavailable_until = 0.0
@@ -119,6 +122,7 @@ class RiderService:
     def stop_sample_events(self, reason):
         from .evidence_observer import retire_received
 
+        self.study_sampler.cancel()
         retire_received(self, reason)
         if self.samples is not None:
             try:
@@ -290,6 +294,7 @@ class RiderService:
             "loop_timing": {
                 **self.timing.snapshot(),
                 "reads": self.read_metrics.snapshot(),
+                "study_sampling": self.study_sampler.snapshot(),
             },
             "errors": {},
             **dict.fromkeys(READS),
@@ -301,28 +306,10 @@ class RiderService:
             return snapshot
         session = self.session
         keys = SECTIONS[section]
-        # Explicit motion collection borrows the same demand-driven telemetry
-        # reader/cache; no extra timer, UART owner, force read or camera.
-        collector = getattr(self.samples, "evidence", None)
-        if collector is not None:
-            with collector.lock:
-                collecting = any(
-                    sid in self.samples.active
-                    and sid not in self.samples.closing
-                    and not state["retired"]
-                    and str(state.get("purpose", "")).startswith("motion-study-v1:")
-                    and self.device is not None
-                    and state["device"] == self.device.id
-                    for sid, state in self.samples.evidence.sessions.items()
-                )
-            if collecting:
-                if "telemetry" not in keys:
-                    keys = (*keys, "telemetry")
-                cadence = snapshot["polling"]["calibration_ms"]
-                snapshot["polling"] = {
-                    key: min(value, cadence)
-                    for key, value in snapshot["polling"].items()
-                }
+        from .study_sampling import collecting
+
+        if collecting(self):
+            self.study_sampler.ensure()
         calls = [
             self.read(
                 READS[key][0],
@@ -878,6 +865,7 @@ class RiderService:
     async def close(self):
         from .evidence_observer import retire_received
 
+        await self.study_sampler.close()
         retire_received(self, "module_closed")
         self.epoch += 1
         if self.conversation_invalidator:
