@@ -150,3 +150,45 @@ async def test_priority_read_invalidation_recovers_at_sampling_cadence():
         await asyncio.wait_for(read_again.wait(), 0.5)
         await sampler.close()
     assert sampler.errors == 1 and sampler.reads >= 1
+
+
+async def test_cancelled_shared_transport_recovers_without_view_poll(
+    tmp_path, monkeypatch
+):
+    service, pi = domain()
+    await service.select("demo", service.session)
+    registry = SamplesRegistry(tmp_path)
+    service.samples = registry
+    entered = asyncio.Event()
+    original = service.client.json
+    state_reads = 0
+
+    async def delayed_first_state(path, **kwargs):
+        nonlocal state_reads
+        if path == "/state":
+            state_reads += 1
+            if state_reads == 1:
+                entered.set()
+                await asyncio.Future()
+        return await original(path, **kwargs)
+
+    monkeypatch.setattr(service.client, "json", delayed_first_state)
+    try:
+        await registry.start("study", "demo", {"scene_group": "motion-study-v1:"})
+        service.study_sampler.ensure()
+        task = service.study_sampler.task
+        await asyncio.wait_for(entered.wait(), 1)
+        service.inflight["/state"].cancel()
+        async with asyncio.timeout(1):
+            while service.study_sampler.reads == 0:
+                await asyncio.sleep(0.01)
+        assert service.study_sampler.task is task
+        assert not task.done()
+        assert service.study_sampler.errors == 1
+        assert service.study_sampler.last_error is None
+        assert all(row["method"] == "GET" for row in pi.trace)
+        await service.study_sampler.close()
+        assert task.cancelled()
+    finally:
+        await service.close()
+        await registry.close()
