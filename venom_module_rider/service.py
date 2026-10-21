@@ -100,6 +100,7 @@ class RiderService:
         self.media_hub: Any = None
         self.pipeline_unavailable_until = 0.0
         self.refresh_task: asyncio.Task | None = None
+        self.transport_cleanup: set[asyncio.Task] = set()
 
     def config(self):
         return {
@@ -154,6 +155,8 @@ class RiderService:
                 await self._close_transport()
                 self.device = self.devices.get(device_id)
                 self.client = self.factory(self.device) if self.device else None
+                if self.client is not None and isinstance(self.client, PiClient):
+                    self.client.transport_invalidated = self._transport_invalidated
                 self.session = uuid.uuid4().hex
                 self.cache.clear()
                 self.sequences.clear()
@@ -257,6 +260,13 @@ class RiderService:
                 reachable = isinstance(exc, RiderError) and exc.code not in {
                     "pi_unreachable",
                     "pi_operation_timeout",
+                    "pi_name_unresolved",
+                    "pi_connect_failed",
+                    "pi_connection_timeout",
+                    "pi_identity_mismatch",
+                    "pi_identity_invalid",
+                    "pi_identity_unavailable",
+                    "stale_transport_generation",
                 }
                 self.read_observations[path] = (
                     time.monotonic(),
@@ -358,6 +368,9 @@ class RiderService:
             "online" if not snapshot["errors"] else "degraded" if good else "offline"
         )
         connection["last_seen"] = self.last_seen
+        describe_transport = getattr(self.transport(), "transport_status", None)
+        if describe_transport is not None:
+            connection["transport"] = describe_transport()
         if snapshot["errors"]:
             connection["error"] = next(iter(snapshot["errors"].values()))
         paths = [READS[key][0] for key in keys]
@@ -413,6 +426,32 @@ class RiderService:
 
         async with self._selection_lock:
             self.check_session(session)
+            client = self.client
+            if (
+                self.device is not None
+                and self.device.transport_profile == "trusted_lan"
+            ):
+                assert client is not None
+                await client.reconnect()
+                if self.transport_cleanup:
+                    await asyncio.gather(
+                        *tuple(self.transport_cleanup), return_exceptions=True
+                    )
+                snapshot = await self._fresh_connection_status()
+                recovered = snapshot["connection"]["status"] == "online"
+                return {
+                    "connection": snapshot["connection"],
+                    "recovery": {
+                        "attempted": True,
+                        "state": "recovered" if recovered else "failed",
+                        "transport_profile": "trusted_lan",
+                        **(
+                            {"error": snapshot["connection"]["error"]}
+                            if not recovered
+                            else {}
+                        ),
+                    },
+                }
             snapshot = await self._fresh_connection_status()
             recovery = {"attempted": False, "state": "not_needed"}
             if snapshot["errors"].get("control") == "pi_unreachable":
@@ -840,6 +879,24 @@ class RiderService:
                 headers["x-rider-capture-key"] = key
         return payload, mime, headers
 
+    def _transport_invalidated(self, client, owner=None):
+        if self.client is not client:
+            return
+        self.epoch += 1
+        self.stop_sample_events("auto_transport_changed")
+        if self.conversation_invalidator:
+            self.conversation_invalidator()
+        self.cache.clear()
+        self.connection_observation = (time.monotonic(), time.time(), "offline")
+        self.pipeline_unavailable_until = 0.0
+        for task in (self.commands - self.stops) | self.operations:
+            if task is not owner:
+                task.cancel()
+        if self.media_hub is not None:
+            cleanup = asyncio.create_task(self.media_hub.invalidate())
+            self.transport_cleanup.add(cleanup)
+            cleanup.add_done_callback(self.transport_cleanup.discard)
+
     async def _cancel_transport_tasks(self):
         tasks = (
             list(self.inflight.values()) + list(self.commands) + list(self.operations)
@@ -854,6 +911,8 @@ class RiderService:
         self.operations.clear()
 
     async def _close_transport(self):
+        if self.transport_cleanup:
+            await asyncio.gather(*tuple(self.transport_cleanup), return_exceptions=True)
         media = getattr(self, "media_hub", None)
         if media is not None:
             await media.invalidate()

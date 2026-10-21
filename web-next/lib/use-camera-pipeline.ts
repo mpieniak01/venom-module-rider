@@ -1,4 +1,5 @@
 "use client";
+import { createBrowserUuid } from "@/lib/optional-modules/transport";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api-client";
 import { data, errorCode, record, type JsonRecord, type Section } from "./model";
@@ -48,7 +49,7 @@ export function useCameraPipeline(section: Section, session: string | undefined,
       const current = statusRef.current;
       if (!current || !origin) throw new Error("camera_pipeline_unavailable");
       const response = await mutate("/camera/pipeline", {
-        contract_version: 1, request_id: (globalThis.crypto?.randomUUID?.() || "camera-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2)), expected_revision: current.revision,
+        contract_version: 1, request_id: createBrowserUuid(), expected_revision: current.revision,
         action, ...(action === "configure" ? { profile } : {}),
       }, "POST", true);
       if (origin !== sessionRef.current) return;

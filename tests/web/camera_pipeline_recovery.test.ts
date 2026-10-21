@@ -34,6 +34,7 @@ test("revision recovery reads immediately while holding the mutation lock", { ti
     require: (name: string) => {
       if (name === "react") return react;
       if (name === "@/lib/api-client") return { apiFetch };
+      if (name === "@/lib/optional-modules/transport") return { createBrowserUuid: () => "00000000-0000-4000-8000-000000000001" };
       if (name === "./model") return { data, errorCode, record };
       if (name === "./camera-pipeline") return { readCameraPipeline, preferredPreviewAnchor };
       throw new Error("unexpected dependency " + name);

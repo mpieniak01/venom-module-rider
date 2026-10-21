@@ -1,3 +1,4 @@
+import { createBrowserUuid } from "@/lib/optional-modules/transport";
 /* eslint-disable @next/next/no-img-element -- Immutable local source and analysis artifacts. */
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api-client";
@@ -86,7 +87,7 @@ export function AnalysisPanel({session,t,language}:{session:string;t:Translator;
   },[selected,refresh]);
   const start=async()=>{
     setBusy(true);setError("");
-    const request=crypto.randomUUID().replaceAll("-","");
+    const request=createBrowserUuid().replaceAll("-","");
     const intent={session_id:session,request_id:request,spec:{profile,window:windowSize,quality_mode:quality,count,offset,corridor:roi,geometry:{mode:geometry,fx:Number.isFinite(fx)?fx:null,fy:Number.isFinite(fy)?fy:null,radius_ratio:Number.isFinite(radius)?radius:null,lookahead_ratio:lookahead},perception:{engine:"depth_plane",residual_limit:residual,outlier_limit:outliers,slope_min:slope}}};
     try{
       sessionStorage.setItem(PENDING,JSON.stringify({session_id:session,request_id:request}));

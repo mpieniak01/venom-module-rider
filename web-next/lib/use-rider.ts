@@ -1,4 +1,5 @@
 "use client";
+import { createBrowserUuid } from "@/lib/optional-modules/transport";
 import {retainSystem} from "./system-history";
 import { freshnessCadence, previewInterval } from "./loop-timing";
 
@@ -25,7 +26,7 @@ export function useRider(section: Section) {
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [panelId] = useState(() => crypto.randomUUID());
+  const [panelId] = useState(() => createBrowserUuid());
   const [manualMode, setManualMode] = useState<"hold" | "continuous" | null>(null);
   const [manualRequest, setManualRequest] = useState<JsonRecord | null>(null);
   const [activeDirection, setActiveDirection] = useState<Direction | null>(null);
@@ -163,6 +164,10 @@ export function useRider(section: Section) {
             && pending.session === next.connection.session && pending.session === previous?.connection.session
             && (ownTransfer || ownPreparation);
           if (!ownPending) hold.cancel();
+          if ((previous?.connection.transport?.generation ?? 0) !== (next.connection.transport?.generation ?? 0)) {
+            motionEpoch.current += 1; pendingHandoff.current = null; pendingResume.current = null;
+            clockRef.current = null; replaceFrame("camera", null, true); replaceFrame("face", null);
+          }
           seqRef.current = 0;
           if (previous?.connection.session !== next.connection.session || previous?.connection.device_id !== next.connection.device_id) {
             replaceFrame("camera", null); replaceFrame("face", null);
@@ -261,7 +266,8 @@ export function useRider(section: Section) {
   const invalidatePipelineMedia = useCallback(() => {
     cameraTransitionEpoch.current += 1; replaceFrame("camera", null, true);
   }, [replaceFrame]);
-  const pipeline = useCameraPipeline(section, status?.connection.session, mutation, invalidatePipelineMedia);
+  const pipelineSession = status?.connection.session ? `${status.connection.session}:${status.connection.transport?.generation ?? 0}` : undefined;
+  const pipeline = useCameraPipeline(section, pipelineSession, mutation, invalidatePipelineMedia);
   const pipelineRef = useRef(pipeline.status); pipelineRef.current = pipeline.status;
   const makeEnvelope = useCallback((body: JsonRecord, source = "manual"): JsonRecord => {
     const action = str(body.action);
@@ -273,7 +279,7 @@ export function useRider(section: Section) {
     const settings = settingsOf(current);
     const timing = readHoldTiming(settings.control_modes);
     const clock = clockRef.current;
-    const envelope: JsonRecord = { ...body, request_id: crypto.randomUUID(), source, execution_context: "panel" };
+    const envelope: JsonRecord = { ...body, request_id: createBrowserUuid(), source, execution_context: "panel" };
     if (record(safety.panel_control).version === 1 && (["move", "height", "balance", "navigation_pause", "navigation_resume"].includes(action) || action === "arm" && body.owner === "manual")) envelope.panel_id = panelId;
     if (!stopping) {
       seqRef.current = Math.max(seqRef.current, finite(safety.last_seq) ? safety.last_seq : 0) + 1;

@@ -134,6 +134,18 @@ class RiderConversation:
             "credential_transport_secure": bool(
                 device and getattr(domain.client, "credential_transport_secure", False)
             ),
+            "credential_transport_allowed": bool(
+                device and getattr(domain.client, "credential_transport_allowed", False)
+            ),
+            "transport_profile": device.transport_profile if device else "secure",
+            "transport_identity_verified": bool(
+                domain.client
+                and getattr(
+                    domain.client,
+                    "transport_status",
+                    lambda: {"identity_verified": False},
+                )().get("identity_verified", False)
+            ),
             "tools": ["status", "observe", "speak", "face", "move", "stop"]
             if self.enabled
             else [],

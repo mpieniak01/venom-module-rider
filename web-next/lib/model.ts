@@ -2,9 +2,9 @@ export type JsonRecord = Record<string, unknown>;
 export type Section = "control" | "vision" | "overview" | "calibration" | "resources" | "face" | "compute";
 export type Direction = "forward" | "backward" | "left" | "right";
 export const DIRECTIONS: Direction[] = ["forward", "backward", "left", "right"];
-export type DeviceConfig = { devices: { id: string; label: string; mode: "demo" | "device" }[]; device_id: string | null; session: string; selection_warning?: string | null };
+export type DeviceConfig = { devices: { id: string; label: string; mode: "demo" | "device"; transport_profile?: "secure" | "trusted_lan" }[]; device_id: string | null; session: string; selection_warning?: string | null };
 export type RiderStatus = {
-  connection: { status: "unconfigured" | "offline" | "online" | "degraded"; configured: boolean; device_id: string | null; label?: string; session: string; mode: "demo" | "device"; error?: string | null; last_seen?: number | null };
+  connection: { status: "unconfigured" | "offline" | "online" | "degraded"; configured: boolean; device_id: string | null; label?: string; session: string; mode: "demo" | "device"; error?: string | null; last_seen?: number | null; transport?: { profile: "secure" | "trusted_lan"; state: string; generation: number; identity_verified: boolean; error?: string | null; retry_in_ms: number } };
   polling: Record<string, number>;
   loop_timing?: JsonRecord;
   telemetry: JsonRecord | null;
@@ -60,7 +60,7 @@ export function featureRows(status: RiderStatus | null): JsonRecord[] {
     return { ...item, ...state, ...(state.enabled !== undefined ? { requested: state.enabled, active: state.enabled === true && state.state === "running" } : {}) };
   });
 }
-export function controlIdentity(status: RiderStatus | null): string { const safety = safetyOf(status); return [status?.connection.session, safety.generation, safety.instance_id ?? safety.instance].join(":"); }
+export function controlIdentity(status: RiderStatus | null): string { const safety = safetyOf(status); return [status?.connection.session, safety.generation, safety.instance_id ?? safety.instance, status?.connection.transport?.generation ?? 0].join(":"); }
 export function sensorRows(status: RiderStatus | null): [string, JsonRecord][] {
   const xgo = record(record(data(status?.telemetry).devices).xgo); const observation = record(xgo.observation); const quality = record(observation.sensor_quality ?? xgo.sensor_quality); const sensors = record(quality.sensors ?? quality);
   return Object.entries(sensors).filter(([, sample]) => typeof sample === "object").map(([name, sample]) => [name, record(sample)]);
