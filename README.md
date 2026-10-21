@@ -523,3 +523,5 @@ quality limits and isolated acceptance.
 Qualified body orientation and replay share the same timeline. See
 [Attitude replay v1](docs/ATTITUDE_REPLAY_V1.md) for the producer convention,
 relative reference, unknown-data fallback and resource limits.
+
+CPU/RAM continuity and diagnostic semantics: [system history](docs/SYSTEM_HISTORY.md).

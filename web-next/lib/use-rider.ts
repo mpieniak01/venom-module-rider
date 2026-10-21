@@ -1,4 +1,5 @@
 "use client";
+import {retainSystem} from "./system-history";
 import { freshnessCadence, previewInterval } from "./loop-timing";
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -148,6 +149,7 @@ export function useRider(section: Section) {
         if (abort.signal.aborted) return;
         const previous = statusRef.current;
         const observed = next;
+        next = retainSystem(previous, next);
         next = retainControl(previous, next);
         if (controlChanged(previous, next)) {
           const pending = pendingHandoff.current, nextSafety = safetyOf(next);
@@ -193,7 +195,7 @@ export function useRider(section: Section) {
         if (abort.signal.aborted) return;
         hold.release();
         const previous = statusRef.current;
-        if (previous) { const offline = { ...previous, connection: { ...previous.connection, status: "offline" as const } }; statusRef.current = offline; setStatus(offline); }
+        if (previous) { const offline = retainSystem(previous, { ...previous, connection: { ...previous.connection, status: "offline" as const } }); statusRef.current = offline; setStatus(offline); }
         replaceFrame("camera", null); replaceFrame("face", null);
         setNotice({ key: "requestFailed", code: errorCode(error), tone: "error" });
       } finally { if (timeout) clearTimeout(timeout); if (!abort.signal.aborted) setLoading(false); }
