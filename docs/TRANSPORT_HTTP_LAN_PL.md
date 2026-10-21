@@ -38,6 +38,17 @@ Niezgodne ID, rola/protokół, zbyt duża odpowiedź i przekierowanie blokują d
 weryfikacja wykrywa także inny peer na starym IP bez wcześniejszego błędu sieci.
 Nie ma automatycznego ponawiania POST.
 
+Pojedynczy timeout puli, połączenia lub odczytu pasywnego JSON GET nadal zwraca
+błąd, lecz nie zamyka niezależnego MJPEG, gdy wspólny hub ma świeżą ramkę
+z dokładnie tego zweryfikowanego upstreamu i generacji. Dowód wymaga istniejących
+kontroli hasha, tożsamości źródła, rosnącej sekwencji i konserwatywnego wieku.
+Wygasa, gdy ramka osiągnie niezmieniony limit przyjęcia 500 ms. Same bajty ani
+powtórzona ramka nie przedłużają go. Limit połączenia nadal wynosi 500 ms.
+Błędy identity, poleceń i mediów, jawny Refresh, inne awarie sieci JSON oraz
+timeout bez tego dowodu nadal unieważniają całą generację. POST nie jest
+ponawiany, a pilny STOP
+zachowuje osobny tor i preflight tożsamości.
+
 Awaria zamyka stare pule. Kolejne zwykłe odczyty zgodnie z zapotrzebowaniem mają
 ograniczony backoff z jitterem, około 1/2/4/8/16/30 s, maksymalnie 30 s.
 Przy nowej próbie nazwa jest rozwiązywana ponownie, a tożsamość weryfikowana.
@@ -84,6 +95,8 @@ Rollback przywraca poprzedni profil/URL z nowymi sesjami i bez replay.
 `make check HOST=<zgodny-checkout-core>` sprawdza kontrakty backendu i UI.
 `tests/test_lan_transport.py` używa wyłącznie mocków i serwerów loopback: m.in.
 Connection-close, obcy peer na tym samym IP, zmiana DNS, Refresh, pilny STOP i
-zamykanie pul. Wynik fixture nie dowodzi DNS telefonu, świeżości fizycznego obrazu,
+zamykanie pul. `tests/test_lan_media_isolation.py` obejmuje także izolację świeżych
+mediów, wygaśnięcie dowodu, podmianę peer i brak replay. Wynik fixture nie dowodzi
+DNS telefonu, świeżości fizycznego obrazu,
 jakości audio, hamowania ani oszczędności CPU. Odbiór rzeczywisty wymaga osobnego
 sprawdzenia przypiętych rewizji trzech repo przed przełączeniem środowiska.

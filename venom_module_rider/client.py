@@ -9,7 +9,7 @@ import logging
 import os
 import time
 from collections.abc import AsyncGenerator, Callable
-from typing import cast
+from typing import TYPE_CHECKING, cast
 from urllib.parse import urlsplit
 
 import httpx
@@ -17,6 +17,10 @@ import httpx
 from .config import Device, credential_transport_secure
 from .errors import RiderError
 from .transport_cleanup import finish_native_cleanup
+
+if TYPE_CHECKING:
+    from .lan_transport import Generation
+    from .stream_contract import NativeFrame
 
 ACCEPT = "application/vnd.rider.api+json;version=1"
 MAX_JSON_BYTES = 2 * 1024 * 1024
@@ -155,6 +159,10 @@ class PiClient:
         )
         self.transport_invalidated: Callable | None = None
         self._reported_lan_failure_generation: int | None = None
+        self._media_generation: Generation | None = None
+        self._media_frame: NativeFrame | None = None
+        self._media_token: object | None = None
+        self._media_valid_until = 0.0
         if self.lan is not None:
             self.lan.invalidated = self._invalidated
         # ASGI fixtures are in-process and never transmit credentials on a network.
@@ -225,6 +233,34 @@ class PiClient:
     def _check_generation(self, generation):
         if self.lan is not None:
             self.lan.check(generation)
+
+    def note_media_health(self, frame, valid_until):
+        """Accept only hub-admitted evidence from this exact live upstream."""
+        self._media_valid_until = 0.0
+        if (
+            self.lan is not None
+            and self._media_generation is self.lan.current
+            and self._media_frame is not None
+            and frame is not None
+            and frame.source is self._media_frame.source
+            and frame.received_mono == self._media_frame.received_mono
+        ):
+            self._media_valid_until = valid_until
+
+    def _preserve_media_on_timeout(self, generation, error, *, passive):
+        # A local endpoint timeout does not contradict a still-fresh verified
+        # stream. Keep reporting the failed read; never retry or extend its age.
+        return (
+            passive
+            and isinstance(
+                error, (httpx.PoolTimeout, httpx.ConnectTimeout, httpx.ReadTimeout)
+            )
+            and self.lan is not None
+            and generation is not None
+            and self.lan.current is generation
+            and self._media_generation is generation
+            and time.monotonic() < self._media_valid_until
+        )
 
     def _log_lan_json_failure(self, path, method, generation, error):
         # One primary failure per generation; pool teardown may cause several
@@ -399,7 +435,18 @@ class PiClient:
                 return payload
         except httpx.TimeoutException as exc:
             self._log_lan_json_failure(path, method, generation, exc)
-            await self._failed(generation, "pi_connection_timeout")
+            if not self._preserve_media_on_timeout(
+                generation,
+                exc,
+                passive=method == "GET"
+                and not stop
+                and body is None
+                and not any(
+                    name.lower() in {"authorization", "proxy-authorization"}
+                    for name in request_headers
+                ),
+            ):
+                await self._failed(generation, "pi_connection_timeout")
             if method != "GET":
                 raise RiderError(
                     "pi_operation_timeout", 504, {"outcome": "unknown"}
@@ -467,6 +514,10 @@ class PiClient:
         from .stream_framing import MultipartJpegParser, boundary_from_type
 
         client, generation = await self._lane("media")
+        token = self._media_token = object()
+        self._media_generation = generation
+        self._media_frame = None
+        self._media_valid_until = 0.0
         try:
             request = client.build_request(
                 "GET",
@@ -507,9 +558,14 @@ class PiClient:
                             frame = NativeFrame(source, payload, time.monotonic())
                             frame.validate_payload()
                             self._check_generation(generation)
+                            if self._media_token is token:
+                                self._media_frame = frame
                             yield frame
                 parser.finish()
             finally:
+                if self._media_token is token:
+                    self._media_frame = None
+                    self._media_valid_until = 0.0
 
                 async def release():
                     try:
@@ -526,6 +582,12 @@ class PiClient:
             raise RiderError(
                 "pi_connect_failed" if self.lan else "stream_unavailable", 503
             ) from exc
+        finally:
+            if self._media_token is token:
+                self._media_token = None
+                self._media_generation = None
+                self._media_frame = None
+                self._media_valid_until = 0.0
 
     async def close(self):
         self.closed = True

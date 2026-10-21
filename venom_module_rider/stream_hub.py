@@ -120,6 +120,21 @@ class NativeStreamHub:
         changed, connection.changed = connection.changed, asyncio.Event()
         changed.set()
 
+    def _report_media_health(self, connection):
+        report = getattr(connection.client, "note_media_health", None)
+        if report is None:
+            return
+        frame = next(reversed(connection.frames.values()), None)
+        now = self.clock()
+        # Preserve the existing conservative age bound. A duplicate, buffered
+        # byte or expired frame cannot renew transport continuity evidence.
+        valid_until = (
+            now + max(0, MAX_FRAME_AGE_MS - frame.age_ms(now)) / 1000
+            if frame is not None and not connection.closed
+            else 0.0
+        )
+        report(frame, valid_until)
+
     def _purge(self, connection):
         now = self.clock()
         for identity, frame in tuple(connection.frames.items()):
@@ -129,6 +144,7 @@ class NativeStreamHub:
         while len(connection.frames) > MAX_REFERENCES:
             identity, _frame = connection.frames.popitem(last=False)
             connection.canonical.pop(identity, None)
+        self._report_media_health(connection)
 
     def update_anchor(self, pipeline):
         connection, anchor = self.connection, pipeline.get("_age_anchor")
@@ -228,6 +244,7 @@ class NativeStreamHub:
                 )
                 connection.error = "stream_unavailable"
             connection.frames.clear()
+            self._report_media_health(connection)
             self._notify(connection)
             if connection.closed:
                 return
@@ -332,6 +349,7 @@ class NativeStreamHub:
     async def _retire(self, connection):
         connection.closed = True
         connection.frames.clear()
+        self._report_media_health(connection)
         canonical = set(connection.canonical.values()) | set(
             connection.canonical_jobs.values()
         )

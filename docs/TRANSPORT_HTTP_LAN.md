@@ -43,6 +43,17 @@ identity or redirect prevents the command/token request. Redirects remain disabl
 This also detects an old IP reassigned to another responding API without an
 intervening network error. No pending POST is automatically retried.
 
+An individual passive JSON GET pool/connect/read timeout still reports its error,
+but does not retire independent MJPEG while the shared hub has a fresh frame from
+that exact verified upstream and generation. The evidence requires the existing
+hash, source authority, monotonic sequence and conservative age checks; it expires
+when that frame reaches the unchanged 500 ms admission limit. Raw bytes and
+replayed frames cannot extend it. The normal connect limit remains 500 ms.
+Identity/command/media failures, explicit Refresh, other JSON network failures and
+timeouts without this fresh proof retain full generation invalidation. POST is
+never replayed and
+urgent STOP keeps its separate lane and identity preflight.
+
 After connection loss the old pools close. Ordinary demand-driven reads retry
 with jittered exponential backoff (roughly 1/2/4/8/16/30 seconds, capped at 30),
 re-resolve the configured name and verify the peer. Normal UI polling cadence is
@@ -94,6 +105,8 @@ Rollback restores the previous profile/URL and requires fresh sessions/intents.
 `make check HOST=<matching-core-checkout>` covers backend/frontend contracts.
 `tests/test_lan_transport.py` uses only isolated mock/loopback servers, including
 Connection-close, same-IP peer replacement, resolver changes, concurrent Refresh,
-urgent STOP and pool cleanup. Fixture tests do not establish actual DNS, phone,
+urgent STOP and pool cleanup. `tests/test_lan_media_isolation.py` additionally
+covers fresh-media isolation, proof expiry, peer replacement and no replay.
+Fixture tests do not establish actual DNS, phone,
 physical media quality, braking or CPU savings. Those require separate acceptance
 with the pinned Pi/module/core revisions before environment rollout.
