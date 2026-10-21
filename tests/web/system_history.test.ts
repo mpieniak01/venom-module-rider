@@ -68,6 +68,8 @@ test("view changes retain source history for a failed first read after returning
  const elsewhere=retainSystem(first,status(null),5000);
  assert.equal(systemAge(elsewhere.system!,5000),6);
  assert.equal(elsewhere.system?.read_error,null);
+ const offline=status(null);offline.connection.status="offline";
+ assert.equal(retainSystem(elsewhere,offline,6000).system?.read_error,"offline");
  const failed=status(null);failed.errors.system="pi_unreachable";
  const returned=retainSystem(elsewhere,failed,10000);
  assert.equal(returned.system?.read_error,"pi_unreachable");
