@@ -78,6 +78,14 @@ class StudySampler:
                 self.reads += 1
                 self.last_success = time.monotonic()
                 self.last_error = None
+            except asyncio.CancelledError:
+                task = asyncio.current_task()
+                if task is not None and task.cancelling():
+                    raise
+                # Connection refresh can cancel the shared transport task,
+                # independently of this still-active recording task.
+                self.errors += 1
+                self.last_error = "study_sampling_read_cancelled"
             except Exception as exc:
                 self.errors += 1
                 self.last_error = (
