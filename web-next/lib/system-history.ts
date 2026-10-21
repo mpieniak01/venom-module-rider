@@ -20,7 +20,7 @@ export function retainSystem(previous:RiderStatus|null,next:RiderStatus,now=perf
     return {...next,system:{...old,read_error:"out_of_order"}};
   const event=before.boot_id&&observation.boot_id&&before.boot_id!==observation.boot_id?"systemHostRestart"
     :before.instance_id&&observation.instance_id&&before.instance_id!==observation.instance_id?"systemApiRestart"
-    :identity&&before.generation!==observation.generation?"systemSamplerResume":old.history_event;
+    :identity&&finite(before.generation)&&finite(observation.generation)&&before.generation!==observation.generation?"systemSamplerResume":old.history_event;
   const age=finite(observation.age_s)?observation.age_s:finite(system.server_time)&&finite(system.ts)?Math.max(0,system.server_time-system.ts):null;
   const previousAge=unchanged?systemAge(old,now):null;
   return {...next,system:{...system,read_error:next.errors.system??(next.connection.status==="offline"?"offline":null),

@@ -55,3 +55,10 @@ test("restart and resume labels require distinct source identities",()=>{
   [{instance_id:"api",boot_id:"boot",generation:2,sequence:5,age_s:0},"systemSamplerResume"],
  ] as const){const next=system();next.observation=observation;assert.equal(retainSystem(first,status(next),1000).system?.history_event,event);}
 });
+
+test("missing source generation is not a confirmed resume event",()=>{
+ const a=system();a.observation={instance_id:"api",sequence:4,age_s:0};
+ const first=retainSystem(null,status(a),0),b=system();
+ b.observation={instance_id:"api",generation:1,sequence:5,age_s:0};
+ assert.notEqual(retainSystem(first,status(b),1000).system?.history_event,"systemSamplerResume");
+});
