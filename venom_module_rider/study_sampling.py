@@ -145,6 +145,28 @@ class StudySampler:
         key = headers.get("x-rider-capture-key")
         if not key:
             raise RiderError("samples_frame_unavailable", 409)
+        latest = await domain.pipeline(force=True)
+        if latest.get("supported"):
+            expected = (
+                latest.get("camera_session"),
+                latest.get("transport_epoch"),
+                latest.get("revision"),
+            )
+            received = tuple(
+                headers.get(name)
+                for name in (
+                    "x-rider-camera-session",
+                    "x-rider-transport-epoch",
+                    "x-rider-pipeline-revision",
+                )
+            )
+            if (
+                latest.get("state") not in {"active", "waiting_frame"}
+                or expected[0] is None
+                or any(value is None for value in expected[1:])
+                or received != tuple(str(value) for value in expected)
+            ):
+                raise RiderError("stream_epoch_changed", 409)
         for sid, row in pending.items():
             if (
                 domain.session != session

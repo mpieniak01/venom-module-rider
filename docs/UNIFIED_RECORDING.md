@@ -42,3 +42,15 @@ Cały zapis i dane pozostają na hoście Venom. Rider-Pi nie staje się archiwum
   to pełny odbiór pozostałych funkcji. Bez ARM/ruchu ani testu fizycznej kamery.
 - Kontrakt hosta: opublikowany Venom main 4ef755a6 (wspólny helper transportu).
   Brak nowych zależności, migracji bazy i zmian repo Rider-Pi.
+
+
+Po recenzji RAW jest dodatkowo sprawdzany względem świeżego stanu pipeline:
+camera_session, transport_epoch i revision muszą odpowiadać nagłówkom klatki.
+Zmiana dowolnego pola lub zatrzymany pipeline odrzuca spóźniony obraz przed
+zapisem na dysk. Dla starszego Pi bez kontraktu pipeline zachowujemy istniejącą
+ścieżkę legacy i jej jawnie ograniczone metadane; nie deklarujemy identycznej
+weryfikacji pochodzenia. Test browser czeka na zakończenie START/STOP po API.
+
+Końcowy gate po recenzji: make check PASS — 1453 Python, 10 istniejących skipów,
+coverage 93,34%; 222 frontend PASS. Ponowny Chrome fixture PASS: jedna zamknięta
+sesja, 2 obrazy i 23 rekordy dowodów po przejściu do Pomiarów.

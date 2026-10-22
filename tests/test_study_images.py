@@ -3,6 +3,7 @@
 import asyncio
 from types import SimpleNamespace
 
+import pytest
 from test_samples_store import frame
 
 from venom_module_rider.samples_registry import SamplesRegistry
@@ -37,6 +38,10 @@ async def fixture(tmp_path, enabled=True, limit=2):
         key = registry.offer("robot", source.payload, source.mime, source.context())
         return source.payload, source.mime, {"x-rider-capture-key": key}
 
+    async def pipeline(*, force=False):
+        return {"supported": False}
+
+    domain.pipeline = pipeline
     domain.read, domain.camera = read, camera
     return registry, row["session_id"], StudySampler(domain), calls
 
@@ -161,3 +166,57 @@ async def test_cancelled_shared_image_read_recovers_without_ui_poll(monkeypatch)
         assert sampler.image_task is not None and not sampler.image_task.done()
         await sampler.close()
     assert calls == 2
+
+
+@pytest.mark.parametrize(
+    "changed", [None, "camera_session", "transport_epoch", "revision", "state"]
+)
+async def test_fresh_pipeline_identity_rejects_late_source_before_capture(
+    tmp_path, changed
+):
+    from venom_module_rider.errors import RiderError
+
+    registry, sid, sampler, _ = await fixture(tmp_path)
+    original = sampler.domain.camera
+    source = {
+        "camera_session": "camera-a",
+        "transport_epoch": 0,
+        "revision": 0,
+        "state": "active",
+        "supported": True,
+    }
+
+    async def pipeline(*, force=False):
+        assert force is True
+        return source
+
+    async def camera(stream):
+        payload, mime, headers = await original(stream)
+        headers.update(
+            {
+                "x-rider-camera-session": "camera-a",
+                "x-rider-transport-epoch": "0",
+                "x-rider-pipeline-revision": "0",
+            }
+        )
+        if changed == "camera_session":
+            source[changed] = "camera-b"
+        elif changed == "state":
+            source[changed] = "stopped"
+        elif changed:
+            source[changed] = 1
+        return payload, mime, headers
+
+    sampler.domain.camera, sampler.domain.pipeline = camera, pipeline
+    try:
+        if changed:
+            with pytest.raises(RiderError, match="stream_epoch_changed"):
+                await sampler.image_tick()
+        else:
+            await sampler.image_tick()
+        await flush(registry)
+        assert registry.store.session(sid)["counts"].get("saved", 0) == (
+            0 if changed else 1
+        )
+    finally:
+        await registry.close()

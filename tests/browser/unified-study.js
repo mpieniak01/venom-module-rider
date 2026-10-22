@@ -7,8 +7,13 @@ async page=>{
  check(f.config.devices.every(d=>d.mode==="demo"),"Demo devices required");
  if(await page.getByTestId("study-end").isEnabled())await page.getByTestId("study-end").click();
  await page.getByTestId("study-record").click();
- const list=await(await page.request.get(origin+"/api/v1/rider/samples/sessions")).json();
- const active=list.sessions.filter(s=>s.state==="collecting");
+ let active=[];
+ for(let n=0;n<30;n++){
+  const list=await(await page.request.get(origin+"/api/v1/rider/samples/sessions")).json();
+  active=list.sessions.filter(s=>s.state==="collecting");
+  if(active.length)break;
+  await new Promise(resolve=>setTimeout(resolve,200));
+ }
  check(active.length===1,"Exactly one session");const sid=active[0].session_id;
  check(active[0].policy.record_images===true,"Automatic images enabled");
  const cfg=await(await page.request.get(origin+"/api/v1/rider/config")).json();
@@ -25,7 +30,12 @@ async page=>{
  check(data.session.state==="collecting","Same active session");
  check(await page.getByTestId("sample-capture").count()===0,"No competing collection controls");
  await page.getByTestId("study-end").click();
- const closed=await(await page.request.get(origin+"/api/v1/rider/samples/sessions/"+sid)).json();
+ let closed;
+ for(let n=0;n<30;n++){
+  closed=await(await page.request.get(origin+"/api/v1/rider/samples/sessions/"+sid)).json();
+  if(closed.session.state==="closed")break;
+  await new Promise(resolve=>setTimeout(resolve,200));
+ }
  check(closed.session.state==="closed","Unified stop closes recording");
  return {session:sid,images:closed.session.counts.saved,evidence:closed.session.evidence};
 }
