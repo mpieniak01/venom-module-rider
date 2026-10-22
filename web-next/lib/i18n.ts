@@ -1,12 +1,13 @@
 // Module-owned translations. Every key contains PL, EN and DE by construction.
 export const messages = {
+  "study.images": ["Klatki", "Frames", "Bilder"],
   "study.title": ["Badanie profilu ruchu", "Motion profile study", "Bewegungsprofil untersuchen"],
   "study.hint": ["Zapisuj polecenia i już dostępne odczyty. Analiza zapisanych sesji działa bez połączenia z robotem.", "Record commands and available observations. Saved sessions can be analyzed without the robot.", "Befehle und verfügbare Messungen aufzeichnen. Gespeicherte Sitzungen sind ohne Roboter analysierbar."],
   "study.surface": ["Podłoże / warunki próby (opcjonalnie)", "Surface / trial conditions (optional)", "Untergrund / Versuchsbedingungen (optional)"],
   "study.recordShort": ["Nagraj badanie", "Record study", "Aufzeichnen"],
   "study.endShort": ["Zakończ zapis", "End recording", "Beenden"],
   "study.global": ["Zapis badania i zatrzymanie ruchu", "Study recording and motion stop", "Versuchsaufzeichnung und Bewegungsstopp"],
-  "study.globalHint": ["Zapis uruchamiasz w nagłówku. Obejmuje ruch ręczny i automaty w różnych zakładkach; nie uruchamia robota. Ukrycie karty lub opuszczenie modułu kończy zapis.", "Start recording in the header. It covers manual motion and automation across tabs; it does not start the robot. Hiding the browser tab or leaving the module ends recording.", "Aufzeichnung im Kopfbereich starten. Sie umfasst manuelle und automatische Bewegung über Reiter hinweg; sie startet den Roboter nicht. Ausblenden des Browser-Tabs oder Verlassen des Moduls beendet die Aufzeichnung."],
+  "study.globalHint": ["Jeden zapis obejmuje telemetrię i RAW z aktywnej kamery (1 klatka/s, do 150 klatek). Nie włącza kamery ani ruchu. Po limicie obrazów telemetria trwa dalej. Ukrycie karty lub wyjście kończy zapis.", "One recording includes telemetry and RAW from an active camera (1 frame/s, up to 150 frames). It starts neither camera nor motion. Telemetry continues after the image limit. Hiding the tab or leaving ends recording.", "Eine Aufzeichnung umfasst Telemetrie und RAW der aktiven Kamera (1 Bild/s, bis 150 Bilder). Kein Kamera- oder Bewegungsstart. Nach dem Bildlimit läuft Telemetrie weiter. Tab ausblenden oder Modul verlassen beendet die Aufzeichnung."],
   "study.activeShort": ["Zapis badania aktywny", "Study recording active", "Versuchsaufzeichnung aktiv"],
   "study.idleShort": ["Zapis badania wyłączony", "Study recording off", "Versuchsaufzeichnung aus"],
   "study.retiredShort": ["Zapis wymaga nowej sesji", "Recording needs a new session", "Aufzeichnung benötigt eine neue Sitzung"],

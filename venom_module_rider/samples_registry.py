@@ -51,6 +51,7 @@ class SamplesRegistry:
         self.closing: set[str] = set()
         self.sequences: dict[str, dict] = {}
         self.deadlines: dict[str, asyncio.TimerHandle] = {}
+        self.study_images: dict[str, dict] = {}
         self.lease: BinaryIO | None = None
         self.failures = 0
         from .automatic_capture import AutomaticCapture
@@ -142,6 +143,20 @@ class SamplesRegistry:
                 if session["state"] == "collecting":
                     self.active.add(session["session_id"])
                     self.evidence.start(session)
+                    if (
+                        values["record_images"]
+                        and values["kind"] == "manual"
+                        and values["scene_group"].startswith("motion-study-v1:")
+                    ):
+                        self.study_images.setdefault(
+                            session["session_id"],
+                            {
+                                "device": device_id,
+                                "count": 0,
+                                "last": None,
+                                "limit": values["max_frames"],
+                            },
+                        )
                     self.session_requests[request_id] = session["session_id"]
                     if values["kind"] == "sequence":
                         self._sequence(session)
@@ -220,6 +235,7 @@ class SamplesRegistry:
         async with self.operations:
             self._open()
             self.closing.add(session_id)
+            self.study_images.pop(session_id, None)
             self.evidence.retire("collection_ended", session_id)
             deadline = self.deadlines.pop(session_id, None)
             if deadline is not None:
@@ -428,6 +444,7 @@ class SamplesRegistry:
             for row in self.sequences.values():
                 row["timer"].cancel()
             self.sequences.clear()
+            self.study_images.clear()
             for timer in self.deadlines.values():
                 timer.cancel()
             self.deadlines.clear()

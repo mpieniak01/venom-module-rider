@@ -8,7 +8,6 @@ import { previewNotice } from "../lib/loop-controls";
 /* eslint-disable @next/next/no-img-element -- Pi binary frames use revocable object URLs. */
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { displayedPreview, previewLifetime } from "../lib/preview-media";
-import { SampleCapture } from "./sample-capture";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Camera, CirclePause, CircleStop } from "lucide-react";
 import { actuatorState, displayValue, finite, formatTime, record, safetyOf, settingsOf, type Direction, type NumericDescriptor } from "../lib/model";
 import type { Translator } from "../lib/i18n";
@@ -172,7 +171,6 @@ export function CameraPanel({ client, t, language, compact = false, onObservatio
     {previewFailure&&<p role="alert" className={styles.hint}>{t(previewFailure)}</p>}
     {editor&&<p className={styles.hint} data-testid="sector-draft-hint">{t("sectorDraftHint")}</p>}
     {(compact || selected === "venom") && <VisionSectors frame={selected === "venom" ? visible : null} t={t} compact={compact}/>}
-    <SampleCapture compact={compact} sourceSession={client.config?.session??null} deviceId={client.config?.device_id??null} frame={client.cameraStream?visible:null} visible={!!client.cameraStream} t={t}/>
     <details className={styles.cameraTools}><summary>{t("cameraTools")}</summary>
       <CameraPipelineControls client={client} t={t}/>
     {selected === "venom" && <p className={styles.hint}>{t("visionLegend")}</p>}

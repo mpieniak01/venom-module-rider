@@ -20,6 +20,7 @@ RecordID = Annotated[str, Field(strict=True, pattern=r"^[a-f0-9]{32}$")]
 
 class CollectionPolicy(StrictModel):
     kind: Literal["manual", "sequence", "import"] = "manual"
+    record_images: StrictBool = False
     duration_s: Annotated[StrictFloat, Field(ge=1, le=30)] = 10.0
     interval_ms: Annotated[StrictInt, Field(ge=150, le=2000)] = 200
     max_frames: Annotated[StrictInt, Field(ge=1, le=150)] = 50

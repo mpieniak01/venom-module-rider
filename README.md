@@ -541,3 +541,6 @@ Qualified body orientation and replay share the same timeline. See
 relative reference, unknown-data fallback and resource limits.
 
 CPU/RAM continuity and diagnostic semantics: [system history](docs/SYSTEM_HISTORY.md).
+
+
+Jedna sesja badania z telemetrią i serią klatek RAW: [Wspólny zapis](docs/UNIFIED_RECORDING.md).
