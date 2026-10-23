@@ -6,7 +6,7 @@ An optional Venom module for manual operation of Rider-Pi. Venom supplies the UI
 
 - Manual arrows: click for a pulse, hold for continuous intent, release for braking without disarming. A global red/green ARM switch and persistent STOP remain visible.
 - Camera RAW/PROC preview, posture-height commands and roll-compensation controls.
-- Device observations, source times, CPU/RAM history and CPU interval peaks. Missing data remains missing.
+- A permanent status under the driving keypad shows battery charge, Pi axis readings, target posture height and roll compensation. SDK axes keep their producer units; missing or stale readings display as unavailable. Height changes require an explicit Apply. Measurements retains detailed observations, source times, CPU/RAM history and CPU interval peaks.
 - Direction-specific calibration in producer-defined units, smoothing curves and profile create/save/apply/rename/delete.
 - Goal selection, resource ownership/power, explicit service diagnostics and journal reads.
 - Face Studio: built-in and custom gestures, field/track editing, PNG/timeline preview, skins, styles, runtime configuration and explicit LCD playback.

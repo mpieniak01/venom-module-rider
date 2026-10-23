@@ -143,7 +143,16 @@ async page => {
     await lastMessage.scrollIntoViewIfNeeded();
     const messages=await lastMessage.boundingBox();
     check(messages && messages.y>=0 && messages.y+messages.height<=1000,"last offline message cannot be reached inside the viewport");
-    await same(initial,"scrolling offline messages keeps controls fixed");
+    // The permanent status now extends below the keypad in normal page flow.
+    // Scrolling may move the whole cockpit, but must not rearrange its targets.
+    const scrolled=await boxes();
+    for(const id of ids.filter(id=>id!=="rider-stop")) {
+      check(Math.abs((scrolled[id].y-scrolled["rider-forward"].y)-(initial[id].y-initial["rider-forward"].y))<=.5,"scroll rearranged keypad "+id);
+      check(scrolled[id].height===initial[id].height&&scrolled[id].width===initial[id].width,"scroll resized keypad "+id);
+    }
+    check(scrolled["rider-stop"].y>=0&&scrolled["rider-stop"].y+scrolled["rider-stop"].height<=1000,"sticky STOP lost while reading status");
+    await page.getByTestId("rider-page").evaluate(el=>{el.scrollTop=0;window.scrollTo(0,0);});
+    await same(initial,"returning from offline status");
     check(await page.getByTestId("rider-arm").getAttribute("aria-pressed")==="true","missing read faked disarm");
     connection="online";controlMissing=false;
     await wait(async()=>!await page.getByTestId("rider-forward").isDisabled(),"manual control not restored");
@@ -163,13 +172,13 @@ async page => {
     await wait(async()=>await page.getByTestId("rider-forward").getAttribute("aria-pressed")==="true","second continuous intent missing");
     const beforeModeChange=calls.length;
     await page.getByTestId("rider-manual-mode").selectOption("pulse");
-    await page.getByTestId("manual-feedback").getByText("Brak",{exact:true}).waitFor();
+    await wait(async()=>await page.getByTestId("manual-pad").locator('[data-testid^="rider-"][aria-pressed="true"]').count()===0,"direction remained active");
     await wait(()=>calls.slice(beforeModeChange).some(c=>c.body.action==="move"&&c.body.mode==="release"),"mode switch did not release previous direction");
     check(armed,"input selection revoked operator ARM");
     await same(initial,"active input mode change");
     await page.getByTestId("rider-left").click();
     await wait(()=>calls.slice(beforeModeChange).some(c=>c.body.action==="move"&&c.body.mode==="pulse"),"pulse not forwarded");
-    await page.getByTestId("manual-feedback").getByText("Brak",{exact:true}).waitFor();
+    await wait(async()=>await page.getByTestId("manual-pad").locator('[data-testid^="rider-"][aria-pressed="true"]').count()===0,"direction remained active");
     await page.getByTestId("rider-manual-mode").selectOption("continuous");
     check(await page.getByTestId("rider-forward").getAttribute("aria-pressed")==="false","continuous selection revived old intent");
     await same(initial,"no intent after pulse");

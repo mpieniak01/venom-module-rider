@@ -14,7 +14,7 @@ import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Camera, CirclePause, CircleS
 import { actuatorState, displayValue, finite, formatTime, record, safetyOf, settingsOf, type Direction, type NumericDescriptor } from "../lib/model";
 import type { Translator } from "../lib/i18n";
 import type { Frame, RiderClient } from "../lib/use-rider";
-import { Button, Empty, Field, Panel, Pill, Range, Select } from "./primitives";
+import { Button, Empty, Field, Input, Panel, Pill, Range, Select } from "./primitives";
 import styles from "../rider.module.css";
 
 const arrows = [
@@ -54,7 +54,7 @@ export function ManualPad({ client, t, language, compact = false, minimal = fals
         <option value="continuous">{t("continuousPad")}</option>
       </Select>
     </label>
-    <div className={styles.pad} role="group" aria-label={t("manual")} aria-describedby={helpId} data-mode={mode}>
+    <div className={styles.pad} role="group" aria-label={t("manual")} aria-describedby={minimal ? undefined : helpId} data-mode={mode}>
       {arrows.map(({ direction, row, column, Icon }) => {
         const active = client.activeDirection === direction && client.manualMode === (continuous ? "continuous" : "hold");
         return <button type="button" key={direction} aria-label={t(direction)} title={t(direction)} aria-pressed={active} disabled={!available} data-testid={`rider-${direction}`} className={`${styles.arrow} ${active ? styles.arrowActive : ""}`} style={{ gridRow: row, gridColumn: column }}
@@ -81,9 +81,8 @@ export function ManualPad({ client, t, language, compact = false, minimal = fals
       })}
       <button type="button" className={`${styles.padCenter} ${styles.padStop}`} style={{ gridRow: 2, gridColumn: 2 }} aria-label={t("stopMotors")} title={t(journeyOwnsMotion(client.status) ? "journeyStop" : operatorPrioritySupported(client.status) ? "operatorPauseHint" : "manualStopHint")} data-testid="rider-pad-stop" onClick={() => void client.stopManual().catch(() => undefined)}><CircleStop size={27} /><span>{t("stopShort")}</span></button>
     </div>
-    {minimal?<div className={styles.manualReadout} data-testid="manual-feedback" aria-live="polite">
-      <div><Pill tone={safety.state==="ARMED"?"good":"warning"}>{t(safety.state==="ARMED"?"armed":safety.state==="ESTOP"?"estop":"disarmed")}</Pill><span>{client.activeDirection?t(client.activeDirection):t("manualNoDirection")}</span></div>
-      <span>{t(feedback.executionKey)}</span>
+    {minimal?<div className={styles.manualReadout} data-testid="manual-feedback">
+      <div role="status"><Pill tone={safety.state==="ARMED"?"good":"warning"}>{t(safety.state==="ARMED"?"armed":safety.state==="ESTOP"?"estop":safety.state==="DISARMED"?"disarmed":"unknown")}</Pill>{client.activeDirection&&<span>{t(client.activeDirection)}</span>}</div>
       {children}
     </div>:<div className={styles.padDetails}>
     <div className={styles.padHelp} id={helpId}>
@@ -101,7 +100,7 @@ export function ManualPad({ client, t, language, compact = false, minimal = fals
     </div>}
   </div>;
 }
-export function Posture({ client, t, language }: { client: RiderClient; t: Translator; language: string }) {
+export function Posture({ client, t, language, compact = false }: { client: RiderClient; t: Translator; language: string; compact?: boolean }) {
   const [draftHeight, setDraftHeight] = useState<number | null>(null);
   const settings = settingsOf(client.status);
   const actuator = record(record(settings.parameter_schema).actuator_fields);
@@ -113,6 +112,30 @@ export function Posture({ client, t, language }: { client: RiderClient; t: Trans
   const height = draftHeight ?? (finite(target.value) ? target.value : descriptor.minimum);
   const capabilities = record(safetyOf(client.status).capabilities);
   const heightAvailable = record(capabilities.height).available !== false && descriptor.type === "integer" && finite(descriptor.minimum) && finite(descriptor.maximum);
+  if (compact) {
+    const value = draftHeight ?? (finite(target.value) ? target.value : Number.NaN);
+    const valid = finite(value) && Number.isInteger(value) && finite(descriptor.minimum) && finite(descriptor.maximum)
+      && value >= descriptor.minimum && value <= descriptor.maximum
+      && (!finite(descriptor.step) || descriptor.step <= 0 || Number.isInteger((value - descriptor.minimum) / descriptor.step));
+    return <div className={styles.operatorPosture} data-testid="operator-posture">
+      <div className={styles.operatorHeight}>
+        <Field label={t("operator.height") + " · " + (descriptor.display_unit ?? "SDK")}>
+          <Input data-testid="operator-height" type="number" value={finite(value) ? value : ""} placeholder="—"
+            min={descriptor.minimum} max={descriptor.maximum} step={descriptor.step ?? 1}
+            disabled={!client.canMutate || !heightAvailable || !!client.busy}
+            onChange={event => setDraftHeight(event.target.value === "" ? Number.NaN : Number(event.target.value))}/>
+        </Field>
+        <Button data-testid="operator-height-apply" disabled={!client.canMove || !heightAvailable || !!client.busy || !valid}
+          onClick={() => { if (valid) void client.command({ action: "height", height: value }).then(response => { if (response) setDraftHeight(null); }); }}>{t("apply")}</Button>
+      </div>
+      <div className={styles.operatorBalance}>
+        <div><span>{t("balance")}</span><strong data-testid="operator-balance-state">{t(balance.enabled === true ? "on" : balance.enabled === false ? "off" : "unknown")}</strong></div>
+        <Button data-testid="operator-balance" aria-pressed={balance.enabled === true}
+          disabled={!client.canMove || balanceDescriptor.type !== "boolean" || record(capabilities.balance).available === false || !!client.busy}
+          onClick={() => void client.command({ action: "balance", enabled: balance.enabled !== true })}>{t(balance.enabled === true ? "disable" : "enable")}</Button>
+      </div>
+    </div>;
+  }
   return <Panel title={t("posture")}>
     {heightAvailable && height !== undefined ? <><Field label={`${t("height")} · ${descriptor.display_unit ?? descriptor.unit ?? ""}`}><div className={`${styles.flex} ${styles.space}`}><Range type="range" min={descriptor.minimum} max={descriptor.maximum} step={descriptor.step} value={height} onChange={event => setDraftHeight(Number(event.target.value))} disabled={!client.canMutate} /><strong>{displayValue(height, descriptor, language)}</strong></div></Field><p className={styles.hint}>{t("heightHint")}</p><div className={`${styles.flex} ${styles.space}`}><span className={styles.small}>{t("heightTarget")}: {displayValue(target.value, descriptor, language)} {descriptor.display_unit} · {formatTime(target.ts, language)}</span><Button disabled={!client.canMove || client.busy === "height" || !finite(height)} onClick={() => void client.command({ action: "height", height })}>{t("apply")}</Button></div></> : <Empty>{t("unavailable")}</Empty>}
     <div className={styles.rule} />

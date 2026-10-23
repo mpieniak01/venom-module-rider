@@ -1,5 +1,8 @@
 // Module-owned translations. Every key contains PL, EN and DE by construction.
 export const messages = {
+  "operator.robotStatus": ["Stan Rider-Pi", "Rider-Pi status", "Rider-Pi-Status"],
+  "operator.orientation": ["Położenie osi", "Axis readings", "Achsenwerte"],
+  "operator.height": ["Wysokość zadana", "Target height", "Sollhöhe"],
   "workspace.acceptanceRevision": ["Obraz potwierdzony · r{revision}", "Image confirmed · r{revision}", "Bild bestätigt · r{revision}"],
   "workspace.connectionLost": ["Brak połączenia. Użyj Odśwież.", "Disconnected. Use Refresh.", "Keine Verbindung. Aktualisieren verwenden."],
   "workspace.prepare": ["Przygotuj automat", "Prepare automatic drive", "Automatik vorbereiten"],

@@ -4,6 +4,8 @@ import { formatTime, record, safetyOf, str } from "../lib/model";
 import type { RiderClient } from "../lib/use-rider";
 import { journeyOwnsMotion, manualInterventionSupported, operatorPrioritySupported } from "../lib/navigation";
 import { ManualPad } from "./control";
+import { OperatorStatus } from "./operator-status";
+import { manualFeedback } from "../lib/manual-feedback";
 import { Button, Panel } from "./primitives";
 import styles from "../rider.module.css";
 
@@ -26,12 +28,13 @@ export function OperatorConsole({ client, t, language }: { client: RiderClient; 
   const journey = journeyOwnsMotion(client.status);
   const ownsManual = safety.state === "ARMED" && safety.owner === "manual";
   const direct = manualInterventionSupported(client.status);
-  const reason = !client.canMutate ? "workspace.connectionLost" : client.status?.errors.control || safety.stale===true ? "workspacePermissionUnknown" : client.canNavigate ? (direct ? "manualGestureReady" : safety.owner === "navigation" ? "operatorInterventionReady" : "workspaceManualReady") : journey && !direct ? "manualGestureUnsupported" : ownsManual ? "workspaceTakeoverNeeded" : safety.state === "ARMED" ? "workspaceAutomaticOwner" : safety.state === "DISARMED" ? "workspaceArmNeeded" : "workspacePermissionUnknown";
-  const notice=client.canMutate&&!client.status?.errors.control&&safety.stale!==true&&client.canNavigate?client.notice:null;
-  return <Panel className={styles.operatorPanel} title={t("manual")} extra={<Button size="large" data-testid="takeover-manual" tone="primary" title={t(direct ? "manualGestureReady" : journey ? "journeyManualTakeover" : operatorPrioritySupported(client.status) && safety.state === "ARMED" ? "operatorTakeoverHint" : "takeManualHint")} disabled={!client.canArm || !!client.busy && !(operatorPrioritySupported(client.status) && safety.state === "ARMED")} onClick={() => void client.takeManual(t("manual"))}>{t("takeManual")}</Button>}>
+  const reason = !client.canMutate ? "workspace.connectionLost" : client.status?.errors.control || safety.stale===true ? "workspacePermissionUnknown" : client.canNavigate ? null : journey && !direct ? "manualGestureUnsupported" : ownsManual ? "workspaceTakeoverNeeded" : safety.state === "ARMED" ? "workspaceAutomaticOwner" : safety.state === "DISARMED" ? null : "workspacePermissionUnknown";
+  const notice=client.canMutate&&!client.status?.errors.control&&safety.stale!==true&&client.notice?.tone==="error"?client.notice:null;
+  return <Panel className={styles.operatorPanel} title={t("manual")} extra={<Button size="large" data-testid="takeover-manual" tone="primary" title={t(journey ? "journeyManualTakeover" : operatorPrioritySupported(client.status) && safety.state === "ARMED" ? "operatorTakeoverHint" : "takeManualHint")} disabled={!client.canArm || !!client.busy && !(operatorPrioritySupported(client.status) && safety.state === "ARMED")} onClick={() => void client.takeManual(t("manual"))}>{t("takeManual")}</Button>}>
     <ManualPad client={client} t={t} language={language} compact minimal>
+      <OperatorStatus client={client} t={t} language={language}/>
       <div className={styles.operatorMessages+" "+(notice?.tone==="error"?styles.operatorMessageError:"")} data-testid="operator-messages" role={notice?.tone==="error"?"alert":"status"}>
-        <span title={notice?.code}>{t(notice?.code==="panel_owner_mismatch"?"workspace.panelChanged":notice?.key??reason)}</span>
+        <span>{notice ? <>{t(notice.code==="panel_owner_mismatch"?"workspace.panelChanged":notice.key)}{notice.code && notice.code!=="panel_owner_mismatch" && <> · {notice.code}</>}</> : reason ? t(reason) : null}</span>
         {notice&&<Button aria-label={t("close")} onClick={()=>client.setNotice(null)}><X size={14}/></Button>}
       </div>
     </ManualPad>
@@ -40,10 +43,10 @@ export function OperatorConsole({ client, t, language }: { client: RiderClient; 
 
 export function OperatorDiagnostics({client,t,language}:{client:RiderClient;t:Translator;language:string}) {
   const safety=safetyOf(client.status),execution=record(safety.execution);
+  const feedback=manualFeedback(client.status,client.manualRequest,client.controlFresh);
   return <Panel title={t("workspace.controlDiagnostics")}>
     <RiderMessages client={client} t={t} language={language}/>
     <div className={styles.meta}><span>{t("owner")}: {String(safety.owner??"—")}</span><span>{t("manualAck")}: {String(client.manualRequest?.phase??"—")}</span><span>{t("manualOutput")}: {String(execution.state??"—")}</span></div>
-    <p className={styles.hint}>{t("manualModePulseHint")}</p>
-    <p className={styles.hint}>{t("manualGestureHint")}</p>
+    <div className={styles.meta} data-testid="manual-execution">{t(feedback.executionKey)} · {feedback.output}</div>
   </Panel>;
 }

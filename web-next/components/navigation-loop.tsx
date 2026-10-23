@@ -17,7 +17,7 @@ import { ModelTuning } from "./model-tuning";
 import { Button, Checkbox, Field, Input, Panel, Pill, Select } from "./primitives";
 import styles from "../rider.module.css";
 
-export function NavigationLoop({client,t,language,manual,auxiliary,recording,operatorDetails}:{client:RiderClient;t:Translator;language:string;manual:ReactNode;auxiliary?:ReactNode;recording?:ReactNode;operatorDetails?:ReactNode}) {
+export function NavigationLoop({client,t,language,manual,recording,operatorDetails}:{client:RiderClient;t:Translator;language:string;manual:ReactNode;recording?:ReactNode;operatorDetails?:ReactNode}) {
   const [view, setView] = useState<"manual" | "automatic" | "journey">("manual");
   const [policy,setPolicy]=useState<JsonRecord|null>(null);
   const [profileSnapshot,setProfileSnapshot]=useState<{policy:JsonRecord|null;session:string}>({policy:null,session:""});
@@ -368,7 +368,6 @@ export function NavigationLoop({client,t,language,manual,auxiliary,recording,ope
       <span className={styles.workspaceOwner} role="status">{t("workspaceOwner")}: <strong>{t(owner === "manual" ? "workspaceManual" : owner === "navigation" ? safety.arming_mode === "journey" ? "workspaceJourney" : "workspaceAutomatic" : safety.state === "DISARMED" ? "workspaceDisarmedOwner" : "workspaceNoOwner")}</strong></span>
     </div>
     <div className={styles.commandDeck} data-testid="command-deck">
-      <div hidden={view !== "manual"} className={styles.manualCommandHint}>{t("manualGestureReady")}</div>
         <div hidden={view !== "automatic"} data-testid="automatic-commands">
           <Panel title={t("loopTitle")} extra={<Button aria-label={t("loopLoad")} disabled={loading||!!operation||!connected} onClick={()=>setRefresh(v=>v+1)}><RefreshCw size={14}/>{t("refresh")}</Button>}>
     <div className={styles.loopStatus} role="status" data-testid="loop-state">
@@ -532,7 +531,6 @@ export function NavigationLoop({client,t,language,manual,auxiliary,recording,ope
           </Panel>
         </div>
         {operatorDetails}
-        {auxiliary}
           </div>
         </details>
     </div>

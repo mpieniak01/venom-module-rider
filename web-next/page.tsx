@@ -10,9 +10,8 @@ import { useRider } from "./lib/use-rider";
 import {useStudyRecording} from "./lib/use-study-recording";
 import {StudyRecordingBar} from "./components/study-recording";
 import { Calibration } from "./components/calibration";
-import { Posture } from "./components/control";
 import { FaceStudio } from "./components/face";
-import { Measurements, RequestHistory, SensorMetrics } from "./components/measurements";
+import { Measurements } from "./components/measurements";
 import { Button, Empty, Panel, Pill, Select } from "./components/primitives";
 import { Resources } from "./components/resources";
 import { NavigationLoop } from "./components/navigation-loop";
@@ -121,7 +120,6 @@ export default function RiderPage() {
           manual={<OperatorConsole client={client} t={t} language={language} />}
           recording={<StudyRecordingBar recording={recording} client={client} t={t}/>}
           operatorDetails={<OperatorDiagnostics client={client} t={t} language={language}/>}
-          auxiliary={<details className={styles.details}><summary>{t("postureAndTelemetry")}</summary><div className={styles.grid}><Posture client={client} t={t} language={language}/><Panel title={t("measurements")} hint={t("measurementsHint")}><SensorMetrics status={client.status} t={t} language={language}/></Panel></div><RequestHistory status={client.status} t={t} language={language}/></details>}
         />}
         {section === "overview" && <Measurements status={client.status} t={t} language={language} />}
         {section === "calibration" && <Calibration key={connection.session} recording={recording} client={client} t={t} language={language} />}
