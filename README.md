@@ -371,6 +371,35 @@ Run from the module checkout. Browser launch settings are environment-specific;
 the Node syntax check is included in the check-web target.
 
 
+### Cold journey start regression
+
+Explicit **Prepare** starts observation. After fresh matching frames arrive,
+the main journey button offers **Confirm and start** when acceptance is missing.
+One explicit click saves image/steering confirmation before requesting the journey
+with the saved revision. It never starts from a rejected write or mismatched frame.
+A rejected save restores the observation requested by the operator and permits
+retry. STOP cancels the whole transaction, including the confirmation write phase;
+a late completion cannot enqueue a journey or restart observation.
+
+Before releasing changes to journey preparation, run
+`tests/browser/journey-start-prod.js` against both connection modes. The fixture
+begins with stopped, unverified revision 134, a historical GO result and Pi GET
+metadata. It checks missing/mismatched frames, a rejected save and recovery,
+retry, combined confirmation/Start, STOP during confirmation and cancellation of delayed Start. Every Rider API
+request is intercepted; these runs never contact the physical executor.
+
+    playwright-cli -s=rider-regression open http://localhost:3300/rider
+    playwright-cli -s=rider-regression run-code --filename=tests/browser/journey-start-prod.js
+    playwright-cli -s=rider-regression goto 'http://localhost:3300/rider?fixtureMode=demo'
+    playwright-cli -s=rider-regression run-code --filename=tests/browser/journey-start-prod.js
+    playwright-cli -s=rider-regression close
+
+Run `tests/browser/operator-workspace.js` as well for camera/keypad stability,
+compact settings and nonoverlapping journey labels at seven viewport sizes.
+`make check-web` checks script syntax and web unit tests; it does **not** execute
+these browser flows. Fixture success does not replace physical operator acceptance.
+
+
 ### Bounded vision trial
 
 The operator starts a trial with one POST to /api/v1/rider/navigation/trial. The request identifies the current Pi generation, configuration and manual-settings revisions, a unique request_id, a fresh Pi-clock timestamp/TTL, and explicit operator consent/plan. The live executor must advertise scoped_stop_generation_supported and remote_decision_deadline_supported. Pi prepares its existing camera/goal/configuration services and grants one navigation ARM for at most 10 seconds. Requests are not replayed on refresh or reconnect.
@@ -547,6 +576,20 @@ CPU/RAM continuity and diagnostic semantics: [system history](docs/SYSTEM_HISTOR
 
 
 Jedna sesja badania z telemetrią i serią klatek RAW: [Wspólny zapis](docs/UNIFIED_RECORDING.md).
+
+## Native preview recovery regression
+
+The native preview reconnect watchdog advances only after a source/analysis-matched,
+fresh JPEG is decoded and committed. Incoming bytes or increasing sequence numbers
+alone cannot renew it. The original image keeps its original freshness deadline;
+a failed stream cannot indefinitely present it as current.
+
+Before releasing native media changes, run `tests/browser/native-stream-recovery.js`
+with Playwright CLI against the local panel. Every Rider endpoint is intercepted.
+The fixture starts from a retired journey with an active camera, then sends
+continuous expired parts, mismatched analysis and undecodable JPEGs. It requires
+GET reconnect and a fresh replacement after each failure, with zero robot mutations.
+`make check-web` includes syntax validation; the browser flow must be run separately.
 
 ## Experimental temporal driving profiles
 

@@ -202,3 +202,23 @@ work in the application's default thread pool. Diagnostics distinguish
 `inference_error`; exception text and private input are not exposed. Pi still
 checks capture age and execution authority. Existing speed, pulse and watchdog
 limits remain unchanged.
+
+## HTTP timing and continuous-journey gaps
+
+Pi subtracts the capture's existing age and request preparation from the HTTP
+wait budget. Connecting, sending, fragmented headers and fragmented bodies share
+one monotonic deadline; partial progress never restarts it. Native source and
+policy metadata reads run concurrently on Venom within that original deadline.
+`source_timing_ms` includes `pipeline_ms`, `policy_ms`, `source_wait_ms` and
+`canonical_ms` for diagnosing time spent before inference.
+
+A continuous journey may discard an exhausted capture and request a new source
+after its previous motor permit expires, while its existing feedback window is
+still open. A correctly bound late GO is not executed. This wait sends no new
+motion and renews neither deadline. Missing feedback at the original deadline,
+operator STOP, authority/source/model changes and invalid replies retain their
+terminal behavior. Bounded trials keep their existing stop behavior.
+
+Pi status `request_attempt` identifies the current run and sequence, pending,
+completed or failed state, elapsed request time and capture age. A failed or
+pending request no longer displays the preceding successful roundtrip as its own.

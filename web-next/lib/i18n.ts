@@ -1,5 +1,10 @@
 // Module-owned translations. Every key contains PL, EN and DE by construction.
 export const messages = {
+  "workspace.journeyAnalysisExpired": ["Brak aktualnej poprawnej analizy — podróż zakończona.", "No current valid analysis — journey ended.", "Keine aktuelle gültige Analyse — Fahrt beendet."],
+  "workspace.confirmStartJourney": ["Potwierdź i jedź", "Confirm and start", "Bestätigen & Start"],
+  "workspace.prepareImage": ["Przygotuj bieżący obraz do startu.", "Prepare the current image for starting.", "Aktuelles Bild für den Start vorbereiten."],
+  "workspace.confirmReady": ["Obraz gotowy do potwierdzenia.", "Image ready for confirmation.", "Bild zur Bestätigung bereit."],
+  "workspace.confirm": ["Potwierdź obraz i skręt", "Confirm image and steering", "Bild und Lenken bestätigen"],
   "operator.robotStatus": ["Stan Rider-Pi", "Rider-Pi status", "Rider-Pi-Status"],
   "operator.orientation": ["Położenie osi", "Axis readings", "Achsenwerte"],
   "operator.height": ["Wysokość zadana", "Target height", "Sollhöhe"],

@@ -120,7 +120,38 @@ async def _reference_decision(request, device, descriptor, admitted_at):
         request.app.state.rider_stream,
         request.app.state.rider_vision,
     )
-    pipeline = await native_pipeline(domain, device=device, source=descriptor.source)
+    # Independent read-only checks share the original deadline. Serial Pi
+    # roundtrips here previously consumed most of a short capture budget.
+    phases = {}
+
+    async def measured(name, operation):
+        started = hub.clock()
+        try:
+            return await operation
+        finally:
+            phases[name] = round(max(0.0, hub.clock() - started) * 1000, 2)
+
+    checks = [
+        asyncio.create_task(
+            measured(
+                "pipeline_ms",
+                native_pipeline(domain, device=device, source=descriptor.source),
+            )
+        ),
+        asyncio.create_task(
+            measured(
+                "policy_ms", validate_model_policy(request, device, descriptor.frame)
+            )
+        ),
+    ]
+    try:
+        pipeline, _ = await asyncio.gather(*checks)
+    finally:
+        # A rejected check cannot leave another request running beyond admission.
+        for check in checks:
+            if not check.done():
+                check.cancel()
+        await asyncio.gather(*checks, return_exceptions=True)
     if (pipeline.get("active_profile") or {}).get("analysis_location") != "venom":
         raise RiderError("vision_remote_disabled", 409)
     if (
@@ -130,16 +161,20 @@ async def _reference_decision(request, device, descriptor, admitted_at):
     ):
         raise RiderError("stream_epoch_changed", 409)
     frame = descriptor.frame
-    await validate_model_policy(request, device, frame)
     if frame.age_ms >= frame.deadline_ms:
         raise RiderError("vision_frame_expired", 409)
     async with hub.lease(domain, pipeline, keepalive=True) as connection:
-        source = await hub.frame(
-            connection,
-            source=descriptor.source,
-            timeout=min(0.3, (frame.deadline_ms - frame.age_ms) / 1000),
+        source = await measured(
+            "source_wait_ms",
+            hub.frame(
+                connection,
+                source=descriptor.source,
+                timeout=min(0.3, (frame.deadline_ms - frame.age_ms) / 1000),
+            ),
         )
-        canonical = await hub.canonical_frame(connection, source)
+        canonical = await measured(
+            "canonical_ms", hub.canonical_frame(connection, source)
+        )
         if connection.closed or domain.transport().device.id != device:
             raise RiderError("stream_epoch_changed", 409)
         now = hub.clock()
@@ -153,6 +188,7 @@ async def _reference_decision(request, device, descriptor, admitted_at):
         # never ignore time this exact part already spent in the host buffer.
         # Pi still checks its own capture deadline before accepting/submitting.
         timing = {
+            **phases,
             "pi_reported_age": round(frame.age_ms, 2),
             "host_before_inference": round(elapsed_ms, 2),
             "observed_age": round(observed_age_ms, 2),

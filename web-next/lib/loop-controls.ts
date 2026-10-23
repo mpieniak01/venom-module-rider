@@ -50,8 +50,9 @@ export function calibrationScope(policy: JsonRecord | null, detector: JsonRecord
   return JSON.stringify([policy?.speed, policy?.max_motion_ms, policy?.decision_budget_ms, policy?.corridor, policy?.perception, policy?.avoidance, detector.sha256]);
 }
 export function loopSettingsValues(policy: JsonRecord, draft: JsonRecord): JsonRecord {
-  const {revision: ignoredRevision, protocol_version: ignoredProtocol, ...values} = draft;
-  void ignoredRevision; void ignoredProtocol;
+  // Pi presentation metadata is read-only; only persisted policy fields are writable.
+  const fields = ["mode", "speed", "max_motion_ms", "decision_budget_ms", "corridor", "perception", "avoidance", "behavior", "verified", "calibration_id", "model_sha256"];
+  const values = Object.fromEntries(fields.filter(key => key in draft).map(key => [key, draft[key]]));
   return calibrationScope(policy, {}) === calibrationScope(draft, {}) ? values
     : {...values, mode: "observe", verified: false, calibration_id: "", model_sha256: ""};
 }
@@ -128,7 +129,7 @@ export function decisionView(state: JsonRecord, detector: JsonRecord) {
     confidence:typeof decision.confidence_fraction==="number"?decision.confidence_fraction:null,
   };
 }
-export function trialBlock(policy: JsonRecord|null, runtime:JsonRecord, detector:JsonRecord, connected:boolean, dirty:boolean, status:RiderStatus|null):string {
+export function trialBlock(policy: JsonRecord|null, runtime:JsonRecord, detector:JsonRecord, connected:boolean, dirty:boolean, status:RiderStatus|null, requireAcceptance=true):string {
   if(!connected)return "loopOffline";
   if(!policy)return "loopLoadFailed";
   if(dirty)return "loopUnsaved";
@@ -140,7 +141,7 @@ export function trialBlock(policy: JsonRecord|null, runtime:JsonRecord, detector
   if(runtime.drive!==true)return runtime.drive_reason==="navigation_executor_update_required"?"loopExecutorUpdate":"loopRuntimeMissing";
   if(detector.configured!==true)return "loopNoModel";
   if(detector.drive_supported===false)return "loopDepthObservation";
-  if(!calibrationRecorded(policy)||detector.loaded===true&&!calibrationMatches(policy,detector))return "loopUnverified";
+  if(requireAcceptance&&(!calibrationRecorded(policy)||detector.loaded===true&&!calibrationMatches(policy,detector)))return "loopUnverified";
   const safety=safetyOf(status);
   if(safety.state==="ESTOP")return "trialEstop";
   if(safety.stale===true||status?.errors?.control)return "trialControlStale";

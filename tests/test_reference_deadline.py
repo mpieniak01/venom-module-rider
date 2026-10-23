@@ -86,3 +86,79 @@ def test_host_buffered_old_source_cannot_be_made_young_by_the_request(monkeypatc
         assert response.status_code == 409
         assert response.json()["detail"]["code"] == "vision_frame_expired"
         assert detector.calls == 0
+
+
+def test_reference_metadata_reads_run_together_within_one_capture_budget(monkeypatch):
+    from venom_module_rider.api import pipeline_routes, vision_routes
+
+    app, _service, pi = fixture(monkeypatch)
+    with TestClient(app) as client:
+        app.state.rider_vision.detector = Detector()
+        current = warmup(client)
+        pipeline, policy = (
+            pipeline_routes.native_pipeline,
+            vision_routes.validate_model_policy,
+        )
+        started = set()
+
+        async def pipeline_read(*args, **kwargs):
+            started.add("pipeline")
+            await asyncio.sleep(0)
+            assert "policy" in started, "policy read waits behind pipeline read"
+            return await pipeline(*args, **kwargs)
+
+        async def policy_read(*args, **kwargs):
+            started.add("policy")
+            await asyncio.sleep(0)
+            assert "pipeline" in started
+            return await policy(*args, **kwargs)
+
+        monkeypatch.setattr(pipeline_routes, "native_pipeline", pipeline_read)
+        monkeypatch.setattr(vision_routes, "validate_model_policy", policy_read)
+        result = client.post(
+            "/api/v1/rider/compute/vision/decision-reference",
+            headers=AUTH,
+            json=descriptor(current),
+        )
+        assert result.status_code == 200, result.text
+        assert result.json()["source"] == current
+        timing = result.json()["source_timing_ms"]
+        assert all(
+            timing[key] >= 0
+            for key in ("pipeline_ms", "policy_ms", "source_wait_ms", "canonical_ms")
+        )
+        assert all(method == "GET" for method, _, _ in pi.calls)
+
+
+def test_rejected_policy_cancels_other_metadata_read_without_inference(monkeypatch):
+    from venom_module_rider.api import pipeline_routes, vision_routes
+    from venom_module_rider.errors import RiderError
+
+    app, _service, pi = fixture(monkeypatch)
+    with TestClient(app) as client:
+        detector = Detector()
+        app.state.rider_vision.detector = detector
+        current = warmup(client)
+        cancelled = []
+
+        async def blocked_pipeline(*_args, **_kwargs):
+            try:
+                await asyncio.Future()
+            finally:
+                cancelled.append(True)
+
+        async def rejected_policy(*_args, **_kwargs):
+            await asyncio.sleep(0)
+            raise RiderError("model_selection_conflict", 409)
+
+        monkeypatch.setattr(pipeline_routes, "native_pipeline", blocked_pipeline)
+        monkeypatch.setattr(vision_routes, "validate_model_policy", rejected_policy)
+        response = client.post(
+            "/api/v1/rider/compute/vision/decision-reference",
+            headers=AUTH,
+            json=descriptor(current),
+        )
+        assert response.status_code == 409
+        assert response.json()["detail"]["code"] == "model_selection_conflict"
+        assert cancelled == [True] and detector.calls == 0
+        assert all(method == "GET" for method, _, _ in pi.calls)

@@ -5,11 +5,12 @@ async page => {
   check(["localhost","127.0.0.1","[::1]"].includes(new URL(base).hostname),"loopback UI required");
   await page.goto("about:blank");
   const calls=[],sha="a".repeat(64);
+  let observe=false;
   let armed=true,owner="manual",holder="previous-panel",generation="fixture-0",serial=0,seq=0,reject=false;
   const settings={revision:1,directions:Object.fromEntries(["forward","backward","left","right"].map(direction=>[direction,{speed:.2,duration:.25}])),parameter_schema:{direction_fields:{speed:{display_factor:100,display_precision:0,display_unit:"%"}}},control_modes:{version:1,supported:["pulse","hold","release"],hold_renewal_ms:150,hold_timeout_ms:500,click_threshold_ms:180,request_ttl_ms:500}};
   const policy={revision:1,mode:"observe",speed:.1,max_motion_ms:150,decision_budget_ms:300,corridor:[.35,.65,.65,.95],perception:{engine:"depth_plane",residual_limit:.06,outlier_limit:.005,slope_min:2},verified:false,calibration_id:"",model_sha256:""};
   const safety=()=>({state:armed?"ARMED":"DISARMED",owner,generation,last_seq:seq,panel_motion_enabled:true,can_move:armed,ready:true,stale:false,observed_at:Date.now()/1000,capabilities:{move:{available:true}},panel_control:{version:1,holder},operator_control:{version:1,state:armed?"paused":"idle",operation_id:"old-operation",generation},operator_intervention_version:1,navigation_journey_version:1,remote_decision_deadline_supported:true,scoped_stop_generation_supported:true,output:{lx:0,az:0}});
-  const nav=()=>({config:policy,status:{running:false,stale:false,mode:"observe",run_id:"",decision:{}},goals:{drive:false,observe:false},runtime:{drive:true,observe:true,known:true},detector:{configured:true,loaded:true,sha256:sha,drive_supported:true,navigation_journey_version:1,supported_protocol_versions:[3],clear_frames_required:3}});
+  const nav=()=>({config:policy,status:{running:observe,stale:false,mode:"observe",run_id:"",decision:{}},goals:{drive:false,observe},runtime:{drive:true,observe:true,known:true},detector:{configured:true,loaded:true,sha256:sha,drive_supported:true,navigation_journey_version:1,supported_protocol_versions:[3],clear_frames_required:3}});
   const advance=()=>{generation="fixture-"+(++serial);seq=0;};
   const wait=async(fn,message)=>{const end=Date.now()+7000;while(!await fn()){check(Date.now()<end,message);await new Promise(resolve=>setTimeout(resolve,40));}};
   await page.route("**/api/v1/rider/**",async route=>{
@@ -17,6 +18,7 @@ async page => {
     const json=(body,status=200)=>route.fulfill({status,contentType:"application/json",body:JSON.stringify(body)});
     if(req.method()!=="GET"){
       const body=req.postDataJSON();calls.push({path,body});
+      if(path==="/goal/s15_venom_perception"){observe=body.enabled;return json({ok:true,meta:{},data:{ok:true}});}
       check(path==="/control","unexpected mutation "+path);
       if(reject)return json({detail:{code:"panel_owner_mismatch"}},409);
       const old=generation;
@@ -53,6 +55,15 @@ async page => {
         const after=await bounds(),image=await page.getByTestId("camera-surface").boundingBox();
         for(const key of ["x","y","width","height"])check(Math.abs(camera[key]-image[key])<=1,"mode moved camera "+viewport.width+" "+mode+" "+key);
         for(const id of targets)for(const key of ["x","y","width","height"])check(Math.abs(initial[id][key]-after[id][key])<=1,"mode moved manual target "+id);
+        if(mode==="journey"){
+          const overlaps=await page.getByTestId("journey-motion-limits").evaluate(el=>{
+            const state=document.querySelector('[data-testid="journey-state"]');
+            if(getComputedStyle(state).display==="none"||state.getBoundingClientRect().width===0)return false;
+            const text=document.createRange();text.selectNodeContents(el);
+            return text.getBoundingClientRect().right>state.getBoundingClientRect().left+1;
+          });
+          check(!overlaps,"journey limits overlap status at "+viewport.width);
+        }
       }
       const hierarchy=await page.getByTestId("workspace-secondary").evaluate(el=>{
         const surface=document.querySelector('[data-testid="driving-surface"]').getBoundingClientRect();
@@ -79,7 +90,9 @@ async page => {
     check(await page.getByTestId("trial-accept").isVisible(),"acceptance hidden");
     check(await page.getByTestId("trial-accept").isDisabled(),"missing current frame allowed acceptance");
     check(await page.getByTestId("loop-start").isDisabled(),"unaccepted policy allowed driving");
-    check(calls.length===0,"opening preparation started motion or camera");
+    await wait(()=>observe,"explicit preparation did not start observation");
+    check(calls.length===1&&calls[0].path==="/goal/s15_venom_perception"&&calls[0].body.enabled===true,"preparation sent actuator/camera commands");
+    calls.length=0;
     await page.getByTestId("workspace-manual").click();await scrollTop();
     await page.getByTestId("takeover-manual").click();
     await wait(()=>holder!=="previous-panel"&&owner==="manual"&&armed,"explicit takeover did not establish current panel");
@@ -98,6 +111,6 @@ async page => {
     check(JSON.stringify(beforeError)===JSON.stringify(afterError),"error moved steering targets");
     const messages=await page.getByTestId("operator-messages").evaluate(el=>({position:getComputedStyle(el).position,scroll:el.scrollHeight,height:el.clientHeight}));
     check(!["absolute","fixed"].includes(messages.position),"operator message floats over controls");
-    return {result:"PASS",viewports:results,mutations:calls.map(call=>call.body.action),preparation:"explicit preview/acceptance; no automatic action",ownership:"foreign takeover and STOP; current holder idempotent",errors:"stable inline message",fixtureOnly:true};
+    return {result:"PASS",viewports:results,mutations:calls.map(call=>call.body.action),preparation:"explicit observation preparation; no motion",ownership:"foreign takeover and STOP; current holder idempotent",errors:"stable inline message",fixtureOnly:true};
   } finally {await page.goto("about:blank");await page.unroute("**/api/v1/rider/**");}
 }

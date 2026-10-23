@@ -67,3 +67,23 @@ test("warm observation retains the ended journey outcome without reviving its au
   const current=journeyView({journey:{...ended,id:"new",active:true,state:"qualifying"},last_trial:{journey:ended}});
   assert.equal(current.historical,false);assert.equal(current.id,"new");assert.equal(current.active,true);
 });
+
+test("confirm-and-start readiness omits only persisted acceptance and still blocks control/configuration failures",()=>{
+  const {policy,detector,status,runtime}=scenario();
+  const unaccepted={...policy,verified:false,calibration_id:"",model_sha256:"",avoidance:{...(policy.avoidance as JsonRecord),sweep_verified:false}};
+  assert.ok(journeyBlocks(unaccepted,runtime,detector,true,false,status).includes("loopUnverified"));
+  assert.deepEqual(journeyBlocks(unaccepted,runtime,detector,true,false,status,false),[]);
+  const safety=status.control!.safety as JsonRecord;
+  safety.state="ESTOP";
+  assert.ok(journeyBlocks(unaccepted,runtime,detector,true,false,status,false).includes("trialEstop"));
+  safety.state="DISARMED";safety.stale=true;
+  assert.ok(journeyBlocks(unaccepted,runtime,detector,true,false,status,false).includes("trialControlStale"));
+  safety.stale=false;safety.execution={inhibit:"local_inhibit"};
+  assert.ok(journeyBlocks(unaccepted,runtime,detector,true,false,status,false).includes("trialExecutionInhibited"));
+  delete safety.execution;
+  assert.ok(journeyBlocks(unaccepted,runtime,detector,false,false,status,false).includes("loopOffline"));
+  assert.ok(journeyBlocks(unaccepted,runtime,detector,true,true,status,false).includes("loopUnsaved"));
+  assert.ok(journeyBlocks({...unaccepted,speed:.11},runtime,detector,true,false,status,false).includes("journeyMotionLimits"));
+  assert.ok(journeyBlocks(unaccepted,{...runtime,drive:false},detector,true,false,status,false).includes("loopRuntimeMissing"));
+  assert.ok(journeyBlocks(unaccepted,runtime,{...detector,navigation_journey_version:undefined},true,false,status,false).includes("journeyUpdateRequired"));
+});

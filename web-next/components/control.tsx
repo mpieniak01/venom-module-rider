@@ -14,7 +14,7 @@ import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Camera, CirclePause, CircleS
 import { actuatorState, displayValue, finite, formatTime, record, safetyOf, settingsOf, type Direction, type NumericDescriptor } from "../lib/model";
 import type { Translator } from "../lib/i18n";
 import type { Frame, RiderClient } from "../lib/use-rider";
-import { Button, Empty, Field, Input, Panel, Pill, Range, Select } from "./primitives";
+import { Button, Empty, Field, Panel, Pill, Range, Select } from "./primitives";
 import styles from "../rider.module.css";
 
 const arrows = [
@@ -113,19 +113,27 @@ export function Posture({ client, t, language, compact = false }: { client: Ride
   const capabilities = record(safetyOf(client.status).capabilities);
   const heightAvailable = record(capabilities.height).available !== false && descriptor.type === "integer" && finite(descriptor.minimum) && finite(descriptor.maximum);
   if (compact) {
-    const value = draftHeight ?? (finite(target.value) ? target.value : Number.NaN);
+    const value = draftHeight ?? (finite(target.value) ? target.value : descriptor.minimum);
+    const chosen = draftHeight !== null || finite(target.value);
     const valid = finite(value) && Number.isInteger(value) && finite(descriptor.minimum) && finite(descriptor.maximum)
       && value >= descriptor.minimum && value <= descriptor.maximum
       && (!finite(descriptor.step) || descriptor.step <= 0 || Number.isInteger((value - descriptor.minimum) / descriptor.step));
     return <div className={styles.operatorPosture} data-testid="operator-posture">
       <div className={styles.operatorHeight}>
         <Field label={t("operator.height") + " · " + (descriptor.display_unit ?? "SDK")}>
-          <Input data-testid="operator-height" type="number" value={finite(value) ? value : ""} placeholder="—"
+          <div className={styles.flex}><Range data-testid="operator-height" aria-label={t("operator.height")} value={finite(value) ? value : 0}
             min={descriptor.minimum} max={descriptor.maximum} step={descriptor.step ?? 1}
             disabled={!client.canMutate || !heightAvailable || !!client.busy}
-            onChange={event => setDraftHeight(event.target.value === "" ? Number.NaN : Number(event.target.value))}/>
+            onPointerDown={event => setDraftHeight(Number(event.currentTarget.value))}
+            onKeyDown={event => {
+              if (["Home", "End", "Enter", " "].includes(event.key)) {
+                if (event.key === "Enter" || event.key === " ") event.preventDefault();
+                setDraftHeight(event.key === "Home" ? Number(descriptor.minimum) : event.key === "End" ? Number(descriptor.maximum) : Number(event.currentTarget.value));
+              }
+            }}
+            onChange={event => setDraftHeight(Number(event.target.value))}/><strong data-testid="operator-height-value">{chosen ? displayValue(value, descriptor, language) : "—"}</strong></div>
         </Field>
-        <Button data-testid="operator-height-apply" disabled={!client.canMove || !heightAvailable || !!client.busy || !valid}
+        <Button data-testid="operator-height-apply" disabled={!client.canMove || !heightAvailable || !!client.busy || !valid || !chosen}
           onClick={() => { if (valid) void client.command({ action: "height", height: value }).then(response => { if (response) setDraftHeight(null); }); }}>{t("apply")}</Button>
       </div>
       <div className={styles.operatorBalance}>
