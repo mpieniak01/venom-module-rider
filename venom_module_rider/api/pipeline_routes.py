@@ -165,6 +165,7 @@ async def processed_native(request, connection, incoming):
             mode="observe",
             corridor=corridor,
             perception=PerceptionSettings.model_validate(policy.get("perception", {})),
+            behavior=policy.get("behavior", {}),
         )
 
         async def infer():

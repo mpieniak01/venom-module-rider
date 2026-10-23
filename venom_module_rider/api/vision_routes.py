@@ -183,6 +183,19 @@ async def _reference_decision(request, device, descriptor, admitted_at):
         return {**result, "source_timing_ms": timing}
 
 
+def profile_presentation(config, detector):
+    """Expose pair support without mutating a cached authoritative Pi snapshot."""
+    result = dict(config)
+    catalog = result.get("behavior_catalog")
+    if isinstance(catalog, dict):
+        result["behavior_catalog"] = {
+            **catalog,
+            "supported": catalog.get("supported") is True
+            and detector.get("temporal_navigation_v1") is True,
+        }
+    return result
+
+
 @router.get("/navigation/config")
 async def configuration(request: Request):
     domain = request.app.state.rider
@@ -218,6 +231,7 @@ async def configuration(request: Request):
         ),
         {},
     )
+    detector = request.app.state.rider_vision.status(config["data"].get("perception"))
     return {
         "runtime": {
             **runtime,
@@ -226,19 +240,34 @@ async def configuration(request: Request):
         },
         "goals": goals,
         "status": state["data"],
-        "config": config["data"],
-        "detector": request.app.state.rider_vision.status(
-            config["data"].get("perception")
-        ),
+        "config": profile_presentation(config["data"], detector),
+        "detector": detector,
     }
 
 
 @router.post("/navigation/config")
 async def configure(request: Request):
     body = await request.json()
-    return await request.app.state.rider.mutate(
+    detector = request.app.state.rider_vision.status()
+    behavior = (
+        body.get("values", {}).get("behavior") if isinstance(body, dict) else None
+    )
+    if (
+        isinstance(behavior, dict)
+        and behavior.get("profile_id") != "legacy"
+        and detector.get("temporal_navigation_v1") is not True
+    ):
+        raise RiderError("temporal_navigation_update_required", 409)
+    result = await request.app.state.rider.mutate(
         "/api/navigation/config", body, request.headers.get("X-Rider-Session")
     )
+    data = result.get("data")
+    if isinstance(data, dict) and isinstance(data.get("config"), dict):
+        result = {
+            **result,
+            "data": {**data, "config": profile_presentation(data["config"], detector)},
+        }
+    return result
 
 
 @router.get("/navigation/state")
@@ -247,13 +276,12 @@ async def navigation_state(request: Request):
         "/api/navigation/status", 0.2, force=True
     )
     config = await request.app.state.rider.read("/api/navigation/config", 0.2)
+    detector = request.app.state.rider_vision.status(config["data"].get("perception"))
     return {
         "goals": await loop_goals(request.app.state.rider),
         "status": state["data"],
-        "config": config["data"],
-        "detector": request.app.state.rider_vision.status(
-            config["data"].get("perception")
-        ),
+        "config": profile_presentation(config["data"], detector),
+        "detector": detector,
     }
 
 

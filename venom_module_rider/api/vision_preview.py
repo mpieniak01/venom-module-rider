@@ -69,6 +69,7 @@ async def processed_camera(request: Request):
     revision = 0
     source = "diagnostic_default"
     perception = {}
+    policy = {}
     try:
         policy = (await domain.read("/api/navigation/config", 0.2))["data"]
         corridor = tuple(policy["corridor"])
@@ -140,6 +141,7 @@ async def processed_camera(request: Request):
                 mode="observe",
                 corridor=corridor,
                 perception=PerceptionSettings.model_validate(perception),
+                behavior=policy.get("behavior", {}),
             )
             result = await loop.decide(
                 client.device.id,

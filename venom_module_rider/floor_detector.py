@@ -50,7 +50,7 @@ class FloorDetector:
             raise ValueError("vision_model_format")
         self.session, self.digest = session, digest
 
-    def detect(self, payload, corridor, *, preview=True):
+    def detect(self, payload, corridor, *, preview=True, evidence=False):
         import numpy as np
         from PIL import Image
 
@@ -61,6 +61,11 @@ class FloorDetector:
                 32 <= image.width <= 1280 and 32 <= image.height <= 720
             ):
                 raise ValueError("vision_image_bounds")
+            source_size = image.size
+            if evidence:
+                from .navigation_maps import source_gray
+
+                gray = source_gray(image)
             rgb = (
                 np.asarray(
                     image.convert("RGB").resize((512, 512), Image.Resampling.BILINEAR),
@@ -92,6 +97,13 @@ class FloorDetector:
             session.run(None, {session.get_inputs()[0].name: pixels})[0]
         )
         result = classify_logits(logits, corridor)
+        if evidence:
+            from .navigation_maps import semantic_maps
+
+            result["_navigation_maps"] = {
+                **semantic_maps(logits, source_size),
+                "gray": gray,
+            }
         if preview:
             result["_preview"] = render_preview(rgb, logits, corridor)
         return result

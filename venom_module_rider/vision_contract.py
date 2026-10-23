@@ -15,6 +15,21 @@ from .avoidance import AvoidanceSettings, MotionPhase
 from .depth_detector import PerceptionSettings
 
 
+class BehaviorSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    version: Annotated[StrictInt, Field(ge=1, le=1)] = 1
+    profile_id: Literal["legacy", "cautious", "balanced", "fluid"] = "legacy"
+    profile_revision: Annotated[StrictInt, Field(ge=1, le=1)] = 1
+
+    @model_validator(mode="after")
+    def validate_definition(self):
+        from .navigation_profiles import validate_behavior
+
+        validate_behavior(self.model_dump())
+        return self
+
+
 class JourneyContext(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -43,6 +58,7 @@ class VisionFrame(BaseModel):
     journey: JourneyContext | None = None
 
     perception: PerceptionSettings = Field(default_factory=PerceptionSettings)
+    behavior: BehaviorSettings = Field(default_factory=BehaviorSettings)
 
     @model_validator(mode="after")
     def avoidance_protocol(self):

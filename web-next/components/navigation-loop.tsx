@@ -12,27 +12,31 @@ import type { Translator } from "../lib/i18n";
 import { LoopDecision } from "./loop-decision";
 import { CameraPanel } from "./control";
 import { PerceptionModelsPanel } from "./perception-models";
+import { NavigationProfiles } from "./navigation-profiles";
 import { Button, Checkbox, Field, Input, Panel, Pill, Select } from "./primitives";
 import styles from "../rider.module.css";
 
 export function NavigationLoop({client,t,language,manual,auxiliary}:{client:RiderClient;t:Translator;language:string;manual:ReactNode;auxiliary?:ReactNode}) {
   const [view, setView] = useState<"manual" | "automatic" | "journey">("manual");
   const [policy,setPolicy]=useState<JsonRecord|null>(null);
+  const [profileSnapshot,setProfileSnapshot]=useState<{policy:JsonRecord|null;session:string}>({policy:null,session:""});
+  const [profileBusy,setProfileBusy]=useState(false);
   const [draft,setDraft]=useState<JsonRecord|null>(null);
   const [editingZone,setEditingZone]=useState(false);
   const dirty=!!policy&&JSON.stringify(policy)!==JSON.stringify(draft);
-  const policyRef=useRef(policy),dirtyRef=useRef(dirty);
+  const policyRef=useRef(policy),dirtyRef=useRef(dirty),policySession=useRef("");
   policyRef.current=policy;dirtyRef.current=dirty;
-  const {setPerceptionPolicy}=client;
+  const {setPerceptionPolicy,currentSession}=client;
   const applyPolicy=useCallback((value:JsonRecord|null)=>{
-    policyRef.current=value;setPolicy(value);setDraft(value);setPerceptionPolicy?.(value);
-  },[setPerceptionPolicy]);
+    policyRef.current=value;policySession.current=currentSession();setPolicy(value);setProfileSnapshot({policy:value,session:currentSession()});setDraft(value);setPerceptionPolicy?.(value);
+  },[setPerceptionPolicy,currentSession]);
   const [detector,setDetector]=useState<JsonRecord>({});
   const [loopState,setLoopState]=useState<JsonRecord>({});
   const [goals,setGoals]=useState<JsonRecord>({});
   const [runtime,setRuntime]=useState<JsonRecord>({});
   const [loading,setLoading]=useState(false);
-  const [operation,setOperation]=useState<"check"|"start"|"stop"|"save"|"zone"|null>(null);
+  const [operationState,setOperation]=useState<"check"|"start"|"stop"|"save"|"zone"|null>(null);
+  const operation=operationState??(profileBusy?"behavior":null);
   const [error,setError]=useState("");
   const [errorRun,setErrorRun]=useState("");
   const [trialFailure,setTrialFailure]=useState<unknown>(null);
@@ -63,7 +67,7 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
   const session=client.status?.connection.session;
   useEffect(()=>{
     const abort=new AbortController();let timer:ReturnType<typeof setTimeout>;let configured=false;let reading=false;
-    setLoopState({stale:true});setGoals({});setRuntime({});setTrialFailure(null);setSettingsError("");setSavedRevision(null);
+    setProfileSnapshot({policy:null,session:session??""});setLoopState({stale:true});setGoals({});setRuntime({});setTrialFailure(null);setSettingsError("");setSavedRevision(null);
     if(!connected)return ()=>abort.abort();
     setLoading(true);setReadError("");
     const apply=(row:JsonRecord)=>{setLoopState(record(row.status));setDetector(record(row.detector));setGoals(record(row.goals));};
@@ -76,7 +80,8 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
         if(abort.signal.aborted)return;
         apply(row);
         const incoming=record(row.config);
-        if(first||!dirtyRef.current&&typeof incoming.revision==="number"&&incoming.revision>Number(policyRef.current?.revision??-1))applyPolicy(incoming);
+        if(typeof incoming.revision==="number")setProfileSnapshot(previous=>previous.session===session&&Number(previous.policy?.revision??-1)>Number(incoming.revision)?previous:{policy:incoming,session:session??""});
+        if((policySession.current!==session||Number(incoming.revision)>=Number(policyRef.current?.revision??-1))&&(first||!dirtyRef.current&&typeof incoming.revision==="number"&&incoming.revision>Number(policyRef.current?.revision??-1)))applyPolicy(incoming);
         if(first){setRuntime(record(row.runtime));configured=true;}
         setReadError("");
       } catch(err) {
@@ -397,7 +402,7 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
     </div>
     <div className={styles.driveWorkspace}>
       <div className={styles.workspaceContent} data-testid="workspace-content" role="region" aria-label={t("workspaceObservation")}>
-        <div className={styles.loopCamera}><PerceptionModelsPanel client={client} t={t} language={language} policy={policy} goals={goals} locked={!!operation||dirty||loading} onApplied={applyPolicy} onRefresh={refreshPerception}/><CameraPanel client={client} t={t} language={language} compact editor={view !== "manual" && editingZone && draft && Array.isArray(draft.corridor) ? {value:draft.corridor as number[],disabled:goals.drive===true||!!operation,onChange:value=>setDraft({...draft,corridor:value})}:undefined}/></div>
+        <div className={styles.loopCamera}><PerceptionModelsPanel client={client} t={t} language={language} policy={policy} goals={goals} locked={!!operation||dirty||loading} onApplied={applyPolicy} onRefresh={refreshPerception}/><NavigationProfiles key={session} client={client} t={t} policy={profileSnapshot.session===session?profileSnapshot.policy:null} goals={goals} locked={!!operation||dirty||loading||!!readError} onApplied={applyPolicy} onRefresh={refreshPerception} onPendingChange={setProfileBusy}/><CameraPanel client={client} t={t} language={language} compact editor={view !== "manual" && editingZone && draft && Array.isArray(draft.corridor) ? {value:draft.corridor as number[],disabled:goals.drive===true||!!operation,onChange:value=>setDraft({...draft,corridor:value})}:undefined}/></div>
         <details id="rider-workspace-details" ref={workspaceDetailsRef} onToggle={event=>setDetailsOpen(event.currentTarget.open)} className={styles.workspaceDetails} data-testid="workspace-details">
           <summary>{t("cockpitDetails")}</summary>
           <div className={styles.workspaceDetailsBody}>

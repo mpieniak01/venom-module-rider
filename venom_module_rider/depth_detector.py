@@ -26,7 +26,7 @@ class PerceptionSettings(BaseModel):
     slope_min: float = Field(default=2.0, ge=1.0, le=4.0)
 
 
-def assess_depth(depth, corridor, settings):
+def assess_depth(depth, corridor, settings, *, evidence=False):
     """Fit with broad support; score the STOP zone. No physical distance."""
     import numpy as np
 
@@ -88,7 +88,7 @@ def assess_depth(depth, corridor, settings):
         state, reason = "clear", "depth_plane_candidate"
     error_map = np.full(depth.shape, np.nan)
     error_map[mask] = errors
-    return {
+    assessment = {
         "state": state,
         "reason": reason,
         "sectors": assess_sectors(
@@ -134,6 +134,18 @@ def assess_depth(depth, corridor, settings):
         "distance_measurement": False,
         "_errors": error_map,
     }
+    if evidence:
+        from .navigation_maps import depth_maps
+
+        signed_map = np.full(depth.shape, np.nan)
+        signed_map[mask] = signed_errors
+        assessment["_navigation_maps"] = depth_maps(
+            error_map,
+            signed_map,
+            settings.residual_limit,
+            valid=reference_valid and oriented,
+        )
+    return assessment
 
 
 def draw_stop_border(draw, shape, corridor):
@@ -270,13 +282,13 @@ class DepthDetector:
             .to(self.device)
         )
 
-    def detect(self, payload, corridor, settings):
-        return self._detect(payload, corridor, settings)
+    def detect(self, payload, corridor, settings, *, evidence=False):
+        return self._detect(payload, corridor, settings, evidence=evidence)
 
-    def detect_ground(self, payload, corridor, settings, geometry):
-        return self._detect(payload, corridor, settings, geometry)
+    def detect_ground(self, payload, corridor, settings, geometry, *, evidence=False):
+        return self._detect(payload, corridor, settings, geometry, evidence=evidence)
 
-    def _detect(self, payload, corridor, settings, geometry=None):
+    def _detect(self, payload, corridor, settings, geometry=None, *, evidence=False):
         import numpy as np
         import torch
 
@@ -330,11 +342,15 @@ class DepthDetector:
             .numpy()
         )
         if geometry is None or geometry.mode == "image":
-            assessment = assess_depth(depth, corridor, settings)
+            assessment = assess_depth(depth, corridor, settings, evidence=evidence)
         else:
             from .adaptive_ground import assess
 
-            assessment = assess(depth, corridor, settings, geometry)
+            assessment = assess(depth, corridor, settings, geometry, evidence=evidence)
+        if evidence and "_navigation_maps" in assessment:
+            from .navigation_maps import source_gray
+
+            assessment["_navigation_maps"]["gray"] = source_gray(image)
         preview = render_depth(image, depth, assessment, corridor, settings, geometry)
         return {
             **assessment,

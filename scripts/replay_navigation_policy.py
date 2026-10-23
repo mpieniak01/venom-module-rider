@@ -1,0 +1,257 @@
+"""Offline replay of source-resolution compact masks, never camera/actuation.
+
+Manifest JSONL rows: frame_id, sequence, captured_s, context, maps (relative NPZ
+path). NPZ contains boolean floor/obstacle/uncertain or source uint8 labels
+and float16/float32 confidence (rethresholded using pixel_confidence); critical
+and uint8 gray are optional. An explicit raw_state can preserve the original model
+assessment. Without it, the strict map baseline is labelled reconstructed.
+"""
+
+import argparse
+import json
+from collections import Counter
+from collections.abc import Mapping
+from hashlib import file_digest, sha256
+from pathlib import Path
+from time import perf_counter
+from typing import Any
+
+from venom_module_rider.navigation_maps import assess_evidence
+from venom_module_rider.temporal_evidence import TemporalEvidence
+
+
+def _asset(root: Path, value: Any) -> Path:
+    if not isinstance(value, str) or not value or Path(value).is_absolute():
+        raise ValueError("replay_relative_maps")
+    path = (root / value).resolve()
+    if not path.is_relative_to(root.resolve()) or not path.is_file():
+        raise ValueError("replay_maps_path")
+    if path.suffix != ".npz":
+        raise ValueError("replay_maps_format")
+    if path.stat().st_size > 32 * 1024 * 1024:
+        raise ValueError("replay_maps_bounds")
+    return path
+
+
+def _read_maps(path: Path) -> dict[str, Any]:
+    import numpy as np
+
+    with np.load(path, allow_pickle=False) as archive:
+        if not (
+            {"floor", "obstacle", "uncertain"}.issubset(archive.files)
+            or {"labels", "confidence"}.issubset(archive.files)
+        ):
+            raise ValueError("replay_maps_keys")
+        # Bound declared arrays before materializing compressed payloads.
+        # The NPZ ZIP member size also bounds decompression memory.
+        import zipfile
+
+        with zipfile.ZipFile(path) as members:
+            if any(item.file_size > 4 * 1024 * 1024 for item in members.infolist()):
+                raise ValueError("replay_maps_bounds")
+        maps = {
+            key: archive[key]
+            for key in (
+                "floor",
+                "obstacle",
+                "uncertain",
+                "critical",
+                "gray",
+                "labels",
+                "confidence",
+                "corridor",
+            )
+            if key in archive.files
+        }
+        for key in (
+            "valid",
+            "geometry_guard_clear",
+            "geometry_collision",
+            "geometry_blocked",
+            "geometry_complete",
+        ):
+            if key in archive.files:
+                value = archive[key]
+                if value.shape != () or value.dtype != np.bool_:
+                    raise ValueError("replay_geometry_metadata")
+                maps[key] = bool(value.item())
+    return maps
+
+
+def replay(
+    manifest: Path,
+    params: Mapping[str, Any],
+    output: Path,
+    *,
+    behavior: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Write streamed results and return counts; no generated truth labels."""
+    import numpy as np
+
+    evaluator = TemporalEvidence()
+    states: Counter[str] = Counter()
+    reasons: Counter[str] = Counter()
+    baseline: Counter[str] = Counter()
+    durations: list[float] = []
+    count = 0
+    if output.resolve() == manifest.resolve():
+        raise ValueError("replay_output_overwrites_input")
+    if output.suffix != ".jsonl":
+        raise ValueError("replay_output_format")
+    maps_digest = sha256()
+    with manifest.open("rb") as stream:
+        manifest_digest = file_digest(stream, "sha256").hexdigest()
+    dimensions: set[tuple[int, int]] = set()
+    profile: dict[str, Any] = {"id": "research", "qualified": False}
+    if behavior is not None:
+        from venom_module_rider.navigation_profiles import policy_digest
+
+        profile = {
+            "id": behavior["profile_id"],
+            "behavior": dict(behavior),
+            "effective_policy_sha256": policy_digest(dict(behavior)),
+            "qualified": False,
+        }
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with (
+        manifest.open(encoding="utf-8") as source,
+        output.open("w", encoding="utf-8") as target,
+    ):
+        for line in source:
+            if len(line) > 64 * 1024:
+                raise ValueError("replay_manifest_bounds")
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            path = _asset(manifest.parent, row["maps"])
+            maps = _read_maps(path)
+            if ("labels" in maps) != ("confidence" in maps):
+                raise ValueError("replay_semantic_pair")
+            map_sha256 = sha256(path.read_bytes()).hexdigest()
+            maps_digest.update(map_sha256.encode())
+            shape = maps["floor"].shape if "floor" in maps else maps["labels"].shape
+            dimensions.add(tuple(shape))
+            corridor = row.get("corridor", [0.35, 0.65, 0.65, 0.95])
+            started = perf_counter()
+            spatial = assess_evidence(
+                maps, corridor, params, raw_reason=row.get("raw_reason")
+            )
+            for key in ("valid", "source_gap"):
+                if key in row:
+                    spatial[key] = row[key]
+            if row.get("valid") is False:
+                spatial["reason"] = row.get("reason", "navigation_invalid_evidence")
+            temporal = evaluator.update(
+                spatial,
+                maps.get("gray"),
+                context=row["context"],
+                sequence=row["sequence"],
+                frame_id=row["frame_id"],
+                captured_s=row["captured_s"],
+                params=params,
+            )
+            duration = (perf_counter() - started) * 1000
+            durations.append(duration)
+            reconstructed = row.get("raw_state") is None
+            state = row.get("raw_state")
+            if reconstructed:
+                if spatial["uncertain_fraction"] > 0.01:
+                    state = "unknown"
+                elif (
+                    spatial["counts"]["obstacle_pixels"]
+                    + spatial["counts"]["ignored_obstacle_pixels"]
+                ):
+                    state = "obstacle"
+                elif spatial["floor_fraction"] < 1:
+                    state = "unknown"
+                else:
+                    state = "clear"
+            if state not in {"clear", "unknown", "obstacle"}:
+                raise ValueError("replay_raw_state")
+            result = {
+                "frame_id": row["frame_id"],
+                "sequence": row["sequence"],
+                "captured_s": row["captured_s"],
+                "context": row["context"],
+                "maps_sha256": map_sha256,
+                "source_sha256": row.get("source_sha256"),
+                "source_dimensions": {
+                    "width": int(shape[1]),
+                    "height": int(shape[0]),
+                },
+                "profile": profile,
+                "raw_state": state,
+                "baseline_reconstructed": reconstructed,
+                "spatial": {
+                    key: value
+                    for key, value in spatial.items()
+                    if not key.startswith("_")
+                },
+                "temporal": temporal,
+                "evaluation_ms": duration,
+            }
+            target.write(json.dumps(result, allow_nan=False) + "\n")
+            count += 1
+            states[temporal["action"]] += 1
+            reasons[temporal["reason"]] += 1
+            baseline[str(state)] += 1
+    return {
+        "frames": count,
+        "profile": profile,
+        "source_dimensions": [
+            {"width": width, "height": height} for height, width in sorted(dimensions)
+        ],
+        "manifest_sha256": manifest_digest,
+        "maps_digest_sha256": maps_digest.hexdigest(),
+        "params_sha256": sha256(
+            json.dumps(dict(params), sort_keys=True, allow_nan=False).encode()
+        ).hexdigest(),
+        "actions": dict(states),
+        "reasons": dict(reasons),
+        "baseline": dict(baseline),
+        "evaluation_ms": {
+            "p50": float(np.percentile(durations, 50)) if durations else None,
+            "p95": float(np.percentile(durations, 95)) if durations else None,
+            "max": max(durations, default=None),
+        },
+        "ground_truth": "not_inferred",
+        "robot_connected": False,
+        "time_basis": "source captured_s; no TTL renewal or metric TTC",
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--manifest", type=Path, required=True)
+    selection = parser.add_mutually_exclusive_group(required=True)
+    selection.add_argument("--params", type=Path, help="Research parameter JSON")
+    selection.add_argument(
+        "--profile",
+        choices=("cautious", "balanced", "fluid"),
+        help="Immutable experimental profile from the shared registry",
+    )
+    parser.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args(argv)
+    behavior = None
+    if args.profile:
+        from venom_module_rider.navigation_profiles import parameters
+
+        behavior = {"version": 1, "profile_id": args.profile, "profile_revision": 1}
+        params = parameters(behavior)
+    else:
+        if args.output.resolve() == args.params.resolve():
+            raise ValueError("replay_output_overwrites_input")
+        params = json.loads(args.params.read_text(encoding="utf-8"))
+        if not isinstance(params, dict):
+            raise ValueError("replay_params")
+    summary = replay(args.manifest, params, args.output, behavior=behavior)
+    summary_path = args.output.with_suffix(".summary.json")
+    summary_path.write_text(
+        json.dumps(summary, indent=2, allow_nan=False) + "\n", encoding="utf-8"
+    )
+    print(json.dumps(summary, indent=2, allow_nan=False))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

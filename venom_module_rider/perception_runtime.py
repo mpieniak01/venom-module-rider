@@ -21,7 +21,7 @@ class TorchSegformer:
     def status(self):
         return {"loaded": self.model is not None, "device": "cpu"}
 
-    def detect(self, payload, corridor):
+    def detect(self, payload, corridor, *, evidence=False):
         import numpy as np
         import torch
         from PIL import Image
@@ -50,6 +50,13 @@ class TorchSegformer:
                 self.model(pixel_values=torch.from_numpy(pixels)).logits.cpu().numpy()
             )
         result = classify_logits(logits, corridor)
+        if evidence:
+            from .navigation_maps import semantic_maps, source_gray
+
+            result["_navigation_maps"] = {
+                **semantic_maps(logits, image.size),
+                "gray": source_gray(image),
+            }
         if rgb.mean() < 0.04 or rgb.std() < 0.01:
             result.update(state="unknown", reason="vision_image_quality")
         result["_preview"] = render_preview(rgb, logits, corridor)
@@ -140,6 +147,13 @@ class ModelRuntime:
             assert detector is not None
             start = time.perf_counter()
             try:
+                from .navigation_profiles import parameters
+
+                options = (
+                    {"evidence": parameters(frame.behavior.model_dump())}
+                    if frame.behavior.profile_id != "legacy"
+                    else {}
+                )
                 if model_id == DEPTH:
                     if (
                         frame.protocol_version == 3
@@ -150,13 +164,14 @@ class ModelRuntime:
                             frame.corridor,
                             frame.perception,
                             frame.avoidance.geometry,
+                            **options,
                         )
                     else:
                         result = detector.detect(
-                            payload, frame.corridor, frame.perception
+                            payload, frame.corridor, frame.perception, **options
                         )
                 else:
-                    result = detector.detect(payload, frame.corridor)
+                    result = detector.detect(payload, frame.corridor, **options)
                     if result.get("_preview"):
                         result["_preview"] = source_overlay(payload, result["_preview"])
                 elapsed = (time.perf_counter() - start) * 1000
@@ -280,7 +295,7 @@ class YoloSemanticOnnx:
     def status(self):
         return {"loaded": self.session is not None, "device": "cpu"}
 
-    def detect(self, payload, corridor):
+    def detect(self, payload, corridor, *, evidence=False):
         import numpy as np
         import onnxruntime as ort
         import torch
@@ -325,6 +340,13 @@ class YoloSemanticOnnx:
             align_corners=False,
         ).numpy()[:, :, top : top + height, left : left + width]
         result = classify_logits(logits, corridor)
+        if evidence:
+            from .navigation_maps import semantic_maps, source_gray
+
+            result["_navigation_maps"] = {
+                **semantic_maps(logits, image.size),
+                "gray": source_gray(image),
+            }
         if rgb.mean() < 0.04 or rgb.std() < 0.01:
             result.update(state="unknown", reason="vision_image_quality")
         result["_preview"] = render_preview(rgb, logits, corridor)
