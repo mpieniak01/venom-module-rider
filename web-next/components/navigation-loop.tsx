@@ -223,29 +223,33 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
     try{await task;}catch(err){if(!stopping.current)failure(err);}
     finally{startTask.current=null;if(!stopping.current)setOperation(null);}
   };
+  const saveImageAcceptance=async(origin:string,acceptSweep:boolean,resumeAfterSave=true)=>{
+    if(!policy)throw new Error("loop_configuration_unavailable");
+    const loaded=await apiFetch<JsonRecord>("/api/v1/rider/navigation/config");ensureOperation(origin);
+    const current=record(loaded.config),model=record(loaded.detector);
+    const visible=client.currentCamera();
+    if(current.revision!==policy.revision||calibrationScope(current,model)!==calibrationScope(policy,detector)||decisionView(record(loaded.status),model).vision!=="go"||!freshPolicyFrame(visible.frame,visible.stream,record(loaded.status),current))throw Object.assign(new Error("navigation_configuration_changed"),{data:{error:"navigation_configuration_changed"}});
+    const resumeObservation=record(loaded.goals).observe===true;
+    await stopGoals(origin);ensureOperation(origin);
+    let saved:JsonRecord;
+    try {
+      saved=await persist(calibrationAcceptance(current,model,"operator-"+createBrowserUuid(),acceptSweep));ensureOperation(origin);
+    } catch (saveError) {
+      // Restore only observation explicitly requested before this transaction.
+      // STOP/cancellation prevents both recovery and a following journey request.
+      if(resumeObservation){ensureOperation(origin);await ensureAnalysis(origin);}
+      throw saveError;
+    }
+    setTrialResult("trialAcceptanceSaved");
+    if(resumeAfterSave)await ensureAnalysis(origin);
+    return saved;
+  };
   const acceptTrial=async()=>{
     const camera=client.currentCamera();
     if(!policy||dirty||operation||loading||goals.drive===true||view==="journey"&&(record(policy.avoidance).enabled!==true||record(policy.avoidance).protocol_version!==3)||imageDecision.vision!=="go"||!freshPolicyFrame(camera.frame,camera.stream,loopState,policy))return;
     client.setNotice(null);setTrialFailure(null);setOperation("save");setError("");setTrialResult("");
     const origin=client.currentSession();operationEpoch.current=client.currentMotionEpoch();operationGeneration.current=client.currentGeneration();
-    const task=(async()=>{
-      const loaded=await apiFetch<JsonRecord>("/api/v1/rider/navigation/config");ensureOperation(origin);
-      const current=record(loaded.config),model=record(loaded.detector);
-      const visible=client.currentCamera();
-      if(current.revision!==policy.revision||calibrationScope(current,model)!==calibrationScope(policy,detector)||decisionView(record(loaded.status),model).vision!=="go"||!freshPolicyFrame(visible.frame,visible.stream,record(loaded.status),current))throw Object.assign(new Error("navigation_configuration_changed"),{data:{error:"navigation_configuration_changed"}});
-      const resumeObservation=record(loaded.goals).observe===true;
-      await stopGoals(origin);ensureOperation(origin);
-      try {
-        await persist(calibrationAcceptance(current,model,"operator-"+createBrowserUuid(),view==="journey"));ensureOperation(origin);
-      } catch (saveError) {
-        // A failed write must not strand an explicitly started preview.
-        // Cancellation/STOP still wins: ensureOperation prevents any restart then.
-        if(resumeObservation){ensureOperation(origin);await ensureAnalysis(origin);}
-        throw saveError;
-      }
-      setTrialResult("trialAcceptanceSaved");
-      await ensureAnalysis(origin);
-    })();startTask.current=task;
+    const task=saveImageAcceptance(origin,view==="journey");startTask.current=task;
     try{await task;}catch(err){if(!stopping.current)failure(err);}
     finally{startTask.current=null;if(!stopping.current)setOperation(null);}
   };
@@ -275,13 +279,19 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
     finally{startTask.current=null;if(!stopping.current)setOperation(null);}
   };
   const runJourney=async()=>{
-    if(!policy||journeyUnavailable.length||operation||loading||startTask.current||journey.active)return;
+    if(!policy||journeyUnavailable.length>0&&!confirmJourney||operation||loading||startTask.current||journey.active)return;
     const origin=client.currentSession(),epoch=client.currentMotionEpoch();
-    client.setNotice(null);setOperation("start");setJourneyError("");setJourneyRequested(false);trialArmed.current=false;
+    operationEpoch.current=epoch;operationGeneration.current=client.currentGeneration();
+    client.setNotice(null);setTrialFailure(null);setError("");setOperation("start");setJourneyError("");setJourneyRequested(false);trialArmed.current=false;
     const task=(async()=>{
       client.setCameraStream("venom");
       const plan=t("journeyPlan")+" · "+String(policy.speed)+" SDK · ≤ "+String(policy.max_motion_ms)+" ms";
-      const result=await client.startNavigationJourney(plan,Number(policy.revision));
+      // This click explicitly confirms the visible image and starts the journey.
+      // Save before admission; a rejected save/STOP must never enqueue motion.
+      const result=await client.startNavigationJourney(plan,Number(policy.revision),confirmJourney?async()=>{
+        const accepted=await saveImageAcceptance(origin,true,false);ensureOperation(origin);
+        return Number(accepted.revision);
+      }:undefined);
       if(stopping.current||client.currentSession()!==origin||client.currentMotionEpoch()!==epoch)throw new Error("navigation_trial_cancelled");
       const saved=record(result.config);if(Object.keys(saved).length)applyPolicy(saved);
       await readState();setJourneyRequested(true);
@@ -344,6 +354,9 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
   const permission=motionPermission(loopState,goals,policy,detector,client.status);
   const imageDecision=decisionView(loopState,detector);
   const acceptanceBlock=dirty?"loopUnsaved":view==="journey"&&(record(policy?.avoidance).enabled!==true||record(policy?.avoidance).protocol_version!==3)?"journeyAvoidanceRequired":calibrationFrameBlock(client.camera,client.cameraStream,loopState,policy)|| (imageDecision.vision!=="go"?"calibrationClearFrame":"");
+  const confirmJourney=!!policy&&(!calibrationMatches(policy,detector)||record(policy.avoidance).sweep_verified!==true)
+    &&!acceptanceBlock&&detector.loaded===true&&/^[a-f0-9]{64}$/.test(String(detector.sha256))
+    &&journeyBlocks(policy,runtime,detector,connected,dirty,client.status,false).length===0;
   const diagnostic=trialDiagnostics(loopState,trialFailure);
   const sharedTrial=diagnostic.outcome;
   const displayedStopReason=sharedTrial?String(sharedTrial.stop_reason):trialStopReason;
@@ -361,6 +374,7 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
   if (view === "journey") {
     if (journeyError) commandReason = t("journeyRequestError") + " · " + journeyError;
     else if (journeyUnavailable[0]) commandReason = t(journeyUnavailable[0]);
+    else if (journey.reason&&["failed","blocked"].includes(journey.phase)) commandReason=t(["decision_timeout","decision_invalid_or_expired"].includes(journey.reason)?"workspace.journeyAnalysisExpired":trialStopReasonKey(journey.reason));
     else if (journey.active&&journey.reason) commandReason = t("state") + ": " + journey.reason;
   } else if (view === "automatic") {
     commandReason = visibleError || readError;
@@ -409,7 +423,7 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
               <span className={styles.small}>{t("journeyElapsed")}: {formatNumber(journey.elapsed,language,1)} s · {t("journeyManeuver")}: {journey.maneuver??"—"}</span>
             </div>
             <div className={styles.loopActions}>
-              <Button tone="primary" size="large" data-testid="journey-start" disabled={journeyUnavailable.length>0||!!operation||!!client.busy||loading||journey.active||automaticActive} onClick={()=>void runJourney()}><Play size={18}/>{t("cockpitStartJourney")}</Button>
+              <Button tone="primary" size="large" data-testid="journey-start" disabled={journeyUnavailable.length>0&&!confirmJourney||!!operation||!!client.busy||loading||journey.active||automaticActive} onClick={()=>void runJourney()}><Play size={18}/>{t(confirmJourney?"workspace.confirmStartJourney":"cockpitStartJourney")}</Button>
               <Button tone="caution" size="large" data-testid="journey-stop" disabled={!connected||operation==="stop"} onClick={()=>void stopJourney()}><Square size={18}/>{t("cockpitStopJourney")}</Button>
               <span className={styles.small} data-testid="journey-motion-limits">{String(policy?.speed??"—")} SDK · ≤ {String(policy?.max_motion_ms??"—")} ms</span>
             </div>
@@ -417,7 +431,7 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
         </div>
       <div className={styles.commandReason} role="status" data-testid="command-reason">
         <span>{commandReason}</span>
-        {prepareAction&&<Button data-testid="prepare-navigation" disabled={!connected||!!operation||loading||!!observeBlock||goals.drive===true} onClick={()=>{if(!acceptanceBlock)void acceptTrial();else showPreparation();}}>{t(!acceptanceBlock?"workspace.confirm":active?"workspace.preparation":"workspace.prepare")}</Button>}
+        {prepareAction&&!(view==="journey"&&confirmJourney)&&<Button data-testid="prepare-navigation" disabled={!connected||!!operation||loading||!!observeBlock||goals.drive===true} onClick={()=>{if(!acceptanceBlock)void acceptTrial();else showPreparation();}}>{t(!acceptanceBlock?"workspace.confirm":active?"workspace.preparation":"workspace.prepare")}</Button>}
       </div>
       <div className={styles.commandAccess}>
         <Button data-testid="workspace-settings-toggle" aria-expanded={detailsOpen} aria-controls="rider-workspace-details" onClick={()=>{if(workspaceDetailsRef.current){workspaceDetailsRef.current.open=!workspaceDetailsRef.current.open;if(workspaceDetailsRef.current.open)workspaceDetailsRef.current.scrollIntoView({block:"nearest",behavior:"smooth"});}}}>{t("cockpitDetails")}</Button>

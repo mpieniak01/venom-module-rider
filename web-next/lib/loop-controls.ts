@@ -129,7 +129,7 @@ export function decisionView(state: JsonRecord, detector: JsonRecord) {
     confidence:typeof decision.confidence_fraction==="number"?decision.confidence_fraction:null,
   };
 }
-export function trialBlock(policy: JsonRecord|null, runtime:JsonRecord, detector:JsonRecord, connected:boolean, dirty:boolean, status:RiderStatus|null):string {
+export function trialBlock(policy: JsonRecord|null, runtime:JsonRecord, detector:JsonRecord, connected:boolean, dirty:boolean, status:RiderStatus|null, requireAcceptance=true):string {
   if(!connected)return "loopOffline";
   if(!policy)return "loopLoadFailed";
   if(dirty)return "loopUnsaved";
@@ -141,7 +141,7 @@ export function trialBlock(policy: JsonRecord|null, runtime:JsonRecord, detector
   if(runtime.drive!==true)return runtime.drive_reason==="navigation_executor_update_required"?"loopExecutorUpdate":"loopRuntimeMissing";
   if(detector.configured!==true)return "loopNoModel";
   if(detector.drive_supported===false)return "loopDepthObservation";
-  if(!calibrationRecorded(policy)||detector.loaded===true&&!calibrationMatches(policy,detector))return "loopUnverified";
+  if(requireAcceptance&&(!calibrationRecorded(policy)||detector.loaded===true&&!calibrationMatches(policy,detector)))return "loopUnverified";
   const safety=safetyOf(status);
   if(safety.state==="ESTOP")return "trialEstop";
   if(safety.stale===true||status?.errors?.control)return "trialControlStale";

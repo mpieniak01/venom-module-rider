@@ -19,7 +19,7 @@ async page => {
   const configView=()=>({...structuredClone(policy),
     behavior_catalog:{version:1,supported:true,active:policy.behavior,profiles,effective_policy_sha256:"c".repeat(64)},
     model_tuning_supported:true,perception_tuning:{version:1,active_model_id:"depth-anything-v2-indoor-small",effective:{}}});
-  let observe=false,drive=false,running=false,stale=true,cameraState="stopped",journey=null,rejectSave=true,rejectedWrites=0;
+  let observe=false,drive=false,running=false,stale=true,cameraState="stopped",journey=null,rejectSave=true,rejectedWrites=0,delaySave=false,savePending=false;
   let state="DISARMED",owner=null,holder=null,generation="prod-0",operation="idle",serial=0,journeyPending=false,delayJourney=false;
   const settings={revision:1,directions:Object.fromEntries(["forward","backward","left","right"].map(key=>[key,{speed:.2,duration:.25,minimum:0,maximum:1,step:.01}])),parameter_schema:{direction_fields:{speed:{display_factor:100,display_precision:0,display_unit:"%"}}},control_modes:{version:1,supported:["pulse","hold","release"],hold_renewal_ms:150,hold_timeout_ms:500,click_threshold_ms:180,request_ttl_ms:500}};
   const safety=()=>({state,owner,generation,arming_mode:state==="ARMED"?"journey":null,last_seq:0,operator_intervention_version:1,navigation_journey_version:1,panel_motion_enabled:state==="ARMED",ready:true,can_move:state==="ARMED",stale:false,observed_at:Date.now()/1000,capabilities:{move:{available:true}},panel_control:{version:1,holder},operator_control:{version:1,state:drive?"active":"paused",operation_id:operation,generation},remote_decision_deadline_supported:true,scoped_stop_generation_supported:true});
@@ -70,6 +70,9 @@ async page => {
         check(body.values.verified===true&&body.values.avoidance.sweep_verified===true,"joint acceptance incomplete");
         check(body.values.model_sha256===sha&&body.values.calibration_id.startsWith("operator-"),"acceptance identity missing");
         if(rejectSave){rejectedWrites++;return json({detail:{code:"navigation_configuration_conflict"}},409);}
+        savePending=true;
+        if(delaySave)await new Promise(resolve=>setTimeout(resolve,1100));
+        savePending=false;
         saves.push(structuredClone(body.values));policy={...body.values,revision:policy.revision+1};
         await page.evaluate(revision=>{window.__journeyStartProd.revision=revision;},policy.revision);
         return json({ok:true,meta:{},data:{ok:true,persisted:true,config:configView()}});
@@ -127,27 +130,39 @@ async page => {
     check(await accept.isDisabled(),"different run frames enabled acceptance");
     await page.evaluate(()=>{window.__journeyStartProd.run="prod-observe";});
     await wait(async()=>!await accept.isDisabled(),"fresh same-run frames never enable acceptance");
-    check(await start.isDisabled(),"video itself granted driving acceptance");
+    check(!await start.isDisabled(),"fresh clear image cannot reach the primary confirm-and-start action");
+    check((await start.innerText()).includes("Potwierdź"),"primary Start does not disclose image/steering confirmation");
     check(saves.length===0&&calls.every(call=>call.path!=="/control"&&call.path!=="/navigation/journey"),"observation actuated or fabricated acceptance");
     scenarios.push("only explicit observation starts camera; wrong revision/run and missing frames cannot grant acceptance");
-    await page.getByTestId("prepare-navigation").click();
+    for(const viewport of [{width:1440,height:1000},{width:1366,height:768},{width:1280,height:720},{width:1024,height:768},{width:768,height:1024},{width:390,height:844},{width:844,height:390}]){
+      await page.setViewportSize(viewport);
+      await page.getByTestId("rider-page").evaluate(el=>{el.scrollTop=0;});
+      const primary=await start.boundingBox(),stop=await page.getByTestId("journey-stop").boundingBox();
+      check(primary&&stop&&primary.x+primary.width<=stop.x+1,"confirm/start overlaps Stop at "+viewport.width);
+      const overflow=await page.getByTestId("rider-page").evaluate(el=>el.scrollWidth>el.clientWidth+1);
+      check(!overflow,"confirm/start horizontally overflows at "+viewport.width);
+    }
+    await page.setViewportSize({width:1366,height:900});
+
+    await start.click();
     await wait(()=>rejectedWrites===1,"fixture did not exercise rejected configuration write");
     await wait(()=>observe&&running&&!stale,"failed acceptance left observation stopped");
     check(policy.revision===134&&policy.verified===false&&policy.avoidance.sweep_verified===false,"failed acceptance changed persisted qualification");
     check(saves.length===0&&calls.every(call=>call.path!=="/control"&&call.path!=="/navigation/journey"),"failed acceptance armed or started motion");
     await wait(async()=>!await accept.isDisabled(),"fresh observation did not recover confirmation after rejected save");
-    check(await start.isDisabled(),"rejected acceptance enabled journey Start");
+    check(!await start.isDisabled(),"rejected acceptance stranded the primary retry action");
     scenarios.push("rejected acceptance keeps unverified revision134 and resumes fresh observation without ARM or journey");
     rejectSave=false;
-    await page.getByTestId("prepare-navigation").click();
-    await wait(()=>policy.revision===135,"strict Pi writer rejected acceptance; echoed read-only metadata: "+JSON.stringify(violations));
-    await wait(async()=>!await start.isDisabled(),"accepted stopped Prod did not enable explicit Start");
-    check(saves.length===1,"acceptance must save once");
-    check(calls.every(call=>call.path!=="/control"&&call.path!=="/navigation/journey"),"acceptance issued ARM or journey");
-    check(policy.verified&&policy.avoidance.sweep_verified&&policy.behavior.profile_id==="balanced","acceptance changed profile or omitted qualification");
-    scenarios.push("explicit acceptance persists only Pi writable keys, both qualifications and revision135; no ARM/motion");
+    const beforeConfirmStart=calls.length;
     await start.click();
-    await wait(()=>journey?.active===true,"explicit Start did not reach journey endpoint");
+    await wait(()=>policy.revision===135,"strict Pi writer rejected acceptance; echoed read-only metadata: "+JSON.stringify(violations));
+    await wait(()=>journey?.active===true,"primary confirm-and-start click did not reach journey endpoint");
+    check(saves.length===1,"acceptance must save once");
+    check(policy.verified&&policy.avoidance.sweep_verified&&policy.behavior.profile_id==="balanced","acceptance changed profile or omitted qualification");
+    const transaction=calls.slice(beforeConfirmStart).map(call=>call.path);
+    check(transaction.indexOf("/navigation/config")<transaction.indexOf("/navigation/journey"),"journey preceded successful acceptance");
+    check(!calls.slice(beforeConfirmStart).some(call=>call.path==="/goal/s15_venom_perception"&&call.body.enabled),"confirm-and-start unnecessarily restarted observation before journey preparation");
+    scenarios.push("one explicit primary click saves both qualifications with Pi writable keys then starts revision135");
     check(calls.filter(call=>call.path==="/navigation/journey").length===1,"Start submitted duplicate journey");
     await page.getByTestId("rider-pad-stop").click();
     await wait(()=>state==="DISARMED"&&!journey?.active,"STOP did not end journey");
@@ -162,6 +177,26 @@ async page => {
     check(calls.filter(call=>call.path==="/navigation/journey").length===2,"STOP triggered an extra restart");
     check(violations.length===0,"unexpected contract or endpoint: "+JSON.stringify(violations));
     scenarios.push("STOP supersedes a pending Start; late completion cannot arm or resume motion");
+    policy={...policy,revision:136,mode:"observe",verified:false,calibration_id:"",model_sha256:"",avoidance:{...policy.avoidance,sweep_verified:false}};
+    observe=true;drive=false;running=true;stale=false;
+    await page.evaluate(()=>{window.__journeyStartProd.revision=136;});
+    await wait(async()=>!await start.isDisabled()&&(await start.innerText()).includes("Potwierdź"),"revised policy does not expose primary confirmation");
+    delaySave=true;
+    await start.click();
+    await wait(()=>savePending,"confirmation write not pending");
+    const beforeStopDuringSave=calls.length;
+    await page.getByTestId("rider-pad-stop").click();
+    await wait(()=>!savePending,"late confirmation write never settled");
+    await new Promise(resolve=>setTimeout(resolve,150));
+    check(calls.filter(call=>call.path==="/navigation/journey").length===2,"late confirmation started a journey after STOP");
+    check(state==="DISARMED"&&!journey?.active&&!drive,"confirmation completion reclaimed authority after STOP");
+    check(!calls.slice(beforeStopDuringSave).some(call=>call.path==="/goal/s15_venom_perception"&&call.body.enabled),"late confirmation restarted observation after STOP");
+    scenarios.push("STOP during acceptance write prevents journey admission and observation restart after its late completion");
+    const endedCalls=calls.length;
+    journey={...journey,active:false,state:"failed",reason:"decision_timeout"};
+    await wait(async()=>(await page.getByTestId("command-reason").innerText()).includes("Brak aktualnej poprawnej analizy"),"ended journey hides its actual analysis-timeout reason");
+    check(calls.length===endedCalls,"displaying a failed journey retried motion automatically");
+    scenarios.push("analysis timeout appears by the main controls without automatically retrying or hiding in diagnostics");
     const settingsSave=page.getByTestId("settings-save");
     await settingsSave.evaluate(button=>{let node=button.parentElement;while(node){if(node.tagName==="DETAILS")node.open=true;node=node.parentElement;}});
     const saveRowHeight=await settingsSave.evaluate(button=>button.parentElement.getBoundingClientRect().height);

@@ -429,17 +429,21 @@ export function useRider(section: Section) {
       return result;
     } finally { if (!priority) motionBlocked.current = Math.max(0, motionBlocked.current - 1); setBusy(null); }
   }, [hold, poll, makeEnvelope, mutation, panelId]);
-  const startNavigationJourney = useCallback(async (plan: string, revision: number) => {
+  const startNavigationJourney = useCallback(async (plan: string, revision: number, prepare?: () => Promise<number>) => {
     const origin = sessionRef.current, epoch = motionEpoch.current;
     hold.cancel(); motionBlocked.current += 1; journeyPreparing.current += 1; setBusy("journey");
     try {
+      // Include explicit image confirmation in the cancellable Start operation.
+      // STOP must take this path before any journey HTTP request exists.
+      const acceptedRevision = prepare ? await prepare() : revision;
+      if (sessionRef.current !== origin || motionEpoch.current !== epoch || document.hidden) throw new Error("navigation_trial_cancelled");
       await poll("control", true);
       if (sessionRef.current !== origin || motionEpoch.current !== epoch || document.hidden) throw new Error("navigation_trial_cancelled");
       if (safetyOf(statusRef.current).navigation_journey_version !== 1) throw new Error("navigation_journey_update_required");
       const {seq: ignoredSeq, action: ignoredAction, ...intent} = makeEnvelope({action:"arm"});
       void ignoredSeq; void ignoredAction;
       pendingJourney.current = {requestId:str(intent.request_id),generation:str(intent.generation)};
-      const result = await mutation("/navigation/journey", {...intent, panel_id:panelId, operator_control_version:1, journey_version:1, config_revision:revision, operator_consent:true, operator_plan:plan}, "POST", true);
+      const result = await mutation("/navigation/journey", {...intent, panel_id:panelId, operator_control_version:1, journey_version:1, config_revision:acceptedRevision, operator_consent:true, operator_plan:plan}, "POST", true);
       if (sessionRef.current !== origin || motionEpoch.current !== epoch) throw new Error("navigation_trial_cancelled");
       await poll("control", true);
       return result;

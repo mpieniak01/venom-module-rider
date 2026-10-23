@@ -373,17 +373,19 @@ the Node syntax check is included in the check-web target.
 
 ### Cold journey start regression
 
-Explicit **Prepare** starts observation without granting motion. The primary
-button then offers image/steering confirmation after fresh matching frames arrive;
-**Start journey** remains a separate action. A rejected configuration write
-restores the observation requested by the operator and permits retry. STOP takes
-precedence over pending preparation or start operations.
+Explicit **Prepare** starts observation. After fresh matching frames arrive,
+the main journey button offers **Confirm and start** when acceptance is missing.
+One explicit click saves image/steering confirmation before requesting the journey
+with the saved revision. It never starts from a rejected write or mismatched frame.
+A rejected save restores the observation requested by the operator and permits
+retry. STOP cancels the whole transaction, including the confirmation write phase;
+a late completion cannot enqueue a journey or restart observation.
 
 Before releasing changes to journey preparation, run
 `tests/browser/journey-start-prod.js` against both connection modes. The fixture
 begins with stopped, unverified revision 134, a historical GO result and Pi GET
 metadata. It checks missing/mismatched frames, a rejected save and recovery,
-retry, explicit Start, STOP and cancellation of delayed Start. Every Rider API
+retry, combined confirmation/Start, STOP during confirmation and cancellation of delayed Start. Every Rider API
 request is intercepted; these runs never contact the physical executor.
 
     playwright-cli -s=rider-regression open http://localhost:3300/rider
