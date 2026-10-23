@@ -139,3 +139,37 @@ test("existing files waiting for qualification offer verification, while real jo
     assert.equal(perceptionInstallAction({ ...parsed, job: { id: "actual-job", state } }), "cancel");
   assert.equal(perceptionInstallAction({ ...parsed, installation: "failed", job: { id: "old", state: "failed" } }), "start");
 });
+
+
+test("Pi ready/unavailable availability preserves the entire ready host catalog without offering host installation", () => {
+  const localRow = (engine: string, ready: boolean) => ({
+    ...local, id: "local-" + engine, engine, label: "Pi " + engine.toUpperCase(), provider: "local",
+    installed: ready, installation: ready ? "ready" : "unavailable", selectable: ready,
+    loaded: false, reason: ready ? null : "local_model_unavailable",
+  });
+  const hostModels = [artifact, { ...artifact, id: "depth-anything-v2-indoor-small" }, { ...artifact, id: "yolo26n-sem-ade20k" }];
+  const catalog = perceptionCatalog({ ...catalogRow, models: hostModels, local_engine: "canny",
+    local_models: [localRow("canny", true), localRow("ssd", false), localRow("tflite", false)] });
+  assert.equal(catalog.models.length, 3);
+  assert.ok(catalog.models.every(model => model.installed && model.installation === "ready" && model.selectable));
+  assert.deepEqual(catalog.local_models.map(model => model.installation), ["ready", "unavailable", "unavailable"]);
+  for (const model of catalog.local_models.slice(1)) {
+    assert.equal(model.installed, false);
+    assert.equal(model.selectable, false);
+    assert.equal(model.loaded, false);
+    assert.equal(model.reason, "local_model_unavailable");
+    assert.equal(perceptionInstallAction(model), null);
+  }
+  assert.throws(() => perceptionCatalog({ ...catalogRow, models: [{ ...artifact, installation: "unavailable" }] }), /perception_catalog_invalid/, "local-only availability must not broaden the host install schema");
+});
+
+
+test("observation requires its own stop without implying ARM, motion or camera shutdown", () => {
+  const policy = { revision: 31, mode: "observe" };
+  assert.equal(perceptionSwitchBlock(idle, true, { observe: true, drive: false }, policy, false), "perception.block.loop");
+  assert.equal(perceptionSwitchBlock(idle, true, { observe: false, drive: false }, policy, false), "");
+  assert.equal(perceptionSwitchBlock(idle, true, { observe: true, drive: true }, policy, false), "perception.block.motion");
+  assert.equal(perceptionReason("navigation_model_stop_loops_first"), "perception.block.loop");
+  assert.equal(perceptionReason("navigation_model_requires_idle_disarmed"), "perception.block.motion");
+  assert.equal(perceptionReason("navigation_goal_state_unavailable"), "perception.block.stale");
+});

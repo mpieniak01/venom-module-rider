@@ -13,14 +13,16 @@ export type PerceptionCatalog = {
   providers: { id: string; available: boolean }[]; local_models: PerceptionModel[]; local_models_error: string; selection_error: string;
 };
 const INSTALL_STATES = ["not_installed", "downloading", "verifying", "ready", "failed", "needs_review"];
+// Pi reports availability of its existing engines, separately from host provisioning.
+const LOCAL_MODEL_STATES = [...INSTALL_STATES, "unavailable"];
 
 /** Venom supplies the catalog; clients never invent a local list or install state. */
 export function perceptionCatalog(value: unknown): PerceptionCatalog {
   const row = record(value);
   if (!Array.isArray(row.models)) throw new Error("perception_catalog_invalid");
-  const parseModels = (items: unknown[]) => items.map(item => {
+  const parseModels = (items: unknown[], states = INSTALL_STATES) => items.map(item => {
     const model = record(item);
-    if (!str(model.id) || !str(model.label) || !INSTALL_STATES.includes(str(model.installation)))
+    if (!str(model.id) || !str(model.label) || !states.includes(str(model.installation)))
       throw new Error("perception_catalog_invalid");
     return {
       id: str(model.id), label: str(model.label), engine: str(model.engine), task: str(model.task),
@@ -31,7 +33,7 @@ export function perceptionCatalog(value: unknown): PerceptionCatalog {
     };
   });
   const models = parseModels(row.models);
-  const local_models = parseModels(Array.isArray(row.local_models) ? row.local_models : []);
+  const local_models = parseModels(Array.isArray(row.local_models) ? row.local_models : [], LOCAL_MODEL_STATES);
   if (new Set(models.map(model => model.id)).size !== models.length) throw new Error("perception_catalog_invalid");
   return { models, selection: selectionFrom(row.selection), switching: row.switching === true, diagnostics: record(row.diagnostics), provider: ["local", "venom"].includes(str(row.provider)) ? str(row.provider) : "unknown",
     pipeline_revision: Number.isSafeInteger(row.pipeline_revision) ? Number(row.pipeline_revision) : null,
@@ -76,6 +78,7 @@ export function perceptionSwitchBlock(status: RiderStatus | null, controlFresh: 
   if (safety.state === "ARMED" || safety.can_move === true || safety.moving === true || ["manual", "navigation"].includes(str(safety.owner))
     || goals.drive === true || record(goals.preparation).active === true)
     return "perception.block.motion";
+  if (goals.observe === true) return "perception.block.loop";
   if (busy) return "perception.block.busy";
   if (!policy || !Number.isSafeInteger(policy.revision)) return "perception.block.policy";
   return "";
@@ -97,7 +100,8 @@ export function perceptionReason(code: string): string {
     model_busy: "perception.block.busy", model_selection_unavailable: "perception.block.policy",
     model_selection_conflict: "perception.reason.conflict", navigation_config_conflict: "perception.reason.conflict",
     model_selection_motion_active: "perception.block.motion", model_selection_requires_idle: "perception.block.motion",
-    model_selection_reserved: "perception.block.busy", model_selection_update_required: "perception.reason.update",
+    model_selection_reserved: "perception.block.busy", navigation_model_stop_loops_first: "perception.block.loop",
+    navigation_model_requires_idle_disarmed: "perception.block.motion", navigation_goal_state_unavailable: "perception.block.stale", model_selection_update_required: "perception.reason.update",
     perception_selection_unsupported: "perception.reason.update", offline: "perception.block.offline",
   };
   return code.includes("conflict") ? "perception.reason.conflict" : keys[code] ?? "perception.reason.failed";
@@ -118,7 +122,7 @@ export function perceptionApplyNeeded(catalog: PerceptionCatalog | null, provide
 
 
 export function perceptionInstallAction(model: PerceptionModel | undefined): "start" | "cancel" | null {
-  if (!model || model.installation === "needs_review") return null;
+  if (!model || ["needs_review", "unavailable"].includes(model.installation)) return null;
   if (model.job.id && ["queued", "waiting", "running", "downloading", "verifying", "cancelling"].includes(str(model.job.state))) return "cancel";
   return model.installation !== "ready" ? "start" : null;
 }

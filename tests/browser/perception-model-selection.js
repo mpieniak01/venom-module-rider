@@ -12,14 +12,14 @@ async page => {
   const calls = [], scenarios = [];
   const a = "depth-anything-v2-indoor-small", b = "segformer-b0-ade20k";
   const hashes = { [a]: "a".repeat(64), [b]: "b".repeat(64) };
-  let model = a, revision = 31, pipelineRevision = 8, provider = "venom", engine = "ssd";
+  let model = a, revision = 31, pipelineRevision = 8, provider = "venom", engine = "canny";
   let safety = "DISARMED", switching = false, failSelection = false, failCatalog = false, wrongFrames = 0, sequence = 0, releaseSelection;
-  let pendingSelection = false, piOffline = false, installedYolo = false, wrongLocalFrames = 0;
+  let pendingSelection = false, piOffline = false, installedYolo = true, wrongLocalFrames = 0, observe = false;
   const config = () => ({ revision, mode: "observe", speed: .1, max_motion_ms: 150, decision_budget_ms: 300, corridor: [.35,.8,.65,.95], verified: false, calibration_id: "", model_sha256: "",
     perception: { engine: model === a ? "depth_plane" : "segformer", model_id: model, artifact_sha256: hashes[model], residual_limit: .06, outlier_limit: .005, slope_min: 2 } });
   const modelRow = (id, label) => ({ id, label, engine: id === a ? "depth_plane" : "segformer", task: id === a ? "relative_ground_geometry" : "semantic_segmentation", revision: "fixture-pinned",
     installed: true, installation: "ready", loaded: id === model && !switching, selectable: true, reason: null, drive_supported: id === a, provider: "CPUExecutionProvider", sha256: hashes[id], job: null });
-  const localModels = () => ["canny", "ssd"].map(id => ({ ...modelRow("local-" + id, "Pi " + id.toUpperCase()), engine: id, sha256: "", loaded: provider === "local" && engine === id, drive_supported: false }));
+  const localModels = () => ["canny", "ssd", "tflite"].map(id => ({ ...modelRow("local-" + id, "Pi " + id.toUpperCase()), engine: id, sha256: "", provider: "local", installed: id === "canny", installation: id === "canny" ? "ready" : "unavailable", selectable: id === "canny", reason: id === "canny" ? null : "local_model_unavailable", loaded: id === "canny" && provider === "local" && engine === id, drive_supported: false }));
   const catalog = () => ({
     models: [modelRow(a, "Depth Anything V2"), modelRow(b, "SegFormer-B0"), { ...modelRow("fast-scnn-floor", "Fast-SCNN"), installed: false, installation: "needs_review", selectable: false, reason: "model_needs_review", qualification_details: ["external_data_missing", "preprocessing_unverified"] }, { ...modelRow("yolo26n-sem-ade20k", "YOLO26"), sha256: "c".repeat(64), installed: installedYolo, selectable: installedYolo, installation: installedYolo ? "ready" : "not_installed", reason: installedYolo ? null : "model_not_installed" }],
     selection: piOffline ? null : { model_id: model, artifact_sha256: hashes[model], revision }, selection_error: piOffline ? "pi_unreachable" : null, provider: piOffline ? null : provider, local_engine: engine, pipeline_revision: piOffline ? null : pipelineRevision,
@@ -28,9 +28,9 @@ async page => {
   });
   const profile = () => ({ analysis_location: provider, local_engine: engine, remote_transport: "snapshots" });
   const pipeline = () => ({ contract_id: "rider.camera_pipeline", contract_version: 1, revision: pipelineRevision, profile: profile(), active_profile: profile(), state: "active", transport_epoch: 1, camera_session: "perception-fixture",
-    capabilities: { analysis_locations: ["venom", "local"], local_engines: ["canny", "ssd"], remote_transports: ["snapshots"], stream_drive_supported: true, local_drive_supported: false }, effective_stages: { capture: true }, error: null });
+    capabilities: { analysis_locations: ["venom", "local"], local_engines: ["canny", "ssd", "tflite"], remote_transports: ["snapshots"], stream_drive_supported: true, local_drive_supported: false }, effective_stages: { capture: true }, error: null });
   const navigation = () => ({ config: config(), detector: { configured: true, loaded: !switching, drive_supported: model === a, sha256: hashes[model], purpose: model === a ? "relative_ground_geometry" : "semantic_segmentation" },
-    runtime: { known: true, observe: true, drive: true }, goals: { observe: true, drive: false },
+    runtime: { known: true, observe: true, drive: true }, goals: { observe, drive: false },
     status: { running: true, stale: false, run_id: "observe-" + revision, config_revision: revision, mode: "observe" } });
   await page.route("**/api/v1/rider/**", async route => {
     const request = route.request(), path = new URL(request.url()).pathname.slice("/api/v1/rider".length);
@@ -72,7 +72,7 @@ async page => {
         model_id: frameModel, artifact_sha256: hashes[frameModel], model_generation: "fixture-" + frameRevision, perception_engine: frameModel === a ? "depth_plane" : "segformer" };
       const source = { contract_version: 1, camera_session: "perception-fixture", transport_epoch: 1, pipeline_revision: pipelineRevision, sequence, frame_id: analysis.frame_id, captured_monotonic_ns: Date.now()*1e6, sha256: "d".repeat(64) };
       if (provider === "local") {
-        const actualEngine = wrongLocalFrames > 0 ? "canny" : engine;
+        const actualEngine = wrongLocalFrames > 0 ? engine === "canny" ? "ssd" : "canny" : engine;
         if (wrongLocalFrames > 0) wrongLocalFrames--;
         Object.assign(source, { model_id: "local-" + actualEngine, local_engine: actualEngine, analysis_location: "local" });
       }
@@ -86,6 +86,9 @@ async page => {
   try {
     await page.goto(base + "/rider");
     const panel = page.getByTestId("perception-models"), choice = page.getByTestId("perception-model-choice"), location = page.getByTestId("perception-provider-choice"), apply = page.getByTestId("perception-model-apply");
+    await panel.waitFor();
+    await wait(async () => !await page.getByTestId("camera-power-toggle").isDisabled(), "fixture pipeline unavailable");
+    await page.getByRole("button", { name: "Wizja Venom", exact: true }).click();
     await panel.locator("summary").first().click();
     await wait(async () => await choice.inputValue() === a, "initial model missing");
     await wait(async () => (await page.getByTestId("perception-preview-result").innerText()).includes(a), "applied A preview missing");
@@ -93,6 +96,10 @@ async page => {
     await choice.selectOption(b);
     check((await page.getByTestId("perception-active-model").innerText()).includes("Depth Anything V2"), "draft B relabelled applied A");
     check((await page.getByTestId("perception-preview-result").innerText()).includes(a), "draft B relabelled A imagery");
+    observe = true;
+    await wait(async () => (await page.getByTestId("perception-switch-block").innerText()).includes("obserwację"), "observation stop requirement missing");
+    check(await apply.isDisabled(), "running observation permitted selection");
+    observe = false;
     await wait(async () => !await apply.isDisabled(), "idle confirmed disarmed switch blocked");
     await apply.click();
     await wait(() => pendingSelection, "selection was not submitted");
@@ -105,19 +112,32 @@ async page => {
     await wait(async () => await page.getByTestId("camera-surface").locator("img").count() === 0, "late A result was not rejected");
     await wait(async () => (await page.getByTestId("perception-preview-result").innerText()).includes(b), "B preview did not recover");
     scenarios.push("draft vs applied; switch clears mask; late A cannot become B");
-    await location.selectOption("local"); await choice.selectOption("local-ssd");
+    check((await choice.locator("option").allTextContents()).filter(text => text.includes("Gotowy")).length === 3, "local unavailable entries hid ready Venom models");
+    await location.selectOption("local");
+    const beforeUnavailable = calls.length;
+    for (const id of ["local-ssd", "local-tflite"]) {
+      await choice.selectOption(id);
+      await wait(async () => (await page.getByTestId("perception-model-block").innerText()).includes("niedostępny na Rider-Pi"), "local unavailable status was not explained");
+      check((await choice.locator("option:checked").innerText()).includes("Niedostępny"), "local availability was mislabeled as uninstalled");
+      check(await apply.isDisabled(), "unavailable local model permitted selection");
+      check(await page.getByTestId("perception-install").count() === 0, "local unavailable model offered a host installation");
+    }
+    check(calls.length === beforeUnavailable, "inspecting unavailable local models mutated the device");
+    await location.selectOption("venom");
+    check((await choice.locator("option").allTextContents()).filter(text => text.includes("Gotowy")).length === 3, "returning from unavailable local models lost the host catalog");
+    await location.selectOption("local"); await choice.selectOption("local-canny");
     check(!(await choice.locator("option").allTextContents()).some(text => text.includes("SegFormer")), "host models leaked into local catalog");
     const beforeLocal = calls.length;
     await wait(async () => !await apply.isDisabled(), "local selection unavailable");
     await apply.click();
     await wait(() => provider === "local", "provider did not change to local");
-    await wait(async () => (await page.getByTestId("perception-active-model").innerText()).includes("Pi SSD"), "local selected model not synchronized");
+    await wait(async () => (await page.getByTestId("perception-active-model").innerText()).includes("Pi CANNY"), "local selected model not synchronized");
     check(calls.slice(beforeLocal).length === 1 && calls[beforeLocal].path === "/camera/pipeline", "local selection used a second host model store");
     await wait(async () => await page.getByTestId("perception-local-preview").count() === 1, "local processed preview missing");
     wrongLocalFrames = 3;
     await wait(async () => await page.getByTestId("camera-surface").locator("img").count() === 0, "old local producer image was labelled with the new engine");
     await wait(async () => await page.getByTestId("camera-surface").locator("img").count() === 1, "local source identity did not recover");
-    scenarios.push("provider-first local model selection uses one pipeline transaction and validates actual PROC engine");
+    scenarios.push("one ready and two unavailable local engines preserve three ready Venom models; Canny uses one pipeline transaction and validates actual PROC engine");
     await location.selectOption("venom"); await choice.selectOption(a); failSelection = true;
     await wait(async () => !await apply.isDisabled(), "return to Venom unavailable");
     await apply.click();
@@ -146,7 +166,7 @@ async page => {
     failCatalog = false;
     scenarios.push("external conflict, stationary ARM, unqualified model and unavailable catalog block selection");
     await wait(async () => await page.getByTestId("perception-read-error").count() === 0, "catalog did not recover");
-    piOffline = true;
+    installedYolo = false; piOffline = true;
     await wait(async () => (await page.getByTestId("perception-active-model").innerText()).includes("nieustalony"), "offline Pi incorrectly shown as the Venom provider");
     await page.getByTestId("perception-selection-error").waitFor();
     await location.selectOption("venom"); await choice.selectOption("yolo26n-sem-ade20k");

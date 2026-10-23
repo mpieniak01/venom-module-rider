@@ -1297,6 +1297,10 @@ export const messages = {
   "perception.reason.verify": ["Pliki modelu są dostępne, ale wymagają jawnej weryfikacji i próby uruchomienia przed wyborem.", "Model files are available but require explicit verification and a smoke run before selection.", "Modelldateien sind verfügbar, benötigen aber explizite Verifikation und einen Probelauf vor der Auswahl."],
   "perception.verify": ["Zweryfikuj na Venom", "Verify on Venom", "Auf Venom verifizieren"],
   "perception.effectiveProvider": ["Rzeczywiste wykonanie", "Effective execution", "Tatsächliche Ausführung"],
+  "perception.install.unavailable": ["Niedostępny", "Unavailable", "Nicht verfügbar"],
+  "perception.availability": ["Dostępność modelu", "Model availability", "Modellverfügbarkeit"],
+  "perception.reason.localUnavailable": ["Ten model jest obecnie niedostępny na Rider-Pi. Powód podaje urządzenie.", "This model is currently unavailable on Rider-Pi. The device reports the reason.", "Dieses Modell ist derzeit auf Rider-Pi nicht verfügbar. Das Gerät meldet den Grund."],
+  "perception.block.loop": ["Przed zmianą modelu zakończ obserwację obrazu. Kamera może pozostać włączona.", "Stop image observation before changing the model. The camera can remain on.", "Vor dem Modellwechsel die Bildbeobachtung beenden. Die Kamera kann eingeschaltet bleiben."],
 } as const;
 export type RiderLanguage = "pl" | "en" | "de";
 export type Translator = (key: string, replacements?: Record<string, string | number>) => string;

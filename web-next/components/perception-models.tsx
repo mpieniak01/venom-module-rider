@@ -72,11 +72,11 @@ export function PerceptionModelsPanel({ client, t, language, policy, goals, lock
   const selected = selectedModels.find(model => model.id === selectedId || catalog?.provider === "local" && model.engine === selectedId);
   const candidate = models.find(model => model.id === draft);
   const runtime = catalog?.provider === "local"
-    ? selected?.loaded === true && client.pipeline.status?.state === "active" && client.pipeline.status.active_profile?.analysis_location === "local" && client.pipeline.status.active_profile.local_engine === selected?.engine ? "active" : client.pipeline.busy ? "loading" : "unloaded"
+    ? selected?.installation === "unavailable" ? "unavailable" : selected?.loaded === true && client.pipeline.status?.state === "active" && client.pipeline.status.active_profile?.analysis_location === "local" && client.pipeline.status.active_profile.local_engine === selected?.engine ? "active" : client.pipeline.busy ? "loading" : "unloaded"
     : catalog?.provider === "venom" ? perceptionRuntime(catalog) : "unavailable";
   const changed = perceptionApplyNeeded(catalog, draftProvider, draft, selected?.id);
   const block = conflict ? "perception.reason.conflict" : readError ? "perception.block.catalog" : perceptionSwitchBlock(client.status, client.controlFresh, goals, policy, locked || !!client.busy || !!pending || !!catalog?.switching || client.pipeline.busy);
-  const modelBlock = !candidate ? "perception.block.policy" : !candidate.selectable ? perceptionReason(candidate.reason || "model_not_installed") : "";
+  const modelBlock = !candidate ? "perception.block.policy" : !candidate.selectable ? draftProvider === "local" && candidate.installation === "unavailable" ? "perception.reason.localUnavailable" : perceptionReason(candidate.reason || "model_not_installed") : "";
   const run = async (kind: "apply" | "install" | "cancel") => {
     if (!candidate || applying.current || pending || (kind === "apply" ? !client.canMutate : !currentSession())) return;
     if (kind === "apply" && (block || modelBlock || !policy || !changed)) return;
@@ -177,7 +177,7 @@ export function PerceptionModelsPanel({ client, t, language, policy, goals, lock
     {failure && <p className={styles.loopError} role="alert" data-testid="perception-operation-error">{t(perceptionReason(failure))} · <code>{failure}</code></p>}
     <details className={styles.details} data-testid="perception-model-details"><summary>{t("perception.manage")}</summary>
       {candidate && <div className={styles.stack}>
-        <p className={styles.small}>{t("perception.installation")}: {t("perception.install." + candidate.installation)} · {t("perception.revision")}: <code>{candidate.revision || "N/A"}</code> · {t("perception.provider")}: {candidate.execution_provider || "N/A"}</p>
+        <p className={styles.small}>{t(draftProvider === "local" ? "perception.availability" : "perception.installation")}: {t("perception.install." + candidate.installation)} · {t("perception.revision")}: <code>{candidate.revision || "N/A"}</code> · {t("perception.provider")}: {candidate.execution_provider || "N/A"}</p>
         {candidate.sha256 && <p className={styles.small}>{t("perception.artifact")}: <code>{candidate.sha256}</code></p>}
         <div className={styles.flex}>
           {readyToInstall && <Button data-testid="perception-install" disabled={!session || !!pending || !!readError} onClick={() => void run("install")} title={t("perception.installHint")}><Download size={14}/>{t(candidate?.installation === "failed" ? "perception.retry" : candidate?.installed ? "perception.verify" : "perception.install")}</Button>}
