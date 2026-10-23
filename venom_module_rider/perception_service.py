@@ -23,9 +23,26 @@ class PerceptionService:
         self.switching = False
         loop.models = self
 
+    def observe_policy(self, device, policy):
+        """A newer Pi policy can change geometry without changing model weights."""
+        previous = self.runtime.expected.get(device)
+        if previous and policy["revision"] < previous["revision"]:
+            return
+        if (policy.get("perception") or {}).get("model_id"):
+            self.runtime.expected[device] = selected_identity(policy)
+        else:
+            self.runtime.expected.pop(device, None)
+
     async def snapshot(self, domain):
-        policy = (await domain.read("/api/navigation/config", 0.2, force=True))["data"]
-        selection = selected_identity(policy)
+        selection, selection_error = None, None
+        try:
+            policy = (await domain.read("/api/navigation/config", 0.2, force=True))[
+                "data"
+            ]
+            selection = selected_identity(policy)
+            self.observe_policy(domain.transport().device.id, policy)
+        except RiderError as exc:
+            selection_error = exc.code
         rows = await asyncio.to_thread(
             lambda: [self.catalog.describe(identity) for identity in SOURCES]
         )
@@ -47,8 +64,12 @@ class PerceptionService:
                     row["installation"] = job["state"]
             elif job and job["state"] == "failed" and row["installation"] != "ready":
                 row.update(installation="failed", reason=job["error"])
-        pipeline = await domain.pipeline()
-        provider = (pipeline.get("profile") or {}).get("analysis_location", "venom")
+        pipeline = {}
+        try:
+            pipeline = await domain.pipeline()
+        except RiderError as exc:
+            selection_error = selection_error or exc.code
+        provider = (pipeline.get("profile") or {}).get("analysis_location")
         local_models, local_error = [], None
         try:
             local = (await domain.read("/api/navigation/local-models", 2.0))["data"]
@@ -58,6 +79,7 @@ class PerceptionService:
         return {
             "models": rows,
             "selection": selection,
+            "selection_error": selection_error,
             "switching": self.switching,
             "diagnostics": self.runtime.diagnostics(),
             "providers": [
@@ -127,7 +149,15 @@ class PerceptionService:
                     result = await domain.mutate(
                         "/api/navigation/model-selection", expected, session
                     )
-                    config = result["data"]
+                    payload = result["data"]
+                    if (
+                        not isinstance(payload, dict)
+                        or payload.get("ok") is not True
+                        or payload.get("persisted") is not True
+                        or not isinstance(payload.get("config"), dict)
+                    ):
+                        raise RiderError("model_selection_invalid_response", 502)
+                    config = payload["config"]
                 except RiderError:
                     # The commit may have succeeded before an ACK was lost.
                     config = (
@@ -161,6 +191,20 @@ class PerceptionService:
                 from .depth_detector import DepthDetector
 
                 self.loop.depth_detector = DepthDetector()
+                from .depth_detector import PerceptionSettings
+
+                self.runtime.state = "loading"
+                warmup = asyncio.create_task(
+                    self.loop.workers.run(
+                        self.runtime.warm,
+                        PerceptionSettings.model_validate(config["perception"]),
+                    )
+                )
+                if expected["engine"] == "depth_plane":
+                    self.loop.depth_busy = warmup
+                else:
+                    self.loop.busy = warmup
+                warmup.add_done_callback(self.loop._drain)
                 return {"selection": selected, "config": config}
             finally:
                 self.switching = False

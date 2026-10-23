@@ -57,6 +57,7 @@ class VisionLoop:
         return self.depth_detector.detect(payload, frame.corridor, frame.perception)
 
     def _detect_model(self, payload, frame):
+        assert self.models is not None
         return self.models.runtime.detect(payload, frame)
 
     def status(self, perception=None):
@@ -314,6 +315,8 @@ class VisionLoop:
                 self._drain(task)
         if self.models is not None and generation != self.models.runtime.generation:
             raise RiderError("model_selection_conflict", 409)
+        if self.models is not None:
+            self.models.runtime.validate(device_id, frame)
         trace_depth = result.pop("_trace_depth", None)
         if depth_mode and trace_depth is not None:
             # Diagnostic only: exact input of this inference, never another RAW.

@@ -28,8 +28,9 @@ class ModelInstaller:
         return dict(job) if job else None
 
     def submit(self, model_id):
-        row = self.catalog.describe(model_id)
-        if row["installation"] == "needs_review":
+        self.catalog.require(model_id)
+        row = self.catalog.definition(model_id)
+        if row["qualification"] == "needs_review":
             raise RiderError("model_needs_review", 409)
         if self.closed:
             raise RiderError("module_closed", 503)
@@ -37,7 +38,7 @@ class ModelInstaller:
             (
                 job
                 for job in self.jobs.values()
-                if job["state"] in {"waiting", "downloading", "verifying"}
+                if job["id"] in self.handles and not self.handles[job["id"]].done()
             ),
             None,
         )
@@ -55,6 +56,15 @@ class ModelInstaller:
         self.jobs[model_id] = job
         handle = asyncio.create_task(self._run(job))
         self.handles[job["id"]] = handle
+
+        def completed(task):
+            if task.cancelled():
+                job.update(state="cancelled", error=None)
+            elif task.exception() is not None:
+                job.update(state="failed", error="model_install_failed")
+            self.handles.pop(job["id"], None)
+
+        handle.add_done_callback(completed)
         return dict(job)
 
     def cancel(self, model_id):
@@ -67,6 +77,7 @@ class ModelInstaller:
 
     async def _run(self, job):
         host_id, tasks, child = None, None, None
+        outcome: tuple[str, str | None] | None = None
         try:
             if self.host_tasks is None:
                 from .analysis_tasks import HostTasks
@@ -106,6 +117,8 @@ class ModelInstaller:
                 "-m",
                 "venom_module_rider.perception_worker",
                 job["model_id"],
+                "--parent-pid",
+                str(os.getpid()),
                 cwd=root,
                 env=environment,
                 stdout=asyncio.subprocess.PIPE,
@@ -118,20 +131,25 @@ class ModelInstaller:
             if child.returncode != 0 or job["state"] != "ready":
                 raise RiderError("model_install_failed", 409)
         except asyncio.CancelledError:
-            job.update(state="cancelled", error=None)
+            outcome = ("cancelled", None)
         except RiderError as exc:
-            job.update(state="failed", error=exc.code)
+            outcome = ("failed", exc.code)
         except Exception:
-            job.update(state="failed", error="model_install_failed")
+            outcome = ("failed", "model_install_failed")
         finally:
             if child is not None and child.returncode is None:
-                child.terminate()
+                job["state"] = "cancelling"
+                with suppress(ProcessLookupError):
+                    child.terminate()
                 try:
                     await asyncio.wait_for(child.wait(), 5)
                 except TimeoutError:
-                    child.kill()
+                    with suppress(ProcessLookupError):
+                        child.kill()
                     await child.wait()
             self.children.pop(job["id"], None)
+            if outcome is not None:
+                job.update(state=outcome[0], error=outcome[1])
             if tasks is not None and host_id is not None:
                 await tasks.finish(
                     host_id,
@@ -142,6 +160,7 @@ class ModelInstaller:
 
     async def _observe(self, child, job):
         assert child.stdout is not None
+        reported_ready = False
         while True:
             try:
                 line = await asyncio.wait_for(child.stdout.readline(), 0.5)
@@ -164,14 +183,31 @@ class ModelInstaller:
             progress = message.get("progress")
             if type(progress) is not int or not 0 <= progress <= 100:
                 raise RiderError("model_install_protocol", 409)
-            job.update(state=message["state"], progress=progress)
+            reported_ready = message["state"] == "ready"
+            job.update(
+                state="verifying" if reported_ready else message["state"],
+                progress=progress,
+            )
         await child.wait()
+        if reported_ready and child.returncode == 0:
+            job["state"] = "ready"
 
     async def close(self):
         self.closed = True
         handles = list(self.handles.values())
         for handle in handles:
-            handle.cancel()
+            job = next(
+                (
+                    row
+                    for row in self.jobs.values()
+                    if self.handles.get(row["id"]) is handle
+                ),
+                None,
+            )
+            if not handle.cancelling() and (
+                job is None or job["state"] != "cancelling"
+            ):
+                handle.cancel()
         for handle in handles:
             with suppress(asyncio.CancelledError):
                 await handle

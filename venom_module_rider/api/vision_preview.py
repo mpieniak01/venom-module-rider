@@ -75,6 +75,9 @@ async def processed_camera(request: Request):
         revision = policy["revision"]
         perception = policy.get("perception", {})
         source = "device_policy"
+        models = getattr(request.app.state, "rider_models", None)
+        if models is not None:
+            models.observe_policy(client.device.id, policy)
     except RiderError as exc:
         if exc.status != 404:
             raise

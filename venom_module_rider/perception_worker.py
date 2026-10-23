@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import shutil
+from contextlib import contextmanager
 
 from .analysis_profiles import ProfileCatalog
 from .analysis_worker import process_limits
@@ -62,13 +64,10 @@ def smoke(catalog, model_id):
     import io
 
     import numpy as np
-    import torch
     from PIL import Image
 
     from .depth_detector import PerceptionSettings
 
-    torch.set_num_threads(2)
-    torch.set_num_interop_threads(1)
     artifact = catalog.qualify_files(model_id)
     detector = build_detector(catalog, model_id, artifact)
     rgb = np.random.default_rng(7).integers(40, 220, (96, 160, 3), dtype=np.uint8)
@@ -91,28 +90,59 @@ def smoke(catalog, model_id):
     catalog.save_receipt(model_id)
 
 
+@contextmanager
+def installation_lease(catalog, model_id):
+    """A dead child releases the lock; a retry may remove only its staging."""
+    catalog.root.mkdir(parents=True, exist_ok=True)
+    lease_path = catalog.root / "installation.lock"
+    descriptor = os.open(lease_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, "a+b") as lease:
+        fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        target = catalog.path(model_id)
+        staging = target.with_name(target.name + ".staging")
+        if staging.is_symlink():
+            raise ValueError("model_staging_invalid")
+        if staging.exists():
+            if staging.resolve().parent != target.parent.resolve():
+                raise ValueError("model_staging_invalid")
+            shutil.rmtree(staging)
+        yield
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("model_id", choices=[DEPTH, SEGFORMER, YOLO])
+    parser.add_argument("--parent-pid", type=int, required=True)
     args = parser.parse_args()
-    process_limits(os.getppid())
-    catalog = ProfileCatalog().live()
-    report("verifying", 1)
-    try:
-        catalog.qualify_files(args.model_id)
-    except Exception:
-        # Existing files with mismatches must fail, not be silently overwritten.
-        if catalog.path(args.model_id).exists():
-            raise
-        if args.model_id == YOLO:
-            from .perception_export import provision_yolo
+    if args.parent_pid <= 1:
+        raise ValueError("model_parent_invalid")
+    process_limits(args.parent_pid)
+    import torch
 
-            provision_yolo(catalog)
-        else:
-            download(catalog, args.model_id)
-    report("verifying", 70)
-    smoke(catalog, args.model_id)
-    report("ready", 100)
+    torch.set_num_threads(2)
+    torch.set_num_interop_threads(1)
+    catalog = ProfileCatalog().live()
+    with installation_lease(catalog, args.model_id):
+        report("verifying", 1)
+        try:
+            catalog.qualify_files(args.model_id)
+        except Exception:
+            # Existing files with mismatches must fail, not be silently overwritten.
+            if catalog.path(args.model_id).exists():
+                raise
+            if args.model_id == YOLO:
+                import contextlib
+                import sys
+
+                from .perception_export import provision_yolo
+
+                with contextlib.redirect_stdout(sys.stderr):
+                    provision_yolo(catalog)
+            else:
+                download(catalog, args.model_id)
+        report("verifying", 70)
+        smoke(catalog, args.model_id)
+        report("ready", 100)
 
 
 if __name__ == "__main__":

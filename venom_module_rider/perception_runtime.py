@@ -98,8 +98,9 @@ class ModelRuntime:
         self.identity = None
         self.generation = 0
         self.state = "unloaded"
-        self.timings = deque(maxlen=100)
+        self.timings: deque[float] = deque(maxlen=100)
         self.last = None
+        self.finishes: deque[float] = deque(maxlen=100)
         self.expected = {}
 
     def reset(self):
@@ -108,6 +109,7 @@ class ModelRuntime:
             self.identity = None
             self.timings.clear()
             self.last = None
+            self.finishes.clear()
             self.state = "unloaded"
             self.generation += 1
 
@@ -160,6 +162,7 @@ class ModelRuntime:
                 elapsed = (time.perf_counter() - start) * 1000
                 self.timings.append(elapsed)
                 self.last = time.monotonic()
+                self.finishes.append(self.last)
                 self.state = "active"
                 return {
                     **result,
@@ -173,11 +176,40 @@ class ModelRuntime:
                 self.state = "unavailable"
                 raise
 
+    def warm(self, perception):
+        """Load outside capture TTL; synthetic output is never published."""
+        import numpy as np
+        from PIL import Image
+
+        from .vision_contract import VisionFrame
+
+        payload = io.BytesIO()
+        Image.fromarray(
+            np.random.default_rng(7).integers(40, 220, (96, 160, 3), dtype=np.uint8)
+        ).save(payload, format="JPEG")
+        frame = VisionFrame(
+            protocol_version=1,
+            run_id="warmup",
+            frame_id="warmup",
+            sequence=1,
+            config_revision=0,
+            age_ms=0.0,
+            deadline_ms=500,
+            perception=perception,
+        )
+        self.detect(payload.getvalue(), frame)
+        self.timings.clear()
+        self.finishes.clear()
+        self.last = None
+
     def status(self):
         return {
             "state": self.state,
             "active_model_id": self.identity[0] if self.identity else None,
             "model_generation": self.generation,
+            "execution_provider": (
+                self.detector.status().get("device", "cpu") if self.detector else None
+            ),
         }
 
     def detector_status(self, perception):
@@ -203,7 +235,18 @@ class ModelRuntime:
         from pathlib import Path
 
         timings = sorted(self.timings)
-        ram = None
+        recent = [at for at in self.finishes if time.monotonic() - at <= 5]
+        fps = (
+            (len(recent) - 1) / (recent[-1] - recent[0])
+            if len(recent) > 1 and recent[-1] > recent[0]
+            else None
+        )
+        ram, vram = None, None
+        import sys
+
+        torch = sys.modules.get("torch")
+        if torch is not None and torch.cuda.is_initialized():
+            vram = torch.cuda.memory_allocated() / 1024**2
         try:
             ram = (
                 int(Path("/proc/self/statm").read_text().split()[1])
@@ -214,14 +257,15 @@ class ModelRuntime:
             pass
         return {
             "runtime": self.status(),
-            "inference_ms": timings[-1] if timings else None,
+            "inference_ms": self.timings[-1] if self.timings else None,
             "p50_ms": timings[len(timings) // 2] if timings else None,
             "p95_ms": timings[min(len(timings) - 1, int(len(timings) * 0.95))]
             if timings
             else None,
-            "fps": None,
+            "fps": round(fps, 2) if fps is not None else None,
+            "memory_scope": "api_process",
             "ram_mb": round(ram, 1) if ram is not None else None,
-            "vram_mb": None,
+            "vram_mb": round(vram, 1) if vram is not None else None,
         }
 
 
@@ -230,6 +274,7 @@ class YoloSemanticOnnx:
 
     def __init__(self, path):
         self.path = path
+        self.threads = 2
         self.session = None
 
     def status(self):
@@ -257,7 +302,7 @@ class YoloSemanticOnnx:
         pixels[top : top + height, left : left + width] = rgb
         if self.session is None:
             options = ort.SessionOptions()
-            options.intra_op_num_threads = 2
+            options.intra_op_num_threads = self.threads
             options.inter_op_num_threads = 1
             self.session = ort.InferenceSession(
                 str(self.path / "model.onnx"),

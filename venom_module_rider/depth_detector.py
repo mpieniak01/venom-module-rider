@@ -233,6 +233,7 @@ class DepthDetector:
         return {
             "configured": manifest.is_file(),
             "loaded": self.model is not None,
+            "device": self.device,
             "model": "depth-anything-v2-indoor-small",
             "sha256": self.digest,
             "purpose": "relative_ground_geometry",

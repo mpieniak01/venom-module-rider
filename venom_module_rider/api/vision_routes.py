@@ -17,7 +17,15 @@ router = APIRouter(route_class=RiderRoute)
 @router.get("/compute/vision/status")
 async def detector_status(request: Request):
     authenticate(request)
-    result = request.app.state.rider_vision.status()
+    models = getattr(request.app.state, "rider_models", None)
+    perception = None
+    if models is not None:
+        domain = request.app.state.rider
+        if domain.transport().device.id == authenticate(request):
+            perception = (await domain.read("/api/navigation/config", 0.2))["data"].get(
+                "perception"
+            )
+    result = request.app.state.rider_vision.status(perception)
     if request.query_params.get("stream") == "true":
         from .pipeline_routes import native_pipeline
 
@@ -65,6 +73,7 @@ async def decision(request: Request):
         frame = VisionFrame.model_validate_json(raw)
     except (ValueError, ValidationError) as exc:
         raise RiderError("vision_invalid_frame", 400) from exc
+    await validate_model_policy(request, device, frame)
     body = await bounded_body(request, 512 * 1024)
     from .pipeline_routes import snapshot_decision_allowed
 
@@ -121,6 +130,7 @@ async def _reference_decision(request, device, descriptor, admitted_at):
     ):
         raise RiderError("stream_epoch_changed", 409)
     frame = descriptor.frame
+    await validate_model_policy(request, device, frame)
     if frame.age_ms >= frame.deadline_ms:
         raise RiderError("vision_frame_expired", 409)
     async with hub.lease(domain, pipeline, keepalive=True) as connection:
@@ -292,3 +302,27 @@ async def start_journey(request: Request, body: NavigationJourneyRequest):
         body.model_dump(),
         request.headers.get("X-Rider-Session"),
     )
+
+
+async def validate_model_policy(request, device, frame):
+    """A late or forged model identity cannot replace the Pi selection."""
+    models = getattr(request.app.state, "rider_models", None)
+    if models is None:
+        return
+    if not frame.perception.model_id and device not in models.runtime.expected:
+        return
+    domain = request.app.state.rider
+    if domain.transport().device.id != device:
+        raise RiderError("stream_device_not_selected", 409)
+    policy = (await domain.read("/api/navigation/config", 0.2))["data"]
+    from ..perception_catalog import selected_identity
+
+    if frame.perception.model_id or policy.get("perception", {}).get("model_id"):
+        selected = selected_identity(policy)
+        if (
+            selected["revision"] != frame.config_revision
+            or selected["model_id"] != frame.perception.model_id
+            or selected["artifact_sha256"] != frame.perception.artifact_sha256
+        ):
+            raise RiderError("model_selection_conflict", 409)
+        models.observe_policy(device, policy)

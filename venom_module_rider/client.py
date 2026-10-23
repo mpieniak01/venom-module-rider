@@ -36,6 +36,8 @@ IMAGE_HEADERS = {
     "x-rider-stale",
     "x-rider-placeholder",
     "x-rider-source-json",
+    "x-rider-local-engine",
+    "x-rider-local-model-id",
     "x-rider-frame-age-ms",
     "x-rider-frame-age-source",
     "x-rider-camera-session",

@@ -51,9 +51,11 @@ def provision_yolo(catalog):
         if digest.hexdigest() != SOURCES[YOLO]["sha256"]:
             raise ValueError("model_hash_mismatch")
         os.environ["YOLO_AUTOINSTALL"] = "false"
+        from typing import cast
+
         from ultralytics import YOLO as Loader
 
-        model = Loader(str(source), task="semantic").model.eval()
+        model = cast(torch.nn.Module, Loader(str(source), task="semantic").model).eval()
         if model.names.get(3) != "floor" or len(model.names) != 150:
             raise ValueError("model_labels_invalid")
         # Export raw logits rather than upstream's class-only export: uncertainty

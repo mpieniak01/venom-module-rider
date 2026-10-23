@@ -22,6 +22,10 @@ def catalog(tmp_path, monkeypatch):
     monkeypatch.delenv("RIDER_DEPTH_MODEL", raising=False)
     monkeypatch.setitem(SOURCES[SEGFORMER], "sha256", DIGEST)
     monkeypatch.setitem(SOURCES[DEPTH], "sha256", DIGEST)
+    monkeypatch.setattr(
+        "venom_module_rider.perception_runtime.ModelRuntime.warm",
+        lambda self, perception: None,
+    )
     return ProfileCatalog(assets_root=tmp_path).live()
 
 
@@ -131,7 +135,7 @@ class Domain:
         }
         if self.fail_ack:
             raise RiderError("pi_timeout", 504)
-        return {"data": self.policy}
+        return {"data": {"ok": True, "persisted": True, "config": self.policy}}
 
 
 @pytest.mark.parametrize("ack_lost", [False, True])

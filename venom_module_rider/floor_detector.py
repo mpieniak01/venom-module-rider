@@ -16,6 +16,7 @@ class FloorDetector:
             os.getenv("RIDER_VISION_MODEL", "/models/rider-floor/model.onnx")
         )
         self.expected = os.getenv("RIDER_VISION_SHA256", "")
+        self.threads = 2
         self.session = None
         self.digest = None
 
@@ -40,7 +41,7 @@ class FloorDetector:
         import onnxruntime as ort
 
         options = ort.SessionOptions()
-        options.intra_op_num_threads = 2
+        options.intra_op_num_threads = self.threads
         options.inter_op_num_threads = 1
         session = ort.InferenceSession(
             str(self.path), options, providers=["CPUExecutionProvider"]

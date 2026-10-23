@@ -77,7 +77,7 @@ class LiveCatalog:
 
     def __init__(self, profiles):
         self.profiles = profiles
-        self.root = profiles.assets / "perception"
+        self.root = profiles.live_assets
         self.cache = {}
 
     def path(self, model_id):
@@ -109,7 +109,13 @@ class LiveCatalog:
             "source": source["repo"],
             "drive_supported": model_id == DEPTH,
             "distance_measurement": False,
-            "provider": "torch-auto" if model_id == DEPTH else "cpu",
+            "provider": "venom",
+            "execution_provider": "torch-auto" if model_id == DEPTH else "cpu",
+            "qualification_details": (
+                ["external_data_missing", "preprocessing_unverified"]
+                if model_id == FAST
+                else []
+            ),
             "qualification": "needs_review" if model_id == FAST else "supported",
         }
 
@@ -217,7 +223,9 @@ class LiveCatalog:
             if exc.code == "model_hash_mismatch":
                 row["installation"] = "failed"
         except (OSError, ValueError, KeyError, TypeError):
-            row.update(installation="verifying", reason="model_verification_required")
+            row.update(
+                installation="not_installed", reason="model_verification_required"
+            )
         return row
 
     def ready(self, model_id):
