@@ -52,12 +52,13 @@ def corridor_mask(corridor: Any, shape: tuple[int, int]) -> Any:
 
 
 def semantic_masks(
-    labels: Any, confidence: Any, pixel_confidence: Any
+    labels: Any, confidence: Any, pixel_confidence: Any, traversable_labels=(3,)
 ) -> dict[str, Any]:
     """Threshold compact source maps identically for replay and live inference.
 
     Confidence is a model score, not a calibrated collision probability. ADE20k
-    floor remains class 3; rug/road/sidewalk are not silently made traversable.
+    floor is class 3; rug is traversable only through an explicit floor+rug policy.
+    Road and sidewalk never become traversable through a surface selection.
     """
     import numpy as np
 
@@ -84,10 +85,17 @@ def semantic_masks(
         or not 0 < pixel_confidence <= 1
     ):
         raise ValueError("navigation_semantic_params")
+    if (
+        not isinstance(traversable_labels, (tuple, list))
+        or any(type(value) is not int for value in traversable_labels)
+        or tuple(traversable_labels) not in {(3,), (3, 28)}
+    ):
+        raise ValueError("navigation_semantic_params")
     confident = confidence.astype(np.float32, copy=False) >= float(pixel_confidence)
+    traversable = np.isin(labels, traversable_labels)
     return {
-        "floor": (labels == 3) & confident,
-        "obstacle": (labels != 3) & confident,
+        "floor": traversable & confident,
+        "obstacle": ~traversable & confident,
         "uncertain": ~confident,
         "valid": True,
     }

@@ -7,7 +7,7 @@ import math
 import os
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .directional import assess_paths, assess_sectors, sector_regions
 from .vision_overlay import draw_sectors
@@ -24,6 +24,15 @@ class PerceptionSettings(BaseModel):
     residual_limit: float = Field(default=0.06, ge=0.01, le=0.15)
     outlier_limit: float = Field(default=0.005, ge=0.0, le=0.02)
     slope_min: float = Field(default=2.0, ge=1.0, le=4.0)
+
+    semantic_models: dict = Field(default_factory=dict)
+
+    @field_validator("semantic_models")
+    @classmethod
+    def validate_model_tuning(cls, value):
+        from .perception_tuning import validate_semantic_models
+
+        return validate_semantic_models(value)
 
 
 def assess_depth(depth, corridor, settings, *, evidence=False):

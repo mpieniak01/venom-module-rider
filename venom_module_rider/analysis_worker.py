@@ -181,9 +181,17 @@ def run(job, output, *, candidate_factory=None, semantic_factory=None):
             emit(output, {"type": "compute", "done": index, "phase": "inference"})
             start = time.perf_counter()
             if semantic:
+                from .perception_tuning import has_semantic_tuning, semantic_parameters
+
+                semantic_options = {}
+                if has_semantic_tuning(settings.model_dump(), context["profile"]["id"]):
+                    semantic_options["semantic"] = semantic_parameters(
+                        settings.model_dump(), model_id=context["profile"]["id"]
+                    )
                 assessment, overlay = cast(SemanticCandidate, model).detect(
                     payload,
                     tuple(spec["corridor"]),
+                    **semantic_options,
                     **({"evidence": True} if capture_evidence else {}),
                 )
                 timings["perception_total"] = (time.perf_counter() - start) * 1000

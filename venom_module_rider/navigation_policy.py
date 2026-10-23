@@ -9,7 +9,7 @@ from .navigation_profiles import parameters
 def evaluate(result, frame, observer, *, context, captured_s, source=None):
     raw_state, raw_reason = result["state"], result["reason"]
     maps = result.pop("_navigation_maps", None)
-    params = parameters(frame.behavior.model_dump())
+    params = parameters(frame.behavior.model_dump(), frame.perception.model_dump())
     spatial = {"valid": False, "reason": raw_reason, "guard_clear": False}
     gray = None
     try:

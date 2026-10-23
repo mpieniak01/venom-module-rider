@@ -186,6 +186,10 @@ async def _reference_decision(request, device, descriptor, admitted_at):
 def profile_presentation(config, detector):
     """Expose pair support without mutating a cached authoritative Pi snapshot."""
     result = dict(config)
+    result["model_tuning_supported"] = (
+        config.get("model_tuning_supported") is True
+        and detector.get("semantic_model_policy_v1") is True
+    )
     catalog = result.get("behavior_catalog")
     if isinstance(catalog, dict):
         result["behavior_catalog"] = {
@@ -248,16 +252,24 @@ async def configuration(request: Request):
 @router.post("/navigation/config")
 async def configure(request: Request):
     body = await request.json()
+    values = body.get("values") if isinstance(body, dict) else None
+    if not isinstance(values, dict):
+        raise RiderError("navigation_configuration_invalid", 400)
     detector = request.app.state.rider_vision.status()
-    behavior = (
-        body.get("values", {}).get("behavior") if isinstance(body, dict) else None
-    )
+    behavior = values.get("behavior")
     if (
         isinstance(behavior, dict)
         and behavior.get("profile_id") != "legacy"
         and detector.get("temporal_navigation_v1") is not True
     ):
         raise RiderError("temporal_navigation_update_required", 409)
+    perception = values.get("perception")
+    if (
+        isinstance(perception, dict)
+        and perception.get("semantic_models")
+        and detector.get("semantic_model_policy_v1") is not True
+    ):
+        raise RiderError("navigation_model_tuning_update_required", 409)
     result = await request.app.state.rider.mutate(
         "/api/navigation/config", body, request.headers.get("X-Rider-Session")
     )
@@ -337,7 +349,11 @@ async def validate_model_policy(request, device, frame):
     models = getattr(request.app.state, "rider_models", None)
     if models is None:
         return
-    if not frame.perception.model_id and device not in models.runtime.expected:
+    if (
+        not frame.perception.model_id
+        and not frame.perception.semantic_models
+        and device not in models.runtime.expected
+    ):
         return
     domain = request.app.state.rider
     if domain.transport().device.id != device:
@@ -345,6 +361,16 @@ async def validate_model_policy(request, device, frame):
     policy = (await domain.read("/api/navigation/config", 0.2))["data"]
     from ..perception_catalog import selected_identity
 
+    expected_perception = policy.get("perception", {})
+    if frame.perception.semantic_models or expected_perception.get("semantic_models"):
+        from ..depth_detector import PerceptionSettings
+
+        if (
+            policy.get("revision") != frame.config_revision
+            or PerceptionSettings.model_validate(expected_perception).model_dump()
+            != frame.perception.model_dump()
+        ):
+            raise RiderError("navigation_model_tuning_conflict", 409)
     if frame.perception.model_id or policy.get("perception", {}).get("model_id"):
         selected = selected_identity(policy)
         if (

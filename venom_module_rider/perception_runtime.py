@@ -9,7 +9,12 @@ from collections import deque
 
 from .depth_detector import DepthDetector, decode_payload
 from .errors import RiderError
-from .floor_detector import FloorDetector, classify_logits, render_preview
+from .floor_detector import (
+    FloorDetector,
+    classify_compact_maps,
+    classify_logits,
+    render_preview,
+)
 from .perception_catalog import DEPTH, SEGFORMER, YOLO
 
 
@@ -21,12 +26,16 @@ class TorchSegformer:
     def status(self):
         return {"loaded": self.model is not None, "device": "cpu"}
 
-    def detect(self, payload, corridor, *, evidence=False):
+    def detect(self, payload, corridor, *, evidence=False, semantic=None):
         import numpy as np
         import torch
         from PIL import Image
         from transformers import SegformerForSemanticSegmentation
 
+        if semantic is not None:
+            from .perception_tuning import validate_resolved_semantic
+
+            semantic = validate_resolved_semantic(semantic)
         image = decode_payload(payload)
         rgb = (
             np.asarray(
@@ -49,18 +58,30 @@ class TorchSegformer:
             logits = (
                 self.model(pixel_values=torch.from_numpy(pixels)).logits.cpu().numpy()
             )
-        result = classify_logits(logits, corridor)
-        if evidence:
-            from .navigation_maps import semantic_maps, source_gray
-
-            result["_navigation_maps"] = {
-                **semantic_maps(logits, image.size),
-                "gray": source_gray(image),
-            }
-        if rgb.mean() < 0.04 or rgb.std() < 0.01:
-            result.update(state="unknown", reason="vision_image_quality")
-        result["_preview"] = render_preview(rgb, logits, corridor)
+        if semantic is not None and 28 in semantic["traversable_labels"]:
+            if self.model.config.id2label.get(28) != "rug":
+                raise ValueError("model_labels_invalid")
+        result = semantic_output(logits, corridor, image, rgb, semantic, evidence)
         return result
+
+
+def semantic_output(logits, corridor, image, rgb, semantic, evidence):
+    """Reuse source maps for raw scoring, temporal evidence and the preview."""
+    from .navigation_maps import semantic_maps, source_gray
+
+    maps = None
+    if semantic is not None or evidence:
+        maps = semantic_maps(logits, image.size, semantic=semantic)
+    result = classify_logits(logits, corridor, semantic=semantic, source_maps=maps)
+    if evidence:
+        assert maps is not None
+        result["_navigation_maps"] = {**maps, "gray": source_gray(image)}
+    if rgb.mean() < 0.04 or rgb.std() < 0.01:
+        result.update(state="unknown", reason="vision_image_quality")
+    result["_preview"] = render_preview(
+        rgb, logits, corridor, semantic=semantic, source_maps=maps
+    )
+    return result
 
 
 def source_overlay(payload, preview):
@@ -149,11 +170,22 @@ class ModelRuntime:
             try:
                 from .navigation_profiles import parameters
 
+                perception = frame.perception.model_dump()
+                behavior = frame.behavior.model_dump()
                 options = (
-                    {"evidence": parameters(frame.behavior.model_dump())}
+                    {"evidence": parameters(behavior, perception)}
                     if frame.behavior.profile_id != "legacy"
                     else {}
                 )
+                if model_id != DEPTH and (
+                    frame.behavior.profile_id != "legacy"
+                    or model_id in perception.get("semantic_models", {})
+                ):
+                    from .perception_tuning import semantic_parameters
+
+                    options["semantic"] = semantic_parameters(
+                        perception, behavior, model_id
+                    )
                 if model_id == DEPTH:
                     if (
                         frame.protocol_version == 3
@@ -295,12 +327,15 @@ class YoloSemanticOnnx:
     def status(self):
         return {"loaded": self.session is not None, "device": "cpu"}
 
-    def detect(self, payload, corridor, *, evidence=False):
+    def detect(self, payload, corridor, *, evidence=False, semantic=None):
         import numpy as np
         import onnxruntime as ort
-        import torch
         from PIL import Image
 
+        if semantic is not None:
+            from .perception_tuning import validate_resolved_semantic
+
+            semantic = validate_resolved_semantic(semantic)
         image = decode_payload(payload)
         scale = min(640 / image.width, 640 / image.height)
         width, height = round(image.width * scale), round(image.height * scale)
@@ -333,21 +368,26 @@ class YoloSemanticOnnx:
             or not np.isfinite(logits).all()
         ):
             raise ValueError("vision_model_output")
-        logits = torch.nn.functional.interpolate(
-            torch.from_numpy(logits),
-            size=(640, 640),
-            mode="bilinear",
-            align_corners=False,
-        ).numpy()[:, :, top : top + height, left : left + width]
-        result = classify_logits(logits, corridor)
-        if evidence:
-            from .navigation_maps import semantic_maps, source_gray
+        from .navigation_maps import (
+            letterbox_semantic_maps,
+            semantic_maps_from_compact,
+            source_gray,
+        )
 
-            result["_navigation_maps"] = {
-                **semantic_maps(logits, image.size),
-                "gray": source_gray(image),
-            }
+        native = letterbox_semantic_maps(logits, (left, top, width, height))
+        maps = semantic_maps_from_compact(
+            native["labels"], native["confidence"], image.size, semantic=semantic
+        )
+        # Legacy raw scoring uses its original cropped model grid. Configured
+        # scoring uses the same source grid as temporal evidence and the preview.
+        result = classify_compact_maps(
+            native if semantic is None else maps, corridor, semantic=semantic
+        )
+        if evidence:
+            result["_navigation_maps"] = {**maps, "gray": source_gray(image)}
         if rgb.mean() < 0.04 or rgb.std() < 0.01:
             result.update(state="unknown", reason="vision_image_quality")
-        result["_preview"] = render_preview(rgb, logits, corridor)
+        result["_preview"] = render_preview(
+            rgb, None, corridor, semantic=semantic, source_maps=maps
+        )
         return result

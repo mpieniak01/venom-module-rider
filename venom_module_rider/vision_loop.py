@@ -55,7 +55,11 @@ class VisionLoop:
         from .navigation_profiles import parameters
 
         options = (
-            {"evidence": parameters(frame.behavior.model_dump())}
+            {
+                "evidence": parameters(
+                    frame.behavior.model_dump(), frame.perception.model_dump()
+                )
+            }
             if frame.behavior.profile_id != "legacy"
             else {}
         )
@@ -65,7 +69,11 @@ class VisionLoop:
         from .navigation_profiles import parameters
 
         options = (
-            {"evidence": parameters(frame.behavior.model_dump())}
+            {
+                "evidence": parameters(
+                    frame.behavior.model_dump(), frame.perception.model_dump()
+                )
+            }
             if frame.behavior.profile_id != "legacy"
             else {}
         )
@@ -102,6 +110,7 @@ class VisionLoop:
             "supported_protocol_versions": [1, 2, 3],
             "navigation_journey_version": 1,
             "temporal_navigation_v1": importlib.util.find_spec("cv2") is not None,
+            "semantic_model_policy_v1": True,
             "ground_geometry_supported": callable(
                 getattr(self.depth_detector, "detect_ground", None)
             ),
@@ -638,7 +647,7 @@ class VisionLoop:
                 {
                     "behavior": frame.behavior.model_dump(),
                     "effective_policy_sha256": policy_digest(
-                        frame.behavior.model_dump()
+                        frame.behavior.model_dump(), frame.perception.model_dump()
                     ),
                 }
                 if frame.behavior.profile_id != "legacy"
