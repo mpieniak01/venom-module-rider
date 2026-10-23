@@ -164,7 +164,7 @@ async page => {
     await page.getByTestId("rider-manual-mode").selectOption("pulse");
     scenarios.push("global blur cancels pending continuous gesture with a scoped independent request and no queued renewal");
     await wait(async()=>await page.getByRole("img",{name:"Klatka kamery Rider"}).isVisible(),"camera image not rendered during jitter test");
-    const firstFrame=frameSequence;statusDelay=650;await wait(()=>slowReads>=2,"slow control reads not exercised");
+    const firstFrame=frameSequence,slowReadsAtStart=slowReads;statusDelay=650;await wait(()=>slowReads>=slowReadsAtStart+2,"slow control reads not exercised");
     check(frameSequence>firstFrame,"camera did not keep refreshing during slow diagnostics");
     check(!await forward.isDisabled(),"diagnostic RTT jitter hid the explicit manual gesture");
     const jitterStart=calls.length;await forward.click();await wait(()=>calls.length>jitterStart,"fresh gesture was queued behind slow polling");

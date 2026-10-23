@@ -1,6 +1,6 @@
 import { WifiOff, X } from "lucide-react";
 import type { Translator } from "../lib/i18n";
-import { formatTime, safetyOf, str } from "../lib/model";
+import { formatTime, record, safetyOf, str } from "../lib/model";
 import type { RiderClient } from "../lib/use-rider";
 import { journeyOwnsMotion, manualInterventionSupported, operatorPrioritySupported } from "../lib/navigation";
 import { ManualPad } from "./control";
@@ -26,14 +26,24 @@ export function OperatorConsole({ client, t, language }: { client: RiderClient; 
   const journey = journeyOwnsMotion(client.status);
   const ownsManual = safety.state === "ARMED" && safety.owner === "manual";
   const direct = manualInterventionSupported(client.status);
-  const reason = client.canNavigate ? (direct ? "manualGestureReady" : safety.owner === "navigation" ? "operatorInterventionReady" : "workspaceManualReady") : journey && !direct ? "manualGestureUnsupported" : ownsManual ? "workspaceTakeoverNeeded" : safety.state === "ARMED" ? "workspaceAutomaticOwner" : safety.state === "DISARMED" ? "workspaceArmNeeded" : "workspacePermissionUnknown";
+  const reason = !client.canMutate ? "workspace.connectionLost" : client.status?.errors.control || safety.stale===true ? "workspacePermissionUnknown" : client.canNavigate ? (direct ? "manualGestureReady" : safety.owner === "navigation" ? "operatorInterventionReady" : "workspaceManualReady") : journey && !direct ? "manualGestureUnsupported" : ownsManual ? "workspaceTakeoverNeeded" : safety.state === "ARMED" ? "workspaceAutomaticOwner" : safety.state === "DISARMED" ? "workspaceArmNeeded" : "workspacePermissionUnknown";
+  const notice=client.canMutate&&!client.status?.errors.control&&safety.stale!==true&&client.canNavigate?client.notice:null;
   return <Panel className={styles.operatorPanel} title={t("manual")} extra={<Button size="large" data-testid="takeover-manual" tone="primary" title={t(direct ? "manualGestureReady" : journey ? "journeyManualTakeover" : operatorPrioritySupported(client.status) && safety.state === "ARMED" ? "operatorTakeoverHint" : "takeManualHint")} disabled={!client.canArm || !!client.busy && !(operatorPrioritySupported(client.status) && safety.state === "ARMED")} onClick={() => void client.takeManual(t("manual"))}>{t("takeManual")}</Button>}>
-    <ManualPad client={client} t={t} language={language} compact>
-    <div className={styles.operatorMessages} data-testid="operator-messages" tabIndex={0} role="region" aria-label={t("workspaceMessages")}>
-      <RiderMessages client={client} t={t} language={language}/>
-      <p className={styles.hint} role="status">{t(reason)}</p>
-      <p className={styles.hint}>{t(direct ? "manualGestureHint" : journey ? "journeyManualTakeover" : operatorPrioritySupported(client.status) && safety.state === "ARMED" ? "operatorTakeoverHint" : "takeManualHint")}</p>
-    </div>
+    <ManualPad client={client} t={t} language={language} compact minimal>
+      <div className={styles.operatorMessages+" "+(notice?.tone==="error"?styles.operatorMessageError:"")} data-testid="operator-messages" role={notice?.tone==="error"?"alert":"status"}>
+        <span title={notice?.code}>{t(notice?.code==="panel_owner_mismatch"?"workspace.panelChanged":notice?.key??reason)}</span>
+        {notice&&<Button aria-label={t("close")} onClick={()=>client.setNotice(null)}><X size={14}/></Button>}
+      </div>
     </ManualPad>
+  </Panel>;
+}
+
+export function OperatorDiagnostics({client,t,language}:{client:RiderClient;t:Translator;language:string}) {
+  const safety=safetyOf(client.status),execution=record(safety.execution);
+  return <Panel title={t("workspace.controlDiagnostics")}>
+    <RiderMessages client={client} t={t} language={language}/>
+    <div className={styles.meta}><span>{t("owner")}: {String(safety.owner??"—")}</span><span>{t("manualAck")}: {String(client.manualRequest?.phase??"—")}</span><span>{t("manualOutput")}: {String(execution.state??"—")}</span></div>
+    <p className={styles.hint}>{t("manualModePulseHint")}</p>
+    <p className={styles.hint}>{t("manualGestureHint")}</p>
   </Panel>;
 }

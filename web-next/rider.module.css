@@ -126,7 +126,6 @@
 .manualEmbedded .pad { grid-template-columns: repeat(3, 56px); grid-template-rows: repeat(3, 50px); gap: 6px; margin: 12px 0; }
 .manualEmbedded .panelTitle { font-size: 14px; }
 
-.driveWorkspace .camera { width: 100%; height: clamp(180px, 28vh, 320px); max-height: none; aspect-ratio: auto; }
 
 .loopToolbar { display: flex; align-items: end; gap: 16px; flex-wrap: wrap; margin: 16px 0; }
 .loopToolbar .loopActions { margin: 0; }
@@ -136,8 +135,6 @@
 
 .loopModeRow { flex: 0 1 440px; }
 
-.driveWorkspace .camera { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
-.driveWorkspace .camera img { min-width: 0; min-height: 0; max-height: 100%; }
 
 .environmentSelect { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--r-muted); }
 .environmentSelect select { width: 160px; }
@@ -175,7 +172,6 @@
 .padStop:disabled { opacity: .4; cursor: not-allowed; }
 
 /* Keep the complete camera image beside the decision and manual controls. */
-.loopCamera .cameraEmbedded .camera { height: clamp(240px, 30vh, 340px); max-height: 340px; aspect-ratio: auto; }
 
 .cameraTransition { border-color: var(--r-border); color: var(--ui-muted); }
 
@@ -232,348 +228,6 @@
 @container rider (max-width: 420px) { .sectorGrid { gap: 5px; } .sectorCard { padding: 6px; font-size: 11px; } .sectorCard b { flex-wrap: wrap; } }
 
 
-/* Fixed driving geometry: observations scroll; input targets never follow messages. */
-.page[data-section="control"] { height: calc(100dvh - var(--rider-page-top, 210px) - 12px); min-height: 460px; padding-bottom: 0; display: flex; flex-direction: column; }
-.page[data-section="control"] > .header, .page[data-section="control"] > .tabs { flex-shrink: 0; }
-.controlPanel { overflow-anchor: none; overflow: hidden; flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.controlWorkspace { flex: 1; min-height: 0; display: grid; grid-template-rows: minmax(44px, max-content) minmax(0, 1fr); gap: 10px; }
-.controlModeRow { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; }
-.controlModes { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
-.workspaceOwner { min-width: 0; font-size: 12px; color: var(--ui-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.driveWorkspace { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 16px; min-height: 0; }
-.workspaceContent { min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 0 6px 12px 0; }
-.workspaceContent > * { margin-bottom: 14px; }
-.workspaceContent .loopCamera { position: static; padding: 16px; background: var(--bg-panel); border: 1px solid var(--r-border); border-radius: 16px; }
-.workspaceContent .loopToolbar { position: static; }
-.operatorConsole { overflow-anchor: none; min-width: 0; min-height: 0; }
-.operatorPanel { height: 100%; box-sizing: border-box; padding: 12px; display: grid; grid-template-rows: var(--r-button-large) minmax(0, 1fr); gap: 8px; }
-.operatorPanel > .panelHeader { height: var(--r-button-large); margin: 0; flex-wrap: nowrap; gap: 6px; }
-.operatorPanel .panelTitle { font-size: 14px; }
-.operatorPanel > .panelHeader .button { padding: 0 10px; white-space: nowrap; }
-.manualPad { min-width: 0; }
-.padMode { display: flex; gap: 8px; align-items: center; min-width: 0; font-size: 12px; height: 40px; }
-.padMode > span { flex-shrink: 0; }
-.padMode .formControl { flex: 1; padding: 6px 8px; font-size: 12px; }
-.padDetails { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
-.padHelp .hint { margin: 4px 0 8px; }
-.operatorPanel .manualPad { display: grid; grid-template-rows: 40px 190px minmax(0, 1fr); height: 100%; min-height: 0; }
-.operatorPanel .pad { grid-template-columns: repeat(3, 68px); grid-template-rows: repeat(3, 56px); gap: 6px; margin: 8px 0 2px; align-content: start; }
-.operatorPanel .manualFeedback { padding: 8px; margin: 8px 0; }
-.operatorPanel .padStatus { flex-wrap: wrap; justify-content: start; gap: 5px; }
-.operatorMessages { min-width: 0; border-top: 1px solid var(--r-border); padding-top: 6px; overflow-wrap: anywhere; }
-.operatorMessages .hint { margin: 0 0 8px; }
-.messages .banner { margin: 0 0 8px; padding: 8px; font-size: 12px; }
-.messages .noticeText { min-width: 0; overflow-wrap: anywhere; }
-.cameraTools { margin: 12px 0; padding: 10px 0; border-top: 1px solid var(--r-border); font-size: 12px; }
-.cameraTools > summary { cursor: pointer; margin-bottom: 8px; color: var(--ui-muted); }
-.pageFocused { position: fixed; inset: 0; z-index: 1000; max-width: none; margin: 0; padding: 10px; background: var(--bg-base); overflow-y: auto; }
-.pageFocused[data-section="control"] { height: 100dvh; min-height: 0; }
-.pageFocused > .header { top: 0; }
-.page .toolbar .pill { width: 170px; height: 28px; box-sizing: border-box; overflow: hidden; text-overflow: ellipsis; display: inline-flex; flex-wrap: nowrap; }
-.page .toolbar .armArmed, .page .toolbar .armDisarmed { width: 178px; padding: 0 8px; white-space: nowrap; }
-@container rider (max-width: 720px) {
-  .page .header { padding: 8px; gap: 6px; margin-bottom: 6px; }
-  .brand { flex-basis: 100%; }
-  .brandIcon, .subtitle { display: none; }
-  .title { font-size: 17px; }
-  .toolbar { flex-basis: 100%; gap: 6px; }
-  .environmentSelect { gap: 4px; font-size: 10px; }
-  .environmentSelect select { width: 76px; min-height: var(--r-button-small); padding: 4px; font-size: 12px; }
-  .toolbar .pill { width: 110px; font-size: 10px; padding: 4px 6px; }
-  .toolbar > .button { padding: 0 8px; }
-  .page .toolbar .armArmed, .page .toolbar .armDisarmed { width: 174px; font-size: 12px; }
-  .toolbar .stop { padding: 0 14px; }
-  .tabs { margin-bottom: 6px; }
-  .tab { padding: 8px; font-size: 12px; }
-  .controlModeRow { gap: 6px; }
-  .workspaceOwner { font-size: 10px; }
-  .driveWorkspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(290px, 1fr) minmax(40px, .8fr); gap: 10px; }
-  .operatorConsole { grid-row: 1; }
-  .workspaceContent { grid-row: 2; }
-  .operatorPanel { grid-template-rows: var(--r-button-large) minmax(0, 1fr); gap: 4px; padding: 8px; }
-  .operatorPanel > .panelHeader { height: var(--r-button-large); }
-  .operatorPanel .manualPad { grid-template-rows: 36px 146px minmax(0, 1fr); }
-  .operatorPanel .padMode { height: 36px; }
-
-  .operatorPanel .pad { grid-template-rows: repeat(3, 44px); grid-template-columns: repeat(3, 64px); gap: 4px; margin: 6px 0 0; }
-}
-@media (max-height: 520px) and (min-width: 721px) {
-  .pageFocused .driveWorkspace { grid-template-columns: minmax(0, 1fr) 300px; }
-  .pageFocused .operatorPanel { grid-template-rows: var(--r-button-large) minmax(0, 1fr); gap: 2px; padding: 6px; }
-  .pageFocused .operatorPanel > .panelHeader { height: var(--r-button-large); }
-  .pageFocused .operatorPanel .manualPad { grid-template-rows: 34px 150px minmax(0, 1fr); }
-  .pageFocused .operatorPanel .pad { grid-template-rows: repeat(3, 44px); grid-template-columns: repeat(3, 60px); gap: 4px; margin: 6px 0 0; }
-}
-
-
-@container rider (min-width: 900px) {
-  .page .header { flex-wrap: nowrap; }
-  .brand { flex: 0 0 140px; }
-  .toolbar { display: grid; grid-template-columns: minmax(160px, 1fr) 120px 36px 178px 104px 36px; gap: 8px; flex: 1; }
-  .environmentSelect { font-size: 10px; gap: 5px; }
-  .environmentSelect select { width: 90px; }
-  .page .toolbar .pill { width: 120px; }
-  .toolbar > .button { padding-left: 6px; padding-right: 6px; }
-  .toolbar .stop { width: 104px; padding: 0 8px; }
-}
-
-
-/* The host document may scroll when browser focus/anchoring changes. Keep the
-   entire driving surface anchored to its measured host slot, not that scroll. */
-/* Host scrollbar appearance must not shift the fixed steering targets. */
-:global(html):has(.page) { scrollbar-gutter: stable; }
-.workspaceFrame { width: 100%; min-width: 0; }
-.page[data-section="control"] { position: fixed; top: var(--rider-page-top, 210px); left: var(--rider-page-left, 0px); width: var(--rider-page-width, 100%); z-index: 40; margin: 0; background: var(--bg-base); }
-.page.pageFocused[data-section="control"] { inset: 0; width: 100%; height: 100dvh; z-index: 1000; }
-
-.workspaceFrame[data-section="control"] { height: calc(100dvh - var(--rider-page-top, 210px) - 12px); min-height: 460px; }
-
-
-@container rider (max-width: 720px) {
-  .toolbar { display: grid; grid-template-columns: 76px minmax(0, 1fr) 36px 36px; grid-template-rows: var(--r-button-small) var(--r-button-large); gap: 6px; }
-  .environmentSelect { grid-column: 1; grid-row: 1; }
-  .environmentSelect > span { display: none; }
-  .page .toolbar .pill { grid-column: 2; grid-row: 1; width: 100%; height: 28px; font-size: 10px; }
-  .toolbar > [data-testid="rider-refresh"] { grid-column: 3; grid-row: 1; }
-  .page .toolbar .armArmed, .page .toolbar .armDisarmed { grid-column: 1 / 3; grid-row: 2; width: 100%; }
-  .toolbar > .stop { grid-column: 3 / 5; grid-row: 2; width: 100%; padding: 0 6px; }
-  .toolbar > [data-testid="workspace-expand"] { grid-column: 4; grid-row: 1; }
-}
-
-.operatorConsole .arrow, .operatorConsole .padStop { transition: background-color .15s, border-color .15s, color .15s; }
-
-.page[data-section="control"] .subtitle { display: none; }
-@container rider (max-width: 720px) {
-  .loopCamera .cameraEmbedded .camera { height: min(28dvh, 180px); min-height: 96px; max-height: 180px; }
-}
-
-@media (max-height: 800px) {
-  .page:not(.pageFocused)[data-section="control"] .controlPanel { overflow-y: auto; }
-  .page:not(.pageFocused)[data-section="control"] .controlWorkspace { min-height: 400px; }
-}
-
-/* Operational cockpit: modes share one mounted camera and one input surface.
-   Only explicitly opened details scroll; command targets never join that flow. */
-.controlWorkspace { position:relative; grid-template-rows:44px 98px minmax(0,1fr); gap:6px; }
-.controlWorkspace [hidden] { display:none !important; }
-.commandDeck { position:relative; min-width:0; padding-right:205px; display:grid; grid-template-rows:66px 26px; gap:4px; }
-.commandDeck > [data-testid$="-commands"] { min-width:0; }
-.commandDeck .panel { padding:0; margin:0; background:none; border:0; box-shadow:none; }
-.commandDeck .panelHeader { display:none; }
-.commandDeck .loopStatus { height:22px; margin:0; gap:6px; flex-wrap:nowrap; overflow:hidden; white-space:nowrap; font-size:12px; }
-.commandDeck .loopStatus > * { flex-shrink:0; }
-.commandDeck [data-testid="active-perception-method"], .commandDeck [data-testid="venom-permission"] { display:none; }
-.commandDeck .loopToolbar { padding:0; margin:0; background:none; border:0; }
-.commandDeck .loopActions { margin:0; display:flex; flex-wrap:nowrap; gap:8px; align-items:center; }
-.commandDeck .loopActions .button { height:44px; min-height:44px; padding:0 12px; }
-.commandDeck .loopActions .small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.commandReason { grid-row:2; font-size:12px; line-height:24px; overflow:auto; white-space:nowrap; color:var(--r-warning,#fbbf24); scrollbar-width:thin; }
-.commandAccess { position:absolute; top:25px; right:0; }
-.manualCommandHint { grid-row:1; display:flex; align-items:center; font-size:12px; color:var(--r-muted); }
-.driveWorkspace { position:relative; grid-template-columns:minmax(0,1fr) 310px; min-height:0; }
-.workspaceContent { position:relative; overflow:hidden; padding:0; display:flex; flex-direction:column; }
-.workspaceContent > .loopCamera { flex:1; min-height:0; margin:0; padding:8px; overflow:hidden; }
-.cameraEmbedded { height:100%; min-height:0; padding:0; display:flex; flex-direction:column; gap:3px; background:none; border:0; box-shadow:none; }
-.cameraEmbedded > .panelHeader { flex:0 0 40px; margin:0; gap:6px; }
-.cameraEmbedded .panelTitle { font-size:14px; }
-.cameraEmbedded > .panelHeader > .flex { gap:6px; flex-wrap:nowrap; }
-.cameraEmbedded .button { min-height:36px; height:36px; padding:0 10px; }
-.cameraSources { display:flex; flex:0 0 36px; gap:6px; }
-.workspaceContent .loopCamera .cameraEmbedded .camera { flex:1 1 0; width:100%; height:auto; min-height:120px; max-height:none; aspect-ratio:auto; }
-.cameraEmbedded .camera img { width:100%; height:100%; object-fit:contain; }
-.cameraEmbedded .camera > .empty { min-height:0; height:100%; padding:8px; }
-.cameraEmbedded .cameraPaused { font-size:11px; line-height:15px; padding:5px; top:4px; left:4px; right:4px; }
-.cameraEmbedded .sectorLegend { flex:0 0 48px; overflow:hidden; margin:0; }
-.cameraEmbedded .sectorGrid { gap:4px; }
-.cameraEmbedded .sectorCard { padding:4px 6px; min-height:44px; overflow:hidden; }
-.cameraEmbedded .sectorCard b { font-size:11px; white-space:nowrap; }
-.cameraEmbedded .sectorCard p { font-size:11px; line-height:16px; margin:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.cameraEmbedded .sectorBadge { margin-right:4px; }
-.sampleCapture[data-compact="true"] { flex:0 0 44px; display:flex; align-items:center; gap:6px; margin:0; padding:0; border:0; }
-.sampleCapture[data-compact="true"] .sampleHeading { display:none; }
-.sampleActions { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
-.sampleCapture[data-compact="true"] .sampleActions { flex-wrap:nowrap; }
-.sampleCapture[data-compact="true"] .sampleDetails { margin-left:auto; font-size:11px; }
-.sampleCapture[data-compact="true"] .sampleDetails[open], .cameraEmbedded > .cameraTools[open] { position:absolute; left:8px; right:8px; bottom:8px; max-height:70%; overflow:auto; background:var(--r-panel,#07121f); border:1px solid var(--r-border,#334155); padding:12px; z-index:8; border-radius:10px; }
-.cameraEmbedded > .cameraTools { flex:0 0 20px; margin:0; padding:0; border:0; font-size:11px; }
-.workspaceDetails { position:absolute; z-index:10; inset:0; pointer-events:none; }
-.workspaceDetails > summary { display:none; }
-.workspaceDetails[open] { pointer-events:auto; background:var(--r-panel,#07121f); border:1px solid var(--r-border,#334155); border-radius:12px; overflow:auto; }
-.workspaceDetails[open] > summary { display:list-item; position:sticky; top:0; padding:12px; background:var(--r-panel,#07121f); z-index:2; cursor:pointer; }
-.workspaceDetailsBody { padding:10px; }
-.workspaceDetailsBody .panel { padding:12px; }
-.controlWorkspace .button { border-radius:9px; box-shadow:none; font-weight:600; font-size:12px; }
-.controlWorkspace .button:focus-visible { outline:2px solid var(--r-accent,#7c3aed); outline-offset:2px; }
-.controlWorkspace .button:hover { transform:none; }
-@container rider (max-width:720px) {
-  .controlWorkspace { grid-template-rows:40px 96px minmax(0,1fr); }
-  .controlModeRow { gap:4px; }
-  .controlModes { gap:4px; flex-wrap:nowrap; }
-  .controlModes .button { padding:0 8px; }
-  .workspaceOwner { display:none; }
-  .commandDeck { padding-right:0; }
-  .commandAccess { right:0; top:0; }
-  .commandAccess .button { height:24px; min-height:24px; font-size:10px; padding:0 6px; }
-  .commandDeck .loopActions .button { height:44px; min-height:44px; }
-  .commandDeck .loopActions .small { font-size:10px; }
-  .commandDeck .loopStatus { height:18px; max-width:calc(100% - 155px); padding-right:0; }
-  .driveWorkspace { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(170px,1fr) 218px; gap:6px; }
-  .workspaceContent { grid-row:1; }
-  .operatorConsole { grid-row:2; }
-  .operatorPanel { padding:6px; grid-template-rows:36px minmax(0,1fr); gap:4px; }
-  .operatorPanel > .panelHeader { height:36px; }
-  .operatorPanel .panelTitle { font-size:13px; }
-  .operatorPanel .manualPad { grid-template-columns:190px minmax(0,1fr); grid-template-rows:32px minmax(0,1fr); column-gap:6px; }
-  .operatorPanel .padMode { grid-column:1 / -1; height:32px; }
-  .operatorPanel .pad { grid-row:2; grid-column:1; grid-template-columns:repeat(3,58px); grid-template-rows:repeat(3,44px); margin:0; }
-  .operatorPanel .padDetails { grid-row:2; grid-column:2; }
-  .operatorPanel .padHelp { display:none; }
-  .operatorPanel .manualFeedback { font-size:10px; margin:0 0 4px; padding:4px; }
-  .operatorPanel .manualFeedback > span { display:block; }
-  .operatorPanel .padStatus { gap:3px; }
-  .operatorPanel .pill { font-size:10px; padding:3px 4px; }
-  .cameraEmbedded > .panelHeader { flex-basis:32px; }
-  .cameraEmbedded .panelTitle, .cameraEmbedded [data-testid="camera-power-state"] { display:none; }
-  .cameraEmbedded > .panelHeader > .flex { width:100%; justify-content:space-between; }
-  .cameraEmbedded .button { height:32px; min-height:32px; padding:0 7px; font-size:11px; }
-  .cameraSources { flex-basis:32px; }
-  .cameraEmbedded .sectorCard b { font-size:10px; }
-  .cameraEmbedded .sectorCard p { font-size:10px; }
-  .sampleCapture[data-compact="true"] { flex-basis:36px; }
-  .sampleCapture[data-compact="true"] .sampleDetails { max-width:100px; }
-}
-@media (max-height:620px) and (min-width:721px) {
-  .pageFocused[data-section="control"] { padding:4px 8px; }
-  .pageFocused .controlWorkspace { grid-template-rows:36px 72px minmax(0,1fr); gap:4px; }
-  .pageFocused .commandDeck { grid-template-rows:44px 24px; }
-  .pageFocused .commandDeck .loopStatus { display:none; }
-  .pageFocused .commandAccess { top:0; }
-  .pageFocused .cameraEmbedded > .panelHeader, .pageFocused .cameraSources { display:none; }
-  .pageFocused .cameraEmbedded .sectorLegend { flex-basis:44px; }
-  .pageFocused .cameraEmbedded > .cameraTools { display:none; }
-  .pageFocused .operatorPanel .padDetails { font-size:11px; }
-}
-
-.cameraEmbedded { position:relative; }
-.cameraEmbedded > .panelHeader { justify-content:flex-end; flex:0 0 44px; }
-.cameraEmbedded > .panelHeader .panelTitle { display:none; }
-.cameraEmbedded > .panelHeader [data-testid="camera-power-state"] { display:none; }
-.cameraEmbedded .cameraSources { position:absolute; top:0; left:0; height:44px; align-items:center; }
-.cameraEmbedded .cameraSources .button, .cameraEmbedded > .panelHeader .button { min-height:44px; height:44px; }
-.sampleCapture[data-compact="true"] .button { min-height:44px; height:44px; }
-@container rider (min-width:721px) and (max-width:899px) {
-  .header { flex-wrap:nowrap; gap:8px; padding:6px 8px; }
-  .brand { flex:0 0 auto; }
-  .brandIcon, .subtitle { display:none; }
-  .title { font-size:17px; white-space:nowrap; }
-  .toolbar { flex:1; flex-wrap:nowrap; justify-content:flex-end; gap:6px; }
-  .toolbar .field > span { display:none; }
-  .toolbar select { width:76px; }
-  .toolbar > .pill { width:100px; min-width:0; }
-  .toolbar [data-testid="rider-arm"] { width:155px; }
-  .toolbar [data-testid="rider-stop"] { padding:0 12px; }
-}
-@container rider (max-width:720px) {
-  .header { display:grid; grid-template-columns:1fr; padding:6px 8px; gap:4px; }
-  .brand { display:none; }
-  .toolbar { display:grid; grid-template-columns:76px minmax(0,1fr) 44px 44px; gap:4px; }
-  .toolbar .field { margin:0; }
-  .toolbar > .pill { width:auto; max-width:none; }
-  .toolbar [data-testid="rider-arm"] { grid-column:1 / 3; width:100%; min-height:44px; height:44px; }
-  .toolbar [data-testid="rider-stop"] { grid-column:3 / 5; width:100%; min-height:44px; height:44px; }
-  .toolbar [data-testid="workspace-expand"] { grid-column:4; grid-row:1; }
-  .toolbar [data-testid="rider-refresh"] { grid-column:3; grid-row:1; }
-  .controlWorkspace { grid-template-rows:40px 82px minmax(0,1fr); }
-  .commandDeck { grid-template-rows:62px 20px; gap:0; }
-  .manualCommandHint { align-items:flex-end; padding-bottom:8px; }
-  .driveWorkspace { grid-template-rows:minmax(170px,1fr) 222px; }
-  .cameraEmbedded > .panelHeader { flex-basis:44px; }
-  .cameraEmbedded > .panelHeader > .flex { width:auto; }
-  .cameraEmbedded .sectorLegend { flex-basis:46px; }
-  .sampleCapture[data-compact="true"] { flex-basis:44px; }
-  .sampleCapture[data-compact="true"] .button { padding:0 6px; font-size:10px; }
-  .sampleCapture[data-compact="true"] .sampleDetails { max-width:90px; }
-}
-@media (max-height:620px) and (min-width:721px) {
-  .pageFocused > .header { margin-bottom:4px; }
-  .pageFocused > .tabs { margin-bottom:4px; }
-  .pageFocused > .tabs .tab { padding:5px 10px; }
-  .pageFocused .controlWorkspace { grid-template-rows:36px 48px minmax(0,1fr); }
-  .pageFocused .commandDeck { grid-template-rows:44px; padding-right:200px; }
-  .pageFocused .commandReason { grid-row:auto; position:absolute; left:300px; right:205px; top:0; height:44px; max-width:none; display:flex; align-items:center; background:var(--bg-panel); font-size:10px; }
-  .pageFocused .commandDeck .loopActions .small { display:none; }
-  .pageFocused .manualCommandHint { align-items:center; }
-  .pageFocused .operatorPanel > .panelHeader { height:32px; }
-  .pageFocused .operatorPanel { grid-template-rows:32px minmax(0,1fr); }
-  .pageFocused .operatorPanel .manualPad { grid-template-columns:190px minmax(0,1fr); grid-template-rows:32px minmax(0,1fr); }
-  .pageFocused .operatorPanel .padMode { grid-column:1 / -1; height:32px; }
-  .pageFocused .operatorPanel .pad { grid-column:1; grid-row:2; grid-template-columns:repeat(3,58px); grid-template-rows:repeat(3,44px); gap:4px; margin:0; }
-  .pageFocused .operatorPanel .padDetails { grid-column:2; grid-row:2; }
-  .pageFocused .driveWorkspace { grid-template-columns:minmax(0,1fr) 390px; gap:8px; }
-  .pageFocused .cameraEmbedded .cameraSources { display:none; }
-  .pageFocused .operatorPanel .panelTitle { font-size:12px; }
-}
-
-@media (max-height:620px) and (min-width:721px) {
-  .pageFocused .header { min-height:44px; height:44px; box-sizing:border-box; padding:0 6px; gap:6px; }
-  .pageFocused .toolbar { gap:4px; }
-  .pageFocused .toolbar > .pill { height:28px; }
-  .pageFocused .header .brand { flex-basis:76px; }
-  .pageFocused .header .title { font-size:14px; }
-  .pageFocused .toolbar .button { min-height:36px; height:36px; }
-  .pageFocused .operatorPanel { padding:2px 4px; grid-template-rows:28px minmax(0,1fr); gap:2px; }
-  .pageFocused .operatorPanel > .panelHeader { height:28px; }
-  .pageFocused .operatorPanel > .panelHeader .button { min-height:28px; height:28px; }
-  .pageFocused .operatorPanel .manualPad { grid-template-rows:28px minmax(0,1fr); }
-  .pageFocused .operatorPanel .padMode { height:28px; }
-  .pageFocused .operatorPanel .padMode select { height:28px; min-height:28px; }
-  .pageFocused .cameraEmbedded .camera { min-height:100px; }
-}
-@container rider (max-width:720px) {
-  .cameraEmbedded .sectorLegend { flex-basis:44px; }
-  .cameraEmbedded .sectorCard { min-height:40px; }
-}
-
-@container rider (max-width:720px) {
-  /* Restoring host navigation explicitly trades image space for its chrome.
-     Keep manual intervention first; the default focused view shows both. */
-  .page:not(.pageFocused)[data-section="control"] { min-height:0; }
-  .page:not(.pageFocused) .driveWorkspace { grid-template-rows:222px minmax(40px,1fr); }
-  .page:not(.pageFocused) .operatorConsole { grid-row:1; }
-  .page:not(.pageFocused) .workspaceContent { grid-row:2; }
-}
-
-@container rider (max-width:720px) {
-  .operatorPanel .manualPad { grid-template-columns:minmax(0,1fr) 190px; }
-  .operatorPanel .pad { grid-column:2; }
-  .operatorPanel .padDetails { grid-column:1; }
-}
-
-@container rider (max-width:720px) {
-  .cameraEmbedded { gap:3px; }
-}
-@media (max-height:620px) and (min-width:721px) {
-  .pageFocused .workspaceContent > .loopCamera { padding:4px; }
-  .pageFocused .cameraEmbedded .sectorLegend { flex-basis:24px; }
-  .pageFocused .cameraEmbedded .sectorCard { display:flex; align-items:center; gap:3px; padding:0 3px; min-height:24px; height:24px; }
-  .pageFocused .cameraEmbedded .sectorCard b { font-size:0; }
-  .pageFocused .cameraEmbedded .sectorBadge { font-size:11px; margin:0; }
-  .pageFocused .cameraEmbedded .sectorCard p { font-size:10px; }
-}
-
-.sampleCapture[data-compact="true"] .sampleDetails { flex:0 0 120px; width:120px; max-width:120px; }
-.sampleCapture[data-compact="true"] .sampleActions { min-width:0; flex:1 1 auto; }
-.sampleCapture[data-compact="true"] .sampleActions .button { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-@container rider (max-width:720px) {
-  .sampleCapture[data-compact="true"] .sampleDetails { flex-basis:90px; width:90px; max-width:90px; }
-}
-
-@container rider (max-width:720px) {
-  .commandDeck .loopStatus .small, .commandDeck .loopActions .small { display:none; }
-}
-
-.cameraEmbedded [data-testid="camera-power-toggle"] { width:44px; padding:0 4px; }
-
 .calibrationTop { display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:16px;align-items:start; }
 .calibrationOperator { grid-column:2;grid-row:1;min-width:0;display:grid;gap:16px; }
 .calibrationForms { grid-column:1;grid-row:1;min-width:0;display:grid;gap:16px; }
@@ -616,22 +270,6 @@
 }
 
 
-@media (max-height:620px) and (min-width:721px) {
-  /* Keep 44px driving targets; compact view selectors and recording instead. */
-  .pageFocused .header { min-height:0; gap:2px; }
-  .pageFocused .recordingBar { padding-top:0; border-top:0; }
-  .pageFocused .recordingActions .button { height:28px; min-height:28px; padding:0 8px; font-size:11px; }
-  .pageFocused .controlWorkspace { grid-template-rows:24px 44px minmax(0,1fr); gap:0; }
-  .pageFocused .controlModes .button { height:24px; min-height:24px; padding:0 6px; font-size:11px; }
-  .pageFocused .commandDeck { gap:0; }
-}
-
-
-/* One provider/model chooser beside the camera; driving controls keep their size. */
-.workspaceContent > .loopCamera { display:flex;flex-direction:column;gap:6px; }
-.perceptionModels { flex:0 1 auto;min-height:32px;max-height:50%;overflow-y:auto;overflow-x:hidden;border-bottom:1px solid var(--r-border);padding:0 0 6px;font-size:12px; }
-.perceptionModels > summary { cursor:pointer;min-height:28px;align-content:center;font-weight:600; }
-.perceptionModels > summary > span { font-weight:400;color:var(--text-secondary);overflow-wrap:anywhere; }
 .perceptionBody { display:grid;gap:6px;padding:8px 0; }
 .perceptionSummary { display:flex;justify-content:space-between;gap:8px;align-items:center; }
 .perceptionSummary .small { margin:4px 0; }
@@ -642,44 +280,172 @@
 .perceptionModels code { overflow-wrap:anywhere; }
 .perceptionPreviewMeta { flex:0 0 auto;display:flex;flex-wrap:wrap;gap:2px 10px;font-size:11px;line-height:1.3;overflow-wrap:anywhere; }
 .perceptionPreviewMeta > span:last-child { flex-basis:100%;color:var(--text-secondary); }
-@container rider (max-width:720px) {
-  .perceptionSelection .field { flex-basis:100%; }
-  .perceptionSelection .button { width:100%; }
-  .perceptionModels { max-height:55%; }
-}
 
-
-/* Reuse the cockpit's settings drawer pattern while choosing a provider/model. */
-.perceptionModels[open] { position:absolute;z-index:9;inset:0;max-height:none;background:var(--r-panel,#07121f);border:1px solid var(--r-border);border-radius:12px;padding:10px; }
-.perceptionModels[open] > summary { position:sticky;top:0;z-index:2;background:var(--r-panel,#07121f);padding:4px 0; }
-.loopCamera .cameraEmbedded { flex:1 1 0;height:auto; }
-@container rider (max-width:720px) {
-  .workspaceContent .loopCamera .cameraEmbedded .camera { min-height:60px; }
-  .cameraEmbedded .perceptionPreviewMeta { position:absolute;left:4px;right:4px;top:46px;z-index:2;padding:2px 4px;background:rgba(3,11,20,.8);pointer-events:none; }
-  .cameraEmbedded .perceptionPreviewMeta > strong { white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;font-size:10px; }
-  .cameraEmbedded .perceptionPreviewMeta > span:nth-child(2) { display:none; }
-  .cameraEmbedded .perceptionPreviewMeta > span:last-child { font-size:9px; }
-}
-
-
-@container rider (max-width:720px) {
-  /* The model drawer may use the mode area, preserving the global and pad STOP. */
-  .perceptionModels[open] { position:fixed;top:calc(var(--rider-page-top,0px) + var(--rider-header-height,160px) + 48px);bottom:max(8px,25dvh);left:calc(var(--rider-page-left,0px) + 8px);width:calc(var(--rider-page-width,100vw) - 16px);right:auto;z-index:1001; }
-}
-
-/* The operator's caution selector stays visible without opening a settings drawer. */
-.navigationProfiles { flex:0 0 auto;min-width:0;border-bottom:1px solid var(--r-border);padding:4px 0;font-size:12px; }
-.navigationProfiles .perceptionBody { padding:2px 0;gap:4px; }
-.navigationProfiles .perceptionSummary { flex-wrap:wrap; }
-.navigationProfiles .perceptionSelection { gap:6px; }
-.navigationProfiles .perceptionSelection .field { flex:1 1 150px; }
-.navigationProfiles .perceptionSelection .button { width:auto; }
-.navigationProfiles .hint,.navigationProfiles .small { margin:2px 0; }
-.navigationProfiles > .perceptionBody > .details { max-height:150px;overflow:auto; }
 .tuningField { display:grid;grid-template-columns:minmax(0,1fr) minmax(90px,.5fr);gap:8px; }
-.tuningField .field { min-width:0; }
-.tuningField input { width:100%;min-width:0; }
+.tuningField .field, .tuningField input { min-width:0;width:100%; }
+
+/* One driving surface; secondary content follows it in normal document flow. */
+:global(html):has(.page) { scrollbar-gutter: stable; }
+.workspaceFrame { width:100%; min-width:0; }
+.workspaceFrame[data-section="control"] { min-height:calc(100dvh - var(--rider-page-top, 0px) - 12px); }
+.page[data-section="control"] { position:fixed; top:var(--rider-page-top, 0px); left:var(--rider-page-left, 0px); width:var(--rider-page-width, 100%); height:calc(100dvh - var(--rider-page-top, 0px) - 12px); max-width:none; margin:0; padding-bottom:24px; z-index:40; background:var(--bg-base); overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; scrollbar-gutter:stable; }
+.page[data-section="control"] > .header { top:0; margin-bottom:8px; }
+.page[data-section="control"] .subtitle { display:none; }
+.pageFocused { position:fixed; inset:0; z-index:1000; max-width:none; margin:0; padding:10px; background:var(--bg-base); overflow-y:auto; }
+.page.pageFocused[data-section="control"] { inset:0; width:100%; height:100dvh; z-index:1000; }
+.pageFocused > .header { top:0; }
+.controlPanel, .controlWorkspace { min-width:0; overflow-anchor:none; }
+.controlWorkspace [hidden] { display:none !important; }
+.drivingSurface { height:max(500px,calc(100dvh - var(--rider-page-top, 0px) - var(--rider-header-height, 80px) - 90px)); display:grid; grid-template-rows:44px 84px minmax(0,1fr); gap:8px; }
+.pageFocused .drivingSurface { height:max(480px,calc(100dvh - var(--rider-header-height, 80px) - 82px)); }
+.controlModeRow { display:flex; justify-content:space-between; align-items:center; gap:12px; min-width:0; }
+.controlModes { display:flex; gap:6px; }
+.workspaceOwner { font-size:12px; color:var(--ui-muted); white-space:nowrap; }
+.commandDeck { min-width:0; position:relative; padding-right:190px; display:grid; grid-template-rows:44px 40px; }
+.commandDeck .panel { padding:0; margin:0; background:none; border:0; display:flex; align-items:center; gap:12px; }
+.commandDeck .panelHeader { display:none; }
+.commandDeck .loopStatus { order:2; height:22px; margin:0; gap:6px; flex-wrap:nowrap; font-size:12px; overflow:hidden; white-space:nowrap; }
+.commandDeck [data-testid="active-perception-method"], .commandDeck [data-testid="venom-permission"] { display:none; }
+.commandDeck .loopToolbar { margin:0; padding:0; }
+.commandDeck .loopActions { display:flex; flex-wrap:nowrap; align-items:center; gap:8px; margin:0; }
+.commandDeck .loopActions .button { height:44px; min-height:44px; }
+.commandDeck .loopActions .small { white-space:nowrap; color:var(--ui-muted); }
+.commandDeck .loopStatus > strong { display:none; }
+.manualCommandHint { display:flex; align-items:center; font-size:12px; color:var(--ui-muted); }
+.commandReason { display:flex; align-items:center; gap:8px; min-width:0; height:40px; font-size:12px; color:var(--tone-warning-text); }
+.commandReason > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.commandReason .button { flex-shrink:0; height:36px; min-height:36px; padding:0 8px; }
+.commandAccess { position:absolute; right:0; top:22px; }
+.driveWorkspace { display:grid; grid-template-columns:minmax(0,1fr) 310px; align-items:stretch; gap:16px; min-height:0; min-width:0; }
+.workspaceContent { min-height:0; min-width:0; }
+.loopCamera { box-sizing:border-box; height:100%; min-height:0; padding:10px; border:1px solid var(--r-border); border-radius:16px; background:var(--bg-panel); }
+.cameraEmbedded { height:100%; min-height:0; display:flex; flex-direction:column; gap:6px; padding:0; border:0; background:none; }
+.cameraEmbedded > .panelHeader { margin:0; flex:0 0 36px; }
+.cameraEmbedded > .panelHeader > .panelTitle { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
+.cameraToolbar { display:flex; width:100%; min-width:0; align-items:center; gap:6px; }
+.cameraSources { display:flex; align-items:center; gap:6px; margin-right:auto; }
+.cameraEmbedded [data-testid="camera-power-state"] { display:none; }
+.cameraEmbedded .button { padding:0 10px; white-space:nowrap; }
+.cameraEmbedded .perceptionPreviewMeta { flex:0 0 30px; min-height:30px; font-size:11px; line-height:15px; overflow:hidden; }
+.cameraEmbedded .perceptionPreviewMeta[hidden] { display:flex !important; visibility:hidden; }
+.cameraEmbedded .perceptionPreviewMeta > span:not(:last-child) { display:none; }
+.workspaceContent .loopCamera .cameraEmbedded .camera { flex:1 1 0; width:auto; height:auto; min-height:200px; max-height:none; aspect-ratio:auto; }
+.cameraEmbedded .camera img { width:100%; height:100%; object-fit:contain; }
+.cameraEmbedded .camera > .empty { min-height:0; padding:12px; }
+.cameraEmbedded .sectorLegend { flex:0 0 44px; margin:0; }
+.cameraEmbedded .sectorCard { padding:4px 6px; min-height:40px; font-size:11px; }
+.cameraEmbedded .sectorCard b { white-space:nowrap; font-size:11px; }
+.cameraEmbedded .sectorCard p { margin:2px 0 0; white-space:nowrap; font-size:11px; }
+.cameraEmbedded .cameraPaused { font-size:12px; padding:6px 8px; }
+.operatorConsole { min-width:0; min-height:0; overflow-anchor:none; }
+.operatorPanel { box-sizing:border-box; height:100%; padding:12px; display:flex; flex-direction:column; gap:8px; }
+.operatorPanel > .panelHeader { margin:0; min-height:44px; flex-wrap:nowrap; }
+.operatorPanel .panelTitle { font-size:14px; }
+.operatorPanel > .panelHeader .button { padding:0 10px; white-space:nowrap; }
+.operatorPanel .manualPad { display:grid; grid-template-rows:36px 198px minmax(88px,1fr); gap:8px; min-height:0; }
+.padMode { display:flex; align-items:center; gap:8px; min-width:0; font-size:12px; }
+.padMode > span { flex-shrink:0; }
+.padMode .formControl { flex:1; min-width:0; font-size:12px; padding:6px; }
+.operatorPanel .pad { grid-template-columns:repeat(3,68px); grid-template-rows:repeat(3,60px); gap:6px; margin:0; }
+.operatorConsole .arrow, .operatorConsole .padStop { transition:background-color .15s,border-color .15s,color .15s; }
+.manualReadout { display:flex; flex-direction:column; gap:4px; min-width:0; font-size:12px; color:var(--ui-muted); }
+.manualReadout > div:first-child { display:flex; align-items:center; flex-wrap:wrap; gap:6px; min-height:28px; }
+.operatorMessages { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:start; gap:6px; box-sizing:border-box; min-height:48px; border-top:1px solid var(--r-border); padding-top:8px; font-size:12px; line-height:18px; }
+.operatorMessages > span { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere; }
+.operatorMessages .button { width:36px; height:36px; min-height:36px; padding:0; }
+.operatorMessageError { color:var(--tone-danger-text); }
+.messages .banner { margin:0 0 8px; padding:10px; }
+.manualFeedback { font-variant-numeric:tabular-nums; }
+.workspaceSecondary > details, .workspaceSecondary .details { scroll-margin-top:calc(var(--rider-header-height,80px) + 16px); }
+.workspaceSecondary { display:grid; gap:10px; margin-top:20px; min-width:0; padding-bottom:20px; }
+.workspaceDisclosure, .workspaceDetails, .workspaceSecondary > .perceptionModels { position:static; min-width:0; max-height:none; margin:0; padding:0; border:1px solid var(--r-border); border-radius:12px; background:var(--bg-panel); color:var(--text-primary); font-size:13px; overflow:visible; }
+.workspaceDisclosure > summary, .workspaceDetails > summary, .workspaceSecondary > .perceptionModels > summary { display:flex; align-items:center; flex-wrap:wrap; gap:8px 16px; box-sizing:border-box; min-height:54px; padding:12px 16px; font-size:14px; font-weight:600; cursor:pointer; list-style:none; }
+.workspaceDisclosure > summary::-webkit-details-marker, .workspaceDetails > summary::-webkit-details-marker, .workspaceSecondary > .perceptionModels > summary::-webkit-details-marker { display:none; }
+.workspaceDisclosure > summary::before, .workspaceDetails > summary::before, .workspaceSecondary > .perceptionModels > summary::before { content:""; flex:0 0 7px; width:7px; height:7px; border-right:2px solid currentColor; border-bottom:2px solid currentColor; transform:rotate(-45deg); margin:0 4px 0 0; }
+.workspaceDisclosure[open] > summary::before, .workspaceDetails[open] > summary::before, .workspaceSecondary > .perceptionModels[open] > summary::before { transform:rotate(45deg); }
+.workspaceDisclosure > summary > span:last-child:not(:first-child), .workspaceSecondary > .perceptionModels > summary > span { margin-left:auto; color:var(--ui-muted); font-size:12px; font-weight:400; overflow-wrap:anywhere; }
+.workspaceDisclosure[open] > summary, .workspaceDetails[open] > summary, .workspaceSecondary > .perceptionModels[open] > summary { border-bottom:1px solid var(--r-border); }
+.workspaceSecondary summary:focus-visible { outline:2px solid var(--r-accent); outline-offset:2px; }
+.disclosureBody, .workspaceDetailsBody, .workspaceSecondary > .perceptionModels > .perceptionBody { padding:16px; }
+.workspaceDetailsBody { display:grid; gap:16px; }
+.workspaceDetailsBody .panel { padding:16px; }
+.workspaceSecondary .details { margin-top:14px; border:1px solid var(--r-border); border-radius:8px; padding:0 12px 12px; }
+.workspaceSecondary .details > summary { min-height:44px; display:list-item; align-content:center; font-size:13px; font-weight:600; }
+.workspaceSecondary .hint { margin:6px 0 12px; }
+.workspaceSecondary .stack { gap:12px; }
+.preparationActions { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; }
+.navigationProfiles { min-width:0; }
+.navigationProfiles .perceptionSummary > strong { display:none; }
+.navigationProfiles > .perceptionBody > .details { max-height:none; overflow:visible; }
+.navigationProfiles .perceptionSelection .button { width:auto; }
+.page .toolbar .pill { width:120px; height:28px; overflow:hidden; text-overflow:ellipsis; }
+.page .toolbar .armArmed, .page .toolbar .armDisarmed { width:178px; white-space:nowrap; }
+@container rider (min-width:900px) {
+  .header { flex-wrap:nowrap; gap:12px; }
+  .brand { flex:0 0 140px; }
+  .toolbar { display:grid; grid-template-columns:minmax(120px,1fr) 120px 36px 178px 104px 36px; gap:8px; flex:1; }
+  .environmentSelect { font-size:11px; gap:6px; }
+  .environmentSelect select { width:90px; }
+  .toolbar > .button { padding:0 6px; }
+}
+@container rider (min-width:721px) and (max-width:899px) {
+  .header { gap:8px; padding:8px; }
+  .brand { flex:0 0 auto; }
+  .brandIcon { display:none; }
+  .title { font-size:17px; }
+  .toolbar { flex:1; flex-wrap:nowrap; gap:6px; }
+  .environmentSelect > span { display:none; }
+  .environmentSelect select { width:76px; }
+  .page .toolbar .pill { width:94px; }
+  .page .toolbar .armArmed, .page .toolbar .armDisarmed { width:140px; }
+  .driveWorkspace { grid-template-columns:minmax(0,1fr) 280px; gap:10px; }
+}
 @container rider (max-width:720px) {
-  .navigationProfiles .perceptionSelection .field { flex-basis:130px; }
-  .navigationProfiles .perceptionSelection .button { padding:0 6px; }
+  .header { padding:6px 8px; gap:4px; }
+  .page .brand { display:none; }
+  .toolbar { display:grid; flex-basis:100%; grid-template-columns:76px minmax(0,1fr) 44px 44px; gap:4px; }
+  .environmentSelect > span { display:none; }
+  .environmentSelect select { width:76px; }
+  .page .toolbar .pill { width:100%; }
+  .toolbar [data-testid="rider-refresh"] { grid-column:3; grid-row:1; padding:0; }
+  .toolbar [data-testid="workspace-expand"] { grid-column:4; grid-row:1; padding:0; }
+  .page .toolbar .armArmed, .page .toolbar .armDisarmed { grid-column:1 / 3; grid-row:2; width:100%; }
+  .toolbar [data-testid="rider-stop"] { grid-column:3 / 5; grid-row:2; width:100%; padding:0 8px; }
+  .tabs { margin-bottom:6px; }
+  .tab { padding:8px; font-size:12px; }
+  .drivingSurface, .pageFocused .drivingSurface { height:auto; grid-template-rows:40px 84px auto; gap:6px; }
+  .controlModeRow { gap:4px; }
+  .controlModes { gap:4px; flex-wrap:nowrap; }
+  .controlModes .button { padding:0 8px; font-size:12px; }
+  .workspaceOwner { display:none; }
+  .commandDeck { padding-right:0; grid-template-rows:44px 40px; }
+  .commandDeck .loopStatus { display:none; }
+  .commandDeck .loopActions .small { display:none; }
+  .commandDeck .loopActions .button { padding:0 10px; }
+  .commandAccess { top:0; right:0; }
+  .commandAccess .button { min-height:36px; height:36px; font-size:12px; padding:0 6px; }
+  .manualCommandHint { max-width:calc(100% - 160px); font-size:11px; line-height:16px; }
+  .commandReason { font-size:11px; }
+  .commandReason .button { font-size:11px; }
+  .driveWorkspace { grid-template-columns:minmax(0,1fr); grid-template-rows:auto auto; gap:8px; }
+  .loopCamera { height:auto; padding:6px; }
+  .cameraEmbedded { height:auto; gap:4px; }
+  .cameraEmbedded .button { padding:0 7px; font-size:11px; }
+  .cameraEmbedded .perceptionPreviewMeta { flex:0 0 24px; min-height:24px; font-size:10px; line-height:12px; }
+  .workspaceContent .loopCamera .cameraEmbedded .camera { flex:none; height:clamp(200px,28dvh,280px); min-height:200px; }
+  .cameraEmbedded .sectorLegend { flex-basis:36px; }
+  .cameraEmbedded .sectorCard { min-height:32px; padding:3px; }
+  .cameraEmbedded .sectorCard b { font-size:10px; }
+  .cameraEmbedded .sectorCard p { font-size:10px; }
+  .operatorPanel { height:auto; padding:8px; gap:4px; }
+  .operatorPanel > .panelHeader { min-height:44px; }
+  .operatorPanel > .panelHeader .button { min-height:44px; height:44px; }
+  .operatorPanel .manualPad { grid-template-columns:minmax(0,1fr) 180px; grid-template-rows:32px 140px; gap:4px 8px; }
+  .operatorPanel .padMode { grid-column:1 / -1; }
+  .operatorPanel .pad { grid-column:2; grid-row:2; grid-template-columns:repeat(3,56px); grid-template-rows:repeat(3,44px); gap:4px; }
+  .operatorPanel .manualReadout { grid-column:1; grid-row:2; font-size:11px; }
+  .operatorMessages { min-height:56px; font-size:11px; line-height:16px; }
+  .workspaceSecondary { margin-top:16px; }
+  .workspaceDisclosure > summary, .workspaceDetails > summary, .workspaceSecondary > .perceptionModels > summary { padding:12px; font-size:13px; }
+  .workspaceDisclosure > summary > span:last-child:not(:first-child), .workspaceSecondary > .perceptionModels > summary > span { flex-basis:100%; margin-left:22px; }
 }

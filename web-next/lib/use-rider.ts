@@ -408,8 +408,8 @@ export function useRider(section: Section) {
   const stopManual = useCallback(async () => {
     motionEpoch.current += 1;
     hold.cancel();
-    if (journeyPreparing.current > 0 || pendingJourney.current || manualStopAction(statusRef.current) === "stop") return command({ action: "stop" }, true);
-    if (manualStopAction(statusRef.current) === "navigation_pause" || pendingResume.current) return command({ action: "navigation_pause" }, true);
+    if (journeyPreparing.current > 0 || pendingJourney.current || manualStopAction(statusRef.current, panelId) === "stop") return command({ action: "stop" }, true);
+    if (manualStopAction(statusRef.current, panelId) === "navigation_pause" || pendingResume.current) return command({ action: "navigation_pause" }, true);
     if (!navigationAvailable(statusRef.current, panelId)) return null;
     return command({ action: "move", device_settings: true, direction: "forward", mode: "release" });
   }, [command, hold, panelId]);
@@ -482,8 +482,11 @@ export function useRider(section: Section) {
         assertCurrent();
         if (statusRef.current?.errors.control || safetyOf(statusRef.current).stale === true || safetyOf(statusRef.current).state !== "DISARMED") throw new Error("journey_takeover_stop_unconfirmed");
       }
-      if (operatorSessionActive(statusRef.current) && safetyOf(statusRef.current).state === "ARMED") {
-        await command({ action: "navigation_pause" }, true, true);
+      await poll("control", true);
+      assertCurrent();
+      if (operatorSessionActive(statusRef.current) && safetyOf(statusRef.current).state === "ARMED"
+        && record(safetyOf(statusRef.current).panel_control).holder === panelId) {
+        if (safetyOf(statusRef.current).owner === "navigation") await command({ action: "navigation_pause" }, true, true);
         return;
       }
       if (!operatorPrioritySupported(statusRef.current)) {

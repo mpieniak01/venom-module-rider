@@ -43,9 +43,9 @@ async page => {
       check(await page.getByTestId("rider-forward").isDisabled(),"editing input mode armed robot");
       await inspect("Sterowanie "+viewport.width);
       await page.getByTestId("workspace-automatic").click();
-      await page.getByTestId("workspace-content").locator("details").evaluateAll(nodes=>nodes.filter(node=>node.querySelector("input,select,textarea")).forEach(node=>{node.open=true;}));
+      await page.getByTestId("workspace-secondary").locator("details").evaluateAll(nodes=>nodes.filter(node=>node.querySelector("input,select,textarea")).forEach(node=>{node.open=true;}));
       await inspect("Automat and camera settings "+viewport.width);
-      const fieldset=page.getByTestId("workspace-content").locator("fieldset").first();
+      const fieldset=page.getByTestId("workspace-secondary").locator("fieldset").first();
       if(await fieldset.count()) {
         await fieldset.evaluate(node=>{node.disabled=true;});
         const children=fieldset.locator("input,select,textarea");

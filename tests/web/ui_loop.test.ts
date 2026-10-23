@@ -435,7 +435,7 @@ test("forward driving is the main action; observation is a closed optional secti
  assert.ok(toolbar);
  assert.ok(matchingNodes(toolbar,node=>node===stop).length);
  assert.equal(matchingNodes(toolbar,node=>node===preview).length,0);
- const optional=jsxByTestId("loop-observation");
+ const optional=jsxByTestId("navigation-preparation");
  assert.ok(ts.isJsxElement(optional)&&optional.openingElement.tagName.getText(navigationSource)==="details");
  assert.equal(jsxAttribute(optional,"open"),undefined);
  assert.ok(matchingNodes(optional,node=>node===preview).length);

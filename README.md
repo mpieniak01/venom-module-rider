@@ -282,11 +282,12 @@ bounded by the smaller of the saved pulse limit and remaining decision permit.
 An accepted request or reported movement is not a travelled-distance measurement.
 Stale and latched records never appear as current GO permission.
 
-The operator workspace has no calibration checklist or repeated acceptance
-form. The existing Pi-owned policy is used directly. Its matching model and
-parameters remain requirements for a driving trial. Changing critical parameters
-revokes that saved policy; the panel reports the exact block instead of displaying
-a form. No diagnostic or page entry arms or manufactures physical calibration.
+The saved Pi policy and its matching model/parameters remain requirements for
+automatic driving. Changing critical settings invalidates that acceptance.
+**Prepare automatic drive** leads to an explicit observation and image/path
+confirmation below the camera; it does not arm or start a trial. The saved
+revision is shown after acceptance. Manual controls remain independent of that
+vision acceptance. See [control workspace](docs/CONTROL_WORKSPACE.md).
 
 A single execution summary says whether Venom can send movement, with manual
 permission shown separately. Manual ARM cannot authorise the autonomous loop.
@@ -474,7 +475,7 @@ It uses two shared action sizes: small (36 px) for tools and large
 at least 44 px height. Use the shared `Button`, `Pill` and `Panel` primitives
 for consistent shapes, status colors and contextual help. Emergency STOP stays
 red; camera power and automatic pause use the warning tone. Button `title` help
-is available on hover and keyboard focus, with disabled controls retaining the
+appears after a short hover or keyboard focus, closes on pointer press, and keeps disabled controls on the
 native title. Tips do not intercept emergency Escape or pointer input.
 
 `tests/browser/ui-consistency.js` is a Playwright CLI `run-code --filename`
@@ -505,8 +506,10 @@ camera-lifecycle and ui-consistency scenarios.
 The driving workspace opens in its focused view on narrow or short windows. The
 expand/restore button switches back to the host layout. Steering arrows and motor
 STOP stay in place while manual/automatic views and status messages change.
-Operator messages share the scrollable information area below the arrows; long
-errors do not reserve a separate panel at the bottom of the screen.
+Current messages use a stable inline slot below the arrows. Detailed errors,
+model settings and recording are disclosures below the camera/keypad. Small
+landscape windows use page scrolling while retaining readable controls and the
+sticky emergency STOP.
 
 The device transport is independent of the web stack. After a host restart,
 restore the configured device connection before diagnosing disabled controls.

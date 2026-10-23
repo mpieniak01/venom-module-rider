@@ -5,7 +5,7 @@ import {apiFetch} from "@/lib/api-client";
 import {getApiBaseUrl} from "@/lib/env";
 import {errorCode,formatNumber,formatTime,record} from "../lib/model";
 import {angleStream,axisNumber,readTimeline,pointAt,profileAt,streamTimes,nearestTime,trialRequests,alignTrial,pulseEvidence,type MotionStream,type MotionTimeline} from "../lib/motion-timeline";
-import {SAMPLES_BASE,type Collection} from "../lib/samples";
+import {SAMPLES_BASE,readSessions,type Collection} from "../lib/samples";
 import type {StudyRecording} from "../lib/use-study-recording";
 import type {Translator} from "../lib/i18n";
 import {Button,Details,Empty,Field,Input,Panel,Range,Select} from "./primitives";
@@ -40,7 +40,7 @@ export function MotionStudy({recording,t,language}:{recording:StudyRecording;t:T
   const aId=(selectedA&&selectedA.captureId===currentId?selectedA.id:currentId)??"";
   useEffect(()=>{
     const controller=new AbortController();
-    void apiFetch<{sessions:Collection[]}>(SAMPLES_BASE+"/sessions",{signal:controller.signal}).then(r=>{if(!controller.signal.aborted){setSessions(r.sessions);setError("");}}).catch(err=>{if(!controller.signal.aborted)setError(errorCode(err));});
+    void apiFetch<{sessions:Collection[]}>(SAMPLES_BASE+"/sessions",{signal:controller.signal}).then(r=>{if(!controller.signal.aborted){setSessions(readSessions(r));setError("");}}).catch(err=>{if(!controller.signal.aborted)setError(errorCode(err));});
     return()=>controller.abort();
   },[revision,currentId,active]);
   const a=useTimeline(aId,revision+":"+capture.session?.state),b=useTimeline(bId,revision);

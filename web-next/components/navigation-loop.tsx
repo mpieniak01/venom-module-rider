@@ -10,14 +10,14 @@ import { stopLoopResources } from "../lib/stop-loop";
 import type { RiderClient } from "../lib/use-rider";
 import type { Translator } from "../lib/i18n";
 import { LoopDecision } from "./loop-decision";
-import { CameraPanel } from "./control";
+import { CameraPanel, CameraDetails } from "./control";
 import { PerceptionModelsPanel } from "./perception-models";
 import { NavigationProfiles } from "./navigation-profiles";
 import { ModelTuning } from "./model-tuning";
 import { Button, Checkbox, Field, Input, Panel, Pill, Select } from "./primitives";
 import styles from "../rider.module.css";
 
-export function NavigationLoop({client,t,language,manual,auxiliary}:{client:RiderClient;t:Translator;language:string;manual:ReactNode;auxiliary?:ReactNode}) {
+export function NavigationLoop({client,t,language,manual,auxiliary,recording,operatorDetails}:{client:RiderClient;t:Translator;language:string;manual:ReactNode;auxiliary?:ReactNode;recording?:ReactNode;operatorDetails?:ReactNode}) {
   const [view, setView] = useState<"manual" | "automatic" | "journey">("manual");
   const [policy,setPolicy]=useState<JsonRecord|null>(null);
   const [profileSnapshot,setProfileSnapshot]=useState<{policy:JsonRecord|null;session:string}>({policy:null,session:""});
@@ -56,6 +56,7 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
   const stopping=useRef(false);
   const settingsRef=useRef<HTMLDetailsElement>(null);
   const workspaceDetailsRef=useRef<HTMLDetailsElement>(null);
+  const preparationRef=useRef<HTMLDetailsElement>(null);
   const [detailsOpen,setDetailsOpen]=useState(false);
   const displayedRun=useRef("");
   const mounted=useRef(true);
@@ -319,7 +320,8 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
   useEffect(()=>{
     if(freshObservation(loopState,goals))setRecoveryFailure(null);
   },[loopState,goals]);
-  const showModelTuning = () => { const panel = document.getElementById("rider-model-tuning"); if (panel instanceof HTMLDetailsElement) panel.open = true; };
+  const showModelTuning = () => { const panel = document.getElementById("rider-model-tuning"); if (panel instanceof HTMLDetailsElement) { panel.open = true; panel.scrollIntoView({block:"start",behavior:"smooth"}); } };
+  const showPreparation = () => { if (preparationRef.current) { preparationRef.current.open=true; preparationRef.current.scrollIntoView({block:"nearest",behavior:"smooth"}); } };
   const observeBlock=policy?loopBlock({...policy,mode:"observe"},runtime,detector,connected,dirty,client.status):"loopLoadFailed";
   const avoidanceSupported=Array.isArray(detector.supported_protocol_versions)&&detector.supported_protocol_versions.includes(Number(record(draft?.avoidance??policy?.avoidance).protocol_version??3));
   const trialUnavailable=record(policy?.avoidance).enabled===true&&!avoidanceSupported?"avoidanceUpdateRequired":trialBlock(policy,runtime,detector,connected,dirty,client.status);
@@ -346,15 +348,19 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
   let commandReason = "";
   if (view === "journey") {
     if (journeyError) commandReason = t("journeyRequestError") + " · " + journeyError;
-    else if (journey.reason) commandReason = t("state") + ": " + journey.reason;
     else if (journeyUnavailable[0]) commandReason = t(journeyUnavailable[0]);
+    else if (journey.active&&journey.reason) commandReason = t("state") + ": " + journey.reason;
   } else if (view === "automatic") {
     commandReason = visibleError || readError;
     if (!commandReason && preparation?.state === "failed") commandReason = t(trialPreparationErrorKey(preparation));
-    if (!commandReason && displayedStopReason) commandReason = t(trialStopReasonKey(displayedStopReason));
     if (!commandReason && trialUnavailable) commandReason = t(trialUnavailable);
+    if (!commandReason && displayedStopReason) commandReason = t(trialStopReasonKey(displayedStopReason));
   }
+  if(loading&&!policy&&view!=="manual")commandReason=t("loading");
+  const needsAcceptance=!!policy&&(!calibrationMatches(policy,detector)||view==="journey"&&record(policy.avoidance).sweep_verified!==true);
+  const prepareAction=detector.drive_supported!==false&&(view==="automatic"&&trialUnavailable==="loopUnverified"||view==="journey"&&journeyUnavailable.some(reason=>["loopUnverified","journeySweepRequired","journeyAcceptanceRequired"].includes(reason)));
   return <section className={styles.controlWorkspace} data-testid="control-workspace">
+    <div className={styles.drivingSurface} data-testid="driving-surface">
     <div className={styles.controlModeRow}>
       <div className={styles.controlModes} role="group" aria-label={t("workspaceView")}>
         {(["manual", "automatic", "journey"] as const).map(mode => <Button key={mode} data-testid={"workspace-" + mode} aria-pressed={view === mode} tone={view === mode ? "primary" : undefined} onClick={() => setView(mode)}>{t(mode === "manual" ? "workspaceManual" : mode === "journey" ? "workspaceJourney" : "workspaceAutomatic")}</Button>)}
@@ -374,8 +380,8 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
     </div>
     <div className={styles.loopToolbar}>
     <div className={styles.loopActions}>
-      <Button tone="primary" data-testid="loop-start" title={t("trialSimpleHelp")} aria-describedby={trialUnavailable?"rider-trial-help rider-trial-block":"rider-trial-help"} disabled={!!trialUnavailable||!!operation||!!client.busy||loading||automaticActive||journey.active} onClick={()=>void runTrial()}><Play size={18}/>{t(priority&&loopState.operator_control_version===1&&loopState.running===true?"cockpitResume":"cockpitStartTrial")}</Button>
-      <Button tone="caution" data-testid="loop-stop" title={t(priority ? "operatorPauseHint" : "loopStop")} disabled={!connected||operation==="stop"||!priority&&operation==="save"} onClick={()=>void stop()}><Square size={18}/>{t(operation==="stop"?"loopStopping":priority?"cockpitPause":"cockpitStop")}</Button>
+      <Button tone="primary" size="large" data-testid="loop-start" title={t("trialSimpleHelp")} aria-describedby="rider-trial-help" disabled={!!trialUnavailable||!!operation||!!client.busy||loading||automaticActive||journey.active} onClick={()=>void runTrial()}><Play size={18}/>{t(priority&&loopState.operator_control_version===1&&loopState.running===true?"cockpitResume":"cockpitStartTrial")}</Button>
+      <Button tone="caution" size="large" data-testid="loop-stop" title={t(priority ? "operatorPauseHint" : "loopStop")} disabled={!connected||operation==="stop"||!priority&&operation==="save"} onClick={()=>void stop()}><Square size={18}/>{t(operation==="stop"?"loopStopping":priority?"cockpitPause":"cockpitStop")}</Button>
       {detector.drive_supported!==false&&<span className={styles.small} data-testid="trial-plan">{String(policy?.speed??"—")} SDK · ≤ {String(policy?.max_motion_ms??"—")} ms</span>}
     </div>
     </div>
@@ -389,41 +395,65 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
               <span className={styles.small}>{t("journeyElapsed")}: {formatNumber(journey.elapsed,language,1)} s · {t("journeyManeuver")}: {journey.maneuver??"—"}</span>
             </div>
             <div className={styles.loopActions}>
-              <Button tone="primary" data-testid="journey-start" disabled={journeyUnavailable.length>0||!!operation||!!client.busy||loading||journey.active||automaticActive} onClick={()=>void runJourney()}><Play size={18}/>{t("cockpitStartJourney")}</Button>
-              <Button tone="caution" data-testid="journey-stop" disabled={!connected||operation==="stop"} onClick={()=>void stopJourney()}><Square size={18}/>{t("cockpitStopJourney")}</Button>
+              <Button tone="primary" size="large" data-testid="journey-start" disabled={journeyUnavailable.length>0||!!operation||!!client.busy||loading||journey.active||automaticActive} onClick={()=>void runJourney()}><Play size={18}/>{t("cockpitStartJourney")}</Button>
+              <Button tone="caution" size="large" data-testid="journey-stop" disabled={!connected||operation==="stop"} onClick={()=>void stopJourney()}><Square size={18}/>{t("cockpitStopJourney")}</Button>
               <span className={styles.small} data-testid="journey-motion-limits">{String(policy?.speed??"—")} SDK · ≤ {String(policy?.max_motion_ms??"—")} ms</span>
             </div>
           </Panel>
         </div>
       <div className={styles.commandReason} role="status" data-testid="command-reason">
-        {commandReason}
+        <span>{commandReason}</span>
+        {prepareAction&&<Button data-testid="prepare-navigation" onClick={showPreparation}>{t("workspace.prepare")}</Button>}
       </div>
       <div className={styles.commandAccess}>
-        <Button data-testid="workspace-settings-toggle" aria-expanded={detailsOpen} aria-controls="rider-workspace-details" onClick={()=>{if(workspaceDetailsRef.current)workspaceDetailsRef.current.open=!workspaceDetailsRef.current.open;}}>{t("cockpitDetails")}</Button>
+        <Button data-testid="workspace-settings-toggle" aria-expanded={detailsOpen} aria-controls="rider-workspace-details" onClick={()=>{if(workspaceDetailsRef.current){workspaceDetailsRef.current.open=!workspaceDetailsRef.current.open;if(workspaceDetailsRef.current.open)workspaceDetailsRef.current.scrollIntoView({block:"nearest",behavior:"smooth"});}}}>{t("cockpitDetails")}</Button>
       </div>
     </div>
     <div className={styles.driveWorkspace}>
       <div className={styles.workspaceContent} data-testid="workspace-content" role="region" aria-label={t("workspaceObservation")}>
-        <div className={styles.loopCamera}><PerceptionModelsPanel client={client} t={t} language={language} policy={policy} goals={goals} locked={!!operation||dirty||loading} onApplied={applyPolicy} onRefresh={refreshPerception}/><NavigationProfiles key={session} client={client} t={t} policy={profileSnapshot.session===session?profileSnapshot.policy:null} goals={goals} locked={!!operation||dirty||loading||!!readError} onApplied={applyPolicy} onRefresh={refreshPerception} onPendingChange={setProfileBusy}/><ModelTuning key={"tuning-"+session} client={client} t={t} policy={profileSnapshot.session===session?profileSnapshot.policy:null} goals={goals} locked={!!operation||dirty||loading||!!readError} onApplied={applyPolicy} onRefresh={refreshPerception} onPendingChange={setProfileBusy}/><CameraPanel client={client} t={t} language={language} compact editor={view !== "manual" && editingZone && draft && Array.isArray(draft.corridor) ? {value:draft.corridor as number[],disabled:goals.drive===true||!!operation,onChange:value=>setDraft({...draft,corridor:value})}:undefined}/></div>
+        <div className={styles.loopCamera}><CameraPanel client={client} t={t} language={language} compact showTools={false} editor={view !== "manual" && editingZone && draft && Array.isArray(draft.corridor) ? {value:draft.corridor as number[],disabled:goals.drive===true||!!operation,onChange:value=>setDraft({...draft,corridor:value})}:undefined}/></div>
+      </div>
+      <aside className={styles.operatorConsole} aria-label={t("manual")} data-testid="operator-console">{manual}</aside>
+    </div>
+    </div>
+    <div className={styles.workspaceSecondary} data-testid="workspace-secondary">
+      <details ref={preparationRef} className={styles.workspaceDisclosure} data-testid="navigation-preparation">
+        <summary><span>{t("workspace.preparation")}</span><span>{t(!policy?"loading":detector.drive_supported===false?"trialAnalysisMode":needsAcceptance?"workspace.acceptancePending":"workspace.acceptanceReady")}</span></summary>
+        <div className={styles.disclosureBody}>
+          <div className={styles.preparationActions} data-testid="loop-observation">
+            <span>{t("workspace.observationStep")}</span>
+            <Button data-testid="loop-preview" disabled={!connected||!!operation||loading||!!observeBlock||active&&loopState.running===true} onClick={()=>void observePreview()}><Play size={14}/>{t(active&&loopState.running===true?"analysisRunning":"startObservation")}</Button>
+          </div>
+          {!!observeBlock&&<p className={styles.hint}>{t(observeBlock)}</p>}
+          <div id="rider-trial-help" data-testid="trial-start-help" className={styles.hint}>{t("workspace.acceptanceStep")}</div>
+    {policy&&(!calibrationMatches(policy,detector)||view==="journey"&&record(policy.avoidance).sweep_verified!==true)&&detector.drive_supported!==false&&<div className={styles.stack} data-testid="trial-acceptance">
+      <p className={styles.hint} data-testid="calibration-acceptance-help">{t(view==="journey"?"journeyAcceptanceHelp":"trialAcceptanceHelp")}</p>
+      {!!acceptanceBlock&&<p className={styles.hint} role="status" data-testid="calibration-preview-block">{t(acceptanceBlock)}</p>}
+      <Button data-testid="trial-accept" disabled={!connected||!!operation||loading||!!acceptanceBlock||goals.drive===true} onClick={()=>void acceptTrial()}>{t(view==="journey"?"journeyAccept":"trialAccept")}</Button>
+    </div>}
+
+          {trialUnavailable&&trialUnavailable!=="loopUnverified"&&<p id="rider-trial-block" className={styles.hint} data-testid="loop-block">{t(trialUnavailable)}</p>}
+          {!needsAcceptance&&policy&&<p role="status" data-testid={view==="journey"?"journey-acceptance-saved":"trial-acceptance-saved"}><Pill tone="good">{t("workspace.acceptanceRevision",{revision:String(policy.revision)})}</Pill></p>}
+        </div>
+      </details>
+      <PerceptionModelsPanel client={client} t={t} language={language} policy={policy} goals={goals} locked={!!operation||dirty||loading} onApplied={applyPolicy} onRefresh={refreshPerception}/>
+      <details className={styles.workspaceDisclosure} data-testid="caution-settings"><summary><span>{t("behavior.title")}</span><span>{policy?t("behavior.profile."+String(record(policy.behavior).profile_id??"legacy")):t("loading")}</span></summary><div className={styles.disclosureBody}>
+        <NavigationProfiles key={session} client={client} t={t} policy={profileSnapshot.session===session?profileSnapshot.policy:null} goals={goals} locked={!!operation||dirty||loading||!!readError} onApplied={applyPolicy} onRefresh={refreshPerception} onPendingChange={setProfileBusy}/>
+      </div></details>
+      <ModelTuning key={"tuning-"+session} client={client} t={t} policy={profileSnapshot.session===session?profileSnapshot.policy:null} goals={goals} locked={!!operation||dirty||loading||!!readError} onApplied={applyPolicy} onRefresh={refreshPerception} onPendingChange={setProfileBusy}/>
+      <CameraDetails client={client} t={t} language={language}/>
+      {recording&&<details className={styles.workspaceDisclosure} data-testid="recording-tools"><summary>{t("workspace.recording")}</summary><div className={styles.disclosureBody}>{recording}</div></details>}
         <details id="rider-workspace-details" ref={workspaceDetailsRef} onToggle={event=>setDetailsOpen(event.currentTarget.open)} className={styles.workspaceDetails} data-testid="workspace-details">
           <summary>{t("cockpitDetails")}</summary>
           <div className={styles.workspaceDetailsBody}>
             <div hidden={view !== "journey"}>
             {journeyUnavailable.length>0&&<div data-testid="journey-blocks" className={styles.loopError} role="status"><ul>{journeyUnavailable.map(block=><li key={block}>{t(block)}</li>)}</ul><Button onClick={showJourneySettings}>{t("journeySettings")}</Button></div>}
-            {policy&&calibrationMatches(policy,detector)&&record(policy.avoidance).sweep_verified===true&&<p className={styles.hint} role="status" data-testid="journey-acceptance-saved">{t("journeyAcceptanceSaved",{revision:String(policy.revision)})}</p>}
             {journey.reason&&<p className={styles.hint} data-testid="journey-reason">{t("state")}: <code>{journey.reason}</code></p>}
             {journeyRequested&&journey.active&&<p className={styles.hint}>{t("journeyStarted")}</p>}
             {journeyError&&<p className={styles.loopError} role="alert" data-testid="journey-error">{t("journeyRequestError")} · {journeyError}</p>}
             </div>
         <div hidden={view === "manual"} data-testid="automatic-panel">
           <Panel title={t("loopSettings")}>
-    <p hidden={view !== "automatic"} id="rider-trial-help" className={styles.hint} data-testid="trial-start-help">{t("trialStartHelp")}</p>
-    <details className={styles.details} data-testid="loop-observation">
-      <summary>{t("observationOptional")}</summary>
-      <p className={styles.hint}>{t("observationOptionalHelp")}</p>
-      <Button data-testid="loop-preview" disabled={!connected||!!operation||loading||!!observeBlock||active&&loopState.running===true} onClick={()=>void observePreview()}><Play size={14}/>{t(active&&loopState.running===true?"analysisRunning":"startObservation")}</Button>
-      {!!observeBlock&&<p className={styles.hint}>{t(observeBlock)}</p>}
-    </details>
     {policy&&!groundActive&&<div className={styles.loopModeRow} data-testid="stopping-zone">
       <Field label={t("stopZone")}><Select aria-label={t("stopZone")} data-testid="loop-zone" value={stoppingZone(policy)} disabled={!connected||loading||!!operation||!!client.busy||dirty||goals.drive===true} onChange={e=>{if(e.target.value==="near"||e.target.value==="far")void changeStoppingZone(e.target.value);}}>
         <option value="near" disabled={!stoppingZoneValues(policy,"near")}>{t("stopZoneNear")}</option>
@@ -432,12 +462,6 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
       </Select></Field>
       <p className={styles.hint}>{t(operation==="zone"?"stopZoneUpdating":"stopZoneHelp")}</p>
     </div>}
-    {policy&&(!calibrationMatches(policy,detector)||view==="journey"&&record(policy.avoidance).sweep_verified!==true)&&detector.drive_supported!==false&&<div className={styles.stack} data-testid="trial-acceptance">
-      <p className={styles.hint} data-testid="calibration-acceptance-help">{t(view==="journey"?"journeyAcceptanceHelp":"trialAcceptanceHelp")}</p>
-      {view==="journey"&&<Button data-testid="journey-preview" disabled={!connected||!!operation||loading||!!observeBlock||active&&loopState.running===true} onClick={()=>void observePreview()}>{t(active&&loopState.running===true?"analysisRunning":"startObservation")}</Button>}
-      {!!acceptanceBlock&&<p className={styles.hint} role="status" data-testid="calibration-preview-block">{t(acceptanceBlock)}</p>}
-      <Button data-testid="trial-accept" disabled={!connected||!!operation||loading||!!acceptanceBlock||goals.drive===true} onClick={()=>void acceptTrial()}>{t(view==="journey"?"journeyAccept":"trialAccept")}</Button>
-    </div>}
     <div hidden={view !== "automatic"}>
     {preparation&&!diagnostic.combined&&<div className={preparation.state==="failed"?styles.loopError:styles.metric} role={preparation.state==="failed"?"alert":"status"} data-testid="trial-preparation" data-request-id={preparation.requestId}>
       <strong>{t(trialPreparationTitle(preparation))} · {t("trialPreparation.phase."+preparation.phase)}</strong>
@@ -445,7 +469,6 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
       <p className={styles.small}>{t(preparation.source==="pi"?"trialPreparationSource":"trialPreparationResponse")} · {formatTime(preparation.observedAt,language)}{!preparation.fresh?" · "+t("trialPreparationStale"):""}</p>
       {preparation.error&&<p>{t(trialPreparationErrorKey(preparation))}</p>}
     </div>}
-    {!!trialUnavailable&&<p id="rider-trial-block" className={styles.loopError} role="status" data-testid="loop-block">{t(trialUnavailable)}</p>}
     {!!trialResult&&!displayedStopReason&&!(trialResult==="trialStarted"&&phase==="running")&&<p className={styles.hint} role="status" data-testid="trial-result">{t(phase==="fault"?"trialEnded":trialResult==="trialStarted"&&phase==="stopped"?"trialStopped":trialResult)}</p>}
     {loopState.mode==="drive"&&loopState.paused===true&&loopState.running===true&&<p className={styles.hint} data-testid="trial-visual-pause">{t("trialVisualPause")}</p>}
     {!!displayedStopReason&&<p role="status" className={trialOutcomeTone(displayedStopReason)==="neutral"?styles.hint:styles.loopError} data-testid="trial-stop-reason">{sharedTrial?t("lastTrial")+" · "+formatTime(sharedTrial.observed_at,language):t("trialEnded")} · {t(trialStopReasonKey(displayedStopReason))}
@@ -508,11 +531,10 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
           <LoopDecision frame={client.cameraStream==="venom"?client.camera:null} state={loopState} detector={detector} policy={policy} status={client.status} t={t} language={language}/>
           </Panel>
         </div>
+        {operatorDetails}
         {auxiliary}
           </div>
         </details>
-      </div>
-      <aside className={styles.operatorConsole} aria-label={t("manual")} data-testid="operator-console">{manual}</aside>
     </div>
   </section>;
 }

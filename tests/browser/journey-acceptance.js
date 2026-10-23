@@ -74,6 +74,7 @@ async page => {
       };
     });
     await page.getByTestId("workspace-journey").click();
+    await page.getByTestId("navigation-preparation").locator("summary").first().click();
     const accept=page.getByTestId("trial-accept");
     await wait(async()=>!await accept.isDisabled(),"fresh native MJPEG never enabled acceptance");
     check((await accept.innerText()).includes("skręt"),"acceptance did not explicitly include steering");
