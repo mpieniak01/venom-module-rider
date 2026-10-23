@@ -44,7 +44,8 @@ async page => {
     await wait(async()=>(await page.getByTestId("operator-battery").innerText()).includes("62"),"fresh battery missing");
     check((await page.getByTestId("operator-axes").innerText()).includes("-925,9"),"SDK axis was converted or wrapped");
     check((await page.getByTestId("operator-axes").innerText()).split("SDK").length===2,"axis unit must be shared once");
-    check(await page.getByTestId("operator-height").inputValue()==="","unknown height invented a target");
+    check(await page.getByTestId("operator-height").getAttribute("type")==="range","height is not a slider");
+    check(await page.getByTestId("operator-height-value").innerText()==="—","unknown height invented a target");
     check(await page.getByTestId("operator-height-apply").isDisabled(),"unknown target allowed apply");
     check((await page.getByTestId("operator-balance-state").innerText())==="Nieznany","unknown balance shown as off");
     check(await page.getByText("Strzałka przejmuje sterowanie ręczne jednym gestem.",{exact:true}).count()===0,"repeated instruction remains");
@@ -63,14 +64,13 @@ async page => {
     await wait(async()=>(await page.getByTestId("operator-battery").innerText()).includes("0 %"),"measured zero hidden");
     check(calls.length===0,"data rendering sent actuator command");
     await page.getByTestId("takeover-manual").click();
-    await wait(async()=>!await page.getByTestId("operator-height").isDisabled()&&holder!=="previous-panel","fixture takeover failed");
+    await wait(async()=>!await page.getByTestId("operator-height").isDisabled()&&holder!=="previous-panel"&&calls.filter(call=>call.body.action==="arm").length===1,"fixture takeover failed");
     const start=calls.length;
-    for(const invalid of ["74","116","75.5",""]) {
-      await page.getByTestId("operator-height").fill(invalid);
-      check(await page.getByTestId("operator-height-apply").isDisabled(),"invalid target allowed: "+invalid);
-    }
-    await page.getByTestId("operator-height").fill("90");
-    check(calls.length===start,"editing height sent command");
+    await page.getByTestId("operator-height").focus();
+    await page.getByTestId("operator-height").press("Home");
+    for(let step=0;step<15;step++)await page.getByTestId("operator-height").press("ArrowRight");
+    check(await page.getByTestId("operator-height").inputValue()==="90","slider did not respect SDK step");
+    check(calls.length===start,"editing height sent command: "+JSON.stringify(calls.slice(start)));
     check(!await page.getByTestId("operator-height-apply").isDisabled(),"valid target blocked");
     await page.getByTestId("operator-height-apply").click();
     await wait(()=>postureHeight===90,"explicit height command missing");

@@ -620,3 +620,17 @@ test("explicit journey acceptance records zone and swept clearance atomically; l
  assert.equal(policy.avoidance.sweep_verified,false);
  for(const avoidance of [{enabled:false,protocol_version:3},{enabled:true,protocol_version:2}])assert.throws(()=>calibrationAcceptance({...policy,avoidance},detector,"operator-explicit",true));
 });
+
+test("Pi presentation metadata is never submitted by save, zone change or acceptance",()=>{
+ const policy={revision:134,protocol_version:1,mode:"observe",speed:.1,max_motion_ms:150,decision_budget_ms:300,corridor:[.35,.8,.65,.95],perception:{engine:"depth_plane"},avoidance:{enabled:true,protocol_version:3,sweep_verified:false},behavior:{version:1,profile_id:"balanced",profile_revision:1},verified:false,calibration_id:"",model_sha256:"",
+ behavior_catalog:{supported:true},model_tuning_supported:true,perception_tuning:{version:1},future_read_only_metadata:{diagnostic:true}};
+ const allowed=["mode","speed","max_motion_ms","decision_budget_ms","corridor","perception","avoidance","behavior","verified","calibration_id","model_sha256"].sort();
+ for(const value of [loopSettingsValues(policy,policy),stoppingZoneValues(policy,"far"),calibrationAcceptance(policy,{sha256:"a".repeat(64)},"operator-test",true)]){
+  assert.ok(value);
+  assert.deepEqual(Object.keys(value).sort(),allowed);
+  assert.deepEqual(value.behavior,policy.behavior);
+ }
+ const accepted=calibrationAcceptance(policy,{sha256:"a".repeat(64)},"operator-test",true);
+ assert.equal(accepted.verified,true);
+ assert.equal((accepted.avoidance as {sweep_verified:boolean}).sweep_verified,true);
+});
