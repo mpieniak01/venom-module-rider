@@ -19,7 +19,7 @@ async page => {
   const configView=()=>({...structuredClone(policy),
     behavior_catalog:{version:1,supported:true,active:policy.behavior,profiles,effective_policy_sha256:"c".repeat(64)},
     model_tuning_supported:true,perception_tuning:{version:1,active_model_id:"depth-anything-v2-indoor-small",effective:{}}});
-  let observe=false,drive=false,running=false,stale=true,cameraState="stopped",journey=null,rejectSave=true,rejectedWrites=0,delaySave=false,savePending=false;
+  let observe=false,drive=false,running=false,stale=true,cameraState="stopped",journey=null,rejectSave=true,rejectedWrites=0,delaySave=false,savePending=false,rejectObservation=false;
   let state="DISARMED",owner=null,holder=null,generation="prod-0",operation="idle",serial=0,journeyPending=false,delayJourney=false;
   const settings={revision:1,directions:Object.fromEntries(["forward","backward","left","right"].map(key=>[key,{speed:.2,duration:.25,minimum:0,maximum:1,step:.01}])),parameter_schema:{direction_fields:{speed:{display_factor:100,display_precision:0,display_unit:"%"}}},control_modes:{version:1,supported:["pulse","hold","release"],hold_renewal_ms:150,hold_timeout_ms:500,click_threshold_ms:180,request_ttl_ms:500}};
   const safety=()=>({state,owner,generation,arming_mode:state==="ARMED"?"journey":null,last_seq:0,operator_intervention_version:1,navigation_journey_version:1,panel_motion_enabled:state==="ARMED",ready:true,can_move:state==="ARMED",stale:false,observed_at:Date.now()/1000,capabilities:{move:{available:true}},panel_control:{version:1,holder},operator_control:{version:1,state:drive?"active":"paused",operation_id:operation,generation},remote_decision_deadline_supported:true,scoped_stop_generation_supported:true});
@@ -57,6 +57,7 @@ async page => {
       const body=req.postDataJSON();calls.push({path,body});
       if(path==="/goal/s15_venom_perception"){
         check(typeof body.enabled==="boolean","observation intent invalid");
+        if(body.enabled&&rejectObservation)return json({detail:{code:"fixture_observer_unavailable"}},503);
         observe=body.enabled;running=observe||drive;stale=!running;if(observe)cameraState="active";
         return json({ok:true,meta:{},data:{ok:true}});
       }
@@ -107,8 +108,15 @@ async page => {
     return json({});
   });
   try{
-    await page.goto(base+"/rider");
+    policy.max_motion_ms=200;
+    await page.goto(base+"/rider",{waitUntil:"domcontentloaded"});
     await page.getByTestId("workspace-journey").click();
+    await wait(async()=>(await page.getByTestId("command-reason").innerText()).includes("150 ms"),"acceptance guidance hides the actual motion-limit block");
+    check(await page.getByTestId("journey-start").isDisabled(),"invalid motion limits enabled Start");
+    check(calls.length===0,"displaying a hard block changed device state");
+    scenarios.push("motion-limit block takes precedence over acceptance guidance");
+    policy.max_motion_ms=150;
+    await page.reload({waitUntil:"domcontentloaded"});await page.getByTestId("workspace-journey").click();
     const start=page.getByTestId("journey-start"),accept=page.getByTestId("trial-accept");
     await wait(async()=>await page.getByTestId("prepare-navigation").isVisible(),"cold Prod does not expose preparation");
     check(await start.isDisabled(),"historical GO without acceptance enabled Start");
@@ -152,6 +160,17 @@ async page => {
     await wait(async()=>!await accept.isDisabled(),"fresh observation did not recover confirmation after rejected save");
     check(!await start.isDisabled(),"rejected acceptance stranded the primary retry action");
     scenarios.push("rejected acceptance keeps unverified revision134 and resumes fresh observation without ARM or journey");
+    rejectObservation=true;
+    await start.click();
+    await wait(()=>rejectedWrites===2,"second save rejection was not exercised");
+    await wait(async()=>(await page.getByTestId("command-reason").innerText()).includes("navigation_configuration_conflict"),"observer recovery failure replaced the original save failure");
+    await wait(async()=>(await page.locator("body").innerText()).includes("fixture_observer_unavailable"),"observer recovery failure is hidden");
+    check(!observe&&!drive&&saves.length===0,"failed recovery fabricated acceptance or motion");
+    scenarios.push("save and observer-recovery failures remain separately visible without admission");
+    rejectObservation=false;
+    await page.getByTestId("prepare-navigation").click();
+    await wait(()=>observe&&running&&!stale,"explicit observation did not recover after a rejected restart");
+    await wait(async()=>!await start.isDisabled(),"fresh recovery did not permit another explicit Start");
     rejectSave=false;
     const beforeConfirmStart=calls.length;
     await start.click();

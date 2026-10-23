@@ -124,6 +124,13 @@ export function Posture({ client, t, language, compact = false }: { client: Ride
           <div className={styles.flex}><Range data-testid="operator-height" aria-label={t("operator.height")} value={finite(value) ? value : 0}
             min={descriptor.minimum} max={descriptor.maximum} step={descriptor.step ?? 1}
             disabled={!client.canMutate || !heightAvailable || !!client.busy}
+            onPointerDown={event => setDraftHeight(Number(event.currentTarget.value))}
+            onKeyDown={event => {
+              if (["Home", "End", "Enter", " "].includes(event.key)) {
+                if (event.key === "Enter" || event.key === " ") event.preventDefault();
+                setDraftHeight(event.key === "Home" ? Number(descriptor.minimum) : event.key === "End" ? Number(descriptor.maximum) : Number(event.currentTarget.value));
+              }
+            }}
             onChange={event => setDraftHeight(Number(event.target.value))}/><strong data-testid="operator-height-value">{chosen ? displayValue(value, descriptor, language) : "—"}</strong></div>
         </Field>
         <Button data-testid="operator-height-apply" disabled={!client.canMove || !heightAvailable || !!client.busy || !valid || !chosen}

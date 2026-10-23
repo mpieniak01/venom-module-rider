@@ -237,7 +237,15 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
     } catch (saveError) {
       // Restore only observation explicitly requested before this transaction.
       // STOP/cancellation prevents both recovery and a following journey request.
-      if(resumeObservation){ensureOperation(origin);await ensureAnalysis(origin);}
+      if(resumeObservation){
+        ensureOperation(origin);
+        try{await ensureAnalysis(origin);}
+        catch(restoreError){
+          if(errorCode(restoreError)==="navigation_trial_cancelled")throw restoreError;
+          ensureOperation(origin);
+          client.setNotice({key:"requestFailed",code:errorCode(restoreError),tone:"error"});
+        }
+      }
       throw saveError;
     }
     setTrialResult("trialAcceptanceSaved");
@@ -348,6 +356,7 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
   const avoidanceSupported=Array.isArray(detector.supported_protocol_versions)&&detector.supported_protocol_versions.includes(Number(record(draft?.avoidance??policy?.avoidance).protocol_version??3));
   const trialUnavailable=record(policy?.avoidance).enabled===true&&!avoidanceSupported?"avoidanceUpdateRequired":trialBlock(policy,runtime,detector,connected,dirty,client.status);
   const journeyUnavailable=journeyBlocks(policy,runtime,detector,connected,dirty,client.status);
+  const nonAcceptanceJourneyBlock=journeyBlocks(policy,runtime,detector,connected,dirty,client.status,false)[0]||"";
   const journey=journeyView(loopState);
   const decision=record(loopState.decision);
   const perception=record(draft?.perception);
@@ -356,7 +365,7 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
   const acceptanceBlock=dirty?"loopUnsaved":view==="journey"&&(record(policy?.avoidance).enabled!==true||record(policy?.avoidance).protocol_version!==3)?"journeyAvoidanceRequired":calibrationFrameBlock(client.camera,client.cameraStream,loopState,policy)|| (imageDecision.vision!=="go"?"calibrationClearFrame":"");
   const confirmJourney=!!policy&&(!calibrationMatches(policy,detector)||record(policy.avoidance).sweep_verified!==true)
     &&!acceptanceBlock&&detector.loaded===true&&/^[a-f0-9]{64}$/.test(String(detector.sha256))
-    &&journeyBlocks(policy,runtime,detector,connected,dirty,client.status,false).length===0;
+    &&!nonAcceptanceJourneyBlock;
   const diagnostic=trialDiagnostics(loopState,trialFailure);
   const sharedTrial=diagnostic.outcome;
   const displayedStopReason=sharedTrial?String(sharedTrial.stop_reason):trialStopReason;
@@ -373,7 +382,7 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
   let commandReason = "";
   if (view === "journey") {
     if (journeyError) commandReason = t("journeyRequestError") + " · " + journeyError;
-    else if (journeyUnavailable[0]) commandReason = t(journeyUnavailable[0]);
+    else if (nonAcceptanceJourneyBlock||journeyUnavailable[0]) commandReason = t(nonAcceptanceJourneyBlock||journeyUnavailable[0]);
     else if (journey.reason&&["failed","blocked"].includes(journey.phase)) commandReason=t(["decision_timeout","decision_invalid_or_expired"].includes(journey.reason)?"workspace.journeyAnalysisExpired":trialStopReasonKey(journey.reason));
     else if (journey.active&&journey.reason) commandReason = t("state") + ": " + journey.reason;
   } else if (view === "automatic") {
@@ -385,7 +394,7 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
   if(loading&&!policy&&view!=="manual")commandReason=t("loading");
   const needsAcceptance=!!policy&&(!calibrationMatches(policy,detector)||view==="journey"&&record(policy.avoidance).sweep_verified!==true);
   const prepareAction=detector.drive_supported!==false&&(view==="automatic"&&trialUnavailable==="loopUnverified"||view==="journey"&&journeyUnavailable.some(reason=>["loopUnverified","journeySweepRequired","journeyAcceptanceRequired"].includes(reason)));
-  if(prepareAction&&!journeyError&&!visibleError&&!readError){
+  if(prepareAction&&(view!=="journey"||!nonAcceptanceJourneyBlock)&&!journeyError&&!visibleError&&!readError){
     commandReason=t(!active||loopState.running!==true?"workspace.prepareImage":acceptanceBlock||"workspace.confirmReady");
   }
   return <section className={styles.controlWorkspace} data-testid="control-workspace">

@@ -1,7 +1,7 @@
 // Every Rider request is intercepted. All ARM/STOP acknowledgements are inert fixtures.
 async page => {
   const check=(value,message)=>{if(!value)throw new Error(message);};
-  const base=new URL(page.url()).origin;
+  const base=page.url()==="about:blank"?"http://localhost:3300":new URL(page.url()).origin;
   check(["localhost","127.0.0.1","[::1]"].includes(new URL(base).hostname),"loopback UI required");
   await page.goto("about:blank");
   const calls=[],sha="a".repeat(64);
@@ -39,7 +39,7 @@ async page => {
   });
   const geometry=[];
   try {
-    await page.setViewportSize({width:1440,height:1000});await page.goto(base+"/rider");
+    await page.setViewportSize({width:1440,height:1000});await page.goto(base+"/rider",{waitUntil:"domcontentloaded"});
     await page.getByTestId("operator-status").waitFor();
     await wait(async()=>(await page.getByTestId("operator-battery").innerText()).includes("62"),"fresh battery missing");
     check((await page.getByTestId("operator-axes").innerText()).includes("-925,9"),"SDK axis was converted or wrapped");
@@ -66,11 +66,22 @@ async page => {
     await page.getByTestId("takeover-manual").click();
     await wait(async()=>!await page.getByTestId("operator-height").isDisabled()&&holder!=="previous-panel"&&calls.filter(call=>call.body.action==="arm").length===1,"fixture takeover failed");
     const start=calls.length;
+    await page.getByTestId("operator-height").click({position:{x:1,y:18}});
+    await wait(async()=>!await page.getByTestId("operator-height-apply").isDisabled(),"explicit minimum remains unselected");
+    check(await page.getByTestId("operator-height").inputValue()==="75","minimum click changed the SDK minimum");
+    check(calls.length===start,"choosing minimum sent an actuator command");
+    await page.getByTestId("operator-height-apply").click();
+    await wait(()=>postureHeight===75,"explicit minimum was not submitted");
+    await wait(async()=>!await page.getByTestId("operator-height").isDisabled(),"minimum apply remained busy");
+    postureHeight=null;
+    await wait(async()=>await page.getByTestId("operator-height-value").innerText()==="—","unknown target did not return after external update");
+    const afterMinimum=calls.length;
     await page.getByTestId("operator-height").focus();
     await page.getByTestId("operator-height").press("Home");
+    check(!await page.getByTestId("operator-height-apply").isDisabled(),"keyboard minimum remains unselected");
     for(let step=0;step<15;step++)await page.getByTestId("operator-height").press("ArrowRight");
     check(await page.getByTestId("operator-height").inputValue()==="90","slider did not respect SDK step");
-    check(calls.length===start,"editing height sent command: "+JSON.stringify(calls.slice(start)));
+    check(calls.length===afterMinimum,"editing height sent command: "+JSON.stringify(calls.slice(afterMinimum)));
     check(!await page.getByTestId("operator-height-apply").isDisabled(),"valid target blocked");
     await page.getByTestId("operator-height-apply").click();
     await wait(()=>postureHeight===90,"explicit height command missing");
@@ -80,7 +91,7 @@ async page => {
     await wait(async()=>!await page.getByTestId("operator-balance").isDisabled(),"balance remained busy");
     await page.getByTestId("operator-balance").click();
     await wait(async()=>(await page.getByTestId("operator-balance-state").innerText())==="Wyłączony","balance disable not synchronized");
-    check(calls.slice(start).map(call=>call.body.action).join(",")==="height,balance,balance","unexpected actuator mutations");
+    check(calls.slice(start).map(call=>call.body.action).join(",")==="height,height,balance,balance","unexpected actuator mutations");
     postureHeight=95;
     await wait(async()=>await page.getByTestId("operator-height").inputValue()==="95","external target not synchronized after apply");
     for(const viewport of [{width:1440,height:1000},{width:1366,height:768},{width:768,height:1024},{width:390,height:844},{width:844,height:390}]) {
