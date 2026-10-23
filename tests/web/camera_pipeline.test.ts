@@ -107,3 +107,33 @@ test("slow status refresh cannot replace a tighter recent camera age bound or re
   const missing={...slow,latest:{}};
   assert.equal(preferredPreviewAnchor(fast,missing),missing);
 });
+
+test("a local or host preview cannot survive a changed pipeline revision or transport generation", async () => {
+  const { cameraPipelineIdentity, framePipelineCurrent } = await import("../../web-next/lib/camera-pipeline");
+  const pipeline = readCameraPipeline(fixture.stopped_status)!;
+  const frame = { pipelineIdentity: cameraPipelineIdentity(pipeline) };
+  assert.equal(framePipelineCurrent(frame, pipeline), true);
+  assert.equal(framePipelineCurrent(frame, { ...pipeline, revision: pipeline.revision + 1 }), false);
+  assert.equal(framePipelineCurrent(frame, { ...pipeline, transport_epoch: pipeline.transport_epoch + 1 }), false);
+  assert.equal(framePipelineCurrent(frame, null), false);
+  assert.equal(framePipelineCurrent({}, pipeline), true);
+});
+
+
+test("PROC metadata identifies the actual local engine, not the newly requested selection", async () => {
+  const { cameraSourceMatches, readCameraSource, framePipelineCurrent } = await import("../../web-next/lib/camera-pipeline");
+  const parsed = readCameraPipeline(fixture.stopped_status)!;
+  const profile = { ...parsed.profile, analysis_location: "local" as const, local_engine: "ssd" as const };
+  const pipeline = { ...parsed, profile, active_profile: profile, camera_session: "proc-session" };
+  const source = { pipeline_revision: pipeline.revision, transport_epoch: pipeline.transport_epoch, camera_session: "proc-session", local_engine: "ssd", model_id: "local-ssd", analysis_location: "local" };
+  assert.deepEqual(readCameraSource(JSON.stringify(source)), source);
+  assert.equal(cameraSourceMatches(source, pipeline), true);
+  assert.equal(framePipelineCurrent({ cameraSource: source }, pipeline), true);
+  for (const patch of [{ local_engine: "canny" }, { model_id: "local-canny" }, { analysis_location: "venom" }, { camera_session: "old" }, { pipeline_revision: pipeline.revision + 1 }])
+    assert.equal(cameraSourceMatches({ ...source, ...patch }, pipeline), false);
+  assert.equal(cameraSourceMatches(source, { ...pipeline, active_profile: null }), false);
+  assert.equal(framePipelineCurrent({ cameraSource: { ...source, model_id: "local-canny" } }, pipeline), false);
+  assert.equal(readCameraSource("invalid"), undefined);
+  assert.equal(readCameraSource("{}"), undefined);
+  assert.equal(readCameraSource("a".repeat(4097)), undefined);
+});

@@ -1,10 +1,12 @@
 import { VisionSectors } from "./vision-sectors";
 import { journeyOwnsMotion, operatorPrioritySupported } from "../lib/navigation";
 import { CameraPipelineControls } from "./camera-pipeline";
+import { framePipelineCurrent } from "../lib/camera-pipeline";
 import { CorridorOverlay, type CorridorEditorProps } from "./corridor-overlay";
 import { manualFeedback } from "../lib/manual-feedback";
 import { frameAge } from "../lib/vision-frame";
 import { previewNotice } from "../lib/loop-controls";
+import { perceptionFrameCurrent } from "../lib/perception";
 /* eslint-disable @next/next/no-img-element -- Pi binary frames use revocable object URLs. */
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { displayedPreview, previewLifetime } from "../lib/preview-media";
@@ -12,7 +14,7 @@ import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Camera, CirclePause, CircleS
 import { actuatorState, displayValue, finite, formatTime, record, safetyOf, settingsOf, type Direction, type NumericDescriptor } from "../lib/model";
 import type { Translator } from "../lib/i18n";
 import type { Frame, RiderClient } from "../lib/use-rider";
-import { Button, Empty, Field, Panel, Pill, Range, Select } from "./primitives";
+import { Button, Empty, Field, Input, Panel, Pill, Range, Select } from "./primitives";
 import styles from "../rider.module.css";
 
 const arrows = [
@@ -21,7 +23,7 @@ const arrows = [
   { direction: "right" as const, row: 2, column: 3, Icon: ArrowRight },
   { direction: "backward" as const, row: 3, column: 2, Icon: ArrowDown },
 ];
-export function ManualPad({ client, t, language, compact = false, children }: { client: RiderClient; t: Translator; language: string; compact?: boolean; children?: ReactNode }) {
+export function ManualPad({ client, t, language, compact = false, minimal = false, children }: { client: RiderClient; t: Translator; language: string; compact?: boolean; minimal?: boolean; children?: ReactNode }) {
   const [mode, setMode] = useState<"pulse" | "continuous">("pulse");
   const helpId = useId();
   const safety = safetyOf(client.status);
@@ -52,7 +54,7 @@ export function ManualPad({ client, t, language, compact = false, children }: { 
         <option value="continuous">{t("continuousPad")}</option>
       </Select>
     </label>
-    <div className={styles.pad} role="group" aria-label={t("manual")} aria-describedby={helpId} data-mode={mode}>
+    <div className={styles.pad} role="group" aria-label={t("manual")} aria-describedby={minimal ? undefined : helpId} data-mode={mode}>
       {arrows.map(({ direction, row, column, Icon }) => {
         const active = client.activeDirection === direction && client.manualMode === (continuous ? "continuous" : "hold");
         return <button type="button" key={direction} aria-label={t(direction)} title={t(direction)} aria-pressed={active} disabled={!available} data-testid={`rider-${direction}`} className={`${styles.arrow} ${active ? styles.arrowActive : ""}`} style={{ gridRow: row, gridColumn: column }}
@@ -79,7 +81,10 @@ export function ManualPad({ client, t, language, compact = false, children }: { 
       })}
       <button type="button" className={`${styles.padCenter} ${styles.padStop}`} style={{ gridRow: 2, gridColumn: 2 }} aria-label={t("stopMotors")} title={t(journeyOwnsMotion(client.status) ? "journeyStop" : operatorPrioritySupported(client.status) ? "operatorPauseHint" : "manualStopHint")} data-testid="rider-pad-stop" onClick={() => void client.stopManual().catch(() => undefined)}><CircleStop size={27} /><span>{t("stopShort")}</span></button>
     </div>
-    <div className={styles.padDetails}>
+    {minimal?<div className={styles.manualReadout} data-testid="manual-feedback">
+      <div role="status"><Pill tone={safety.state==="ARMED"?"good":"warning"}>{t(safety.state==="ARMED"?"armed":safety.state==="ESTOP"?"estop":safety.state==="DISARMED"?"disarmed":"unknown")}</Pill>{client.activeDirection&&<span>{t(client.activeDirection)}</span>}</div>
+      {children}
+    </div>:<div className={styles.padDetails}>
     <div className={styles.padHelp} id={helpId}>
       <p className={styles.hint}>{t(continuous ? "manualModeContinuousHint" : "manualModePulseHint")}</p>
       {continuous && !client.canContinuous && <p className={styles.hint} role="status">{t(record(safety.panel_control).version === 1 ? "continuousTakeover" : "continuousUnsupported")}</p>}
@@ -92,10 +97,10 @@ export function ManualPad({ client, t, language, compact = false, children }: { 
     <div className={styles.padStatus}><Pill tone={safety.state === "ARMED" ? "good" : "warning"}>{t(safety.state === "ARMED" ? "armed" : safety.state === "ESTOP" ? "estop" : safety.state === "DISARMED" ? "disarmed" : "unknown")}</Pill>{(client.status?.errors.control || safety.stale === true) && <Pill tone="warning">{t("lastPermission")}</Pill>}{!!record(safety.execution).inhibit && <Pill tone="warning">{t("executionPaused")}</Pill>}{client.activeDirection && <Pill tone="good">{t(client.manualMode === "continuous" ? "continuousPad" : "held")} · {t(client.activeDirection)}</Pill>}</div>
     <div className={`${styles.flex} ${styles.space}`} style={{ marginTop: 15 }}><span className={styles.small}>{t("owner")}: {typeof safety.owner === "string" ? safety.owner : "—"}</span><Button onClick={() => client.hold.release()} disabled={!client.activeDirection}><CirclePause size={15} />{t("endDirection")}</Button></div>
       {children}
-    </div>
+    </div>}
   </div>;
 }
-export function Posture({ client, t, language }: { client: RiderClient; t: Translator; language: string }) {
+export function Posture({ client, t, language, compact = false }: { client: RiderClient; t: Translator; language: string; compact?: boolean }) {
   const [draftHeight, setDraftHeight] = useState<number | null>(null);
   const settings = settingsOf(client.status);
   const actuator = record(record(settings.parameter_schema).actuator_fields);
@@ -107,6 +112,30 @@ export function Posture({ client, t, language }: { client: RiderClient; t: Trans
   const height = draftHeight ?? (finite(target.value) ? target.value : descriptor.minimum);
   const capabilities = record(safetyOf(client.status).capabilities);
   const heightAvailable = record(capabilities.height).available !== false && descriptor.type === "integer" && finite(descriptor.minimum) && finite(descriptor.maximum);
+  if (compact) {
+    const value = draftHeight ?? (finite(target.value) ? target.value : Number.NaN);
+    const valid = finite(value) && Number.isInteger(value) && finite(descriptor.minimum) && finite(descriptor.maximum)
+      && value >= descriptor.minimum && value <= descriptor.maximum
+      && (!finite(descriptor.step) || descriptor.step <= 0 || Number.isInteger((value - descriptor.minimum) / descriptor.step));
+    return <div className={styles.operatorPosture} data-testid="operator-posture">
+      <div className={styles.operatorHeight}>
+        <Field label={t("operator.height") + " · " + (descriptor.display_unit ?? "SDK")}>
+          <Input data-testid="operator-height" type="number" value={finite(value) ? value : ""} placeholder="—"
+            min={descriptor.minimum} max={descriptor.maximum} step={descriptor.step ?? 1}
+            disabled={!client.canMutate || !heightAvailable || !!client.busy}
+            onChange={event => setDraftHeight(event.target.value === "" ? Number.NaN : Number(event.target.value))}/>
+        </Field>
+        <Button data-testid="operator-height-apply" disabled={!client.canMove || !heightAvailable || !!client.busy || !valid}
+          onClick={() => { if (valid) void client.command({ action: "height", height: value }).then(response => { if (response) setDraftHeight(null); }); }}>{t("apply")}</Button>
+      </div>
+      <div className={styles.operatorBalance}>
+        <div><span>{t("balance")}</span><strong data-testid="operator-balance-state">{t(balance.enabled === true ? "on" : balance.enabled === false ? "off" : "unknown")}</strong></div>
+        <Button data-testid="operator-balance" aria-pressed={balance.enabled === true}
+          disabled={!client.canMove || balanceDescriptor.type !== "boolean" || record(capabilities.balance).available === false || !!client.busy}
+          onClick={() => void client.command({ action: "balance", enabled: balance.enabled !== true })}>{t(balance.enabled === true ? "disable" : "enable")}</Button>
+      </div>
+    </div>;
+  }
   return <Panel title={t("posture")}>
     {heightAvailable && height !== undefined ? <><Field label={`${t("height")} · ${descriptor.display_unit ?? descriptor.unit ?? ""}`}><div className={`${styles.flex} ${styles.space}`}><Range type="range" min={descriptor.minimum} max={descriptor.maximum} step={descriptor.step} value={height} onChange={event => setDraftHeight(Number(event.target.value))} disabled={!client.canMutate} /><strong>{displayValue(height, descriptor, language)}</strong></div></Field><p className={styles.hint}>{t("heightHint")}</p><div className={`${styles.flex} ${styles.space}`}><span className={styles.small}>{t("heightTarget")}: {displayValue(target.value, descriptor, language)} {descriptor.display_unit} · {formatTime(target.ts, language)}</span><Button disabled={!client.canMove || client.busy === "height" || !finite(height)} onClick={() => void client.command({ action: "height", height })}>{t("apply")}</Button></div></> : <Empty>{t("unavailable")}</Empty>}
     <div className={styles.rule} />
@@ -114,20 +143,24 @@ export function Posture({ client, t, language }: { client: RiderClient; t: Trans
     <div className={styles.meta}>{t("state")}: {t(balance.enabled === true ? "on" : balance.enabled === false ? "off" : "unknown")}</div>
   </Panel>;
 }
-export function CameraPanel({ client, t, language, compact = false, onObservation, observationDisabled = false, editor }: { client: RiderClient; t: Translator; language: string; compact?: boolean; onObservation?:()=>void; observationDisabled?:boolean; editor?:CorridorEditorProps }) {
+export function CameraPanel({ client, t, language, compact = false, showTools = true, onObservation, observationDisabled = false, editor }: { client: RiderClient; t: Translator; language: string; compact?: boolean; showTools?: boolean; onObservation?:()=>void; observationDisabled?:boolean; editor?:CorridorEditorProps }) {
   const [imageSize,setImageSize]=useState<[number,number]>([320,240]);
   const [displayed,setDisplayed]=useState<Frame|null>(null);
+  // Explicit model results disappear on mismatch, expiry or failed inference.
+  const modelPreview = client.cameraStream === "venom" && client.perceptionSelection !== undefined;
+  const candidate = !framePipelineCurrent(client.camera, client.pipeline.status) || modelPreview && !perceptionFrameCurrent(client.camera, client.perceptionSelection) ? null : client.camera;
+  const displayedModel = !framePipelineCurrent(displayed, client.pipeline.status) || modelPreview && !perceptionFrameCurrent(displayed, client.perceptionSelection) ? null : displayed;
   // The candidate decodes offscreen before the visible img fires its load event.
-  const visible = displayedPreview(client.camera, displayed);
+  const visible = displayedPreview(candidate, displayedModel);
   useEffect(() => {
-    const frame = displayedPreview(client.camera, displayed);
+    const frame = displayedPreview(candidate, displayedModel);
     if (!frame || frame.stale) return;
     const remaining = previewLifetime(frame);
     if (remaining === null) return;
     const timer = setTimeout(() => setDisplayed(previous => previous?.url === frame.url
       ? { ...previous, stale: true, knownFreshness: false } : previous), remaining);
     return () => clearTimeout(timer);
-  }, [client.camera, displayed]);
+  }, [candidate, displayedModel]);
   const [previewBusy,setPreviewBusy]=useState(false);
   const [previewFailure,setPreviewFailure]=useState("");
   const chooseStream=async(stream:"raw"|"proc"|"venom"|null)=>{
@@ -143,8 +176,8 @@ export function CameraPanel({ client, t, language, compact = false, onObservatio
   };
   const power = client.pipeline.status;
   const cameraOn = !!power && ["active", "starting", "waiting_frame"].includes(power.state);
-  const cameraButtonLabel = t(compact ? !power ? "cockpitCameraUnknown" : cameraOn ? "cockpitCameraOff" : "cockpitCameraOn" : !power || cameraOn ? "cameraSwitchOff" : "cameraSwitchOn");
-  const cameraButtonName = compact ? cameraButtonLabel + " · " + t(!power ? "unknown" : cameraOn ? "cameraSwitchOff" : "cameraSwitchOn") : cameraButtonLabel;
+  const cameraButtonLabel = t(!power ? "cockpitCameraUnknown" : cameraOn ? "cameraSwitchOff" : "cameraSwitchOn");
+  const cameraButtonName = cameraButtonLabel;
   const changePower = async () => {
     setPreviewFailure("");
     try {
@@ -162,21 +195,34 @@ export function CameraPanel({ client, t, language, compact = false, onObservatio
     ? record(visible.analysis.source) : visible?.analysis;
   const streams = client.pipeline.status?.profile.analysis_location === "local"
     ? (["raw", "proc"] as const) : compact ? (["raw", "venom"] as const) : (["raw", "venom", "proc"] as const);
-  return <Panel className={compact?styles.cameraEmbedded:""} title={t("camera")} hint={compact?undefined:t("cameraHint")} extra={<div className={styles.flex}>
+  return <Panel className={compact?styles.cameraEmbedded:""} title={t("camera")} hint={compact?undefined:t("cameraHint")} extra={<div className={styles.cameraToolbar}>
+      <div className={styles.cameraSources}>{streams.map(stream => <Button key={stream} aria-label={t(stream === "venom" ? "visionVenom" : stream === "proc" ? "visionPi" : stream)} tone={selected === stream ? "primary" : undefined} aria-pressed={selected === stream} onClick={() => void chooseStream(stream)} disabled={!client.canMutate||previewBusy}>{t(compact ? stream === "raw" ? "workspace.raw" : stream === "venom" ? "workspace.analysis" : "visionPi" : stream === "venom" ? "visionVenom" : stream === "proc" ? "visionPi" : stream)}</Button>)}</div>
       <span data-testid="camera-power-state"><Pill tone={power?.state === "active" ? "good" : "warning"}>{t(power ? "pipeline.state." + power.state : "unknown")}</Pill></span><Button aria-label={cameraButtonName} data-testid="camera-power-toggle" tone={cameraOn ? "caution" : undefined} title={t(!power ? client.pipeline.supported === false ? "pipeline.legacy" : client.pipeline.error ? "pipeline.readFailed" : "pipeline.loading" : "cameraHint")} onClick={() => void changePower()} disabled={!power||!client.canMutate||client.pipeline.busy||power.state === "stopping"}>{cameraButtonLabel}</Button>
       <Button aria-label={t(client.cameraStream ? "hidePreview" : "showPreview")} data-testid="camera-preview-toggle" onClick={() => void chooseStream(client.cameraStream ? null : "raw")} disabled={!client.canMutate||previewBusy}><Camera size={15} />{!compact && t(client.cameraStream ? "hidePreview" : "showPreview")}</Button>
     </div>}>
-    <div className={styles.cameraSources}>{streams.map(stream => <Button key={stream} tone={selected === stream ? "primary" : undefined} aria-pressed={selected === stream} onClick={() => void chooseStream(stream)} disabled={!client.canMutate||previewBusy}>{t(stream === "venom" ? "visionVenom" : stream === "proc" ? "visionPi" : stream)}</Button>)}</div>
-    <div className={styles.camera} data-testid="camera-surface">{client.camera&&notice&&<div className={transitioning?styles.cameraPaused+" "+styles.cameraTransition:styles.cameraPaused} role="status" data-testid="vision-preview-paused">{t(notice!)}</div>}{client.camera ? <><img data-capture-key={client.camera.captureKey} src={client.camera.url} alt={t("cameraAlt")} onLoad={event=>{const {naturalWidth,naturalHeight}=event.currentTarget;setImageSize(previous=>previous[0]===naturalWidth&&previous[1]===naturalHeight?previous:[naturalWidth,naturalHeight]);client.markCameraDecoded(event.currentTarget.currentSrc,true);if(client.camera&&event.currentTarget.currentSrc===client.camera.url)setDisplayed(client.camera);}} onError={event=>{client.markCameraDecoded(event.currentTarget.currentSrc,false);setDisplayed(null);}} />{editor&&<CorridorOverlay editor={editor} size={imageSize} t={t}/>}</> : <Empty><Camera size={32} />{t(transitioning?"visionPreviewRestarting":client.mediaError ?? (client.cameraStream ? "frameMissing" : "showPreview"))}{onObservation&&<><p className={styles.hint}>{t("loopPreviewHelp")}</p><Button tone="primary" disabled={observationDisabled} onClick={onObservation}>{t("loopPreparePreview")}</Button></>}</Empty>}</div>
+    <div hidden={selected!=="venom"} className={styles.perceptionPreviewMeta} data-testid="perception-preview-result" aria-live="polite">
+      <strong>{visible?.analysis ? String(visible.analysis.model_id || (visible.analysis.perception_engine === "depth_plane" ? "Depth Anything V2" : "SegFormer-B0")) : t("perception.previewWaiting")}</strong>
+      {visible?.analysis && <span>{t("frameSequence")}: {String(sourceIdentity?.sequence)} · {String(sourceIdentity?.frame_id).slice(0,12)} · {Math.round(frameAge(visible) ?? 0)} ms · {t("perception.inference")}: {visible.inferenceMs || "N/A"} ms · r{String(visible.analysis.config_revision)}</span>}
+      <span title={t(visible?.analysis?.perception_engine === "depth_plane" || String(visible?.analysis?.model_id ?? "").startsWith("depth-anything") ? "perception.geometryLegend" : "perception.semanticLegend")}>{t(visible?.analysis?.perception_engine === "depth_plane" || String(visible?.analysis?.model_id ?? "").startsWith("depth-anything") ? "perception.geometryLegendShort" : "perception.semanticLegendShort")}</span>
+    </div>
+    {selected === "proc" && <p className={styles.small} data-testid="perception-local-preview">{t("perception.location.local")} · {candidate ? client.pipeline.status?.active_profile?.local_engine.toUpperCase() ?? t("perception.runtime.unavailable") : t("perception.previewWaiting")}</p>}
+    <div className={styles.camera} data-testid="camera-surface">{candidate&&notice&&<div className={transitioning?styles.cameraPaused+" "+styles.cameraTransition:styles.cameraPaused} role="status" data-testid="vision-preview-paused">{t(notice!)}</div>}{candidate ? <><img data-capture-key={candidate.captureKey} src={candidate.url} alt={t("cameraAlt")} onLoad={event=>{const {naturalWidth,naturalHeight}=event.currentTarget;setImageSize(previous=>previous[0]===naturalWidth&&previous[1]===naturalHeight?previous:[naturalWidth,naturalHeight]);client.markCameraDecoded(event.currentTarget.currentSrc,true);if(candidate&&event.currentTarget.currentSrc===candidate.url)setDisplayed(candidate);}} onError={event=>{client.markCameraDecoded(event.currentTarget.currentSrc,false);setDisplayed(null);}} />{editor&&<CorridorOverlay editor={editor} size={imageSize} t={t}/>}</> : <Empty><Camera size={32} />{t(transitioning?"visionPreviewRestarting":client.mediaError ?? (modelPreview ? "perception.previewWaiting" : client.cameraStream ? "frameMissing" : "showPreview"))}{onObservation&&<><p className={styles.hint}>{t("loopPreviewHelp")}</p><Button tone="primary" disabled={observationDisabled} onClick={onObservation}>{t("loopPreparePreview")}</Button></>}</Empty>}</div>
     {previewFailure&&<p role="alert" className={styles.hint}>{t(previewFailure)}</p>}
     {editor&&<p className={styles.hint} data-testid="sector-draft-hint">{t("sectorDraftHint")}</p>}
-    {(compact || selected === "venom") && <VisionSectors frame={selected === "venom" ? visible : null} t={t} compact={compact}/>}
-    <details className={styles.cameraTools}><summary>{t("cameraTools")}</summary>
-      <CameraPipelineControls client={client} t={t}/>
-    {selected === "venom" && <p className={styles.hint}>{t("visionLegend")}</p>}
-    {visible?.visionState && <p className={styles.hint}>{t(visible.stale?"loopDecision":"state")}: {t("vision." + visible.visionState)} · {visible.inferenceMs} ms · <code>{visible.visionReason}</code>{visible.visionPolicy === "diagnostic_default" && <> · {t("visionDefaultZone")}</>}</p>}
-    {visible?.analysis && <p className={styles.small} data-testid="frame-identity">{t("frameSequence")}: {String(sourceIdentity?.sequence)} · {String(sourceIdentity?.frame_id).slice(0,12)} · {t("frameRelativeAge")}: {Math.round(frameAge(visible)??0)} ms · {t("frameAnalysisRevision")}: r{String(visible.analysis.config_revision)}</p>}
-    {visible && <div className={styles.meta}><Pill>{t(visible.stale?"framePaused":Number(visible.recordedAt)>0 ? "frameReplay" : visible.knownFreshness ? "frameFresh" : "frameTimeUnknown")}</Pill>{Number(visible.recordedAt)>0&&<span>{t("frameRecorded")}: {formatTime(Number(visible.recordedAt),language)}</span>}{visible.fileAt && <span>{t("frameAt")}: {formatTime(Number(visible.fileAt), language)}</span>}{visible.source && <span>{t("source")}: {visible.source}</span>}</div>}
-    </details>
+    {selected === "venom" && <VisionSectors frame={selected === "venom" ? visible : null} t={t} compact={compact}/>}
+    {showTools&&<CameraDetails client={client} t={t} language={language}/>}
   </Panel>;
+}
+
+
+export function CameraDetails({client,t,language}:{client:RiderClient;t:Translator;language:string}) {
+  const visible=client.camera, selected=client.cameraStream;
+  const sourceIdentity=visible?.analysis&&Object.keys(record(visible.analysis.source)).length?record(visible.analysis.source):visible?.analysis;
+  return <details className={styles.workspaceDisclosure} data-testid="camera-settings"><summary>{t("cameraTools")}</summary><div className={styles.disclosureBody}>
+    <CameraPipelineControls client={client} t={t}/>
+    {selected==="venom"&&<p className={styles.hint}>{t("visionLegend")}</p>}
+    {visible?.visionState&&<p className={styles.hint}>{t("state")}: {t("vision."+visible.visionState)} · {visible.inferenceMs} ms · <code>{visible.visionReason}</code></p>}
+    {visible?.analysis&&<p className={styles.small} data-testid="frame-identity">{t("frameSequence")}: {String(sourceIdentity?.sequence)} · {String(sourceIdentity?.frame_id).slice(0,12)} · {t("frameRelativeAge")}: {Math.round(frameAge(visible)??0)} ms · r{String(visible.analysis.config_revision)}</p>}
+    {visible&&<p className={styles.small}>{t(visible.stale?"framePaused":visible.knownFreshness?"frameFresh":"frameTimeUnknown")} · {formatTime(Number(visible.fileAt),language)}</p>}
+  </div></details>;
 }

@@ -6,7 +6,7 @@ from typing import Any
 import numpy as np
 
 
-def assess(depth, reference, camera, tolerance, outlier_limit):
+def assess(depth, reference, camera, tolerance, outlier_limit, *, params=None):
     radius = camera.radius_ratio
     step = radius / 4
     along = np.arange(0, camera.lookahead_ratio + radius + step / 2, step)
@@ -63,6 +63,7 @@ def assess(depth, reference, camera, tolerance, outlier_limit):
         oz,
     )[occupied]
     candidates: list[dict[str, Any]] = []
+    navigation_maps = None
     for angle in headings:
         a = math.radians(float(angle))
         x = s * math.sin(a) + t * math.cos(a)
@@ -100,6 +101,20 @@ def assess(depth, reference, camera, tolerance, outlier_limit):
             + coefficients[2]
         )
         blocked = abs(residual) > tolerance
+        if params is not None and angle == 0:
+            import cv2
+
+            from .navigation_maps import depth_maps
+
+            route = np.zeros(depth.shape, dtype=np.uint8)
+            projected = np.column_stack((ix[valid], iy[valid])).astype(np.int32)
+            if len(projected) >= 3:
+                cv2.fillConvexPoly(route, cv2.convexHull(projected), (1,))
+            if route.any():
+                navigation_maps = depth_maps(
+                    abs(signed), signed, tolerance, valid=complete
+                )
+                navigation_maps["corridor"] = route.astype(bool)
         near = s <= radius + min(0.25, camera.lookahead_ratio / 3)
         guard_clear = (
             bool(valid[near].all() and not blocked[near].any()) if near.any() else False
@@ -129,6 +144,16 @@ def assess(depth, reference, camera, tolerance, outlier_limit):
             if (oz >= 0).any()
             else 1.0
         )
+        if params is not None and angle == 0 and navigation_maps is not None:
+            # Source-floor masks do not represent the volume swept by the body.
+            # Keep established 3D collision/near-guard as independent evidence,
+            # including elevated obstacles above the projected ground footprint.
+            navigation_maps.update(
+                geometry_guard_clear=bool(guard_clear),
+                geometry_collision=bool(collisions.any()),
+                geometry_blocked=state == "obstacle",
+                geometry_complete=bool(complete),
+            )
         candidates.append(
             {
                 "heading_deg": float(angle),
@@ -195,6 +220,9 @@ def assess(depth, reference, camera, tolerance, outlier_limit):
         "geometry": "ground_capsule",
     }
     return {
+        **(
+            {"_navigation_maps": navigation_maps} if navigation_maps is not None else {}
+        ),
         "_path_overlay": {
             "center": envelope(reference, camera, 0.0),
             **{

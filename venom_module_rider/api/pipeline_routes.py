@@ -114,6 +114,9 @@ async def processed_native(request, connection, incoming):
         request.app.state.rider_stream,
     )
     policy = (await domain.read("/api/navigation/config", 0.2))["data"]
+    models = getattr(request.app.state, "rider_models", None)
+    if models is not None:
+        models.observe_policy(domain.transport().device.id, policy)
     corridor, revision = tuple(policy["corridor"]), policy["revision"]
     status = (await domain.read("/api/navigation/status", 0.2))["data"]
     run_id = status.get("run_id")
@@ -162,6 +165,7 @@ async def processed_native(request, connection, incoming):
             mode="observe",
             corridor=corridor,
             perception=PerceptionSettings.model_validate(policy.get("perception", {})),
+            behavior=policy.get("behavior", {}),
         )
 
         async def infer():

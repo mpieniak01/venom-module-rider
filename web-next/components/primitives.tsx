@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type ButtonHTMLAttributes, type CSSProperties, type InputHTMLAttributes, type SelectHTMLAttributes, type TextareaHTMLAttributes, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type InputHTMLAttributes, type SelectHTMLAttributes, type TextareaHTMLAttributes, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Button as VenomButton } from "@/components/ui/button";
 import { Info } from "lucide-react";
@@ -14,15 +14,22 @@ export function Panel({ title, hint, extra, children, className = "" }: { title:
 export function Button({ tone, size = "small", title, children, className = "", onMouseEnter, onMouseLeave, onFocus, onBlur, "aria-describedby": describedBy, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { tone?: "primary" | "danger" | "caution"; size?: "small" | "large" }) {
   const tooltipId = useId();
   const [position, setPosition] = useState<CSSProperties | null>(null);
+  const tipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const close = () => { if (tipTimer.current) clearTimeout(tipTimer.current); tipTimer.current=null; setPosition(null); };
+  useEffect(() => () => { if (tipTimer.current) clearTimeout(tipTimer.current); }, []);
   const show = (target: HTMLButtonElement) => {
     if (!title || props.disabled) return;
-    const rect = (target.closest("header") ?? target).getBoundingClientRect();
+    const rect = target.getBoundingClientRect();
     const width = Math.min(320, window.innerWidth - 24);
-    setPosition({ width, left: Math.max(12, Math.min(rect.left + rect.width / 2 - width / 2, window.innerWidth - width - 12)), ...(rect.bottom + 140 > window.innerHeight ? { bottom: window.innerHeight - rect.top + 8 } : { top: rect.bottom + 8 }) });
+    close();
+    tipTimer.current=setTimeout(() => {
+      tipTimer.current=null;
+      setPosition({ width, left: Math.max(12, Math.min(rect.left + rect.width / 2 - width / 2, window.innerWidth - width - 12)), ...(rect.bottom + 140 > window.innerHeight ? { bottom: window.innerHeight - rect.top + 8 } : { top: rect.bottom + 8 }) });
+    }, 650);
   };
   useEffect(() => {
     if (!position) return;
-    const close = () => setPosition(null);
+    const close = () => { if(tipTimer.current)clearTimeout(tipTimer.current);tipTimer.current=null;setPosition(null); };
     const key = (event: KeyboardEvent) => { if (event.key === "Escape") close(); };
     window.addEventListener("scroll", close, true);
     window.addEventListener("resize", close);
@@ -31,8 +38,8 @@ export function Button({ tone, size = "small", title, children, className = "", 
   }, [position]);
   const visible = !!title && !!position && !props.disabled;
   return <><VenomButton variant={tone === "danger" ? "danger" : tone === "caution" ? "warning" : tone === "primary" ? "primary" : "secondary"} size={size === "large" ? "md" : "sm"} className={`${styles.button} ${size === "large" ? styles.buttonLarge : ""} ${className}`} data-size={size} title={props.disabled ? title : undefined} aria-describedby={[describedBy, visible ? tooltipId : undefined].filter(Boolean).join(" ") || undefined}
-    onMouseEnter={event => { show(event.currentTarget); onMouseEnter?.(event); }} onMouseLeave={event => { setPosition(null); onMouseLeave?.(event); }}
-    onFocus={event => { show(event.currentTarget); onFocus?.(event); }} onBlur={event => { setPosition(null); onBlur?.(event); }} {...props}>{children}</VenomButton>
+    onMouseEnter={event => { show(event.currentTarget); onMouseEnter?.(event); }} onMouseLeave={event => { close(); onMouseLeave?.(event); }}
+    onFocus={event => { if(event.currentTarget.matches(":focus-visible"))show(event.currentTarget); onFocus?.(event); }} onBlur={event => { close(); onBlur?.(event); }} onPointerDown={close} {...props}>{children}</VenomButton>
     {visible && createPortal(<span role="tooltip" id={tooltipId} className={styles.tooltip} style={position!}>{title}</span>, document.body)}</>;
 }
 export function Hint({ children }: { children: ReactNode }) {

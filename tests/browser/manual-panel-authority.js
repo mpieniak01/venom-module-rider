@@ -29,7 +29,8 @@ async page => {
  await page.unroute("**/api/v1/rider/control");
  await page.waitForTimeout(900);
  check(await page.getByTestId("rider-forward").getAttribute("aria-pressed")==="false","reconnect resumed motion");
- const lostLink=await page.getByTestId("manual-feedback").innerText();
+ await page.getByTestId("workspace-details").evaluate(el=>{el.open=true;});
+ const lostLink=await page.getByTestId("manual-execution").innerText();
  check(lostLink.includes("Zgłoszone ZERO"),"watchdog did not report zero");
  const context=await page.context().browser().newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
  const other=await context.newPage();
@@ -48,7 +49,8 @@ async page => {
    check(await page.getByTestId("rider-forward").isDisabled(),"old panel still owns control");
    await other.getByTestId("rider-pad-stop").tap();
    await other.waitForTimeout(600);
-   check(await other.getByTestId("manual-feedback").innerText().then(text=>text.includes("Zgłoszone ZERO")),"touch STOP no zero");
+   await other.getByTestId("workspace-details").evaluate(el=>{el.open=true;});
+   check(await other.getByTestId("manual-execution").innerText().then(text=>text.includes("Zgłoszone ZERO")),"touch STOP no zero");
    await other.screenshot({path:"output/playwright/continuous-mobile.png",fullPage:true});
    await page.getByTestId("rider-stop").click();
    await other.waitForTimeout(600);

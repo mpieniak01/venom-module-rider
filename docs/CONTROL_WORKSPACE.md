@@ -1,68 +1,72 @@
 # Rider operator workspace
 
-The Rider module provides **Manual**, **Automatic (10 s)** and
-**Automat2 — journey** presentation views.
-Selecting a view never arms the robot, starts a camera, or starts a navigation trial.
-The displayed owner comes from Pi; a selected view is not evidence of motor authority.
+The camera and the manual keypad are the primary driving surface. Manual,
+Automatic (10 s) and Automat2 views reuse those same mounted controls. Selecting
+a view changes presentation only; Pi reports the actual motor owner.
 
-## Driving
-A single directional pad remains mounted while permission or connectivity changes.
-Choose **Pulse / hold** or **Continuous drive** in the selector. Changing that choice
-ends an existing manual intent and does not start another direction.
-The centre STOP brakes manual motion using Pi settings and keeps manual ARM.
-During Automat2 preparation or a running journey it sends global STOP and
-revokes the pending or active journey authority.
-The header emergency STOP stops and disarms. **Stop loop and camera** retains
-its separate navigation/resource cleanup behavior.
+## Camera and manual control
 
-The manual console stays independent of scrolling camera/configuration content.
-Messages and acknowledgements use bounded scroll regions below the directional
-targets. Device disconnection and rejected requests cannot insert rows above them.
-Phones initially open the full-window module workspace. The expand/restore button
-changes only presentation, without browser fullscreen
-permissions; it does not affect robot state and is unavailable during active manual input.
+The camera toolbar selects raw image or analysis and provides an explicit
+**Switch off camera** action at the source. Hiding preview only hides the image.
+The manual keypad remains available according to Pi's existing control contract,
+independently of the selected vision model or navigation calibration.
 
-Camera pipeline configuration and sample capture are available in the camera's
-tools disclosure. Stored sample sessions are under **Perception**.
-The optional Take manual button stops Venom loop goals, requests manual ARM,
-and starts or retains camera preview. On a Pi advertising intervention v1, a
-direction gesture itself supplies fresh manual consent without that button.
+The centre STOP brakes an owned manual intent. It pauses compatible automatic
+control or ends an active/preparing journey. From a different panel it sends a
+global STOP rather than an unauthorized pause or release. Header STOP always
+stops and disarms. A direction gesture on an intervention-v1 Pi supplies explicit
+manual consent and ends the old automatic intent. Releasing it never resumes
+that intent.
 
-## Local acceptance
+**Take manual control** pauses an automatic session owned by this panel. Taking
+over a different panel uses the existing disarm/read/manual-ARM sequence. An
+already owned paused session does not repeat that handoff.
+
+## Settings below the camera
+
+Preparation, model/provider selection, caution, per-model tuning, camera
+configuration, recording and diagnostics are full-width disclosures below the
+driving surface. Opening them does not overlay or shrink the camera. There is
+one page scroll area; small landscape screens retain readable images and touch
+targets through scrolling. Header emergency STOP remains accessible.
+
+Current operator messages use a stable inline area below the keypad. Detailed
+acknowledgements, error codes and repeated instructions belong in diagnostics.
+Tips appear after a short hover or keyboard focus and close on a pointer press.
+
+## Preparing automatic drive
+
+After changing the model or critical settings, **Prepare automatic drive** opens
+the explicit observation/acceptance controls. Start analysis, inspect a fresh
+image for the saved revision, and confirm the image/path. Automat2 also needs its
+existing swept-path acceptance and avoidance settings. Stale, mismatched or
+unclear frames cannot be accepted. Successful acceptance displays its saved
+configuration revision.
+
+This flow does not arm or start driving. The separate Start/Resume action and
+Pi's motion admission remain authoritative. Opening the panel, reconnecting,
+changing caution or accepting a preview never restores an earlier drive intent.
+
+## Hardware-free acceptance
+
 Use the existing host dependencies:
 
     make check-web
 
-With the host UI running, run the hardware-free geometry/flow scenario through
-Playwright CLI:
+With the local UI available, run Playwright CLI scenarios. They intercept every
+Rider request, including all simulated motion and ARM acknowledgements:
 
     playwright-cli -s=workspace open http://localhost:3300/rider
+    playwright-cli -s=workspace run-code --filename=tests/browser/operator-workspace.js
     playwright-cli -s=workspace run-code --filename=tests/browser/control-workspace.js
+    playwright-cli -s=workspace run-code --filename=tests/browser/operator-priority.js
+    playwright-cli -s=workspace run-code --filename=tests/browser/operator-journey-priority.js
+    playwright-cli -s=workspace run-code --filename=tests/browser/journey-acceptance.js
+    playwright-cli -s=workspace run-code --filename=tests/browser/camera-lifecycle.js
+    playwright-cli -s=workspace run-code --filename=tests/browser/ui-consistency.js
 
-The scenario intercepts every Rider API request. It checks stable direction and
-STOP rectangles under success/error/offline messages, ARM, input selection,
-manual/automatic view changes, scrolling, and phone/tablet viewports. It also
-checks manual brake versus global STOP and never contacts a physical actuator.
-This does not replace operator-authorized physical acceptance.
+These cover readable camera/keypad geometry, settings placement, stable messages,
+foreign-panel takeover and STOP, delayed replies, camera power and explicit
+acceptance. They do not replace operator-authorized physical acceptance.
 
-## Continuous journey
-
-Automat2 adds a separate explicit Start journey and Stop journey. A journey has
-no overall ten-second limit; all existing short motor-pulse and decision
-watchdogs remain active. Pi and Venom must both support journey v1. Missing
-avoidance, swept-path acceptance or calibration is explained next to Start.
-Image and calibrated ground geometry use their existing rules. No settings or
-operator acceptance are fabricated by selecting the view.
-
-A versioned direction gesture atomically ends the old journey and establishes
-new manual authority, including from normal DISARMED after a fault. The optional
-Take manual button retains its STOP/read/ARM sequence; it is not a prerequisite
-for the arrows. The journey does not use the ten-second trial's timed resume.
-A new explicit Start can reuse a compatible ready observer with a new run and
-fresh qualification. Stop journey keeps observation; Stop loop and camera
-releases its resources. Reconnect and page refresh never start another journey.
-
-See [Journey v1](JOURNEY_V1.md) for the paired contract, per-obstacle budgets and
-qualification limits. Hardware-free journey flow:
-
-    playwright-cli -s=workspace run-code --filename=tests/browser/journey.js
+See [Journey v1](JOURNEY_V1.md) for the paired journey contract and limits.

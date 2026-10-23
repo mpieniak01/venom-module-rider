@@ -6,10 +6,11 @@ import { freshnessCadence, previewInterval } from "./loop-timing";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api-client";
 import { getApiBaseUrl } from "@/lib/env";
-import { cameraPreviewStopped, nativePreview, anchoredPreviewAge, nativeAnalysisMatches } from "./camera-pipeline";
+import { readCameraSource, cameraSourceMatches, cameraPipelineIdentity, cameraPreviewStopped, nativePreview, anchoredPreviewAge, nativeAnalysisMatches } from "./camera-pipeline";
 import { useCameraPipeline } from "./use-camera-pipeline";
 import { readMjpeg, type MjpegPart } from "./mjpeg";
 import { readAnalysis } from "./vision-frame";
+import { perceptionPolicy, perceptionResultMatches, type PerceptionSelection } from "./perception";
 import { decodePreview, nextPreviewDelay, previewLifetime, previewRequestCurrent, retainedPreview, expiredNativeCandidate } from "./preview-media";
 import { configForConnection } from "./device-session";
 import { adoptIntervention } from "./operator-control";
@@ -18,7 +19,7 @@ import { canRequestArm, commandAccepted, controlIdentity, data, errorCode, faceR
 
 const BASE = "/api/v1/rider";
 export type Notice = { key: string; code?: string; tone: "error" | "success" | "info" };
-export type Frame = { captureKey?: string; analysis?: JsonRecord; ageMs?: number; receivedAt?: number; ageSource?: string; decoded?: boolean; url: string; stale: boolean; source: string; fileAt: string; id: string; knownFreshness: boolean; visionState: string; visionReason: string; inferenceMs: string; visionPolicy: string; recordedAt: string };
+export type Frame = { cameraSource?: JsonRecord; pipelineIdentity?: string; captureKey?: string; analysis?: JsonRecord; ageMs?: number; receivedAt?: number; ageSource?: string; decoded?: boolean; url: string; stale: boolean; source: string; fileAt: string; id: string; knownFreshness: boolean; visionState: string; visionReason: string; inferenceMs: string; visionPolicy: string; recordedAt: string };
 import { continuousAvailable, controlChanged, freshControl, navigationAvailable, navigationView, observationClock, journeyOwnsMotion, manualStopAction, manualInterventionAvailable, manualInterventionSupported, operatorPrioritySupported, operatorSessionActive, retainControl, type ControlClock } from "./navigation";
 export function useRider(section: Section) {
   const [config, setConfig] = useState<DeviceConfig | null>(null);
@@ -37,6 +38,9 @@ export function useRider(section: Section) {
   const [cameraTransition, setCameraTransitionState] = useState(false);
   const cameraTransitionRef = useRef(false);
   const cameraTransitionEpoch = useRef(0);
+  const perceptionExpected = useRef<PerceptionSelection | null | undefined>(undefined);
+  const [perceptionSelection, setPerceptionSelection] = useState<PerceptionSelection | null | undefined>(undefined);
+  const [perceptionEpoch, setPerceptionEpoch] = useState(0);
   const [showRuntimeFrame, setShowRuntimeFrame] = useState(false);
   const statusRef = useRef<RiderStatus | null>(null);
   const cameraRef = useRef<Frame | null>(null);
@@ -85,16 +89,26 @@ export function useRider(section: Section) {
     const setter = kind === "camera" ? setCamera : setRuntimeFrame;
     setter(previous => { if (retain && kind === "camera" && !next && previous) return retainedPreview(previous, busyRetry); if (previous) URL.revokeObjectURL(previous.url); return next; });
   }, []);
+  const setPerceptionPolicy = useCallback((policy: JsonRecord | null) => {
+    const next = perceptionPolicy(policy);
+    if (JSON.stringify(next) === JSON.stringify(perceptionExpected.current)) return;
+    perceptionExpected.current = next; setPerceptionSelection(next);
+    cameraTransitionEpoch.current += 1; setPerceptionEpoch(value => value + 1);
+    if (mediaRef.current.camera === "venom") { cameraRef.current = null; replaceFrame("camera", null); setMediaError("perception.previewWaiting"); }
+  }, [replaceFrame]);
+  const invalidatePerceptionPreview = useCallback(() => setPerceptionPolicy(null), [setPerceptionPolicy]);
+  const keepCameraOnFailure = useCallback(() => !perceptionExpected.current?.model_id || mediaRef.current.camera !== "venom", []);
   const setCameraTransition = useCallback((transitioning: boolean) => {
     if (cameraTransitionRef.current !== transitioning) cameraTransitionEpoch.current += 1;
     cameraTransitionRef.current = transitioning; setCameraTransitionState(transitioning);
-    if (transitioning && mediaRef.current.camera === "venom") replaceFrame("camera", null, true);
+    if (transitioning && mediaRef.current.camera === "venom") replaceFrame("camera", null, !perceptionExpected.current?.model_id);
   }, [replaceFrame]);
   const markCameraDecoded = useCallback((url: string, decoded: boolean) => {
     setCamera(previous => previous?.url === url && previous.decoded !== decoded ? { ...previous, decoded } : previous);
   }, []);
   const fetchFrame = useCallback(async (path: string, signal: AbortSignal, kind: "camera" | "face") => {
     const epoch = cameraTransitionEpoch.current;
+    const pipelineIdentity = cameraPipelineIdentity(pipelineRef.current);
     const currentPreview = () => previewRequestCurrent(kind, path, cameraTransitionRef.current, epoch, cameraTransitionEpoch.current);
     if (!currentPreview()) return;
     const response = await fetch(`${getApiBaseUrl()}${BASE}${path}`, { cache: "no-store", signal });
@@ -103,7 +117,7 @@ export function useRider(section: Section) {
       let code = "";
       try { code = String(record(record(await response.json()).detail).code ?? ""); } catch { /* Non-JSON frame failure. */ }
       if (signal.aborted || !currentPreview() || !frameRequested(kind, path, sectionRef.current, mediaRef.current)) return;
-      replaceFrame(kind, null, kind === "camera", kind === "camera" && path === "/camera/venom" && response.status === 429 && code === "vision_busy");
+      replaceFrame(kind, null, kind === "camera" && keepCameraOnFailure(), kind === "camera" && path === "/camera/venom" && response.status === 429 && code === "vision_busy");
       setMediaError(code === "camera_off" ? "visionCameraOff" : code === "vision_busy" ? "visionBusy" : path === "/camera/venom" ? "visionPreviewUnavailable" : "frameMissing");
       return;
     }
@@ -111,7 +125,16 @@ export function useRider(section: Section) {
     const ageMs = response.headers.has("X-Rider-Frame-Age-Ms") ? Number(response.headers.get("X-Rider-Frame-Age-Ms")) : undefined;
     const stale = response.headers.get("X-Rider-Stale");
     const placeholder = response.headers.get("X-Rider-Placeholder") === "true";
-    if (stale === "true" || placeholder) { replaceFrame(kind, null, kind === "camera"); setMediaError("frameStale"); return; }
+    if (stale === "true" || placeholder) { replaceFrame(kind, null, kind === "camera" && keepCameraOnFailure()); setMediaError("frameStale"); return; }
+    const analysis = readAnalysis(response.headers.get("X-Rider-Analysis-Json"));
+    const sourceHeader = response.headers.get("X-Rider-Source-Json");
+    const cameraSource = readCameraSource(sourceHeader);
+    if (kind === "camera" && sourceHeader && (!cameraSource || !cameraSourceMatches(cameraSource, pipelineRef.current))) {
+      replaceFrame("camera", null); setMediaError("perception.previewWaiting"); return;
+    }
+    if (kind === "camera" && path === "/camera/venom" && !perceptionResultMatches(analysis, perceptionExpected.current)) {
+      replaceFrame("camera", null); setMediaError("perception.previewWaiting"); return;
+    }
     const blob = await response.blob();
     if (signal.aborted || !currentPreview() || !frameRequested(kind, path, sectionRef.current, mediaRef.current)) return;
     const url = URL.createObjectURL(blob);
@@ -120,14 +143,15 @@ export function useRider(section: Section) {
       if (signal.aborted || !currentPreview() || !frameRequested(kind, path, sectionRef.current, mediaRef.current)) {
         URL.revokeObjectURL(url); return;
       }
+      if (kind === "camera" && pipelineIdentity !== cameraPipelineIdentity(pipelineRef.current)) { URL.revokeObjectURL(url); return; }
       const expired = kind === "camera" && path === "/camera/venom" && previewLifetime({ageMs,receivedAt}) === 0;
-      replaceFrame(kind, { captureKey: response.headers.get("X-Rider-Capture-Key") ?? undefined, analysis: readAnalysis(response.headers.get("X-Rider-Analysis-Json")), ageMs, receivedAt, ageSource: response.headers.get("X-Rider-Frame-Age-Source") ?? undefined, decoded: kind === "camera", url, stale: expired, knownFreshness: stale === "false" && !expired, source: response.headers.get("X-Rider-Source") || response.headers.get("X-Face-Source") || "", fileAt: response.headers.get("X-Rider-File-Observed-At") || "", id: response.headers.get("X-Rider-Frame-Id") || "", visionState: response.headers.get("X-Rider-Vision-State") || "", visionReason: response.headers.get("X-Rider-Vision-Reason") || "", inferenceMs: response.headers.get("X-Rider-Vision-Inference-Ms") || "", visionPolicy: response.headers.get("X-Rider-Vision-Policy") || "", recordedAt: response.headers.get("X-Rider-Recorded-At") || "" });
+      replaceFrame(kind, { cameraSource, pipelineIdentity, captureKey: response.headers.get("X-Rider-Capture-Key") ?? undefined, analysis, ageMs, receivedAt, ageSource: response.headers.get("X-Rider-Frame-Age-Source") ?? undefined, decoded: kind === "camera", url, stale: expired, knownFreshness: stale === "false" && !expired, source: response.headers.get("X-Rider-Source") || response.headers.get("X-Face-Source") || "", fileAt: response.headers.get("X-Rider-File-Observed-At") || "", id: response.headers.get("X-Rider-Frame-Id") || "", visionState: response.headers.get("X-Rider-Vision-State") || "", visionReason: response.headers.get("X-Rider-Vision-Reason") || "", inferenceMs: response.headers.get("X-Rider-Vision-Inference-Ms") || "", visionPolicy: response.headers.get("X-Rider-Vision-Policy") || "", recordedAt: response.headers.get("X-Rider-Recorded-At") || "" });
       setMediaError(null);
     } catch (error) {
       URL.revokeObjectURL(url);
       throw error;
     }
-  }, [replaceFrame]);
+  }, [replaceFrame, keepCameraOnFailure]);
   const poll = useCallback(async (target?: Section, fast = false, explicit = false) => {
     if (refreshPromise.current && !explicit) return;
     const pending = fast ? controlPollPromise : pollPromise;
@@ -171,6 +195,7 @@ export function useRider(section: Section) {
           seqRef.current = 0;
           if (previous?.connection.session !== next.connection.session || previous?.connection.device_id !== next.connection.device_id) {
             replaceFrame("camera", null); replaceFrame("face", null);
+            perceptionExpected.current = undefined; setPerceptionSelection(undefined); cameraTransitionEpoch.current += 1;
             mediaRef.current = { camera: null, face: false }; setCameraStream(null); setShowRuntimeFrame(false);
           }
         }
@@ -264,7 +289,7 @@ export function useRider(section: Section) {
     } catch (error) { if (!quiet) setNotice({ key: errorCode(error) === "pi_operation_timeout" ? "operationUnconfirmed" : errorCode(error).includes("conflict") ? "conflict" : "requestFailed", code: errorCode(error), tone: "error" }); throw error; }
   }, [isConnected]);
   const invalidatePipelineMedia = useCallback(() => {
-    cameraTransitionEpoch.current += 1; replaceFrame("camera", null, true);
+    cameraTransitionEpoch.current += 1; replaceFrame("camera", null);
   }, [replaceFrame]);
   const pipelineSession = status?.connection.session ? `${status.connection.session}:${status.connection.transport?.generation ?? 0}` : undefined;
   const pipeline = useCameraPipeline(section, pipelineSession, mutation, invalidatePipelineMedia);
@@ -383,8 +408,8 @@ export function useRider(section: Section) {
   const stopManual = useCallback(async () => {
     motionEpoch.current += 1;
     hold.cancel();
-    if (journeyPreparing.current > 0 || pendingJourney.current || manualStopAction(statusRef.current) === "stop") return command({ action: "stop" }, true);
-    if (manualStopAction(statusRef.current) === "navigation_pause" || pendingResume.current) return command({ action: "navigation_pause" }, true);
+    if (journeyPreparing.current > 0 || pendingJourney.current || manualStopAction(statusRef.current, panelId) === "stop") return command({ action: "stop" }, true);
+    if (manualStopAction(statusRef.current, panelId) === "navigation_pause" || pendingResume.current) return command({ action: "navigation_pause" }, true);
     if (!navigationAvailable(statusRef.current, panelId)) return null;
     return command({ action: "move", device_settings: true, direction: "forward", mode: "release" });
   }, [command, hold, panelId]);
@@ -457,8 +482,11 @@ export function useRider(section: Section) {
         assertCurrent();
         if (statusRef.current?.errors.control || safetyOf(statusRef.current).stale === true || safetyOf(statusRef.current).state !== "DISARMED") throw new Error("journey_takeover_stop_unconfirmed");
       }
-      if (operatorSessionActive(statusRef.current) && safetyOf(statusRef.current).state === "ARMED") {
-        await command({ action: "navigation_pause" }, true, true);
+      await poll("control", true);
+      assertCurrent();
+      if (operatorSessionActive(statusRef.current) && safetyOf(statusRef.current).state === "ARMED"
+        && record(safetyOf(statusRef.current).panel_control).holder === panelId) {
+        if (safetyOf(statusRef.current).owner === "navigation") await command({ action: "navigation_pause" }, true, true);
         return;
       }
       if (!operatorPrioritySupported(statusRef.current)) {
@@ -501,6 +529,7 @@ export function useRider(section: Section) {
       const result = await mutation("/config", { device_id }, "POST", true);
       const next = result as unknown as DeviceConfig;
       configRef.current = next; sessionRef.current = next.session; setConfig(next); statusRef.current = null; clockRef.current = null; setStatus(null); seqRef.current = 0;
+      perceptionExpected.current = undefined; setPerceptionSelection(undefined); cameraTransitionEpoch.current += 1;
       mediaRef.current = { camera: null, face: false }; setCameraStream(null); setShowRuntimeFrame(false); setMediaError(null);
       replaceFrame("camera", null); replaceFrame("face", null); setNotice(next.selection_warning ? { key: next.selection_warning, tone: "info" } : null); await poll();
     } catch (error) { setNotice({ key: "requestFailed", code: errorCode(error), tone: "error" }); }
@@ -535,7 +564,7 @@ export function useRider(section: Section) {
   const pipelineLocation = pipeline.status?.profile.analysis_location;
   useEffect(() => {
     if (pipelineLocation === "local" && cameraStream === "venom") setCameraStream("proc");
-    if (pipelineLocation === "venom" && cameraStream === "proc") setCameraStream("raw");
+    if (pipelineLocation === "venom" && cameraStream === "proc") setCameraStream("venom");
   }, [pipelineLocation, cameraStream]);
   const pipelineIdentity = pipeline.status ? [pipeline.status.revision, pipeline.status.transport_epoch, pipeline.status.camera_session].join(":") : "";
   const pipelineBusy = pipeline.busy;
@@ -558,6 +587,9 @@ export function useRider(section: Section) {
       || headers.get("X-Rider-Frame-Id") !== source.frame_id) throw new Error("stream_source_invalid");
     const analysis = readAnalysis(headers.get("X-Rider-Analysis-Json"));
     if (headers.get("X-Rider-Source") === "venom" && !nativeAnalysisMatches(analysis, source)) throw new Error("stream_analysis_mismatch");
+    if (headers.get("X-Rider-Source") === "venom" && !perceptionResultMatches(analysis, perceptionExpected.current)) {
+      replaceFrame("camera", null); setMediaError("perception.previewWaiting"); return;
+    }
     const receivedAt = part.receivedAt;
     if ((previewLifetime({ageMs, receivedAt}) ?? 0) <= 0) throw new Error("stream_source_expired");
     const url = URL.createObjectURL(new Blob([Uint8Array.from(part.bytes)], { type: "image/jpeg" }));
@@ -566,6 +598,7 @@ export function useRider(section: Section) {
       if (signal.aborted || !current()) { URL.revokeObjectURL(url); return; }
       const expired = (previewLifetime({ageMs, receivedAt}) ?? 0) <= 0;
       replaceFrame("camera", {
+        cameraSource: source, pipelineIdentity: [source.pipeline_revision, source.transport_epoch, source.camera_session].join(":"),
         url, decoded: true, stale: expired, knownFreshness: !expired, ageMs, receivedAt,
         ageSource: headers.get("X-Rider-Frame-Age-Source") ?? undefined,
         captureKey: headers.get("X-Rider-Capture-Key") ?? undefined,
@@ -588,13 +621,13 @@ export function useRider(section: Section) {
       if (!alive || document.hidden) return;
       const current = ++cycle, started = performance.now(), epoch = cameraTransitionEpoch.current; abort = new AbortController();
       try { await fetchFrame("/camera/" + cameraStream, abort.signal, "camera"); }
-      catch { if (!abort.signal.aborted && alive && previewRequestCurrent("camera", "/camera/" + cameraStream, cameraTransitionRef.current, epoch, cameraTransitionEpoch.current)) { replaceFrame("camera", null, true); setMediaError("frameMissing"); } }
+      catch { if (!abort.signal.aborted && alive && previewRequestCurrent("camera", "/camera/" + cameraStream, cameraTransitionRef.current, epoch, cameraTransitionEpoch.current)) { replaceFrame("camera", null, keepCameraOnFailure()); setMediaError("frameMissing"); } }
       if (alive && current === cycle && !document.hidden) timer = setTimeout(() => void tick(), nextPreviewDelay(started, performance.now(), previewInterval(statusRef.current?.loop_timing)));
     };
     const visibility = () => { cycle++; clearTimeout(timer); abort?.abort(); if (!document.hidden) void tick(); };
     document.addEventListener("visibilitychange", visibility); void tick();
     return () => { alive=false; cycle++; clearTimeout(timer); abort?.abort(); document.removeEventListener("visibilitychange", visibility); };
-  }, [cameraStream, section, mediaSession, fetchFrame, replaceFrame, processedTransition, nativeStreaming, pipelineBusy, pipelineStopped, pipelineIdentity]);
+  }, [cameraStream, section, mediaSession, fetchFrame, replaceFrame, processedTransition, nativeStreaming, pipelineBusy, pipelineStopped, pipelineIdentity, perceptionEpoch, keepCameraOnFailure]);
   useEffect(() => {
     if (!nativeStreaming || !cameraStream || !["control", "vision"].includes(section) || processedTransition || pipelineBusy || pipelineStopped) return;
     let alive = true, cycle = 0, retry: ReturnType<typeof setTimeout> | undefined, controller: AbortController | undefined;
@@ -605,11 +638,11 @@ export function useRider(section: Section) {
       let latest: MjpegPart | null = null, decoding = false, lastSequence = -1, gap: ReturnType<typeof setTimeout>;
       const current = () => alive && ticket === cycle && !abort.signal.aborted && !document.hidden
         && epoch === cameraTransitionEpoch.current;
-      const expire = () => { replaceFrame("camera", null, true); setMediaError("frameStale"); abort.abort(); };
+      const expire = () => { replaceFrame("camera", null, keepCameraOnFailure()); setMediaError("frameStale"); abort.abort(); };
       const pump = async () => {
         if (decoding) return; decoding = true;
         try { while (latest && current()) { const part = latest; latest = null; await nativePart(part, abort.signal, current); } }
-        catch (error) { if (current()) { replaceFrame("camera", null, true, expiredNativeCandidate(error)); setMediaError("frameStale"); } }
+        catch (error) { if (current()) { replaceFrame("camera", null, keepCameraOnFailure(), expiredNativeCandidate(error)); setMediaError("frameStale"); } }
         finally { decoding = false; }
       };
       gap = setTimeout(expire, 5000);
@@ -624,21 +657,21 @@ export function useRider(section: Section) {
           clearTimeout(gap); gap = setTimeout(expire, 3000);
           latest = part; void pump();
         });
-      } catch { if (current()) { replaceFrame("camera", null, true); setMediaError("pipeline.streamFailed"); } }
+      } catch { if (current()) { replaceFrame("camera", null, keepCameraOnFailure()); setMediaError("pipeline.streamFailed"); } }
       finally {
         clearTimeout(gap); latest = null; abort.abort();
         if (alive && ticket === cycle && !document.hidden) {
-          replaceFrame("camera", null, true); retry = setTimeout(() => void connect(), 1000);
+          replaceFrame("camera", null, keepCameraOnFailure()); retry = setTimeout(() => void connect(), 1000);
         }
       }
     };
     const visibility = () => {
-      cycle++; clearTimeout(retry); controller?.abort(); replaceFrame("camera", null, true);
+      cycle++; clearTimeout(retry); controller?.abort(); replaceFrame("camera", null, keepCameraOnFailure());
       if (!document.hidden) void connect();
     };
     document.addEventListener("visibilitychange", visibility); void connect();
     return () => { alive = false; cycle++; clearTimeout(retry); controller?.abort(); document.removeEventListener("visibilitychange", visibility); };
-  }, [cameraStream, nativeStreaming, pipelineBusy, pipelineStopped, pipelineIdentity, processedTransition, section, mediaSession, nativePart, replaceFrame]);
+  }, [cameraStream, nativeStreaming, pipelineBusy, pipelineStopped, pipelineIdentity, processedTransition, section, mediaSession, nativePart, replaceFrame, perceptionEpoch, keepCameraOnFailure]);
   useEffect(() => {
     if ((!nativeStreaming && cameraStream !== "venom") || !camera || camera.stale) return;
     const remaining = previewLifetime(camera);
@@ -653,6 +686,6 @@ export function useRider(section: Section) {
   // ARM always refreshes the fast control endpoint before making its envelope.
   // The latency of a diagnostics view must not prevent that refresh request.
   const canArm = canRequestArm(status);
-  return { pipeline, config, status, loading, notice, setNotice, busy, activeDirection, manualMode, manualRequest, panelId, canContinuous: continuousAvailable(status, panelId) && canNavigate(), controlFresh: hasFreshControl(), canMutate: isConnected(), canArm, canNavigate: canNavigate(), canMove: movementReady(), poll, refresh, refreshing, command, stopManual, startNavigationTrial, startNavigationJourney, currentSession, currentMotionEpoch, currentGeneration, currentCamera, mutate: runMutation, takeManual, selectDevice, hold, camera, cameraStream, setCameraStream, cameraTransition, setCameraTransition, markCameraDecoded, runtimeFrame, showRuntimeFrame, setShowRuntimeFrame, mediaError };
+  return { pipeline, config, status, loading, notice, setNotice, busy, activeDirection, manualMode, manualRequest, panelId, canContinuous: continuousAvailable(status, panelId) && canNavigate(), controlFresh: hasFreshControl(), canMutate: isConnected(), canArm, canNavigate: canNavigate(), canMove: movementReady(), poll, refresh, refreshing, command, stopManual, startNavigationTrial, startNavigationJourney, currentSession, currentMotionEpoch, currentGeneration, currentCamera, setPerceptionPolicy, invalidatePerceptionPreview, perceptionSelection, mutate: runMutation, takeManual, selectDevice, hold, camera, cameraStream, setCameraStream, cameraTransition, setCameraTransition, markCameraDecoded, runtimeFrame, showRuntimeFrame, setShowRuntimeFrame, mediaError };
 }
 export type RiderClient = ReturnType<typeof useRider>;

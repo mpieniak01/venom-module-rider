@@ -17,7 +17,15 @@ router = APIRouter(route_class=RiderRoute)
 @router.get("/compute/vision/status")
 async def detector_status(request: Request):
     authenticate(request)
-    result = request.app.state.rider_vision.status()
+    models = getattr(request.app.state, "rider_models", None)
+    perception = None
+    if models is not None:
+        domain = request.app.state.rider
+        if domain.transport().device.id == authenticate(request):
+            perception = (await domain.read("/api/navigation/config", 0.2))["data"].get(
+                "perception"
+            )
+    result = request.app.state.rider_vision.status(perception)
     if request.query_params.get("stream") == "true":
         from .pipeline_routes import native_pipeline
 
@@ -65,6 +73,7 @@ async def decision(request: Request):
         frame = VisionFrame.model_validate_json(raw)
     except (ValueError, ValidationError) as exc:
         raise RiderError("vision_invalid_frame", 400) from exc
+    await validate_model_policy(request, device, frame)
     body = await bounded_body(request, 512 * 1024)
     from .pipeline_routes import snapshot_decision_allowed
 
@@ -121,6 +130,7 @@ async def _reference_decision(request, device, descriptor, admitted_at):
     ):
         raise RiderError("stream_epoch_changed", 409)
     frame = descriptor.frame
+    await validate_model_policy(request, device, frame)
     if frame.age_ms >= frame.deadline_ms:
         raise RiderError("vision_frame_expired", 409)
     async with hub.lease(domain, pipeline, keepalive=True) as connection:
@@ -173,6 +183,23 @@ async def _reference_decision(request, device, descriptor, admitted_at):
         return {**result, "source_timing_ms": timing}
 
 
+def profile_presentation(config, detector):
+    """Expose pair support without mutating a cached authoritative Pi snapshot."""
+    result = dict(config)
+    result["model_tuning_supported"] = (
+        config.get("model_tuning_supported") is True
+        and detector.get("semantic_model_policy_v1") is True
+    )
+    catalog = result.get("behavior_catalog")
+    if isinstance(catalog, dict):
+        result["behavior_catalog"] = {
+            **catalog,
+            "supported": catalog.get("supported") is True
+            and detector.get("temporal_navigation_v1") is True,
+        }
+    return result
+
+
 @router.get("/navigation/config")
 async def configuration(request: Request):
     domain = request.app.state.rider
@@ -208,6 +235,7 @@ async def configuration(request: Request):
         ),
         {},
     )
+    detector = request.app.state.rider_vision.status(config["data"].get("perception"))
     return {
         "runtime": {
             **runtime,
@@ -216,19 +244,42 @@ async def configuration(request: Request):
         },
         "goals": goals,
         "status": state["data"],
-        "config": config["data"],
-        "detector": request.app.state.rider_vision.status(
-            config["data"].get("perception")
-        ),
+        "config": profile_presentation(config["data"], detector),
+        "detector": detector,
     }
 
 
 @router.post("/navigation/config")
 async def configure(request: Request):
     body = await request.json()
-    return await request.app.state.rider.mutate(
+    values = body.get("values") if isinstance(body, dict) else None
+    if not isinstance(values, dict):
+        raise RiderError("navigation_configuration_invalid", 400)
+    detector = request.app.state.rider_vision.status()
+    behavior = values.get("behavior")
+    if (
+        isinstance(behavior, dict)
+        and behavior.get("profile_id") != "legacy"
+        and detector.get("temporal_navigation_v1") is not True
+    ):
+        raise RiderError("temporal_navigation_update_required", 409)
+    perception = values.get("perception")
+    if (
+        isinstance(perception, dict)
+        and perception.get("semantic_models")
+        and detector.get("semantic_model_policy_v1") is not True
+    ):
+        raise RiderError("navigation_model_tuning_update_required", 409)
+    result = await request.app.state.rider.mutate(
         "/api/navigation/config", body, request.headers.get("X-Rider-Session")
     )
+    data = result.get("data")
+    if isinstance(data, dict) and isinstance(data.get("config"), dict):
+        result = {
+            **result,
+            "data": {**data, "config": profile_presentation(data["config"], detector)},
+        }
+    return result
 
 
 @router.get("/navigation/state")
@@ -237,13 +288,12 @@ async def navigation_state(request: Request):
         "/api/navigation/status", 0.2, force=True
     )
     config = await request.app.state.rider.read("/api/navigation/config", 0.2)
+    detector = request.app.state.rider_vision.status(config["data"].get("perception"))
     return {
         "goals": await loop_goals(request.app.state.rider),
         "status": state["data"],
-        "config": config["data"],
-        "detector": request.app.state.rider_vision.status(
-            config["data"].get("perception")
-        ),
+        "config": profile_presentation(config["data"], detector),
+        "detector": detector,
     }
 
 
@@ -292,3 +342,42 @@ async def start_journey(request: Request, body: NavigationJourneyRequest):
         body.model_dump(),
         request.headers.get("X-Rider-Session"),
     )
+
+
+async def validate_model_policy(request, device, frame):
+    """A late or forged model identity cannot replace the Pi selection."""
+    models = getattr(request.app.state, "rider_models", None)
+    if models is None:
+        return
+    domain = request.app.state.rider
+    if domain.transport().device.id != device:
+        raise RiderError("stream_device_not_selected", 409)
+    policy = (await domain.read("/api/navigation/config", 0.2))["data"]
+    from ..navigation_profiles import DEFAULT_BEHAVIOR, validate_behavior
+    from ..perception_catalog import selected_identity
+
+    expected_behavior = validate_behavior(policy.get("behavior", DEFAULT_BEHAVIOR))
+    if expected_behavior != frame.behavior.model_dump() or (
+        expected_behavior["profile_id"] != "legacy"
+        and policy.get("revision") != frame.config_revision
+    ):
+        raise RiderError("navigation_behavior_conflict", 409)
+    expected_perception = policy.get("perception", {})
+    if frame.perception.semantic_models or expected_perception.get("semantic_models"):
+        from ..depth_detector import PerceptionSettings
+
+        if (
+            policy.get("revision") != frame.config_revision
+            or PerceptionSettings.model_validate(expected_perception).model_dump()
+            != frame.perception.model_dump()
+        ):
+            raise RiderError("navigation_model_tuning_conflict", 409)
+    if frame.perception.model_id or policy.get("perception", {}).get("model_id"):
+        selected = selected_identity(policy)
+        if (
+            selected["revision"] != frame.config_revision
+            or selected["model_id"] != frame.perception.model_id
+            or selected["artifact_sha256"] != frame.perception.artifact_sha256
+        ):
+            raise RiderError("model_selection_conflict", 409)
+        models.observe_policy(device, policy)

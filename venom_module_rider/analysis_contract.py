@@ -2,12 +2,20 @@
 
 from typing import Annotated, Literal
 
-from pydantic import Field, StrictFloat, StrictInt, field_validator
+from pydantic import (
+    Field,
+    StrictBool,
+    StrictFloat,
+    StrictInt,
+    field_validator,
+    model_validator,
+)
 
 from .api.schemas import StrictModel
 from .depth_detector import PerceptionSettings
 from .ground_config import GroundGeometry
 from .samples_contract import RecordID, RequestID
+from .vision_contract import BehaviorSettings
 
 
 class AnalysisSpec(StrictModel):
@@ -23,6 +31,8 @@ class AnalysisSpec(StrictModel):
     perception: PerceptionSettings = PerceptionSettings(engine="depth_plane")
     geometry: GroundGeometry = GroundGeometry(mode="image")
     quality_mode: Literal["production", "model_probe"] = "production"
+    behavior: BehaviorSettings = Field(default_factory=BehaviorSettings)
+    capture_evidence: StrictBool = False
     window: Literal[1, 3, 5] = 1
     offset: Annotated[StrictInt, Field(ge=0, le=999)] = 0
     count: Annotated[StrictInt, Field(ge=1, le=200)] = 200
@@ -43,12 +53,32 @@ class AnalysisSpec(StrictModel):
             raise ValueError("analysis_corridor_invalid")
         return value
 
-    @field_validator("perception")
-    @classmethod
-    def depth_only(cls, value):
-        if value.engine != "depth_plane":
+    @model_validator(mode="after")
+    def matching_engine(self):
+        from .perception_catalog import FAST, SEGFORMER, YOLO
+
+        semantic = self.profile in {SEGFORMER, YOLO, FAST}
+        if semantic and "perception" not in self.model_fields_set:
+            self.perception = self.perception.model_copy(update={"engine": "segformer"})
+        expected = "segformer" if semantic else "depth_plane"
+        if self.perception.engine != expected:
             raise ValueError("analysis_engine_unsupported")
-        return value
+        if semantic:
+            if self.window != 1:
+                raise ValueError("analysis_window_unsupported")
+            if self.geometry.mode != "image":
+                raise ValueError("analysis_geometry_unsupported")
+            model_id = self.perception.model_id
+            artifact = self.perception.artifact_sha256
+            if (
+                bool(model_id) != bool(artifact)
+                or model_id
+                and model_id != self.profile
+            ):
+                raise ValueError("analysis_model_identity_mismatch")
+        elif self.perception.model_id or self.perception.artifact_sha256:
+            raise ValueError("analysis_model_identity_unsupported")
+        return self
 
 
 class AnalysisCreate(StrictModel):

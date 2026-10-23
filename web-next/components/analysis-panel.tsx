@@ -1,10 +1,11 @@
 import { createBrowserUuid } from "@/lib/optional-modules/transport";
 /* eslint-disable @next/next/no-img-element -- Immutable local source and analysis artifacts. */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api-client";
 import { getApiBaseUrl } from "@/lib/env";
-import { errorCode, formatTime, record, str, type JsonRecord } from "../lib/model";
+import { data, errorCode, formatTime, record, str, type JsonRecord } from "../lib/model";
 import { SAMPLES_BASE } from "../lib/samples";
+import { analysisProfileSettings, LEGACY_ANALYSIS_BEHAVIOR, riderAnalysisSettings, semanticProfile, type AnalysisProfile } from "../lib/analysis-profile";
 import type { Translator } from "../lib/i18n";
 import { Button, Details, Field, Input, Select } from "./primitives";
 import styles from "../rider.module.css";
@@ -12,7 +13,7 @@ import styles from "../rider.module.css";
 const BASE="/api/v1/rider/analysis";
 const PENDING="rider.analysis.pending.v1";
 type Run=JsonRecord&{id:string;state:string;done:number;total:number;phase:string;created:number;error?:string};
-type Profile={id:string;installed:boolean;windows:number[];error?:string};
+type Profile=AnalysisProfile;
 const terminal=(run:Run|null)=>!!run&&["succeeded","failed","cancelled"].includes(run.state);
 const metric=(value:unknown)=>typeof value==="number"?Number(value.toFixed(3)).toString():"N/A";
 function remembered(session:string):string {
@@ -30,6 +31,14 @@ export function AnalysisPanel({session,t,language}:{session:string;t:Translator;
   const [residual,setResidual]=useState(0.06);
   const [outliers,setOutliers]=useState(0.005);
   const [slope,setSlope]=useState(2);
+  const [behavior,setBehavior]=useState(LEGACY_ANALYSIS_BEHAVIOR);
+  const [semanticModels,setSemanticModels]=useState<JsonRecord>({});
+  const [importedRevision,setImportedRevision]=useState<number|null>(null);
+  const [importing,setImporting]=useState(false), [importError,setImportError]=useState("");
+  const importEpoch=useRef(0);
+  const invalidateImport=useCallback(()=>{importEpoch.current++;},[]);
+  useEffect(()=>{setImporting(false);setImportError("");return invalidateImport;},[session,invalidateImport]);
+
   const [geometry,setGeometry]=useState("image");
   const [fx,setFx]=useState(Number.NaN);
   const [fy,setFy]=useState(Number.NaN);
@@ -85,10 +94,30 @@ export function AnalysisPanel({session,t,language}:{session:string;t:Translator;
     setReport(null);setFrame(0);setComparison(null);void poll();
     return()=>{current=false;if(timer)clearTimeout(timer);};
   },[selected,refresh]);
+  const available=profiles.find(item=>item.id===profile);
+  const semantic=semanticProfile(available);
+  const loadRiderSettings=async()=>{
+    const epoch=++importEpoch.current;
+    setImporting(true);setImportError("");
+    try {
+      const response=await apiFetch<JsonRecord>("/api/v1/rider/navigation/config",{cache:"no-store"});
+      if(epoch!==importEpoch.current)return;
+      const snapshot=riderAnalysisSettings(data(response).config);
+      setBehavior(snapshot.behavior);setSemanticModels(record(snapshot.perception.semantic_models));setRoi(snapshot.corridor);
+      setResidual(Number(snapshot.perception.residual_limit));setOutliers(Number(snapshot.perception.outlier_limit));setSlope(Number(snapshot.perception.slope_min));
+      setImportedRevision(snapshot.revision);
+    } catch(err){if(epoch===importEpoch.current)setImportError(errorCode(err));}
+    finally{if(epoch===importEpoch.current)setImporting(false);}
+  };
+  const resetRiderSettings=()=>{
+    importEpoch.current++;setImporting(false);setImportError("");setImportedRevision(null);
+    setBehavior({...LEGACY_ANALYSIS_BEHAVIOR});setSemanticModels({});setRoi([.35,.8,.65,.95]);setResidual(.06);setOutliers(.005);setSlope(2);
+  };
   const start=async()=>{
     setBusy(true);setError("");
     const request=createBrowserUuid().replaceAll("-","");
-    const intent={session_id:session,request_id:request,spec:{profile,window:windowSize,quality_mode:quality,count,offset,corridor:roi,geometry:{mode:geometry,fx:Number.isFinite(fx)?fx:null,fy:Number.isFinite(fy)?fy:null,radius_ratio:Number.isFinite(radius)?radius:null,lookahead_ratio:lookahead},perception:{engine:"depth_plane",residual_limit:residual,outlier_limit:outliers,slope_min:slope}}};
+    const settings=analysisProfileSettings(available,windowSize,{mode:geometry,fx:Number.isFinite(fx)?fx:null,fy:Number.isFinite(fy)?fy:null,radius_ratio:Number.isFinite(radius)?radius:null,lookahead_ratio:lookahead},{residual_limit:residual,outlier_limit:outliers,slope_min:slope,...(Object.keys(semanticModels).length?{semantic_models:semanticModels}:{})});
+    const intent={session_id:session,request_id:request,spec:{profile,quality_mode:quality,count,offset,corridor:roi,behavior:{...behavior},...settings}};
     try{
       sessionStorage.setItem(PENDING,JSON.stringify({session_id:session,request_id:request}));
       const value=await apiFetch<Run>(BASE+"/runs",{method:"POST",body:JSON.stringify(intent)});
@@ -109,7 +138,6 @@ export function AnalysisPanel({session,t,language}:{session:string;t:Translator;
   const row=record((Array.isArray(report?.rows)?report.rows:[])[frame]);
   const summary=record(report?.summary);
   const artifact=(name:string)=>getApiBaseUrl()+BASE+"/runs/"+selected+"/artifacts/"+name;
-  const available=profiles.find(item=>item.id===profile);
   return <section data-testid="analysis-panel">
     <h3>{t("analysis.title")}</h3><p className={styles.hint}>{t("analysis.hint")}</p>
     {error&&<p role="alert">{t("analysis.failure")} · <code>{error}</code></p>}
@@ -118,14 +146,21 @@ export function AnalysisPanel({session,t,language}:{session:string;t:Translator;
       <Field label={t("analysis.profile")}><Select aria-label={t("analysis.profile")} data-testid="analysis-profile" value={profile} onChange={event=>{setProfile(event.target.value);setWindowSize(1);}}>{profiles.map(item=><option key={item.id} value={item.id} disabled={!item.installed}>{item.id}{!item.installed?" · "+t("analysis.unavailable"):""}</option>)}</Select></Field>
       <Field label={t("analysis.window")}><Select aria-label={t("analysis.window")} value={windowSize} onChange={event=>setWindowSize(Number(event.target.value))}>{(available?.windows??[1]).map(value=><option key={value} value={value}>{value}</option>)}</Select></Field>
     </div>
+    <div className={styles.stack} data-testid="analysis-rider-settings">
+      <div className={styles.flex}><Button data-testid="analysis-load-rider" disabled={importing||busy} onClick={()=>void loadRiderSettings()}>{t(importing?"analysis.loadingRider":"analysis.loadRider")}</Button><Button data-testid="analysis-reset-rider" disabled={busy} onClick={resetRiderSettings}>{t("analysis.resetRider")}</Button></div>
+      <p className={styles.hint} data-testid="analysis-rider-source">{t(importedRevision===null?"analysis.riderDefaults":"analysis.riderLoaded",{revision:importedRevision??"—"})}</p>
+      <p className={styles.small} data-testid="analysis-rider-effective">{t("analysis.riderSettingsState",{profile:behavior.profile_id,surface:semantic?str(record(semanticModels[profile]).surface)||"floor_only":t("analysis.depthSurface")})}</p>
+      <p className={styles.hint}>{t("analysis.classificationScope")}</p>
+      {importError&&<p className={styles.loopError} role="alert" data-testid="analysis-rider-error">{t("analysis.loadRiderFailed")} · <code>{importError}</code></p>}
+    </div>
     <details className={styles.details}><summary>{t("analysis.parameters")}</summary><div className={styles.grid}>
       {number("count",count,setCount,1,200)}{number("offset",offset,setOffset,0,999)}
       {roi.map((value,index)=><span key={index}>{number("roi"+index,value,next=>setRoi(previous=>previous.map((item,i)=>i===index?next:item)),0,1,0.01)}</span>)}
-      <Field label={t("geometryMode")}><Select aria-label={t("geometryMode")} value={geometry} onChange={event=>setGeometry(event.target.value)}><option value="image">{t("geometryImage")}</option><option value="ground">{t("geometryGround")}</option></Select></Field>
+      {!semantic&&<><Field label={t("geometryMode")}><Select aria-label={t("geometryMode")} value={geometry} onChange={event=>setGeometry(event.target.value)}><option value="image">{t("geometryImage")}</option><option value="ground">{t("geometryGround")}</option></Select></Field>
       {geometry==="ground"&&<>{number("fx",fx,setFx,0.1,5,0.01)}{number("fy",fy,setFy,0.1,5,0.01)}{number("radius",radius,setRadius,0.05,5,0.01)}{number("lookahead",lookahead,setLookahead,0.25,8,0.05)}<p className={styles.hint}>{t("analysis.calibrationHint")}</p></>}
-      {number("residual",residual,setResidual,0.01,0.15,0.001)}{number("outliers",outliers,setOutliers,0,0.02,0.001)}{number("slope",slope,setSlope,1,4,0.1)}
+      {number("residual",residual,setResidual,0.01,0.15,0.001)}{number("outliers",outliers,setOutliers,0,0.02,0.001)}{number("slope",slope,setSlope,1,4,0.1)}</>}
       <Field label={t("analysis.quality")}><Select aria-label={t("analysis.quality")} value={quality} onChange={event=>setQuality(event.target.value)}><option value="production">{t("analysis.production")}</option><option value="model_probe">{t("analysis.probe")}</option></Select></Field>
-    </div><p className={styles.hint}>{t("analysis.windowHint")}</p></details>
+    </div><p className={styles.hint}>{t(semantic?"analysis.semanticHint":"analysis.windowHint")}</p></details>
     <div className={styles.flex}><Button data-testid="analysis-start" tone="primary" disabled={busy||!!pending||!available?.installed} onClick={()=>void start()}>{t("analysis.start")}</Button><Button onClick={()=>void refresh().catch(err=>setError(errorCode(err)))}>{t("refresh")}</Button></div>
     <Field label={t("analysis.runs")}><Select aria-label={t("analysis.runs")} data-testid="analysis-run" value={selected} onChange={event=>setSelected(event.target.value)}><option value="">{t("samples.choose")}</option>{runs.map(item=><option key={item.id} value={item.id}>{formatTime(item.created,language)} · {t("analysis.state."+item.state)} · {item.id.slice(0,8)}</option>)}</Select></Field>
     {run&&<div data-testid="analysis-status"><p aria-live="polite">{t("analysis.state."+run.state)} · {t("analysis.phase."+run.phase)} · {run.done}/{run.total}</p><progress max={run.total} value={run.done}/>{run.error&&<p role="alert"><code>{run.error}</code></p>}{!terminal(run)&&<Button data-testid="analysis-cancel" disabled={run.cancel_requested===true} onClick={()=>void cancel()}>{t(run.cancel_requested?"analysis.cancelling":"analysis.cancel")}</Button>}</div>}

@@ -81,6 +81,7 @@ async page => {
     await page.getByTestId("rider-forward").waitFor();
     await wait(async()=>!await page.getByTestId("rider-arm").isDisabled(),"fixture ARM unavailable");
     const initial=await boxes();
+    await page.getByTestId("workspace-details").evaluate(el=>{el.open=true;});
     check(initial["rider-backward"].y+initial["rider-backward"].height<1000,"desktop pad below viewport");
     check(await page.getByTestId("rider-forward").isDisabled(),"disarmed arrow enabled");
     check(calls.length===0,"page startup mutated robot");
@@ -91,7 +92,7 @@ async page => {
     await same(initial,"manual view");
     check(calls.length===0,"view changed authority/resources");
     connection="offline"; controlMissing=true;
-    await wait(async()=>(await page.getByTestId("operator-messages").innerText()).includes("Ostatni znany stan"),"offline state not observed before refresh");
+    await wait(async()=>(await page.getByTestId("operator-messages").innerText()).includes("Brak połączenia"),"offline state not observed before refresh");
     await page.getByTestId("rider-refresh").click();
     check(await page.getByTestId("rider-refresh").isDisabled(),"refresh can run twice concurrently");
     await wait(async()=>!await page.getByTestId("rider-refresh").isDisabled(),"refresh stayed busy");
@@ -100,11 +101,11 @@ async page => {
     check(refreshes.length===1 && calls.length===0,"refresh replayed a hardware command");
     await same(initial,"refresh success");
     recoverable=false; connection="offline";controlMissing=true;
-    await wait(async()=>(await page.getByTestId("operator-messages").innerText()).includes("Ostatni znany stan"),"offline state missing before failed refresh");
+    await wait(async()=>(await page.getByTestId("operator-messages").innerText()).includes("Brak połączenia"),"offline state missing before failed refresh");
     await page.getByTestId("rider-refresh").click();
     await wait(async()=>!await page.getByTestId("rider-refresh").isDisabled(),"failed refresh stayed busy");
     check(await page.getByTestId("rider-forward").isDisabled(),"failed refresh enabled motion");
-    check((await page.getByTestId("operator-messages").innerText()).includes("Ostatni znany stan"),"failed refresh hid offline state");
+    check((await page.getByTestId("operator-messages").innerText()).includes("Brak połączenia"),"failed refresh hid offline state");
     check((await page.getByTestId("rider-messages").innerText()).includes("Nie udało się potwierdzić połączenia"),"failed refresh did not explain recovery");
     recoverable=true;
     await page.getByTestId("rider-refresh").click();
@@ -117,7 +118,7 @@ async page => {
     await wait(async()=>!await page.getByTestId("rider-refresh").isDisabled(),"read-only refresh stayed busy");
     check((await page.getByTestId("rider-messages").innerText()).includes("Odczytano aktualny stan Pi. Tryb tylko do odczytu"),"healthy read-only refresh showed a connection failure");
     connection="offline";controlMissing=true;
-    await wait(async()=>(await page.getByTestId("operator-messages").innerText()).includes("Ostatni znany stan"),"read-only offline state missing");
+    await wait(async()=>(await page.getByTestId("operator-messages").innerText()).includes("Brak połączenia"),"read-only offline state missing");
     await page.getByTestId("rider-refresh").click();
     await wait(async()=>!await page.getByTestId("rider-refresh").isDisabled(),"read-only offline refresh stayed busy");
     check((await page.getByTestId("rider-messages").innerText()).includes("Brak potwierdzenia połączenia z Pi. Tryb tylko do odczytu"),"offline read-only restriction missing");
@@ -136,13 +137,22 @@ async page => {
     await same(initial,"multiline rejection");
     reject=false;
     connection="offline";controlMissing=true;
-    await wait(async()=>(await page.getByTestId("operator-messages").innerText()).includes("Ostatni znany stan"),"offline notice absent");
+    await wait(async()=>(await page.getByTestId("operator-messages").innerText()).includes("Brak połączenia"),"offline notice absent");
     await same(initial,"offline notice");
-    const lastMessage=page.getByTestId("operator-messages").locator("p").last();
+    const lastMessage=page.getByTestId("operator-messages");
     await lastMessage.scrollIntoViewIfNeeded();
     const messages=await lastMessage.boundingBox();
     check(messages && messages.y>=0 && messages.y+messages.height<=1000,"last offline message cannot be reached inside the viewport");
-    await same(initial,"scrolling offline messages keeps controls fixed");
+    // The permanent status now extends below the keypad in normal page flow.
+    // Scrolling may move the whole cockpit, but must not rearrange its targets.
+    const scrolled=await boxes();
+    for(const id of ids.filter(id=>id!=="rider-stop")) {
+      check(Math.abs((scrolled[id].y-scrolled["rider-forward"].y)-(initial[id].y-initial["rider-forward"].y))<=.5,"scroll rearranged keypad "+id);
+      check(scrolled[id].height===initial[id].height&&scrolled[id].width===initial[id].width,"scroll resized keypad "+id);
+    }
+    check(scrolled["rider-stop"].y>=0&&scrolled["rider-stop"].y+scrolled["rider-stop"].height<=1000,"sticky STOP lost while reading status");
+    await page.getByTestId("rider-page").evaluate(el=>{el.scrollTop=0;window.scrollTo(0,0);});
+    await same(initial,"returning from offline status");
     check(await page.getByTestId("rider-arm").getAttribute("aria-pressed")==="true","missing read faked disarm");
     connection="online";controlMissing=false;
     await wait(async()=>!await page.getByTestId("rider-forward").isDisabled(),"manual control not restored");
@@ -162,120 +172,24 @@ async page => {
     await wait(async()=>await page.getByTestId("rider-forward").getAttribute("aria-pressed")==="true","second continuous intent missing");
     const beforeModeChange=calls.length;
     await page.getByTestId("rider-manual-mode").selectOption("pulse");
-    await page.getByTestId("manual-feedback").getByText("Brak",{exact:true}).waitFor();
+    await wait(async()=>await page.getByTestId("manual-pad").locator('[data-testid^="rider-"][aria-pressed="true"]').count()===0,"direction remained active");
     await wait(()=>calls.slice(beforeModeChange).some(c=>c.body.action==="move"&&c.body.mode==="release"),"mode switch did not release previous direction");
     check(armed,"input selection revoked operator ARM");
     await same(initial,"active input mode change");
     await page.getByTestId("rider-left").click();
     await wait(()=>calls.slice(beforeModeChange).some(c=>c.body.action==="move"&&c.body.mode==="pulse"),"pulse not forwarded");
-    await page.getByTestId("manual-feedback").getByText("Brak",{exact:true}).waitFor();
+    await wait(async()=>await page.getByTestId("manual-pad").locator('[data-testid^="rider-"][aria-pressed="true"]').count()===0,"direction remained active");
     await page.getByTestId("rider-manual-mode").selectOption("continuous");
     check(await page.getByTestId("rider-forward").getAttribute("aria-pressed")==="false","continuous selection revived old intent");
     await same(initial,"no intent after pulse");
     await page.getByTestId("workspace-automatic").click();
     await page.getByTestId("workspace-content").evaluate(el=>{el.scrollTop=el.scrollHeight;});
     await same(initial,"scrolling automatic details");
-    scenarios.push("desktop: views, ARM, success/error/offline, continuous/brake, independent scrolling");
-    for(const viewport of [{width:390,height:844},{width:768,height:1024}]) {
-      await page.setViewportSize(viewport);
-      await page.evaluate(()=>window.scrollTo(0,0));
-      await stable();
-      const before=await boxes();
-      const viewportContent = await page.getByTestId("workspace-content").boundingBox();
-      check(viewportContent && viewportContent.height>=40 && viewportContent.y+viewportContent.height<=viewport.height, "camera/configuration scrollport clipped "+viewport.width);
-      check(before["rider-backward"].y+before["rider-backward"].height<=viewport.height,"pad below viewport "+viewport.width);
-      check(before["rider-forward"].x>=0&&before["rider-right"].x+before["rider-right"].width<=viewport.width,"pad outside viewport "+viewport.width);
-      await page.getByTestId("workspace-manual").click();
-      await same(before,"responsive manual view");
-      await page.getByTestId("rider-manual-mode").selectOption("continuous");
-      await same(before,"responsive input selection");
-      await page.getByTestId("workspace-expand").click();
-      await stable();
-      const expanded=await boxes();
-      check(expanded["rider-backward"].y+expanded["rider-backward"].height<=viewport.height,"expanded pad hidden");
-      await page.getByTestId("workspace-automatic").click();
-      await same(expanded,"expanded automatic view");
-      await page.getByTestId("workspace-expand").click();
-      await stable();
-      scenarios.push(viewport.width+": fixed controls and expanded workspace");
-    }
+    scenarios.push("desktop: views, ARM, success/error/offline, continuous/brake, inline message stability");
     await page.getByTestId("rider-stop").click();
     await wait(()=>!armed,"global stop did not disarm fixture");
     check(calls.filter(c=>c.body.action==="arm").length===1,"unexpected ARM");
-    await page.setViewportSize({width:390,height:844});
-    await page.reload();
-    await page.getByTestId("rider-forward").waitFor();
-    await stable();
-    const phonePage=await page.getByTestId("rider-page").boundingBox();
-    const phonePreview=await page.getByTestId("workspace-content").boundingBox();
-    check(phonePage && phonePage.y===0 && phonePage.height===844,"phone did not open focused workspace");
-    check(phonePreview && phonePreview.height>=150 && phonePreview.y+phonePreview.height<=844,"phone preview inaccessible");
-    check(calls.filter(c=>c.body.action==="arm").length===1,"phone startup armed");
-    scenarios.push("phone first load: focused workspace, accessible preview, no ARM");
-    for(const viewport of [{width:1280,height:720},{width:1366,height:768}]) {
-      const callsBefore=calls.length;
-      await page.setViewportSize(viewport);
-      await page.reload();
-      await page.getByTestId("rider-forward").waitFor();
-      await stable();
-      const surface=await page.getByTestId("rider-page").boundingBox();
-      const controls=await boxes();
-      check(surface && surface.y===0 && surface.height===viewport.height,"short desktop did not open focused workspace");
-      check(controls["rider-backward"].y+controls["rider-backward"].height<=viewport.height,"short desktop hid backward control");
-      await page.getByTestId("operator-messages").scrollIntoViewIfNeeded();
-      await same(controls,"short desktop operator messages");
-      check(calls.length===callsBefore,"short desktop startup mutated robot");
-      scenarios.push(viewport.width+"x"+viewport.height+": complete controls and scrollable messages, no actuation");
-    }
-    // The operational surface, not just its scrollport, must fit. All API
-    // requests remain intercepted by this fixture, including every mutation.
-    const cockpit=[];
-    for(const viewport of [{width:1440,height:1000},{width:1366,height:768},{width:1280,height:720},{width:1024,height:768},{width:768,height:1024},{width:390,height:844},{width:844,height:390},{width:1024,height:576},{width:853,height:480}]) {
-      await page.setViewportSize(viewport);
-      await page.reload();
-      await page.getByTestId("rider-forward").waitFor();
-      await stable();
-      const camera=await page.getByTestId("camera-surface").elementHandle();
-      const pad=await page.getByTestId("rider-forward").elementHandle();
-      const origin=await page.getByTestId("camera-surface").boundingBox();
-      let autoStart=null;
-      for(const mode of ["manual","automatic","journey"]) {
-        await page.getByTestId("workspace-"+mode).click();
-        await stable();
-        check(await camera.evaluate(el=>el===document.querySelector('[data-testid="camera-surface"]')),"mode remounted camera");
-        check(await pad.evaluate(el=>el===document.querySelector('[data-testid="rider-forward"]')),"mode remounted manual input");
-        const bounds=await page.getByTestId("camera-surface").boundingBox();
-        for(const key of ["x","y","width","height"])check(Math.abs(origin[key]-bounds[key])<=1,"mode shifted camera "+viewport.width+" "+mode+" "+key);
-        check(bounds.width>=160&&bounds.height>=120,"camera too small "+viewport.width+"x"+viewport.height+" "+JSON.stringify(bounds));
-        if(mode!=="manual") {
-          const start=await page.getByTestId(mode==="automatic"?"loop-start":"journey-start").boundingBox();
-          const reason=await page.getByTestId("command-reason").boundingBox();
-          const deck=await page.getByTestId("command-deck").boundingBox();
-          check(reason.y>=deck.y-1&&reason.y+reason.height<=deck.y+deck.height+1,"reason escaped command deck");
-          const stop=await page.getByTestId(mode==="automatic"?"loop-stop":"journey-stop").boundingBox();
-          for(const action of [start,stop])check(action.y+action.height<=reason.y+1||reason.y+reason.height<=action.y+1||action.x+action.width<=reason.x+1||reason.x+reason.width<=action.x+1,"reason overlaps action controls");
-          if(autoStart)check(Math.abs(start.y-autoStart.y)<=1,"automatic and journey start targets differ");
-          else autoStart=start;
-        }
-        const targets=["camera-surface",...ids,...(mode==="automatic"?["loop-start","loop-stop"]:mode==="journey"?["journey-start","journey-stop"]:[])];
-        const visibility=await page.evaluate(targets=>targets.map(id=>{
-          const el=document.querySelector('[data-testid="'+id+'"]'),r=el.getBoundingClientRect();
-          let fits=r.x>=0&&r.y>=0&&r.right<=innerWidth&&r.bottom<=innerHeight;
-          for(let parent=el.parentElement;parent;parent=parent.parentElement){const style=getComputedStyle(parent),p=parent.getBoundingClientRect();if(/auto|scroll|hidden|clip/.test(style.overflowY))fits&&=r.y>=p.y-1&&r.bottom<=p.bottom+1;if(/auto|scroll|hidden|clip/.test(style.overflowX))fits&&=r.x>=p.x-1&&r.right<=p.right+1;}
-          const at=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);
-          return {id,fits,uncovered:!!at&&(el===at||el.contains(at)||el.disabled&&at.contains(el)),at:at?.outerHTML.slice(0,220),height:r.height};
-        }),targets);
-        check(visibility.every(item=>item.fits&&item.uncovered),"clipped/covered cockpit "+viewport.width+" "+mode+" "+JSON.stringify(visibility));
-        await page.getByTestId("workspace-settings-toggle").click();
-        await wait(async()=>await page.getByTestId("workspace-settings-toggle").getAttribute("aria-expanded")==="true","details state missing");
-        const after=await boxes();
-        for(const id of ids)check(after[id].y+(after[id].height/2)<viewport.height,"details hid manual control");
-        await page.getByTestId("workspace-settings-toggle").click();
-      }
-      cockpit.push(viewport);
-    }
-    check(calls.filter(c=>c.body.action==="arm").length===1,"layout checks armed robot");
-    scenarios.push("cockpit: nine viewports / zoom-equivalent sizes, three modes, camera identity, clipping, occlusion and details");
+    const cockpit=[]; // Responsive primary/secondary geometry is covered by operator-workspace.js.
     configured=false;
     await wait(async()=>await page.getByTestId("operator-console").count()===0,"unconfigured fallback not shown");
     check(await page.getByTestId("rider-messages").count()===1,"fallback lost operator messages");

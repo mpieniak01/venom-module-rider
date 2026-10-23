@@ -9,6 +9,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from .depth_candidates import (
     CHECKPOINT_HASHES,
@@ -120,6 +121,64 @@ class Profile:
         }
 
 
+@dataclass(frozen=True)
+class SemanticProfile(Profile):
+    """Server paths and qualification reuse the host-owned live catalog."""
+
+    live_catalog: Any
+
+    def availability(self):
+        error = self.live_catalog.describe(self.name)["reason"]
+        if error:
+            return error
+        if not self.python.is_file() or not os.access(self.python, os.X_OK):
+            return "analysis_runtime_unavailable"
+        return None
+
+    def describe(self):
+        error = self.availability()
+        return {
+            "id": self.name,
+            "backend": "semantic",
+            "task": "semantic",
+            "perception_engine": "segformer",
+            "resolution": "native_preprocessor",
+            "installed": error is None,
+            "loaded": False,
+            "content_verified": False,
+            "error": error,
+            "device": "cpu",
+            "drive_supported": False,
+            "distance_measurement": False,
+            "windows": [1],
+        }
+
+    def qualify(self):
+        error = self.availability()
+        if error:
+            raise RiderError(error, 409)
+        artifact = self.live_catalog.ready(self.name)
+        definition = self.live_catalog.definition(self.name)
+        metadata = {
+            "id": self.name,
+            "backend": artifact["backend"],
+            "task": "semantic",
+            "files": artifact["files"],
+            "model_sha256": artifact["sha256"],
+            "revision": definition["revision"],
+            "resolution": "native_preprocessor",
+            "sdk_revision": None,
+            "device": "cpu",
+            "content_verified": True,
+            "drive_supported": False,
+            "distance_measurement": False,
+        }
+        return {
+            **metadata,
+            "fingerprint": hashlib.sha256(canonical(metadata)).hexdigest(),
+        }
+
+
 class ProfileCatalog:
     """One config supplies production baseline and retained offline options."""
 
@@ -132,6 +191,14 @@ class ProfileCatalog:
         )
         self.module = self.module.resolve()
         self.assets = self.assets.resolve()
+        self.live_assets = Path(
+            os.getenv(
+                "RIDER_MODEL_ROOT",
+                str(self.assets / "perception")
+                if assets_root
+                else str(Path.home() / ".local/share/venom/rider/models"),
+            )
+        ).resolve()
         self.config = (
             Path(config).resolve()
             if config
@@ -190,8 +257,30 @@ class ProfileCatalog:
         except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
             raise RiderError("analysis_profile_configuration", 503) from exc
 
+    def live(self):
+        """Host-owned model inventory shared by live and offline callers."""
+        from .perception_catalog import LiveCatalog
+
+        return LiveCatalog(self)
+
+    def research_profiles(self):
+        """Extend the retained depth list without a second model registry."""
+        from .perception_catalog import FAST, SEGFORMER, YOLO
+
+        result: dict[str, Profile] = dict(self.profiles())
+        live = self.live()
+        for name in (SEGFORMER, YOLO, FAST):
+            result[name] = SemanticProfile(
+                name, "semantic", live.path(name), Path(sys.executable), None, 0, live
+            )
+        return result
+
     def resolve(self, name):
         """Resolve an ID, never a caller-supplied path or shell fragment."""
+        from .perception_catalog import FAST, SEGFORMER, YOLO
+
+        if name in {SEGFORMER, YOLO, FAST}:
+            return self.research_profiles()[name]
         result = self.profiles().get(name)
         if result is None:
             raise RiderError("analysis_profile_unknown", 404)

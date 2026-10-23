@@ -81,7 +81,9 @@ export function continuousAvailable(status: RiderStatus | null, panelId: string)
 }
 
 /** Stale navigation metadata cannot turn a manual release into an unsupported pause. */
-export function manualStopAction(status:RiderStatus|null):"stop"|"navigation_pause"|"release" {
+export function manualStopAction(status:RiderStatus|null,panelId?:string):"stop"|"navigation_pause"|"release" {
+  const safety=safetyOf(status),panel=record(safety.panel_control);
+  if(safety.state==="ARMED"&&panelId&&panel.version===1&&panel.holder!==panelId)return "stop";
   if(journeyOwnsMotion(status))return "stop";
   return safetyOf(status).owner==="navigation"&&operatorSessionActive(status)?"navigation_pause":"release";
 }

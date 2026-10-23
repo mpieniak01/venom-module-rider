@@ -14,6 +14,7 @@ import signal
 import sys
 import time
 from pathlib import Path
+from typing import cast
 
 MAX_MESSAGE = 16 * 1024**2
 
@@ -70,7 +71,7 @@ def side_of(assessment):
     )
 
 
-def run(job, output, *, candidate_factory=None):
+def run(job, output, *, candidate_factory=None, semantic_factory=None):
     """Use the retained adapter and exactly the live decoder/geometry/overlay."""
     emit(output, {"type": "compute", "done": 0, "phase": "loading"})
     import numpy as np
@@ -91,7 +92,28 @@ def run(job, output, *, candidate_factory=None):
     spec, inputs = context["spec"], context["inputs"]
     settings = PerceptionSettings.model_validate(spec["perception"])
     geometry = GroundGeometry.model_validate(spec["geometry"])
+    from .navigation_profiles import DEFAULT_BEHAVIOR, validate_behavior
+
+    behavior = validate_behavior(spec.get("behavior", DEFAULT_BEHAVIOR))
     order = context["session"].get("policy", {}).get("order_source", "receipt")
+    semantic = profile["backend"] == "semantic"
+    capture_evidence = spec.get("capture_evidence", False)
+    if type(capture_evidence) is not bool:
+        raise ValueError("analysis_navigation_evidence_opt_in")
+    if semantic:
+        if (
+            settings.engine != "segformer"
+            or spec["window"] != 1
+            or geometry.mode != "image"
+        ):
+            raise ValueError("analysis_semantic_configuration")
+        if (
+            settings.model_id
+            and settings.model_id != context["profile"]["id"]
+            or settings.artifact_sha256
+            and settings.artifact_sha256 != context["profile"]["model_sha256"]
+        ):
+            raise ValueError("analysis_model_identity_mismatch")
     if spec["window"] > 1 and (
         profile["backend"] == "da2"
         or any(
@@ -134,61 +156,140 @@ def run(job, output, *, candidate_factory=None):
         else:
             if model is None:
                 emit(output, {"type": "compute", "done": index, "phase": "loading"})
-                import torch
+                if semantic:
+                    from .analysis_semantic import SemanticCandidate
 
-                torch.set_num_threads(spec["threads"])
-                torch.set_num_interop_threads(1)
-                start = time.perf_counter()
-                model = (candidate_factory or Candidate)(
-                    profile["backend"], profile["model"], "cpu", profile["resolution"]
-                )
-                model_load_ms = (time.perf_counter() - start) * 1000
+                    model = (semantic_factory or SemanticCandidate)(
+                        profile, context["profile"], spec["threads"]
+                    )
+                    # Native adapters load lazily in detect. Its first total
+                    # perception call includes cold loading; do not report the
+                    # cheap adapter constructor as measured model load time.
+                else:
+                    import torch
+
+                    torch.set_num_threads(spec["threads"])
+                    torch.set_num_interop_threads(1)
+                    start = time.perf_counter()
+                    model = (candidate_factory or Candidate)(
+                        profile["backend"],
+                        profile["model"],
+                        "cpu",
+                        profile["resolution"],
+                    )
+                    model_load_ms = (time.perf_counter() - start) * 1000
                 model_metadata = model.metadata
             images = [*images, image][-spec["window"] :]
             used_window = len(images)
             emit(output, {"type": "compute", "done": index, "phase": "inference"})
             start = time.perf_counter()
-            depth = (
-                model.infer(image)
-                if spec["window"] == 1
-                else model.infer_window(images)
-            )
-            timings["inference"] = (time.perf_counter() - start) * 1000
-            emit(output, {"type": "compute", "done": index, "phase": "geometry"})
-            start = time.perf_counter()
-            if geometry.mode == "image":
-                assessment = assess_depth(depth, tuple(spec["corridor"]), settings)
-            else:
-                from .adaptive_ground import assess
+            if semantic:
+                from .perception_tuning import has_semantic_tuning, semantic_parameters
 
-                assessment = assess(depth, tuple(spec["corridor"]), settings, geometry)
-            timings["geometry"] = (time.perf_counter() - start) * 1000
-            start = time.perf_counter()
-            overlay = render_depth(image, depth, assessment, spec["corridor"], settings)
-            stream = io.BytesIO()
-            np.save(stream, depth.astype(np.float32), allow_pickle=False)
-            artifacts.append(
-                artifact(
-                    f"{index:04d}-depth.npy",
-                    stream.getvalue(),
-                    "application/octet-stream",
+                semantic_options = {}
+                if behavior["profile_id"] != "legacy" or has_semantic_tuning(
+                    settings.model_dump(), context["profile"]["id"]
+                ):
+                    semantic_options["semantic"] = semantic_parameters(
+                        settings.model_dump(),
+                        behavior,
+                        model_id=context["profile"]["id"],
+                    )
+                assessment, overlay = cast(SemanticCandidate, model).detect(
+                    payload,
+                    tuple(spec["corridor"]),
+                    **semantic_options,
+                    **({"evidence": True} if capture_evidence else {}),
                 )
+                timings["perception_total"] = (time.perf_counter() - start) * 1000
+                artifacts.append(
+                    artifact(f"{index:04d}-overlay.jpg", overlay, "image/jpeg")
+                )
+            else:
+                depth = (
+                    cast(Candidate, model).infer(image)
+                    if spec["window"] == 1
+                    else cast(Candidate, model).infer_window(images)
+                )
+                timings["inference"] = (time.perf_counter() - start) * 1000
+                emit(output, {"type": "compute", "done": index, "phase": "geometry"})
+                start = time.perf_counter()
+                if geometry.mode == "image":
+                    assessment = assess_depth(
+                        depth,
+                        tuple(spec["corridor"]),
+                        settings,
+                        **({"evidence": True} if capture_evidence else {}),
+                    )
+                else:
+                    from .adaptive_ground import assess
+
+                    evidence_options = {}
+                    if capture_evidence:
+                        from .navigation_profiles import DEFAULT_BEHAVIOR, parameters
+
+                        evidence_options = {
+                            "evidence": parameters(
+                                {
+                                    **DEFAULT_BEHAVIOR,
+                                    "profile_id": "balanced",
+                                }
+                            )
+                        }
+                    assessment = assess(
+                        depth,
+                        tuple(spec["corridor"]),
+                        settings,
+                        geometry,
+                        **evidence_options,
+                    )
+                timings["geometry"] = (time.perf_counter() - start) * 1000
+                start = time.perf_counter()
+                overlay = render_depth(
+                    image, depth, assessment, spec["corridor"], settings
+                )
+                stream = io.BytesIO()
+                np.save(stream, depth.astype(np.float32), allow_pickle=False)
+                artifacts.append(
+                    artifact(
+                        f"{index:04d}-depth.npy",
+                        stream.getvalue(),
+                        "application/octet-stream",
+                    )
+                )
+                low, high = np.quantile(depth, [0.01, 0.99])
+                grey = (
+                    (np.clip((depth - low) / max(float(high - low), 1e-8), 0, 1)) * 255
+                ).astype(np.uint8)
+                stream = io.BytesIO()
+                Image.fromarray(grey).save(stream, format="PNG")
+                artifacts += [
+                    artifact(f"{index:04d}-depth.png", stream.getvalue(), "image/png"),
+                    artifact(f"{index:04d}-overlay.jpg", overlay, "image/jpeg"),
+                ]
+                timings["render"] = (time.perf_counter() - start) * 1000
+        maps = assessment.pop("_navigation_maps", None)
+        navigation_evidence = None
+        if capture_evidence:
+            from .navigation_archive import encode_evidence
+
+            start = time.perf_counter()
+            evidence_payload, navigation_evidence = encode_evidence(
+                maps, image, rejected=not quality
             )
-            low, high = np.quantile(depth, [0.01, 0.99])
-            grey = (
-                (np.clip((depth - low) / max(float(high - low), 1e-8), 0, 1)) * 255
-            ).astype(np.uint8)
-            stream = io.BytesIO()
-            Image.fromarray(grey).save(stream, format="PNG")
-            artifacts += [
-                artifact(f"{index:04d}-depth.png", stream.getvalue(), "image/png"),
-                artifact(f"{index:04d}-overlay.jpg", overlay, "image/jpeg"),
-            ]
-            timings["render"] = (time.perf_counter() - start) * 1000
+            name = f"{index:04d}-navigation.npz"
+            navigation_evidence["artifact"] = name
+            artifacts.append(
+                artifact(name, evidence_payload, "application/octet-stream")
+            )
+            timings["navigation_evidence"] = (time.perf_counter() - start) * 1000
         row = {
             "sample_id": sample["sample_id"],
             "raw_sha256": raw["sha256"],
             **assessment,
+            **(
+                {"navigation_evidence": navigation_evidence} if capture_evidence else {}
+            ),
             "obstacle_side": side_of(assessment),
             "drive_supported": False,
             "distance_measurement": False,

@@ -9,7 +9,7 @@ async page => {
   await page.getByTestId("rider-forward").waitFor({state:"visible"});
   const check = (ok,why) => { if(!ok) throw new Error(why); };
   const pressed=()=>page.getByTestId("rider-forward").getAttribute("aria-pressed");
-  const noIntent=()=>page.getByTestId("manual-feedback").getByText("Brak",{exact:true}).waitFor();
+  const noIntent=()=>page.waitForFunction(()=>!document.querySelector('[data-testid="manual-pad"] [data-testid^="rider-"][aria-pressed="true"]'));
   await page.getByTestId("rider-forward").click();
   await page.waitForTimeout(900);
   check(await pressed()==="true","direction did not latch after release");
@@ -23,7 +23,8 @@ async page => {
   await page.getByTestId("rider-forward").click();
   await page.waitForTimeout(700);
   check(await pressed()==="false","same direction did not stop");
-  const stopped=await page.getByTestId("manual-feedback").innerText();
+  await page.getByTestId("workspace-details").evaluate(el=>{el.open=true;});
+  const stopped=await page.getByTestId("manual-execution").innerText();
   check(stopped.includes("Zgłoszone ZERO"),"no zero after release");
   await page.getByTestId("rider-forward").click();
   await page.getByTestId("rider-manual-mode").selectOption("pulse");

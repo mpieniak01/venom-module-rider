@@ -6,7 +6,7 @@ from .ground_fit import fit
 from .ground_paths import assess as assess_paths
 
 
-def assess(depth, corridor, settings, camera):
+def assess(depth, corridor, settings, camera, *, evidence=False):
     if not camera.calibrated():
         return unknown(depth, corridor, "geometry_calibration_missing")
     if (
@@ -27,7 +27,12 @@ def assess(depth, corridor, settings, camera):
         1 - depth * (coefficients[0] * u + coefficients[1] * v + coefficients[2])
     )
     path = assess_paths(
-        depth, reference, camera, settings.residual_limit, settings.outlier_limit
+        depth,
+        reference,
+        camera,
+        settings.residual_limit,
+        settings.outlier_limit,
+        params=evidence if isinstance(evidence, dict) else None,
     )
     sectors = {side: {**row} for side, row in path["paths"].items() if side != "guard"}
     sectors["center"] = {

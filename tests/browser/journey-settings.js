@@ -58,10 +58,11 @@ async page => {
     check(policy.mode==="observe"&&!policy.verified&&policy.revision===54,"saved policy incorrect");
     check((await page.getByTestId("settings-save-success").innerText()).includes("54"),"saved revision not shown");
     check(await save.isDisabled(),"saved settings still dirty");
-    check(!await page.getByTestId("journey-preview").isDisabled(),"no way to start analysis for acceptance");
+    await page.getByTestId("navigation-preparation").locator("summary").first().click();
+    check(!await page.getByTestId("loop-preview").isDisabled(),"no way to start analysis for acceptance");
     check(await page.getByTestId("journey-start").isDisabled(),"save fabricated acceptance");
     scenarios.push("retry saves unaccepted observation revision 54 and exposes analysis action");
-    await page.getByTestId("journey-preview").click();await wait(()=>observe,"preview not started");
+    await page.getByTestId("loop-preview").click();await wait(()=>observe,"preview not started");
     await wait(async()=>!await geometry.isDisabled(),"preview locks settings");
     await page.getByRole("checkbox",{name:"Omijaj przeszkody w tej próbie",exact:true}).check();
     const offset=calls.length;await save.click();await wait(()=>policy.revision===55&&observe,"save did not resume observation");
@@ -74,8 +75,8 @@ async page => {
     check(policy.revision===56&&!observe,"partial success not preserved");
     check(await page.getByTestId("settings-save-success").isVisible(),"confirmed revision lost on restart failure");
     scenarios.push("confirmed save remains visible when analysis restart fails");
-    await wait(async()=>!await page.getByTestId("journey-preview").isDisabled(),"preview retry unavailable");
-    await page.getByTestId("journey-preview").click();
+    await wait(async()=>!await page.getByTestId("loop-preview").isDisabled(),"preview retry unavailable");
+    await page.getByTestId("loop-preview").click();
     await page.getByTestId("navigation-request-error").waitFor();
     check((await page.getByTestId("navigation-request-error").innerText()).includes("fixture_analysis_restart_failed"),"preview error hidden in journey view");
     scenarios.push("failed observation start is visible in Automat2 without a false journey-start message");

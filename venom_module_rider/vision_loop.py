@@ -2,6 +2,7 @@
 
 import asyncio
 import copy
+import importlib.util
 import time
 from collections import OrderedDict
 from uuid import uuid4
@@ -28,6 +29,7 @@ class VisionLoop:
         source_session=None,
         priority=None,
     ):
+        self.models = None
         self.host_session = uuid4().hex
         self.priority = priority
         self.priority_errors = 0
@@ -39,6 +41,7 @@ class VisionLoop:
         self.busy = None
         self.depth_busy = None
         self.runs = OrderedDict()
+        self.temporal_runs = OrderedDict()
         self.closed = False
         self.previews = OrderedDict()
         self.preview_changed = asyncio.Event()
@@ -48,12 +51,54 @@ class VisionLoop:
         self.production_waiters = {False: 0, True: 0}
         self.workers = VisionWorkers("rider-vision")
 
+    def _detect_floor(self, payload, frame):
+        from .navigation_profiles import parameters
+
+        options = (
+            {
+                "evidence": parameters(
+                    frame.behavior.model_dump(), frame.perception.model_dump()
+                )
+            }
+            if frame.behavior.profile_id != "legacy"
+            else {}
+        )
+        from .perception_tuning import has_semantic_tuning, semantic_parameters
+
+        perception = frame.perception.model_dump()
+        if frame.behavior.profile_id != "legacy" or has_semantic_tuning(perception):
+            options["semantic"] = semantic_parameters(
+                perception, frame.behavior.model_dump()
+            )
+        return self.detector.detect(payload, frame.corridor, **options)
+
     def _detect_depth(self, payload, frame):
+        from .navigation_profiles import parameters
+
+        options = (
+            {
+                "evidence": parameters(
+                    frame.behavior.model_dump(), frame.perception.model_dump()
+                )
+            }
+            if frame.behavior.profile_id != "legacy"
+            else {}
+        )
         if frame.protocol_version == 3 and frame.avoidance.geometry.mode == "ground":
             return self.depth_detector.detect_ground(
-                payload, frame.corridor, frame.perception, frame.avoidance.geometry
+                payload,
+                frame.corridor,
+                frame.perception,
+                frame.avoidance.geometry,
+                **options,
             )
-        return self.depth_detector.detect(payload, frame.corridor, frame.perception)
+        return self.depth_detector.detect(
+            payload, frame.corridor, frame.perception, **options
+        )
+
+    def _detect_model(self, payload, frame):
+        assert self.models is not None
+        return self.models.runtime.detect(payload, frame)
 
     def status(self, perception=None):
         selected = (
@@ -62,11 +107,17 @@ class VisionLoop:
             else self.detector
         )
         return {
-            **selected.status(),
+            **(
+                self.models.runtime.detector_status(perception)
+                if self.models is not None and perception and perception.get("model_id")
+                else selected.status()
+            ),
             "busy": (self.depth_busy if selected is self.depth_detector else self.busy)
             is not None,
             "supported_protocol_versions": [1, 2, 3],
             "navigation_journey_version": 1,
+            "temporal_navigation_v1": importlib.util.find_spec("cv2") is not None,
+            "semantic_model_policy_v1": importlib.util.find_spec("cv2") is not None,
             "ground_geometry_supported": callable(
                 getattr(self.depth_detector, "detect_ground", None)
             ),
@@ -87,6 +138,7 @@ class VisionLoop:
             frame.config_revision,
             frame.corridor,
             frame.perception.model_dump_json(),
+            frame.behavior.model_dump_json(),
             (
                 frame.avoidance.geometry.model_dump_json()
                 if frame.protocol_version == 3
@@ -153,9 +205,13 @@ class VisionLoop:
         depth_mode = frame.perception.engine == "depth_plane"
         task = asyncio.create_task(
             self.workers.run(
-                self._detect_depth if depth_mode else self.detector.detect,
+                self._detect_model
+                if self.models is not None and frame.perception.model_id
+                else self._detect_depth
+                if depth_mode
+                else self._detect_floor,
                 payload,
-                frame if depth_mode else frame.corridor,
+                frame,
             )
         )
         if depth_mode:
@@ -189,6 +245,11 @@ class VisionLoop:
     ):
         if self.closed:
             raise RiderError("module_closed", 503)
+        generation = self.models.runtime.generation if self.models else 0
+        if self.models is not None:
+            if self.models.switching:
+                raise RiderError("model_busy", 409)
+            self.models.runtime.validate(device_id, frame)
         if not frame.valid_corridor() or frame.age_ms >= frame.deadline_ms:
             raise RiderError("vision_frame_expired", 409)
         depth_mode = frame.perception.engine == "depth_plane"
@@ -214,6 +275,7 @@ class VisionLoop:
             frame.calibration_id,
             frame.model_sha256,
             frame.perception.model_dump_json(),
+            frame.behavior.model_dump_json(),
             frame.protocol_version,
             frame.avoidance.model_dump_json(),
             frame.journey.id if frame.journey else None,
@@ -254,7 +316,8 @@ class VisionLoop:
         self.runs[identity] = state
         self.runs.move_to_end(identity)
         while len(self.runs) > 32:
-            self.runs.popitem(last=False)
+            expired_identity, _ = self.runs.popitem(last=False)
+            self.temporal_runs.pop(expired_identity, None)
         if self.priority is not None:
             try:
                 self.priority.live()
@@ -293,6 +356,10 @@ class VisionLoop:
         finally:
             if task.done():
                 self._drain(task)
+        if self.models is not None and generation != self.models.runtime.generation:
+            raise RiderError("model_selection_conflict", 409)
+        if self.models is not None:
+            self.models.runtime.validate(device_id, frame)
         trace_depth = result.pop("_trace_depth", None)
         if depth_mode and trace_depth is not None:
             # Diagnostic only: exact input of this inference, never another RAW.
@@ -326,8 +393,30 @@ class VisionLoop:
         # Full heading grid stays in the depth trace, not Pi's bounded response
         # or the preview HTTP header. Keep only selected paths and gap extents.
         result.pop("heading_candidates", None)
+        temporal = None
+        if frame.behavior.profile_id != "legacy":
+            from .navigation_policy import evaluate
+            from .temporal_evidence import TemporalEvidence
+
+            observer = self.temporal_runs.setdefault(identity, TemporalEvidence())
+            temporal = evaluate(
+                result,
+                frame,
+                observer,
+                context={
+                    "signature": signature,
+                    "device_id": device_id,
+                    "run_id": frame.run_id,
+                },
+                captured_s=now - frame.age_ms / 1000,
+                source=source_reference,
+            )
+        else:
+            result.pop("_navigation_maps", None)
         elapsed = (self.clock() - now) * 1000
         if elapsed + frame.age_ms >= frame.deadline_ms:
+            if identity in self.temporal_runs:
+                self.temporal_runs[identity].reset()
             result = {
                 "state": "unknown",
                 "reason": "vision_decision_expired",
@@ -338,14 +427,36 @@ class VisionLoop:
                     else {}
                 ),
             }
-        count = count + 1 if result["state"] == "clear" else 0
+        count = (
+            count + 1
+            if result["state"] == "clear"
+            else count
+            if temporal and temporal["action"] == "slow" and count >= 3
+            else 0
+        )
         state["count"] = count
         if self.closed:
             raise RiderError("module_closed", 503)
-        model = selected.status().get("sha256", "")
+        status = (
+            self.models.runtime.detector_status(frame.perception.model_dump())
+            if self.models is not None and frame.perception.model_id
+            else selected.status()
+        )
+        model = status.get("sha256", "")
+        result.update(
+            model_id=frame.perception.model_id
+            or (
+                "depth-anything-v2-indoor-small"
+                if depth_mode
+                else "segformer-b0-ade20k"
+            ),
+            artifact_sha256=frame.perception.artifact_sha256,
+            model_generation=generation,
+        )
         permitted = (
             frame.mode == "drive"
             and frame.verified
+            and (not frame.perception.model_id or depth_mode)
             and bool(frame.calibration_id)
             and model == frame.model_sha256
             and len(model) == 64
@@ -428,6 +539,31 @@ class VisionLoop:
                 progress_delta=planner.get("progress_delta"),
                 pose_resets=planner.get("pose_resets", 0),
             )
+        if temporal is not None:
+            if result.get("reason") == "vision_decision_expired":
+                action, vision_action = "stop", "stop"
+            else:
+                vision_action = temporal["action"] if count >= 3 else "stop"
+                if (
+                    vision_action == "slow"
+                    and permitted
+                    and frame.motion_phase == "ready"
+                    and not result.get("terminal_stop")
+                ):
+                    action, motion_reason = "slow", temporal["reason"]
+                elif temporal["action"] == "stop":
+                    # A confirmed distant obstacle may use qualified side paths.
+                    # A near or unreliable observation vetoes every maneuver.
+                    steering_allowed = (
+                        action.startswith(("turn_", "steer_"))
+                        and temporal.get("state") == "obstacle"
+                        and temporal.get("near_guard_clear") is True
+                        and temporal.get("evidence_frames", 0) >= 3
+                        and temporal.get("spatial", {}).get("valid") is True
+                        and temporal.get("spatial", {}).get("hard_stop") is not True
+                    )
+                    if not steering_allowed:
+                        action, motion_reason = "stop", temporal["reason"]
         record_result(state, frame, action, result)
         journey_result = (
             {"journey": frame.journey.model_dump(), "host_session": self.host_session}
@@ -510,8 +646,20 @@ class VisionLoop:
             self.previews.pop(device_id, None)
         changed, self.preview_changed = self.preview_changed, asyncio.Event()
         changed.set()
+        from .navigation_profiles import policy_digest
+
         response = {
             **result,
+            **(
+                {
+                    "behavior": frame.behavior.model_dump(),
+                    "effective_policy_sha256": policy_digest(
+                        frame.behavior.model_dump(), frame.perception.model_dump()
+                    ),
+                }
+                if frame.behavior.profile_id != "legacy"
+                else {}
+            ),
             **(
                 {
                     "_preview": image,
@@ -541,7 +689,7 @@ class VisionLoop:
             "clear_count": count,
             "physical_clearance": "unverified",
             "perception_engine": frame.perception.engine,
-            "drive_supported": True,
+            "drive_supported": not frame.perception.model_id or depth_mode,
         }
 
         # Planning, prediction annotation and preview publication also spend
@@ -553,6 +701,8 @@ class VisionLoop:
             200, max(0, int(frame.deadline_ms - frame.age_ms - complete_ms))
         )
         if response["valid_for_ms"] == 0:
+            if identity in self.temporal_runs:
+                self.temporal_runs[identity].reset()
             response.update(
                 state="unknown",
                 reason="vision_decision_expired",

@@ -15,3 +15,12 @@ test("active navigation pauses and journey terminates; idle metadata grants no p
   assert.equal(manualStopAction(state("manual","operator","idle")),"release");
   assert.equal(manualStopAction(null),"release");
 });
+
+test("STOP from another panel does not send a holder-only pause or release",()=>{
+  for(const [owner,mode,phase] of [["manual","operator","paused"],["navigation","timed","active"]]){
+    const current=state(owner,mode,phase);
+    Object.assign(current.control!.safety as object,{state:"ARMED",panel_control:{version:1,holder:"previous-panel"}});
+    assert.equal(manualStopAction(current,"new-panel"),"stop");
+    assert.equal(manualStopAction(current,"previous-panel"),owner==="manual"?"release":"navigation_pause");
+  }
+});

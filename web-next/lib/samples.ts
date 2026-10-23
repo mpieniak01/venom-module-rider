@@ -26,3 +26,14 @@ export function captureOutcome(value:unknown):CaptureOutcome {
   if(!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(str(row.id)) || !["queued","running","saved","failed"].includes(str(row.state)) || row.state==="saved"&&!ticket.test(str(row.sample_id))) throw new Error("invalid_capture_response");
   return row as CaptureOutcome;
 }
+
+/** Reject malformed session lists before they can unmount the operator panel. */
+export function readSessions(value:unknown):Collection[] {
+  const sessions=record(value).sessions;
+  if(!Array.isArray(sessions)||!sessions.every(item=>{
+    const row=record(item);
+    return typeof row.session_id==="string"&&row.session_id.length>0&&typeof row.state==="string"
+      &&typeof row.started_at==="number"&&Number.isFinite(row.started_at);
+  }))throw new Error("sample_sessions_invalid");
+  return sessions as Collection[];
+}

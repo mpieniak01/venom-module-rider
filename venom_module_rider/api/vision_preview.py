@@ -69,12 +69,16 @@ async def processed_camera(request: Request):
     revision = 0
     source = "diagnostic_default"
     perception = {}
+    policy = {}
     try:
         policy = (await domain.read("/api/navigation/config", 0.2))["data"]
         corridor = tuple(policy["corridor"])
         revision = policy["revision"]
         perception = policy.get("perception", {})
         source = "device_policy"
+        models = getattr(request.app.state, "rider_models", None)
+        if models is not None:
+            models.observe_policy(client.device.id, policy)
     except RiderError as exc:
         if exc.status != 404:
             raise
@@ -137,6 +141,7 @@ async def processed_camera(request: Request):
                 mode="observe",
                 corridor=corridor,
                 perception=PerceptionSettings.model_validate(perception),
+                behavior=policy.get("behavior", {}),
             )
             result = await loop.decide(
                 client.device.id,

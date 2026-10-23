@@ -45,6 +45,9 @@ async page => {
   });
   const wait = async (fn,message) => {const until=Date.now()+7000;while(!await fn()){check(Date.now()<until,message);await new Promise(r=>setTimeout(r,40));}};
   const results = [];
+  const focusWithKeyboard=async locator=>{await locator.focus();await page.keyboard.press("Shift+Tab");await page.keyboard.press("Tab");};
+  let stage="initial";
+  const runtimeErrors=[];const captureError=error=>runtimeErrors.push(error.message);page.on("pageerror",captureError);
   try {
     for (const viewport of [{width:1440,height:1000},{width:390,height:844},{width:768,height:1024}]) {
       await page.setViewportSize(viewport);
@@ -65,6 +68,7 @@ async page => {
       let count=await inspect();
       const stop=page.getByTestId("rider-stop");
       const before=await stop.boundingBox();
+      stage="hover tip "+viewport.width;
       await stop.hover();
       await page.getByRole("tooltip").waitFor();
       const tooltip=await page.getByRole("tooltip").boundingBox();
@@ -73,7 +77,7 @@ async page => {
       check(tooltip.y>=before.y+before.height||tooltip.y+tooltip.height<=before.y||tooltip.x>=before.x+before.width||tooltip.x+tooltip.width<=before.x,"tooltip obscures emergency STOP");
       check((await stop.getAttribute("aria-describedby")).includes(await page.getByRole("tooltip").getAttribute("id")),"tooltip not associated");
       await page.mouse.move(0,0);
-      await stop.focus();
+      await focusWithKeyboard(stop);
       await page.getByRole("tooltip").waitFor();
       await page.getByTestId("rider-refresh").focus();
       await page.getByTestId("workspace-automatic").click();
@@ -86,7 +90,7 @@ async page => {
       if(viewport.width===1440) {
         await page.evaluate(()=>{document.documentElement.dataset.theme="venom-light";document.documentElement.style.colorScheme="light";});
         await inspect();
-        await stop.focus();
+        await focusWithKeyboard(stop);
         await page.getByRole("tooltip").waitFor();
         await page.screenshot({path:"ux-light-tooltip.png"});
         await page.evaluate(()=>{document.documentElement.dataset.theme="venom-dark";document.documentElement.style.colorScheme="dark";});
@@ -99,6 +103,7 @@ async page => {
     await page.reload();
     await page.getByTestId("rider-forward").waitFor();
     for (const name of ["Pomiary","Kalibracja","Cele i zasoby","Face Studio","Percepcja"]) {
+      stage="tab "+name;
       await page.getByRole("tab",{name,exact:true}).click();
       await page.screenshot({path:"ux-tab-"+name.replaceAll(" ","-")+".png"});
       const sizes=await page.getByTestId("rider-page").locator("button[data-size]:visible").evaluateAll(nodes=>nodes.map(node=>node.getBoundingClientRect().height));
@@ -107,7 +112,7 @@ async page => {
     }
     await page.getByRole("tab",{name:"Sterowanie",exact:true}).click();
     const stop=page.getByTestId("rider-stop");
-    await stop.focus();
+    await focusWithKeyboard(stop);
     await page.getByRole("tooltip").waitFor();
     check(calls.length===0,"browsing mutated robot");
     await page.keyboard.press("Escape");
@@ -115,7 +120,8 @@ async page => {
     check(await page.getByRole("tooltip").count()===0,"Escape did not dismiss tip");
     check(calls.length===1,"unexpected mutation beyond fixture STOP");
     return {result:"PASS",fixtureOnly:true,results,escapeStopPreserved:true};
-  } finally {
+  } catch(error) {throw new Error(stage+" · "+error.message+" · runtime="+runtimeErrors.join(" | ")+" · tabs="+JSON.stringify(await page.getByRole("tab").allTextContents()));} finally {
+    page.off("pageerror",captureError);
     await page.goto("about:blank");
     await page.unroute("**/api/v1/rider/**");
   }

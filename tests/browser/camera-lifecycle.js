@@ -38,7 +38,7 @@ async page => {
     const power = page.getByTestId("camera-power-toggle"), preview = page.getByTestId("camera-preview-toggle");
     await power.waitFor();
     check(await power.isVisible() && await power.isDisabled(), "missing pipeline hid or enabled camera control");
-    check((await power.innerText()).includes("Wyłącz"), "missing pipeline lost OFF control");
+    check((await power.innerText()).includes("?"), "missing pipeline invented a known power state");
     await wait(async () => (await power.getAttribute("title") || "").includes("odczytać"), "read failure explanation absent");
     pipelineUnavailable = false;
     await wait(async () => !await power.isDisabled(), "camera control did not recover");
