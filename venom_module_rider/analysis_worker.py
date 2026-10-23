@@ -14,6 +14,7 @@ import signal
 import sys
 import time
 from pathlib import Path
+from typing import cast
 
 MAX_MESSAGE = 16 * 1024**2
 
@@ -70,7 +71,7 @@ def side_of(assessment):
     )
 
 
-def run(job, output, *, candidate_factory=None):
+def run(job, output, *, candidate_factory=None, semantic_factory=None):
     """Use the retained adapter and exactly the live decoder/geometry/overlay."""
     emit(output, {"type": "compute", "done": 0, "phase": "loading"})
     import numpy as np
@@ -92,6 +93,21 @@ def run(job, output, *, candidate_factory=None):
     settings = PerceptionSettings.model_validate(spec["perception"])
     geometry = GroundGeometry.model_validate(spec["geometry"])
     order = context["session"].get("policy", {}).get("order_source", "receipt")
+    semantic = profile["backend"] == "semantic"
+    if semantic:
+        if (
+            settings.engine != "segformer"
+            or spec["window"] != 1
+            or geometry.mode != "image"
+        ):
+            raise ValueError("analysis_semantic_configuration")
+        if (
+            settings.model_id
+            and settings.model_id != context["profile"]["id"]
+            or settings.artifact_sha256
+            and settings.artifact_sha256 != context["profile"]["model_sha256"]
+        ):
+            raise ValueError("analysis_model_identity_mismatch")
     if spec["window"] > 1 and (
         profile["backend"] == "da2"
         or any(
@@ -134,57 +150,83 @@ def run(job, output, *, candidate_factory=None):
         else:
             if model is None:
                 emit(output, {"type": "compute", "done": index, "phase": "loading"})
-                import torch
+                if semantic:
+                    from .analysis_semantic import SemanticCandidate
 
-                torch.set_num_threads(spec["threads"])
-                torch.set_num_interop_threads(1)
-                start = time.perf_counter()
-                model = (candidate_factory or Candidate)(
-                    profile["backend"], profile["model"], "cpu", profile["resolution"]
-                )
-                model_load_ms = (time.perf_counter() - start) * 1000
+                    model = (semantic_factory or SemanticCandidate)(
+                        profile, context["profile"], spec["threads"]
+                    )
+                    # Native adapters load lazily in detect. Its first total
+                    # perception call includes cold loading; do not report the
+                    # cheap adapter constructor as measured model load time.
+                else:
+                    import torch
+
+                    torch.set_num_threads(spec["threads"])
+                    torch.set_num_interop_threads(1)
+                    start = time.perf_counter()
+                    model = (candidate_factory or Candidate)(
+                        profile["backend"],
+                        profile["model"],
+                        "cpu",
+                        profile["resolution"],
+                    )
+                    model_load_ms = (time.perf_counter() - start) * 1000
                 model_metadata = model.metadata
             images = [*images, image][-spec["window"] :]
             used_window = len(images)
             emit(output, {"type": "compute", "done": index, "phase": "inference"})
             start = time.perf_counter()
-            depth = (
-                model.infer(image)
-                if spec["window"] == 1
-                else model.infer_window(images)
-            )
-            timings["inference"] = (time.perf_counter() - start) * 1000
-            emit(output, {"type": "compute", "done": index, "phase": "geometry"})
-            start = time.perf_counter()
-            if geometry.mode == "image":
-                assessment = assess_depth(depth, tuple(spec["corridor"]), settings)
-            else:
-                from .adaptive_ground import assess
-
-                assessment = assess(depth, tuple(spec["corridor"]), settings, geometry)
-            timings["geometry"] = (time.perf_counter() - start) * 1000
-            start = time.perf_counter()
-            overlay = render_depth(image, depth, assessment, spec["corridor"], settings)
-            stream = io.BytesIO()
-            np.save(stream, depth.astype(np.float32), allow_pickle=False)
-            artifacts.append(
-                artifact(
-                    f"{index:04d}-depth.npy",
-                    stream.getvalue(),
-                    "application/octet-stream",
+            if semantic:
+                assessment, overlay = cast(SemanticCandidate, model).detect(
+                    payload, tuple(spec["corridor"])
                 )
-            )
-            low, high = np.quantile(depth, [0.01, 0.99])
-            grey = (
-                (np.clip((depth - low) / max(float(high - low), 1e-8), 0, 1)) * 255
-            ).astype(np.uint8)
-            stream = io.BytesIO()
-            Image.fromarray(grey).save(stream, format="PNG")
-            artifacts += [
-                artifact(f"{index:04d}-depth.png", stream.getvalue(), "image/png"),
-                artifact(f"{index:04d}-overlay.jpg", overlay, "image/jpeg"),
-            ]
-            timings["render"] = (time.perf_counter() - start) * 1000
+                timings["perception_total"] = (time.perf_counter() - start) * 1000
+                artifacts.append(
+                    artifact(f"{index:04d}-overlay.jpg", overlay, "image/jpeg")
+                )
+            else:
+                depth = (
+                    cast(Candidate, model).infer(image)
+                    if spec["window"] == 1
+                    else cast(Candidate, model).infer_window(images)
+                )
+                timings["inference"] = (time.perf_counter() - start) * 1000
+                emit(output, {"type": "compute", "done": index, "phase": "geometry"})
+                start = time.perf_counter()
+                if geometry.mode == "image":
+                    assessment = assess_depth(depth, tuple(spec["corridor"]), settings)
+                else:
+                    from .adaptive_ground import assess
+
+                    assessment = assess(
+                        depth, tuple(spec["corridor"]), settings, geometry
+                    )
+                timings["geometry"] = (time.perf_counter() - start) * 1000
+                start = time.perf_counter()
+                overlay = render_depth(
+                    image, depth, assessment, spec["corridor"], settings
+                )
+                stream = io.BytesIO()
+                np.save(stream, depth.astype(np.float32), allow_pickle=False)
+                artifacts.append(
+                    artifact(
+                        f"{index:04d}-depth.npy",
+                        stream.getvalue(),
+                        "application/octet-stream",
+                    )
+                )
+                low, high = np.quantile(depth, [0.01, 0.99])
+                grey = (
+                    (np.clip((depth - low) / max(float(high - low), 1e-8), 0, 1)) * 255
+                ).astype(np.uint8)
+                stream = io.BytesIO()
+                Image.fromarray(grey).save(stream, format="PNG")
+                artifacts += [
+                    artifact(f"{index:04d}-depth.png", stream.getvalue(), "image/png"),
+                    artifact(f"{index:04d}-overlay.jpg", overlay, "image/jpeg"),
+                ]
+                timings["render"] = (time.perf_counter() - start) * 1000
         row = {
             "sample_id": sample["sample_id"],
             "raw_sha256": raw["sha256"],

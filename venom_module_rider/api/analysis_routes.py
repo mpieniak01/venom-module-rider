@@ -19,7 +19,7 @@ def manager(request):
 @router.get("/profiles")
 async def profiles(request: Request):
     domain = manager(request)
-    values = await domain.io(domain.catalog.profiles)
+    values = await domain.io(domain.catalog.research_profiles)
     return {"profiles": [profile.describe() for profile in values.values()]}
 
 
