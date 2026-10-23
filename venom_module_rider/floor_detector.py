@@ -170,11 +170,17 @@ def render_preview(rgb, logits, corridor):
         130,
         245,
     )
-    overlay = Image.fromarray(colors).resize((512, 512), Image.Resampling.NEAREST)
+    height, width = rgb.shape[:2]
+    overlay = Image.fromarray(colors).resize((width, height), Image.Resampling.NEAREST)
     image = Image.blend(Image.fromarray((rgb * 255).astype(np.uint8)), overlay, 0.4)
     x0, y0, x1, y1 = corridor
     ImageDraw.Draw(image).rectangle(
-        (int(x0 * 511), int(y0 * 511), int(x1 * 511), int(y1 * 511)),
+        (
+            int(x0 * (width - 1)),
+            int(y0 * (height - 1)),
+            int(x1 * (width - 1)),
+            int(y1 * (height - 1)),
+        ),
         outline="white",
         width=3,
     )

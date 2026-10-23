@@ -28,6 +28,7 @@ class VisionLoop:
         source_session=None,
         priority=None,
     ):
+        self.models = None
         self.host_session = uuid4().hex
         self.priority = priority
         self.priority_errors = 0
@@ -55,6 +56,9 @@ class VisionLoop:
             )
         return self.depth_detector.detect(payload, frame.corridor, frame.perception)
 
+    def _detect_model(self, payload, frame):
+        return self.models.runtime.detect(payload, frame)
+
     def status(self, perception=None):
         selected = (
             self.depth_detector
@@ -62,7 +66,11 @@ class VisionLoop:
             else self.detector
         )
         return {
-            **selected.status(),
+            **(
+                self.models.runtime.detector_status(perception)
+                if self.models is not None and perception and perception.get("model_id")
+                else selected.status()
+            ),
             "busy": (self.depth_busy if selected is self.depth_detector else self.busy)
             is not None,
             "supported_protocol_versions": [1, 2, 3],
@@ -153,9 +161,15 @@ class VisionLoop:
         depth_mode = frame.perception.engine == "depth_plane"
         task = asyncio.create_task(
             self.workers.run(
-                self._detect_depth if depth_mode else self.detector.detect,
+                self._detect_model
+                if self.models is not None and frame.perception.model_id
+                else self._detect_depth
+                if depth_mode
+                else self.detector.detect,
                 payload,
-                frame if depth_mode else frame.corridor,
+                frame
+                if depth_mode or self.models is not None and frame.perception.model_id
+                else frame.corridor,
             )
         )
         if depth_mode:
@@ -189,6 +203,11 @@ class VisionLoop:
     ):
         if self.closed:
             raise RiderError("module_closed", 503)
+        generation = self.models.runtime.generation if self.models else 0
+        if self.models is not None:
+            if self.models.switching:
+                raise RiderError("model_busy", 409)
+            self.models.runtime.validate(device_id, frame)
         if not frame.valid_corridor() or frame.age_ms >= frame.deadline_ms:
             raise RiderError("vision_frame_expired", 409)
         depth_mode = frame.perception.engine == "depth_plane"
@@ -293,6 +312,8 @@ class VisionLoop:
         finally:
             if task.done():
                 self._drain(task)
+        if self.models is not None and generation != self.models.runtime.generation:
+            raise RiderError("model_selection_conflict", 409)
         trace_depth = result.pop("_trace_depth", None)
         if depth_mode and trace_depth is not None:
             # Diagnostic only: exact input of this inference, never another RAW.
@@ -342,10 +363,26 @@ class VisionLoop:
         state["count"] = count
         if self.closed:
             raise RiderError("module_closed", 503)
-        model = selected.status().get("sha256", "")
+        status = (
+            self.models.runtime.detector_status(frame.perception.model_dump())
+            if self.models is not None and frame.perception.model_id
+            else selected.status()
+        )
+        model = status.get("sha256", "")
+        result.update(
+            model_id=frame.perception.model_id
+            or (
+                "depth-anything-v2-indoor-small"
+                if depth_mode
+                else "segformer-b0-ade20k"
+            ),
+            artifact_sha256=frame.perception.artifact_sha256,
+            model_generation=generation,
+        )
         permitted = (
             frame.mode == "drive"
             and frame.verified
+            and (not frame.perception.model_id or depth_mode)
             and bool(frame.calibration_id)
             and model == frame.model_sha256
             and len(model) == 64
@@ -541,7 +578,7 @@ class VisionLoop:
             "clear_count": count,
             "physical_clearance": "unverified",
             "perception_engine": frame.perception.engine,
-            "drive_supported": True,
+            "drive_supported": not frame.perception.model_id or depth_mode,
         }
 
         # Planning, prediction annotation and preview publication also spend

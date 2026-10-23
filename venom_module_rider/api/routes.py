@@ -24,6 +24,7 @@ from . import (
     compute_routes,
     conversation_routes,
     motion_evidence_routes,
+    perception_routes,
     pipeline_routes,
     samples_routes,
     vision_routes,
@@ -112,6 +113,9 @@ async def lifespan(app):
             if analysis is not None:
                 await analysis.close()
             app.state.rider_analysis_error = "analysis_unavailable"
+    from ..perception_service import PerceptionService
+
+    app.state.rider_models = PerceptionService(app.state.rider_vision)
     default = os.getenv("RIDER_DEFAULT_DEVICE")
     if existing is None:
         await service.restore(default)
@@ -126,6 +130,7 @@ async def lifespan(app):
         if samples is not None:
             await samples.close()
         await app.state.rider_stream.close()
+        await app.state.rider_models.close()
         await app.state.rider_vision.close()
         await compute.close()
         await service.close()
@@ -231,6 +236,7 @@ async def update_loop_timing(request: Request):
 router.include_router(compute_routes.router)
 router.include_router(conversation_routes.router)
 router.include_router(vision_routes.router)
+router.include_router(perception_routes.router)
 router.include_router(pipeline_routes.router)
 router.include_router(samples_routes.router)
 router.include_router(analysis_routes.router)

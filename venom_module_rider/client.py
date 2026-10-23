@@ -68,6 +68,8 @@ def expected_contract(path: str):
         "/api/services/graph": ("rider.service_graph", 2),
         "/svc/frame-distributor.service": ("rider.services", 2),
         "/api/navigation/config": ("rider.navigation_loop", 1),
+        "/api/navigation/model-selection": ("rider.navigation_loop", 1),
+        "/api/navigation/local-models": ("rider.navigation_loop", 1),
         "/api/navigation/trial": ("rider.navigation_loop", 1),
         "/api/navigation/journey": ("rider.navigation_loop", 1),
         "/api/navigation/status": ("rider.navigation_loop", 1),

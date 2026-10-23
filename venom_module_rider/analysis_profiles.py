@@ -190,6 +190,12 @@ class ProfileCatalog:
         except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
             raise RiderError("analysis_profile_configuration", 503) from exc
 
+    def live(self):
+        """Host-owned model inventory shared by live and offline callers."""
+        from .perception_catalog import LiveCatalog
+
+        return LiveCatalog(self)
+
     def resolve(self, name):
         """Resolve an ID, never a caller-supplied path or shell fragment."""
         result = self.profiles().get(name)

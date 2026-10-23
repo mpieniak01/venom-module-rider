@@ -16,6 +16,11 @@ from .vision_overlay import draw_sectors
 class PerceptionSettings(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
     engine: str = Field(default="segformer", pattern=r"^(segformer|depth_plane)$")
+    model_id: str = Field(
+        default="",
+        pattern=r"^$|^(segformer-b0-ade20k|fast-scnn-floor|yolo26n-sem-ade20k|depth-anything-v2-indoor-small)$",
+    )
+    artifact_sha256: str = Field(default="", pattern=r"^$|^[a-f0-9]{64}$")
     residual_limit: float = Field(default=0.06, ge=0.01, le=0.15)
     outlier_limit: float = Field(default=0.005, ge=0.0, le=0.02)
     slope_min: float = Field(default=2.0, ge=1.0, le=4.0)

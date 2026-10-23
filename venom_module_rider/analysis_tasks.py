@@ -16,7 +16,12 @@ class HostTasks:
             self.queue = TaskManager(QueueManager(self.state))
 
     def create(self, run):
-        task = self.state.create_task("Rider offline analysis " + run["id"])
+        label = (
+            "Rider model installation "
+            if run.get("kind") == "perception-install"
+            else "Rider offline analysis "
+        )
+        task = self.state.create_task(label + run["id"])
         self.state.update_context(
             task.id,
             {
