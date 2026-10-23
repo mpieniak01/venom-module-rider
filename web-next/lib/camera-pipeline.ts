@@ -87,3 +87,35 @@ export function preferredPreviewAnchor(previous:CameraPipeline["previewAnchor"],
   }
   return candidate;
 }
+
+export function cameraPipelineIdentity(pipeline: CameraPipeline | null | undefined): string | undefined {
+  return pipeline ? [pipeline.revision, pipeline.transport_epoch, pipeline.camera_session].join(":") : undefined;
+}
+
+export function framePipelineCurrent(frame: { pipelineIdentity?: string; cameraSource?: JsonRecord } | null, pipeline: CameraPipeline | null | undefined): boolean {
+  return !!frame && (!frame.pipelineIdentity || frame.pipelineIdentity === cameraPipelineIdentity(pipeline))
+    && (!frame.cameraSource || cameraSourceMatches(frame.cameraSource, pipeline));
+}
+
+
+export function readCameraSource(header: string | null): JsonRecord | undefined {
+  if (!header || header.length > 4096) return undefined;
+  try {
+    const source = record(JSON.parse(header));
+    return typeof source.camera_session === "string" && Number.isSafeInteger(source.pipeline_revision)
+      && Number.isSafeInteger(source.transport_epoch) ? source : undefined;
+  } catch { return undefined; }
+}
+/** Model metadata is produced alongside PROC; requested local profiles cannot re-label it. */
+export function cameraSourceMatches(source: JsonRecord, pipeline: CameraPipeline | null | undefined): boolean {
+  if (!pipeline || source.pipeline_revision !== pipeline.revision || source.transport_epoch !== pipeline.transport_epoch
+    || source.camera_session !== pipeline.camera_session) return false;
+  if (source.local_engine !== undefined || source.model_id !== undefined) {
+    const active = pipeline.active_profile;
+    return !!active && active.analysis_location === "local"
+      && (source.local_engine === undefined || source.local_engine === active.local_engine)
+      && (source.model_id === undefined || source.model_id === "local-" + active.local_engine)
+      && (source.analysis_location === undefined || source.analysis_location === "local");
+  }
+  return true;
+}

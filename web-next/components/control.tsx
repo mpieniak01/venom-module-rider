@@ -1,10 +1,12 @@
 import { VisionSectors } from "./vision-sectors";
 import { journeyOwnsMotion, operatorPrioritySupported } from "../lib/navigation";
 import { CameraPipelineControls } from "./camera-pipeline";
+import { framePipelineCurrent } from "../lib/camera-pipeline";
 import { CorridorOverlay, type CorridorEditorProps } from "./corridor-overlay";
 import { manualFeedback } from "../lib/manual-feedback";
 import { frameAge } from "../lib/vision-frame";
 import { previewNotice } from "../lib/loop-controls";
+import { perceptionFrameCurrent } from "../lib/perception";
 /* eslint-disable @next/next/no-img-element -- Pi binary frames use revocable object URLs. */
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { displayedPreview, previewLifetime } from "../lib/preview-media";
@@ -117,17 +119,21 @@ export function Posture({ client, t, language }: { client: RiderClient; t: Trans
 export function CameraPanel({ client, t, language, compact = false, onObservation, observationDisabled = false, editor }: { client: RiderClient; t: Translator; language: string; compact?: boolean; onObservation?:()=>void; observationDisabled?:boolean; editor?:CorridorEditorProps }) {
   const [imageSize,setImageSize]=useState<[number,number]>([320,240]);
   const [displayed,setDisplayed]=useState<Frame|null>(null);
+  // Explicit model results disappear on mismatch, expiry or failed inference.
+  const modelPreview = client.cameraStream === "venom" && client.perceptionSelection !== undefined;
+  const candidate = !framePipelineCurrent(client.camera, client.pipeline.status) || modelPreview && !perceptionFrameCurrent(client.camera, client.perceptionSelection) ? null : client.camera;
+  const displayedModel = !framePipelineCurrent(displayed, client.pipeline.status) || modelPreview && !perceptionFrameCurrent(displayed, client.perceptionSelection) ? null : displayed;
   // The candidate decodes offscreen before the visible img fires its load event.
-  const visible = displayedPreview(client.camera, displayed);
+  const visible = displayedPreview(candidate, displayedModel);
   useEffect(() => {
-    const frame = displayedPreview(client.camera, displayed);
+    const frame = displayedPreview(candidate, displayedModel);
     if (!frame || frame.stale) return;
     const remaining = previewLifetime(frame);
     if (remaining === null) return;
     const timer = setTimeout(() => setDisplayed(previous => previous?.url === frame.url
       ? { ...previous, stale: true, knownFreshness: false } : previous), remaining);
     return () => clearTimeout(timer);
-  }, [client.camera, displayed]);
+  }, [candidate, displayedModel]);
   const [previewBusy,setPreviewBusy]=useState(false);
   const [previewFailure,setPreviewFailure]=useState("");
   const chooseStream=async(stream:"raw"|"proc"|"venom"|null)=>{
@@ -167,7 +173,13 @@ export function CameraPanel({ client, t, language, compact = false, onObservatio
       <Button aria-label={t(client.cameraStream ? "hidePreview" : "showPreview")} data-testid="camera-preview-toggle" onClick={() => void chooseStream(client.cameraStream ? null : "raw")} disabled={!client.canMutate||previewBusy}><Camera size={15} />{!compact && t(client.cameraStream ? "hidePreview" : "showPreview")}</Button>
     </div>}>
     <div className={styles.cameraSources}>{streams.map(stream => <Button key={stream} tone={selected === stream ? "primary" : undefined} aria-pressed={selected === stream} onClick={() => void chooseStream(stream)} disabled={!client.canMutate||previewBusy}>{t(stream === "venom" ? "visionVenom" : stream === "proc" ? "visionPi" : stream)}</Button>)}</div>
-    <div className={styles.camera} data-testid="camera-surface">{client.camera&&notice&&<div className={transitioning?styles.cameraPaused+" "+styles.cameraTransition:styles.cameraPaused} role="status" data-testid="vision-preview-paused">{t(notice!)}</div>}{client.camera ? <><img data-capture-key={client.camera.captureKey} src={client.camera.url} alt={t("cameraAlt")} onLoad={event=>{const {naturalWidth,naturalHeight}=event.currentTarget;setImageSize(previous=>previous[0]===naturalWidth&&previous[1]===naturalHeight?previous:[naturalWidth,naturalHeight]);client.markCameraDecoded(event.currentTarget.currentSrc,true);if(client.camera&&event.currentTarget.currentSrc===client.camera.url)setDisplayed(client.camera);}} onError={event=>{client.markCameraDecoded(event.currentTarget.currentSrc,false);setDisplayed(null);}} />{editor&&<CorridorOverlay editor={editor} size={imageSize} t={t}/>}</> : <Empty><Camera size={32} />{t(transitioning?"visionPreviewRestarting":client.mediaError ?? (client.cameraStream ? "frameMissing" : "showPreview"))}{onObservation&&<><p className={styles.hint}>{t("loopPreviewHelp")}</p><Button tone="primary" disabled={observationDisabled} onClick={onObservation}>{t("loopPreparePreview")}</Button></>}</Empty>}</div>
+    {selected === "venom" && <div className={styles.perceptionPreviewMeta} data-testid="perception-preview-result" aria-live="polite">
+      <strong>{visible?.analysis ? String(visible.analysis.model_id || (visible.analysis.perception_engine === "depth_plane" ? "Depth Anything V2" : "SegFormer-B0")) : t("perception.previewWaiting")}</strong>
+      {visible?.analysis && <span>{t("frameSequence")}: {String(sourceIdentity?.sequence)} · {String(sourceIdentity?.frame_id).slice(0,12)} · {Math.round(frameAge(visible) ?? 0)} ms · {t("perception.inference")}: {visible.inferenceMs || "N/A"} ms · r{String(visible.analysis.config_revision)}</span>}
+      <span title={t(visible?.analysis?.perception_engine === "depth_plane" || String(visible?.analysis?.model_id ?? "").startsWith("depth-anything") ? "perception.geometryLegend" : "perception.semanticLegend")}>{t(visible?.analysis?.perception_engine === "depth_plane" || String(visible?.analysis?.model_id ?? "").startsWith("depth-anything") ? "perception.geometryLegendShort" : "perception.semanticLegendShort")}</span>
+    </div>}
+    {selected === "proc" && <p className={styles.small} data-testid="perception-local-preview">{t("perception.location.local")} · {candidate ? client.pipeline.status?.active_profile?.local_engine.toUpperCase() ?? t("perception.runtime.unavailable") : t("perception.previewWaiting")}</p>}
+    <div className={styles.camera} data-testid="camera-surface">{candidate&&notice&&<div className={transitioning?styles.cameraPaused+" "+styles.cameraTransition:styles.cameraPaused} role="status" data-testid="vision-preview-paused">{t(notice!)}</div>}{candidate ? <><img data-capture-key={candidate.captureKey} src={candidate.url} alt={t("cameraAlt")} onLoad={event=>{const {naturalWidth,naturalHeight}=event.currentTarget;setImageSize(previous=>previous[0]===naturalWidth&&previous[1]===naturalHeight?previous:[naturalWidth,naturalHeight]);client.markCameraDecoded(event.currentTarget.currentSrc,true);if(candidate&&event.currentTarget.currentSrc===candidate.url)setDisplayed(candidate);}} onError={event=>{client.markCameraDecoded(event.currentTarget.currentSrc,false);setDisplayed(null);}} />{editor&&<CorridorOverlay editor={editor} size={imageSize} t={t}/>}</> : <Empty><Camera size={32} />{t(transitioning?"visionPreviewRestarting":client.mediaError ?? (modelPreview ? "perception.previewWaiting" : client.cameraStream ? "frameMissing" : "showPreview"))}{onObservation&&<><p className={styles.hint}>{t("loopPreviewHelp")}</p><Button tone="primary" disabled={observationDisabled} onClick={onObservation}>{t("loopPreparePreview")}</Button></>}</Empty>}</div>
     {previewFailure&&<p role="alert" className={styles.hint}>{t(previewFailure)}</p>}
     {editor&&<p className={styles.hint} data-testid="sector-draft-hint">{t("sectorDraftHint")}</p>}
     {(compact || selected === "venom") && <VisionSectors frame={selected === "venom" ? visible : null} t={t} compact={compact}/>}

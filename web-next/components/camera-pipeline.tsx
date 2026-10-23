@@ -16,14 +16,8 @@ export function CameraPipelineControls({ client, t }: { client: RiderClient; t: 
   const stages = Object.entries(status.effective_stages).filter(([, enabled]) => enabled).map(([name]) => name);
   return <div data-testid="camera-pipeline">
     <div className={styles.flex}>
-      <Field label={t("pipeline.analysis")}><Select value={status.profile.analysis_location} disabled={disabled}
-        onChange={event => configure({ analysis_location: event.target.value as CameraProfile["analysis_location"] })}>
-        {["local", "venom"].map(value => <option key={value} value={value} disabled={!status.capabilities.analysis_locations.includes(value)}>{t("pipeline." + value)}</option>)}
-      </Select></Field>
-      {status.profile.analysis_location === "local" ? <Field label={t("pipeline.localEngine")}><Select disabled={disabled} value={status.profile.local_engine}
-        onChange={event => configure({ local_engine: event.target.value as CameraProfile["local_engine"] })}>
-        {["canny", "ssd", "tflite"].map(value => <option key={value} value={value} disabled={!status.capabilities.local_engines.includes(value)}>{value.toUpperCase()}</option>)}
-      </Select></Field> : <Field label={t("pipeline.transport")}><Select disabled={disabled} value={status.profile.remote_transport}
+      <span className={styles.small}>{t("pipeline.analysis")}: {t("pipeline." + status.profile.analysis_location)}{status.profile.analysis_location === "local" && " · " + status.profile.local_engine.toUpperCase()} · {t("perception.useCatalog")}</span>
+      {status.profile.analysis_location !== "local" && <Field label={t("pipeline.transport")}><Select disabled={disabled} value={status.profile.remote_transport}
         onChange={event => configure({ remote_transport: event.target.value as CameraProfile["remote_transport"] })}>
         {["snapshots", "mjpeg"].map(value => <option key={value} value={value} disabled={!status.capabilities.remote_transports.includes(value)}>{t("pipeline." + value)}</option>)}
       </Select></Field>}

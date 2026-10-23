@@ -41,13 +41,14 @@ export function useCameraPipeline(section: Section, session: string | undefined,
     void tick();
     return () => { active = false; controller.abort(); clearTimeout(timer); };
   }, [section, session, refresh]);
-  const change = useCallback(async (action: "configure" | "start" | "stop", profile?: CameraProfile) => {
+  const change = useCallback(async (action: "configure" | "start" | "stop", profile?: CameraProfile, expectedRevision?: number) => {
     if (locked.current) return;
     locked.current = true; readEpoch.current++; setBusy(true); setError(null); invalidate();
     const origin = sessionRef.current;
     try {
       const current = statusRef.current;
       if (!current || !origin) throw new Error("camera_pipeline_unavailable");
+      if (expectedRevision !== undefined && current.revision !== expectedRevision) throw new Error("camera_pipeline_conflict");
       const response = await mutate("/camera/pipeline", {
         contract_version: 1, request_id: createBrowserUuid(), expected_revision: current.revision,
         action, ...(action === "configure" ? { profile } : {}),

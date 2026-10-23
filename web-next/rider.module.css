@@ -625,3 +625,44 @@
   .pageFocused .controlModes .button { height:24px; min-height:24px; padding:0 6px; font-size:11px; }
   .pageFocused .commandDeck { gap:0; }
 }
+
+
+/* One provider/model chooser beside the camera; driving controls keep their size. */
+.workspaceContent > .loopCamera { display:flex;flex-direction:column;gap:6px; }
+.perceptionModels { flex:0 1 auto;min-height:32px;max-height:50%;overflow-y:auto;overflow-x:hidden;border-bottom:1px solid var(--r-border);padding:0 0 6px;font-size:12px; }
+.perceptionModels > summary { cursor:pointer;min-height:28px;align-content:center;font-weight:600; }
+.perceptionModels > summary > span { font-weight:400;color:var(--text-secondary);overflow-wrap:anywhere; }
+.perceptionBody { display:grid;gap:6px;padding:8px 0; }
+.perceptionSummary { display:flex;justify-content:space-between;gap:8px;align-items:center; }
+.perceptionSummary .small { margin:4px 0; }
+.perceptionSelection { display:flex;align-items:end;gap:8px;flex-wrap:wrap; }
+.perceptionSelection .field { flex:1 1 180px;min-width:0;margin:0; }
+.perceptionSelection select { width:100%;min-width:0;max-width:100%; }
+.perceptionStatus,.perceptionDiagnostics { display:flex;align-items:center;gap:6px 12px;flex-wrap:wrap; }
+.perceptionModels code { overflow-wrap:anywhere; }
+.perceptionPreviewMeta { flex:0 0 auto;display:flex;flex-wrap:wrap;gap:2px 10px;font-size:11px;line-height:1.3;overflow-wrap:anywhere; }
+.perceptionPreviewMeta > span:last-child { flex-basis:100%;color:var(--text-secondary); }
+@container rider (max-width:720px) {
+  .perceptionSelection .field { flex-basis:100%; }
+  .perceptionSelection .button { width:100%; }
+  .perceptionModels { max-height:55%; }
+}
+
+
+/* Reuse the cockpit's settings drawer pattern while choosing a provider/model. */
+.perceptionModels[open] { position:absolute;z-index:9;inset:0;max-height:none;background:var(--r-panel,#07121f);border:1px solid var(--r-border);border-radius:12px;padding:10px; }
+.perceptionModels[open] > summary { position:sticky;top:0;z-index:2;background:var(--r-panel,#07121f);padding:4px 0; }
+.loopCamera .cameraEmbedded { flex:1 1 0;height:auto; }
+@container rider (max-width:720px) {
+  .workspaceContent .loopCamera .cameraEmbedded .camera { min-height:60px; }
+  .cameraEmbedded .perceptionPreviewMeta { position:absolute;left:4px;right:4px;top:46px;z-index:2;padding:2px 4px;background:rgba(3,11,20,.8);pointer-events:none; }
+  .cameraEmbedded .perceptionPreviewMeta > strong { white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;font-size:10px; }
+  .cameraEmbedded .perceptionPreviewMeta > span:nth-child(2) { display:none; }
+  .cameraEmbedded .perceptionPreviewMeta > span:last-child { font-size:9px; }
+}
+
+
+@container rider (max-width:720px) {
+  /* The model drawer may use the mode area, preserving the global and pad STOP. */
+  .perceptionModels[open] { position:fixed;top:calc(var(--rider-page-top,0px) + var(--rider-header-height,160px) + 48px);bottom:max(8px,25dvh);left:calc(var(--rider-page-left,0px) + 8px);width:calc(var(--rider-page-width,100vw) - 16px);right:auto;z-index:1001; }
+}

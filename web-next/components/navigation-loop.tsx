@@ -11,6 +11,7 @@ import type { RiderClient } from "../lib/use-rider";
 import type { Translator } from "../lib/i18n";
 import { LoopDecision } from "./loop-decision";
 import { CameraPanel } from "./control";
+import { PerceptionModelsPanel } from "./perception-models";
 import { Button, Checkbox, Field, Input, Panel, Pill, Select } from "./primitives";
 import styles from "../rider.module.css";
 
@@ -22,9 +23,10 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
   const dirty=!!policy&&JSON.stringify(policy)!==JSON.stringify(draft);
   const policyRef=useRef(policy),dirtyRef=useRef(dirty);
   policyRef.current=policy;dirtyRef.current=dirty;
+  const {setPerceptionPolicy}=client;
   const applyPolicy=useCallback((value:JsonRecord|null)=>{
-    policyRef.current=value;setPolicy(value);setDraft(value);
-  },[]);
+    policyRef.current=value;setPolicy(value);setDraft(value);setPerceptionPolicy?.(value);
+  },[setPerceptionPolicy]);
   const [detector,setDetector]=useState<JsonRecord>({});
   const [loopState,setLoopState]=useState<JsonRecord>({});
   const [goals,setGoals]=useState<JsonRecord>({});
@@ -44,6 +46,7 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
   const [trialStopReason,setTrialStopReason]=useState("");
   const trialSession=useRef("");
   const [refresh,setRefresh]=useState(0);
+  const refreshPerception=useCallback(()=>setRefresh(value=>value+1),[]);
   const startTask=useRef<Promise<unknown>|null>(null);
   const stopping=useRef(false);
   const settingsRef=useRef<HTMLDetailsElement>(null);
@@ -394,7 +397,7 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
     </div>
     <div className={styles.driveWorkspace}>
       <div className={styles.workspaceContent} data-testid="workspace-content" role="region" aria-label={t("workspaceObservation")}>
-        <div className={styles.loopCamera}><CameraPanel client={client} t={t} language={language} compact editor={view !== "manual" && editingZone && draft && Array.isArray(draft.corridor) ? {value:draft.corridor as number[],disabled:goals.drive===true||!!operation,onChange:value=>setDraft({...draft,corridor:value})}:undefined}/></div>
+        <div className={styles.loopCamera}><PerceptionModelsPanel client={client} t={t} language={language} policy={policy} goals={goals} locked={!!operation||dirty||loading} onApplied={applyPolicy} onRefresh={refreshPerception}/><CameraPanel client={client} t={t} language={language} compact editor={view !== "manual" && editingZone && draft && Array.isArray(draft.corridor) ? {value:draft.corridor as number[],disabled:goals.drive===true||!!operation,onChange:value=>setDraft({...draft,corridor:value})}:undefined}/></div>
         <details id="rider-workspace-details" ref={workspaceDetailsRef} onToggle={event=>setDetailsOpen(event.currentTarget.open)} className={styles.workspaceDetails} data-testid="workspace-details">
           <summary>{t("cockpitDetails")}</summary>
           <div className={styles.workspaceDetailsBody}>
@@ -470,9 +473,7 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
           {!groundDraft&&<Field label={t("loopCorridor")}><Input disabled={settingsLocked} value={Array.isArray(draft.corridor)?draft.corridor.join(","):""} onChange={e=>setDraft({...draft,corridor:e.target.value.split(",").map(Number)})}/></Field>}
         </div>
         {"perception" in draft?<div className={styles.grid} data-testid="perception-settings">
-          <Field label={t("perceptionMethod")}><Select aria-label={t("perceptionMethod")} disabled={settingsLocked} value={String(perception.engine??"segformer")} onChange={e=>setDraft({...draft,mode:"observe",perception:{...perception,engine:e.target.value}})}>
-            <option value="segformer">{t("perceptionSemantic")}</option><option value="depth_plane">{t("perceptionGeometry")}</option>
-          </Select></Field>
+          <p className={styles.hint}>{t("perceptionMethod")}: {t(perception.engine==="depth_plane"?"perceptionGeometry":"perceptionSemantic")} · {t("perception.useCatalog")}</p>
           {perception.engine==="depth_plane"&&<>
             <Field label={t("perceptionResidual")}><Input disabled={settingsLocked} type="number" min="0.01" max="0.15" step="0.01" value={Number(perception.residual_limit)} onChange={e=>setDraft({...draft,perception:{...perception,residual_limit:Number(e.target.value)}})}/></Field>
             <Field label={t("perceptionOutliers")}><Input disabled={settingsLocked} type="number" min="0" max="2" step="0.1" value={Number(perception.outlier_limit)*100} onChange={e=>setDraft({...draft,perception:{...perception,outlier_limit:Number(e.target.value)/100}})}/></Field>
