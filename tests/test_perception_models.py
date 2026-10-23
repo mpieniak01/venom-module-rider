@@ -233,3 +233,28 @@ async def test_switch_waits_for_native_work(catalog):
         gate.set()
         await operation
         await loop.close()
+
+
+async def test_legacy_loaded_model_is_visible_without_changing_selection(catalog):
+    provision(catalog)
+    loop = VisionLoop()
+    loop.detector = SimpleNamespace(
+        status=lambda: {
+            "loaded": True,
+            "configured": True,
+            "sha256": DIGEST,
+            "device": "cpu",
+        }
+    )
+    service = PerceptionService(loop, catalog=catalog)
+    domain = Domain()
+    try:
+        snapshot = await service.snapshot(domain)
+        assert snapshot["diagnostics"]["runtime"]["active_model_id"] == SEGFORMER
+        assert snapshot["diagnostics"]["runtime"]["state"] == "active"
+        assert snapshot["models"][0]["loaded"] is True
+        assert snapshot["selection"]["artifact_sha256"] == ""
+        assert not domain.posts
+    finally:
+        await service.close()
+        await loop.close()

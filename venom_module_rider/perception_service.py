@@ -35,11 +35,13 @@ class PerceptionService:
 
     async def snapshot(self, domain):
         selection, selection_error = None, None
+        perception = None
         try:
             policy = (await domain.read("/api/navigation/config", 0.2, force=True))[
                 "data"
             ]
             selection = selected_identity(policy)
+            perception = policy.get("perception")
             self.observe_policy(domain.transport().device.id, policy)
         except RiderError as exc:
             selection_error = exc.code
@@ -47,6 +49,15 @@ class PerceptionService:
             lambda: [self.catalog.describe(identity) for identity in SOURCES]
         )
         runtime = self.runtime.status()
+        if selection and not (perception or {}).get("model_id"):
+            legacy = self.loop.status(perception)
+            if legacy.get("loaded") is True:
+                runtime = {
+                    "state": "active",
+                    "active_model_id": selection["model_id"],
+                    "model_generation": 0,
+                    "execution_provider": legacy.get("device", "cpu"),
+                }
         for row in rows:
             row["loaded"] = (
                 row["id"] == runtime["active_model_id"] and runtime["state"] == "active"
@@ -81,7 +92,7 @@ class PerceptionService:
             "selection": selection,
             "selection_error": selection_error,
             "switching": self.switching,
-            "diagnostics": self.runtime.diagnostics(),
+            "diagnostics": {**self.runtime.diagnostics(), "runtime": runtime},
             "providers": [
                 {"id": "venom", "label": "Venom", "available": True},
                 {
