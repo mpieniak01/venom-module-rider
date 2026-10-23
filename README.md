@@ -577,6 +577,20 @@ CPU/RAM continuity and diagnostic semantics: [system history](docs/SYSTEM_HISTOR
 
 Jedna sesja badania z telemetrią i serią klatek RAW: [Wspólny zapis](docs/UNIFIED_RECORDING.md).
 
+## Native preview recovery regression
+
+The native preview reconnect watchdog advances only after a source/analysis-matched,
+fresh JPEG is decoded and committed. Incoming bytes or increasing sequence numbers
+alone cannot renew it. The original image keeps its original freshness deadline;
+a failed stream cannot indefinitely present it as current.
+
+Before releasing native media changes, run `tests/browser/native-stream-recovery.js`
+with Playwright CLI against the local panel. Every Rider endpoint is intercepted.
+The fixture starts from a retired journey with an active camera, then sends
+continuous expired parts, mismatched analysis and undecodable JPEGs. It requires
+GET reconnect and a fresh replacement after each failure, with zero robot mutations.
+`make check-web` includes syntax validation; the browser flow must be run separately.
+
 ## Experimental temporal driving profiles
 
 Both panels can select a Pi-owned Legacy/Cautious/Balanced/Fluid policy.

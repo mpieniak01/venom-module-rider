@@ -592,14 +592,14 @@ export function useRider(section: Section) {
     const analysis = readAnalysis(headers.get("X-Rider-Analysis-Json"));
     if (headers.get("X-Rider-Source") === "venom" && !nativeAnalysisMatches(analysis, source)) throw new Error("stream_analysis_mismatch");
     if (headers.get("X-Rider-Source") === "venom" && !perceptionResultMatches(analysis, perceptionExpected.current)) {
-      replaceFrame("camera", null); setMediaError("perception.previewWaiting"); return;
+      replaceFrame("camera", null); setMediaError("perception.previewWaiting"); return false;
     }
     const receivedAt = part.receivedAt;
     if ((previewLifetime({ageMs, receivedAt}) ?? 0) <= 0) throw new Error("stream_source_expired");
     const url = URL.createObjectURL(new Blob([Uint8Array.from(part.bytes)], { type: "image/jpeg" }));
     try {
       await decodePreview(url, signal);
-      if (signal.aborted || !current()) { URL.revokeObjectURL(url); return; }
+      if (signal.aborted || !current()) { URL.revokeObjectURL(url); return false; }
       const expired = (previewLifetime({ageMs, receivedAt}) ?? 0) <= 0;
       replaceFrame("camera", {
         cameraSource: source, pipelineIdentity: [source.pipeline_revision, source.transport_epoch, source.camera_session].join(":"),
@@ -616,6 +616,7 @@ export function useRider(section: Section) {
         recordedAt: "",
       });
       setMediaError(expired ? "frameStale" : null);
+      return !expired;
     } catch (error) { URL.revokeObjectURL(url); throw error; }
   }, [replaceFrame]);
   useEffect(() => {
@@ -645,7 +646,16 @@ export function useRider(section: Section) {
       const expire = () => { replaceFrame("camera", null, keepCameraOnFailure()); setMediaError("frameStale"); abort.abort(); };
       const pump = async () => {
         if (decoding) return; decoding = true;
-        try { while (latest && current()) { const part = latest; latest = null; await nativePart(part, abort.signal, current); } }
+        try {
+          while (latest && current()) {
+            const part = latest; latest = null;
+            if (await nativePart(part, abort.signal, current) && current()) {
+              // Bytes/sequence progress is not proof of a usable image. Rejected
+              // or undecodable parts must not keep a dead preview alive forever.
+              clearTimeout(gap); gap = setTimeout(expire, 3000);
+            }
+          }
+        }
         catch (error) { if (current()) { replaceFrame("camera", null, keepCameraOnFailure(), expiredNativeCandidate(error)); setMediaError("frameStale"); } }
         finally { decoding = false; }
       };
@@ -658,7 +668,6 @@ export function useRider(section: Section) {
           const sequence = Number(source.sequence);
           if (!Number.isSafeInteger(sequence) || sequence <= lastSequence) return;
           lastSequence = sequence;
-          clearTimeout(gap); gap = setTimeout(expire, 3000);
           latest = part; void pump();
         });
       } catch { if (current()) { replaceFrame("camera", null, keepCameraOnFailure()); setMediaError("pipeline.streamFailed"); } }

@@ -29,6 +29,7 @@ check-web:
 	node --check tests/browser/form-consistency.js
 	node --check tests/browser/ui-consistency.js
 	node --check tests/browser/camera-lifecycle.js
+	node --check tests/browser/native-stream-recovery.js
 	node --check tests/browser/operator-priority.js
 	node --check tests/browser/control-workspace.js
 	node --check tests/browser/vision-sectors.js
