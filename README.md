@@ -544,3 +544,11 @@ CPU/RAM continuity and diagnostic semantics: [system history](docs/SYSTEM_HISTOR
 
 
 Jedna sesja badania z telemetrią i serią klatek RAW: [Wspólny zapis](docs/UNIFIED_RECORDING.md).
+
+## Experimental temporal driving profiles
+
+Both panels can select a Pi-owned Legacy/Cautious/Balanced/Fluid policy.
+New profiles add source-region history, bounded SLOW and current-image boundary
+diagnostics while retaining legacy compatibility and independent motion gates.
+See [Temporal navigation v1](docs/TEMPORAL_NAVIGATION_V1.md) for capability,
+compact-map replay, tests and the required local acceptance.

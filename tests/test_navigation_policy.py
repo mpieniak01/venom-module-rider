@@ -299,3 +299,63 @@ async def test_temporal_near_guard_vetoes_existing_steering_maneuver():
             assert result["action"] == "stop"
     finally:
         await loop.close()
+
+
+async def test_semantic_rethresholding_never_validates_a_rejected_source():
+    class InvalidSource(MapDetector):
+        def detect(self, *_args, **options):
+            result = super().detect(*_args, **options)
+            result.update(state="clear", reason="source_unverified")
+            result["_navigation_maps"].update(
+                valid=False,
+                labels=np.full((100, 100), 3, dtype=np.uint8),
+                confidence=np.ones((100, 100), dtype=np.float32),
+            )
+            return result
+
+    now = [0.0]
+    loop = VisionLoop(InvalidSource(), clock=lambda: now[0])
+    try:
+        for seq in range(1, 5):
+            now[0] = seq * 0.06
+            result = await loop.decide("pi", frame(seq), b"fixture")
+            assert result["action"] == result["vision_action"] == "stop"
+            assert result["clear_count"] == 0
+            assert result["temporal"]["spatial"]["valid"] is False
+            assert result["raw_state"] == "clear"
+    finally:
+        await loop.close()
+
+
+def test_replay_semantic_invalid_flag_survives_new_confidence_threshold(tmp_path):
+    from scripts.replay_navigation_policy import replay
+
+    labels = np.full((100, 100), 3, dtype=np.uint8)
+    np.savez_compressed(
+        tmp_path / "map.npz",
+        labels=labels,
+        confidence=np.ones((100, 100), np.float32),
+        valid=np.array(False),
+    )
+    manifest = tmp_path / "manifest.jsonl"
+    manifest.write_text(
+        "".join(
+            json.dumps(
+                {
+                    "maps": "map.npz",
+                    "sequence": i,
+                    "frame_id": f"f{i}",
+                    "captured_s": i * 0.06,
+                    "context": {"source": "fixture"},
+                    "raw_state": "clear",
+                    "raw_reason": "source_unverified",
+                }
+            )
+            + "\n"
+            for i in range(1, 5)
+        )
+    )
+    summary = replay(
+        manifest, parameters(selected()), tmp_path / "out.jsonl", behavior=selected()
+    )
+    assert summary["actions"] == {"stop": 4}

@@ -47,7 +47,12 @@ def _read_maps(path: Path) -> dict[str, Any]:
         import zipfile
 
         with zipfile.ZipFile(path) as members:
-            if any(item.file_size > 4 * 1024 * 1024 for item in members.infolist()):
+            entries = members.infolist()
+            if (
+                len(entries) > 16
+                or sum(item.file_size for item in entries) > 12 * 1024 * 1024
+                or any(item.file_size > 4 * 1024 * 1024 for item in entries)
+            ):
                 raise ValueError("replay_maps_bounds")
         maps = {
             key: archive[key]
@@ -232,6 +237,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
+    import cv2
+
+    cv2.setNumThreads(1)
     behavior = None
     if args.profile:
         from venom_module_rider.navigation_profiles import parameters

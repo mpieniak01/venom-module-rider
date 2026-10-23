@@ -3,6 +3,8 @@ import type { Translator } from "../lib/i18n";
 import styles from "../rider.module.css";
 
 export function NavigationTemporal({ view, t }: { view: TemporalView; t: Translator }) {
+  const reasonKey = "vision.reason." + view.reason;
+  const translatedReason = t(reasonKey);
   return <section className={styles.stack} aria-label={t("temporal.title")} data-testid="temporal-diagnostics">
     <h3>{t("temporal.title")}</h3>
     {!view.available ? <p className={styles.hint}>{t("temporal.none")}</p> : <>
@@ -15,8 +17,9 @@ export function NavigationTemporal({ view, t }: { view: TemporalView; t: Transla
         <span>{t("temporal.evidence")}: {view.evidenceFrames ?? "—"}</span>
         <span>{t("temporal.near")}: {t(view.nearGuard === null ? "temporal.unknown" : view.nearGuard ? "temporal.yes" : "temporal.no")}</span>
       </div>
-      <p className={styles.small} data-testid="temporal-reason">{t("temporal.reason")}: {view.reason || t("temporal.noReason")}</p>
+      <p className={styles.small} data-testid="temporal-reason">{t("temporal.reason")}: {view.reason ? (translatedReason === reasonKey ? view.reason : translatedReason) : t("temporal.noReason")}</p>
       <p className={styles.hint} data-testid="temporal-boundary">{view.boundaryPoints > 0 ? t("temporal.boundary") + ": " + view.boundaryPoints : t("temporal.noBoundary")}</p>
+      {view.boundaryPoints > 0 && <p className={styles.hint}>{t("temporal.overlayLegend")}</p>}
     </>}
   </section>;
 }

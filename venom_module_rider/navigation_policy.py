@@ -40,6 +40,10 @@ def evaluate(result, frame, observer, *, context, captured_s, source=None):
             "history_ms": 0,
             "tracking": {"status": "unavailable"},
         }
+    if "_preview" in result:
+        from .navigation_overlay import render_evidence
+
+        result["_preview"] = render_evidence(result["_preview"], spatial)
     temporal = {**temporal, "version": 1, "spatial": public_spatial(spatial)}
     visible_state = temporal["state"]
     if (

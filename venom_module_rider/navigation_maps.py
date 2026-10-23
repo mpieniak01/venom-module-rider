@@ -76,6 +76,8 @@ def assess_evidence(maps, corridor, params, *, raw_reason=None):
             **semantic_masks(
                 maps["labels"], maps["confidence"], params["pixel_confidence"]
             ),
+            # Thresholding cannot validate a previously rejected source.
+            "valid": maps.get("valid", True),
         }
     spatial = assess_maps(
         maps["floor"],

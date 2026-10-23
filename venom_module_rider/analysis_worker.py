@@ -94,6 +94,9 @@ def run(job, output, *, candidate_factory=None, semantic_factory=None):
     geometry = GroundGeometry.model_validate(spec["geometry"])
     order = context["session"].get("policy", {}).get("order_source", "receipt")
     semantic = profile["backend"] == "semantic"
+    capture_evidence = spec.get("capture_evidence", False)
+    if type(capture_evidence) is not bool:
+        raise ValueError("analysis_navigation_evidence_opt_in")
     if semantic:
         if (
             settings.engine != "segformer"
@@ -179,7 +182,9 @@ def run(job, output, *, candidate_factory=None, semantic_factory=None):
             start = time.perf_counter()
             if semantic:
                 assessment, overlay = cast(SemanticCandidate, model).detect(
-                    payload, tuple(spec["corridor"])
+                    payload,
+                    tuple(spec["corridor"]),
+                    **({"evidence": True} if capture_evidence else {}),
                 )
                 timings["perception_total"] = (time.perf_counter() - start) * 1000
                 artifacts.append(
@@ -195,12 +200,33 @@ def run(job, output, *, candidate_factory=None, semantic_factory=None):
                 emit(output, {"type": "compute", "done": index, "phase": "geometry"})
                 start = time.perf_counter()
                 if geometry.mode == "image":
-                    assessment = assess_depth(depth, tuple(spec["corridor"]), settings)
+                    assessment = assess_depth(
+                        depth,
+                        tuple(spec["corridor"]),
+                        settings,
+                        **({"evidence": True} if capture_evidence else {}),
+                    )
                 else:
                     from .adaptive_ground import assess
 
+                    evidence_options = {}
+                    if capture_evidence:
+                        from .navigation_profiles import DEFAULT_BEHAVIOR, parameters
+
+                        evidence_options = {
+                            "evidence": parameters(
+                                {
+                                    **DEFAULT_BEHAVIOR,
+                                    "profile_id": "balanced",
+                                }
+                            )
+                        }
                     assessment = assess(
-                        depth, tuple(spec["corridor"]), settings, geometry
+                        depth,
+                        tuple(spec["corridor"]),
+                        settings,
+                        geometry,
+                        **evidence_options,
                     )
                 timings["geometry"] = (time.perf_counter() - start) * 1000
                 start = time.perf_counter()
@@ -227,10 +253,28 @@ def run(job, output, *, candidate_factory=None, semantic_factory=None):
                     artifact(f"{index:04d}-overlay.jpg", overlay, "image/jpeg"),
                 ]
                 timings["render"] = (time.perf_counter() - start) * 1000
+        maps = assessment.pop("_navigation_maps", None)
+        navigation_evidence = None
+        if capture_evidence:
+            from .navigation_archive import encode_evidence
+
+            start = time.perf_counter()
+            evidence_payload, navigation_evidence = encode_evidence(
+                maps, image, rejected=not quality
+            )
+            name = f"{index:04d}-navigation.npz"
+            navigation_evidence["artifact"] = name
+            artifacts.append(
+                artifact(name, evidence_payload, "application/octet-stream")
+            )
+            timings["navigation_evidence"] = (time.perf_counter() - start) * 1000
         row = {
             "sample_id": sample["sample_id"],
             "raw_sha256": raw["sha256"],
             **assessment,
+            **(
+                {"navigation_evidence": navigation_evidence} if capture_evidence else {}
+            ),
             "obstacle_side": side_of(assessment),
             "drive_supported": False,
             "distance_measurement": False,

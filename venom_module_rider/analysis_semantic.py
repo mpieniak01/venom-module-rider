@@ -60,10 +60,11 @@ class SemanticCandidate:
             "perception_timing": "decode_preprocess_load_infer_postprocess_overlay",
         }
 
-    def detect(self, payload, corridor):
+    def detect(self, payload, corridor, *, evidence=False):
         from .perception_runtime import source_overlay
 
-        result = dict(self.detector.detect(payload, corridor))
+        options = {"evidence": True} if evidence else {}
+        result = dict(self.detector.detect(payload, corridor, **options))
         if result.get("state") not in {"clear", "obstacle", "unknown"}:
             raise ValueError("analysis_model_output")
         preview = result.pop("_preview", None)
