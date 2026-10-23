@@ -13,6 +13,7 @@ import { LoopDecision } from "./loop-decision";
 import { CameraPanel } from "./control";
 import { PerceptionModelsPanel } from "./perception-models";
 import { NavigationProfiles } from "./navigation-profiles";
+import { ModelTuning } from "./model-tuning";
 import { Button, Checkbox, Field, Input, Panel, Pill, Select } from "./primitives";
 import styles from "../rider.module.css";
 
@@ -318,6 +319,7 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
   useEffect(()=>{
     if(freshObservation(loopState,goals))setRecoveryFailure(null);
   },[loopState,goals]);
+  const showModelTuning = () => { const panel = document.getElementById("rider-model-tuning"); if (panel instanceof HTMLDetailsElement) panel.open = true; };
   const observeBlock=policy?loopBlock({...policy,mode:"observe"},runtime,detector,connected,dirty,client.status):"loopLoadFailed";
   const avoidanceSupported=Array.isArray(detector.supported_protocol_versions)&&detector.supported_protocol_versions.includes(Number(record(draft?.avoidance??policy?.avoidance).protocol_version??3));
   const trialUnavailable=record(policy?.avoidance).enabled===true&&!avoidanceSupported?"avoidanceUpdateRequired":trialBlock(policy,runtime,detector,connected,dirty,client.status);
@@ -402,7 +404,7 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
     </div>
     <div className={styles.driveWorkspace}>
       <div className={styles.workspaceContent} data-testid="workspace-content" role="region" aria-label={t("workspaceObservation")}>
-        <div className={styles.loopCamera}><PerceptionModelsPanel client={client} t={t} language={language} policy={policy} goals={goals} locked={!!operation||dirty||loading} onApplied={applyPolicy} onRefresh={refreshPerception}/><NavigationProfiles key={session} client={client} t={t} policy={profileSnapshot.session===session?profileSnapshot.policy:null} goals={goals} locked={!!operation||dirty||loading||!!readError} onApplied={applyPolicy} onRefresh={refreshPerception} onPendingChange={setProfileBusy}/><CameraPanel client={client} t={t} language={language} compact editor={view !== "manual" && editingZone && draft && Array.isArray(draft.corridor) ? {value:draft.corridor as number[],disabled:goals.drive===true||!!operation,onChange:value=>setDraft({...draft,corridor:value})}:undefined}/></div>
+        <div className={styles.loopCamera}><PerceptionModelsPanel client={client} t={t} language={language} policy={policy} goals={goals} locked={!!operation||dirty||loading} onApplied={applyPolicy} onRefresh={refreshPerception}/><NavigationProfiles key={session} client={client} t={t} policy={profileSnapshot.session===session?profileSnapshot.policy:null} goals={goals} locked={!!operation||dirty||loading||!!readError} onApplied={applyPolicy} onRefresh={refreshPerception} onPendingChange={setProfileBusy}/><ModelTuning key={"tuning-"+session} client={client} t={t} policy={profileSnapshot.session===session?profileSnapshot.policy:null} goals={goals} locked={!!operation||dirty||loading||!!readError} onApplied={applyPolicy} onRefresh={refreshPerception} onPendingChange={setProfileBusy}/><CameraPanel client={client} t={t} language={language} compact editor={view !== "manual" && editingZone && draft && Array.isArray(draft.corridor) ? {value:draft.corridor as number[],disabled:goals.drive===true||!!operation,onChange:value=>setDraft({...draft,corridor:value})}:undefined}/></div>
         <details id="rider-workspace-details" ref={workspaceDetailsRef} onToggle={event=>setDetailsOpen(event.currentTarget.open)} className={styles.workspaceDetails} data-testid="workspace-details">
           <summary>{t("cockpitDetails")}</summary>
           <div className={styles.workspaceDetailsBody}>
@@ -458,10 +460,7 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
       {!groundActive&&<Button data-testid="zone-edit" disabled={!draft||goals.drive===true||!!operation} onClick={()=>setEditingZone(!editingZone)}>{t(editingZone?"zoneFinish":"zoneEdit")}</Button>}
       {editingZone&&!groundActive&&<><Button data-testid="zone-save" disabled={!dirty||!!operation||goals.drive===true} onClick={()=>void save()}>{t("loopSave")}</Button><Button onClick={()=>{setDraft(policy);setEditingZone(false);}}>{t("loopDiscard")}</Button><Button disabled={!!operation} onClick={()=>draft&&setDraft({...draft,corridor:[.35,.80,.65,.95]})}>{t("zoneReset")}</Button></>}
     </div>
-    {editingZone&&!groundActive&&<><p className={styles.hint}>{t("zoneDraftHelp")}</p><div className={styles.grid}>
-      <Field label={t("perceptionResidual")}><Input type="number" min=".01" max=".15" step=".005" value={Number(perception.residual_limit)} onChange={e=>draft&&setDraft({...draft,perception:{...perception,residual_limit:Number(e.target.value)}})}/></Field>
-      <Field label={t("perceptionOutliers")}><Input type="number" min="0" max="2" step=".1" value={Number(perception.outlier_limit)*100} onChange={e=>draft&&setDraft({...draft,perception:{...perception,outlier_limit:Number(e.target.value)/100}})}/></Field>
-    </div></>}
+    {editingZone&&!groundActive&&<div className={styles.flex}><p className={styles.hint}>{t("zoneDraftHelp")}</p><Button onClick={showModelTuning}>{t("tuning.title")}</Button></div>}
     {groundActive&&<p className={styles.hint} data-testid="ground-geometry-help">{t("geometryPreviewHelp")}</p>}
     <details ref={settingsRef} className={styles.details}><summary>{t("loopSettings")}{dirty?" · "+t("unsaved"):""}</summary>
       <div className={styles.metrics}>
@@ -478,14 +477,9 @@ export function NavigationLoop({client,t,language,manual,auxiliary}:{client:Ride
           {!groundDraft&&<Field label={t("loopCorridor")}><Input disabled={settingsLocked} value={Array.isArray(draft.corridor)?draft.corridor.join(","):""} onChange={e=>setDraft({...draft,corridor:e.target.value.split(",").map(Number)})}/></Field>}
         </div>
         {"perception" in draft?<div className={styles.grid} data-testid="perception-settings">
-          <p className={styles.hint}>{t("perceptionMethod")}: {t(perception.engine==="depth_plane"?"perceptionGeometry":"perceptionSemantic")} · {t("perception.useCatalog")}</p>
-          {perception.engine==="depth_plane"&&<>
-            <Field label={t("perceptionResidual")}><Input disabled={settingsLocked} type="number" min="0.01" max="0.15" step="0.01" value={Number(perception.residual_limit)} onChange={e=>setDraft({...draft,perception:{...perception,residual_limit:Number(e.target.value)}})}/></Field>
-            <Field label={t("perceptionOutliers")}><Input disabled={settingsLocked} type="number" min="0" max="2" step="0.1" value={Number(perception.outlier_limit)*100} onChange={e=>setDraft({...draft,perception:{...perception,outlier_limit:Number(e.target.value)/100}})}/></Field>
-            {!groundDraft&&<Field label={t("perceptionSlope")}><Input disabled={settingsLocked} type="number" min="1" max="4" step="0.1" value={Number(perception.slope_min)} onChange={e=>setDraft({...draft,perception:{...perception,slope_min:Number(e.target.value)}})}/></Field>}
-          </>}
+          <p className={styles.hint}>{t("perceptionMethod")}: {t(perception.engine==="depth_plane"?"perceptionGeometry":"perceptionSemantic")}</p>
+          <Button data-testid="open-model-tuning" onClick={showModelTuning}>{t("tuning.title")}</Button>
         </div>:<p className={styles.hint}>{t("perceptionPiUpdate")}</p>}
-        {perception.engine==="depth_plane"&&<p className={styles.hint}>{t("perceptionGeometryHint")}</p>}
         {record(draft?.avoidance).protocol_version===3&&<fieldset className={styles.stack} disabled={settingsLocked} data-testid="ground-geometry-settings"><legend>{t("geometrySettings")}</legend>
           <Field label={t("geometryMode")}><Select data-testid="geometry-mode" value={String(record(record(draft?.avoidance).geometry).mode??"image")} onChange={e=>draft&&setDraft({...draft,avoidance:{...record(draft.avoidance),geometry:{...record(record(draft.avoidance).geometry),mode:e.target.value},sweep_verified:false}})}><option value="ground">{t("geometryGround")}</option><option value="image">{t("geometryImage")}</option></Select></Field>
           <p className={styles.hint} data-testid="geometry-mode-help">{t(record(record(draft?.avoidance).geometry).mode==="ground"?"geometryCalibrationHelp":"geometryImageHelp")}</p>

@@ -125,3 +125,36 @@ def test_schema_and_presentation_share_storage():
     assert depth["effective"]["residual_limit"] == 0.05
     with pytest.raises(ValueError, match="unsupported"):
         semantic_parameters({"engine": "depth_plane"})
+
+
+def test_legacy_adapter_receives_selected_surface_without_explicit_model():
+    from types import SimpleNamespace
+
+    from venom_module_rider.vision_loop import VisionLoop
+
+    seen = []
+
+    class Detector:
+        def detect(self, payload, corridor, **options):
+            seen.append(options)
+            return {"state": "clear", "reason": "floor_candidate"}
+
+    frame = SimpleNamespace(
+        corridor=(0.0, 0.0, 1.0, 1.0),
+        perception=PerceptionSettings(semantic_models={SEG: setting()}),
+        behavior=SimpleNamespace(
+            profile_id="legacy", model_dump=lambda: DEFAULT_BEHAVIOR
+        ),
+    )
+    VisionLoop._detect_floor(SimpleNamespace(detector=Detector()), b"fixture", frame)
+    assert seen[0]["semantic"]["traversable_labels"] == [3, 28]
+
+
+def test_legacy_digest_distinguishes_selected_surface_without_changing_old_default():
+    plain = {"engine": "segformer"}
+    assert policy_digest(DEFAULT_BEHAVIOR, plain) == policy_digest(DEFAULT_BEHAVIOR)
+    rug = perception()
+    floor = perception(semantic_models={SEG: setting(surface="floor_only")})
+    assert policy_digest(DEFAULT_BEHAVIOR, rug) != policy_digest(
+        DEFAULT_BEHAVIOR, floor
+    )

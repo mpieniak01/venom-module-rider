@@ -525,3 +525,74 @@ def test_export_rejects_empty_timeline_and_report_row_identity_mismatch(tmp_path
     report.write_text(json.dumps(frozen))
     with pytest.raises(ValueError, match="analysis_navigation_export_report"):
         archive.export_evidence(report, artifacts, timeline, tmp_path / "out")
+
+
+@pytest.mark.parametrize(
+    "model_id,artifact,expected_error",
+    [
+        ("segformer-b0-ade20k", "", None),
+        ("yolo26n-sem-ade20k", "", "replay_model_identity"),
+        ("segformer-b0-ade20k", "d" * 64, "replay_model_artifact"),
+    ],
+)
+def test_explicit_replay_settings_are_bound_to_model_maps(
+    tmp_path, model_id, artifact, expected_error
+):
+    from venom_module_rider.depth_detector import PerceptionSettings
+
+    report, artifacts, timeline, frozen, _ = fixture_export(tmp_path, semantic=True)
+    frozen["context"]["profile"]["id"] = "segformer-b0-ade20k"
+    report.write_text(json.dumps(frozen))
+    output = tmp_path / "export"
+    archive.export_evidence(report, artifacts, timeline, output)
+    perception = PerceptionSettings(
+        engine="segformer",
+        model_id=model_id,
+        artifact_sha256=artifact or "c" * 64,
+        semantic_models={model_id: {"surface": "floor_rug"}},
+    ).model_dump()
+    behavior = {**DEFAULT_BEHAVIOR, "profile_id": "balanced"}
+    if expected_error:
+        with pytest.raises(ValueError, match=expected_error):
+            replay(
+                output / "manifest.jsonl",
+                parameters(behavior, perception),
+                tmp_path / "result.jsonl",
+                behavior=behavior,
+                perception=perception,
+            )
+    else:
+        summary = replay(
+            output / "manifest.jsonl",
+            parameters(behavior, perception),
+            tmp_path / "result.jsonl",
+            behavior=behavior,
+            perception=perception,
+        )
+        assert summary["frames"] == 3
+        assert (
+            summary["profile"]["perception"]["semantic_models"][model_id]["surface"]
+            == "floor_rug"
+        )
+
+
+@pytest.mark.parametrize("semantic_maps", [True, False])
+def test_explicit_replay_rejects_maps_from_another_model_type(tmp_path, semantic_maps):
+    report, artifacts, timeline, frozen, _ = fixture_export(
+        tmp_path, semantic=semantic_maps
+    )
+    model = "da2-default" if semantic_maps else "segformer-b0-ade20k"
+    frozen["context"]["profile"]["id"] = model
+    report.write_text(json.dumps(frozen))
+    output = tmp_path / "export"
+    archive.export_evidence(report, artifacts, timeline, output)
+    perception = {"engine": "depth_plane" if semantic_maps else "segformer"}
+    behavior = {**DEFAULT_BEHAVIOR, "profile_id": "balanced"}
+    with pytest.raises(ValueError, match="replay_.*_maps_required"):
+        replay(
+            output / "manifest.jsonl",
+            parameters(behavior, perception),
+            tmp_path / "result.jsonl",
+            behavior=behavior,
+            perception=perception,
+        )

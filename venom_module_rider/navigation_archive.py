@@ -348,6 +348,11 @@ def export_evidence(
             "source_device_id": sample.get("source_device_id"),
             "transport_epoch": identity.get("transport_epoch"),
             "pipeline_revision": identity.get("pipeline_revision"),
+            "model_id": (
+                "depth-anything-v2-indoor-small"
+                if context.get("profile", {}).get("id") == "da2-default"
+                else context.get("profile", {}).get("id")
+            ),
             "model_fingerprint": fingerprint,
             "model_sha256": context.get("profile", {}).get("model_sha256"),
             "code": context.get("code"),

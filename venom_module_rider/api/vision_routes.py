@@ -349,18 +349,19 @@ async def validate_model_policy(request, device, frame):
     models = getattr(request.app.state, "rider_models", None)
     if models is None:
         return
-    if (
-        not frame.perception.model_id
-        and not frame.perception.semantic_models
-        and device not in models.runtime.expected
-    ):
-        return
     domain = request.app.state.rider
     if domain.transport().device.id != device:
         raise RiderError("stream_device_not_selected", 409)
     policy = (await domain.read("/api/navigation/config", 0.2))["data"]
+    from ..navigation_profiles import DEFAULT_BEHAVIOR, validate_behavior
     from ..perception_catalog import selected_identity
 
+    expected_behavior = validate_behavior(policy.get("behavior", DEFAULT_BEHAVIOR))
+    if expected_behavior != frame.behavior.model_dump() or (
+        expected_behavior["profile_id"] != "legacy"
+        and policy.get("revision") != frame.config_revision
+    ):
+        raise RiderError("navigation_behavior_conflict", 409)
     expected_perception = policy.get("perception", {})
     if frame.perception.semantic_models or expected_perception.get("semantic_models"):
         from ..depth_detector import PerceptionSettings

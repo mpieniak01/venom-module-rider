@@ -92,6 +92,9 @@ def run(job, output, *, candidate_factory=None, semantic_factory=None):
     spec, inputs = context["spec"], context["inputs"]
     settings = PerceptionSettings.model_validate(spec["perception"])
     geometry = GroundGeometry.model_validate(spec["geometry"])
+    from .navigation_profiles import DEFAULT_BEHAVIOR, validate_behavior
+
+    behavior = validate_behavior(spec.get("behavior", DEFAULT_BEHAVIOR))
     order = context["session"].get("policy", {}).get("order_source", "receipt")
     semantic = profile["backend"] == "semantic"
     capture_evidence = spec.get("capture_evidence", False)
@@ -184,9 +187,13 @@ def run(job, output, *, candidate_factory=None, semantic_factory=None):
                 from .perception_tuning import has_semantic_tuning, semantic_parameters
 
                 semantic_options = {}
-                if has_semantic_tuning(settings.model_dump(), context["profile"]["id"]):
+                if behavior["profile_id"] != "legacy" or has_semantic_tuning(
+                    settings.model_dump(), context["profile"]["id"]
+                ):
                     semantic_options["semantic"] = semantic_parameters(
-                        settings.model_dump(), model_id=context["profile"]["id"]
+                        settings.model_dump(),
+                        behavior,
+                        model_id=context["profile"]["id"],
                     )
                 assessment, overlay = cast(SemanticCandidate, model).detect(
                     payload,

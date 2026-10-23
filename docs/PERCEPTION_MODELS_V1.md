@@ -118,3 +118,49 @@ configuration containing movement approval as a shortcut.
 - https://huggingface.co/Tanishjain9/fast-scnn-floor-segmentation
 - https://docs.ultralytics.com/tasks/semantic/
 - https://github.com/ultralytics/assets/releases/tag/v8.4.0
+
+## Operator caution and model tuning
+
+The **Caution level** selector is visible beside the perception selector, above
+the camera, in Manual, Automatic and Journey views. Choices are Legacy,
+Cautious, Balanced and Fluid. Only **Apply** persists a choice; a draft does not
+change the active profile. Both panels poll the Pi's revisioned configuration.
+A local Canny/SSD/TFLite provider retains its own executor; new host temporal
+profiles are unavailable there, with an explicit explanation and Legacy rollback.
+
+Open **Selected model settings** below the caution selector. Depth Anything V2
+exposes its existing residual/outlier/slope thresholds. SegFormer B0 and YOLO
+semantic expose floor-only or floor-and-rug plus optional overrides for pixel
+confidence, floor fraction, uncertain fraction and region fraction. Inheritance
+uses the selected caution profile; an explicit value belongs to that model only.
+ADE20K floor=3 and rug=28 are separate classes. Rug is traversable only when
+floor-and-rug is explicitly selected. Road/sidewalk are never added implicitly.
+Legacy SegFormer without an explicit model ID uses the same editor.
+
+The Pi persists `perception.semantic_models`, keyed by canonical host model ID.
+Each record has `version=1`, `surface=floor_only|floor_rug` and nullable
+`pixel_confidence`, `min_floor_fraction`, `max_uncertain_fraction`,
+`min_region_fraction`. Null means profile inheritance. An empty dictionary may
+be omitted for compatibility. Switching models preserves the other records.
+`semantic_model_policy_v1` is negotiated separately from temporal profiles;
+old hosts refuse configured policies instead of ignoring them.
+
+Changes require stopped navigation goals and fresh zero-motion executor state,
+use CAS and revoke previous navigation/calibration/sweep approval. They persist
+observation mode and never start a camera, model run or robot. Explicit semantic
+model selection remains observation-only. The surface mapping and resolved
+thresholds are shared by classification, preview, compact maps and offline
+analysis. YOLO resizes class logits in bounded channel batches; numerical parity
+is checked without changing its exported model.
+
+The archive panel starts in offline Legacy and needs no Pi. **Load saved Rider
+settings** explicitly reads the current Pi config, freezing caution, per-model
+settings, ROI and depth thresholds for that experiment. It does not change the
+selected offline checkpoint or copy live model identity/movement approval.
+The panel classifies individual frames/maps; complete temporal evaluation uses
+`scripts/replay_navigation_policy.py --profile ... --perception settings.json`.
+Explicit replay settings require matching canonical model identity (and artifact
+hash if supplied). Semantic tuning requires labels plus confidence; old boolean
+masks cannot apply confidence or class changes. Depth requires depth masks.
+Returning to Legacy does not restore earlier driving approval. Downgrading code
+that rejects optional fields needs an idle, observation-only config migration.

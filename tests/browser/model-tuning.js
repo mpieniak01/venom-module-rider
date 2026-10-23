@@ -1,0 +1,41 @@
+// Run against the inert navigation-profiles fixture. No actual robot endpoints are used.
+async page => {
+  const check = (value, message) => { if (!value) throw new Error(message); };
+  const panel = page.getByTestId("model-tuning");
+  await panel.locator("summary").first().click();
+  const surface = page.getByTestId("tuning-surface"), apply = page.getByTestId("tuning-apply");
+  check(await surface.inputValue() === "floor_only", "Floor-only legacy default changed");
+  check(await page.evaluate(() => window.profileFixtureCalls.length) === 0, "Opening model tuning caused a write");
+  await surface.selectOption("floor_rug");
+  await page.getByTestId("tuning-mode-pixel_confidence").selectOption("custom");
+  await page.getByTestId("tuning-pixel_confidence").fill("0.82");
+  await apply.click(); await page.getByTestId("tuning-saved").waitFor();
+  const calls = await page.evaluate(() => window.profileFixtureCalls);
+  check(calls.length === 1 && calls[0].path === "/navigation/config", "Unexpected mutation");
+  const p = calls[0].body.values.perception;
+  check(p.model_id === "segformer-b0-ade20k" && p.semantic_models[p.model_id].surface === "floor_rug", "Model mapping was not saved");
+  check(p.semantic_models["yolo26n-sem-ade20k"].pixel_confidence === .9, "Other model settings were overwritten");
+  await page.getByTestId("fixture-model").selectOption("yolo26n-sem-ade20k");
+  check(await surface.inputValue() === "floor_rug", "Other model surface was lost");
+  check(await page.getByTestId("tuning-pixel_confidence").inputValue() === "0.9", "Other model override was lost");
+  await surface.selectOption("floor_only");
+  await page.getByTestId("fixture-other-panel").click();
+  check(await apply.isDisabled(), "Stale model draft remained writable");
+  check((await page.getByTestId("tuning-message").textContent()).includes("drugim panelu"), "Missing model CAS conflict");
+  await page.getByTestId("tuning-refresh").click();
+  await page.getByTestId("fixture-drive").click(); await surface.selectOption("floor_only");
+  check(await apply.isDisabled(), "Model tuning writable during active drive");
+  await page.getByTestId("fixture-pause").click(); await page.getByTestId("tuning-refresh").click();
+  await page.getByTestId("fixture-support").click();
+  check(await surface.isDisabled(), "Legacy backend enabled unsupported semantic tuning");
+  check((await page.getByTestId("tuning-message").textContent()).includes("aktualizacji"), "No update guidance for old backend");
+  await page.getByTestId("fixture-support").click();
+  await page.getByTestId("fixture-model").selectOption("depth-anything-v2-indoor-small");
+  check(await page.getByTestId("tuning-residual_limit").isVisible(), "Depth-specific settings missing");
+  check(await surface.count() === 0, "Semantic options shown for depth model");
+  await page.getByTestId("fixture-language").selectOption("de");
+  check((await panel.textContent()).includes("Gewähltes Modell"), "Missing German model tuning");
+  await page.setViewportSize({ width: 390, height: 844 });
+  check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "Model tuning overflows mobile layout");
+  return { scenarios: 10, mutations: calls.length, robot_contacted: false, pass: true };
+}

@@ -144,3 +144,6 @@ current configuration and remove only that new field under idle/disarmed
 conditions. Reset `mode=observe`, `verified=false`, empty calibration/model
 approval and `avoidance.sweep_verified=false`; never restore old movement
 permission from a backup. Model identity migration remains separate.
+
+
+Operator placement, per-model overrides and archive import are documented in [perception models](PERCEPTION_MODELS_V1.md#operator-caution-and-model-tuning).

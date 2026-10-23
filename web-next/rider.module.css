@@ -666,3 +666,20 @@
   /* The model drawer may use the mode area, preserving the global and pad STOP. */
   .perceptionModels[open] { position:fixed;top:calc(var(--rider-page-top,0px) + var(--rider-header-height,160px) + 48px);bottom:max(8px,25dvh);left:calc(var(--rider-page-left,0px) + 8px);width:calc(var(--rider-page-width,100vw) - 16px);right:auto;z-index:1001; }
 }
+
+/* The operator's caution selector stays visible without opening a settings drawer. */
+.navigationProfiles { flex:0 0 auto;min-width:0;border-bottom:1px solid var(--r-border);padding:4px 0;font-size:12px; }
+.navigationProfiles .perceptionBody { padding:2px 0;gap:4px; }
+.navigationProfiles .perceptionSummary { flex-wrap:wrap; }
+.navigationProfiles .perceptionSelection { gap:6px; }
+.navigationProfiles .perceptionSelection .field { flex:1 1 150px; }
+.navigationProfiles .perceptionSelection .button { width:auto; }
+.navigationProfiles .hint,.navigationProfiles .small { margin:2px 0; }
+.navigationProfiles > .perceptionBody > .details { max-height:150px;overflow:auto; }
+.tuningField { display:grid;grid-template-columns:minmax(0,1fr) minmax(90px,.5fr);gap:8px; }
+.tuningField .field { min-width:0; }
+.tuningField input { width:100%;min-width:0; }
+@container rider (max-width:720px) {
+  .navigationProfiles .perceptionSelection .field { flex-basis:130px; }
+  .navigationProfiles .perceptionSelection .button { padding:0 6px; }
+}

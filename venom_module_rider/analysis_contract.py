@@ -15,6 +15,7 @@ from .api.schemas import StrictModel
 from .depth_detector import PerceptionSettings
 from .ground_config import GroundGeometry
 from .samples_contract import RecordID, RequestID
+from .vision_contract import BehaviorSettings
 
 
 class AnalysisSpec(StrictModel):
@@ -30,6 +31,7 @@ class AnalysisSpec(StrictModel):
     perception: PerceptionSettings = PerceptionSettings(engine="depth_plane")
     geometry: GroundGeometry = GroundGeometry(mode="image")
     quality_mode: Literal["production", "model_probe"] = "production"
+    behavior: BehaviorSettings = Field(default_factory=BehaviorSettings)
     capture_evidence: StrictBool = False
     window: Literal[1, 3, 5] = 1
     offset: Annotated[StrictInt, Field(ge=0, le=999)] = 0

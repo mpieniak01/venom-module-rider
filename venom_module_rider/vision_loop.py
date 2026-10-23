@@ -63,6 +63,13 @@ class VisionLoop:
             if frame.behavior.profile_id != "legacy"
             else {}
         )
+        from .perception_tuning import has_semantic_tuning, semantic_parameters
+
+        perception = frame.perception.model_dump()
+        if frame.behavior.profile_id != "legacy" or has_semantic_tuning(perception):
+            options["semantic"] = semantic_parameters(
+                perception, frame.behavior.model_dump()
+            )
         return self.detector.detect(payload, frame.corridor, **options)
 
     def _detect_depth(self, payload, frame):
@@ -110,7 +117,7 @@ class VisionLoop:
             "supported_protocol_versions": [1, 2, 3],
             "navigation_journey_version": 1,
             "temporal_navigation_v1": importlib.util.find_spec("cv2") is not None,
-            "semantic_model_policy_v1": True,
+            "semantic_model_policy_v1": importlib.util.find_spec("cv2") is not None,
             "ground_geometry_supported": callable(
                 getattr(self.depth_detector, "detect_ground", None)
             ),

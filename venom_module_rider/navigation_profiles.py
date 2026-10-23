@@ -92,6 +92,11 @@ def parameters(value, perception=None):
 def policy_digest(value, perception=None):
     behavior = validate_behavior(value)
     payload = {"behavior": behavior, "parameters": parameters(behavior, perception)}
+    if behavior["profile_id"] == "legacy" and perception is not None:
+        from .perception_tuning import has_semantic_tuning, semantic_parameters
+
+        if has_semantic_tuning(perception):
+            payload["semantic"] = semantic_parameters(perception, behavior)
     return hashlib.sha256(
         json.dumps(
             payload, sort_keys=True, separators=(",", ":"), allow_nan=False

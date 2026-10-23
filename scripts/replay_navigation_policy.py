@@ -83,12 +83,27 @@ def _read_maps(path: Path) -> dict[str, Any]:
     return maps
 
 
+def _model_identity(row: Mapping[str, Any], perception: Mapping[str, Any]) -> None:
+    """Explicit model settings must never be scored against another model's maps."""
+    from venom_module_rider.perception_tuning import active_model_id
+
+    context = row.get("context")
+    if not isinstance(context, dict) or context.get("model_id") != active_model_id(
+        perception
+    ):
+        raise ValueError("replay_model_identity")
+    artifact = perception.get("artifact_sha256")
+    if artifact and context.get("model_sha256") != artifact:
+        raise ValueError("replay_model_artifact")
+
+
 def replay(
     manifest: Path,
     params: Mapping[str, Any],
     output: Path,
     *,
     behavior: Mapping[str, Any] | None = None,
+    perception: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Write streamed results and return counts; no generated truth labels."""
     import numpy as np
@@ -114,8 +129,11 @@ def replay(
         profile = {
             "id": behavior["profile_id"],
             "behavior": dict(behavior),
-            "effective_policy_sha256": policy_digest(dict(behavior)),
+            "effective_policy_sha256": policy_digest(
+                dict(behavior), dict(perception) if perception is not None else None
+            ),
             "qualified": False,
+            **({"perception": dict(perception)} if perception is not None else {}),
         }
     output.parent.mkdir(parents=True, exist_ok=True)
     with (
@@ -128,10 +146,21 @@ def replay(
             if not line.strip():
                 continue
             row = json.loads(line)
+            if perception is not None:
+                _model_identity(row, perception)
             path = _asset(manifest.parent, row["maps"])
             maps = _read_maps(path)
             if ("labels" in maps) != ("confidence" in maps):
                 raise ValueError("replay_semantic_pair")
+            if perception is not None:
+                semantic = perception.get("engine") == "segformer"
+                if semantic and not {"labels", "confidence"}.issubset(maps):
+                    raise ValueError("replay_semantic_maps_required")
+                if not semantic and (
+                    "labels" in maps
+                    or not {"floor", "obstacle", "uncertain"}.issubset(maps)
+                ):
+                    raise ValueError("replay_depth_maps_required")
             map_sha256 = sha256(path.read_bytes()).hexdigest()
             maps_digest.update(map_sha256.encode())
             shape = maps["floor"].shape if "floor" in maps else maps["labels"].shape
@@ -235,24 +264,40 @@ def main(argv: list[str] | None = None) -> int:
         choices=("cautious", "balanced", "fluid"),
         help="Immutable experimental profile from the shared registry",
     )
+    parser.add_argument(
+        "--perception",
+        type=Path,
+        help="Saved per-model perception settings JSON; used with --profile",
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     import cv2
 
     cv2.setNumThreads(1)
     behavior = None
+    perception = None
+    if args.perception:
+        if not args.profile or args.perception.stat().st_size > 4096:
+            raise ValueError("replay_perception")
+        from venom_module_rider.depth_detector import PerceptionSettings
+
+        perception = PerceptionSettings.model_validate_json(
+            args.perception.read_text()
+        ).model_dump()
     if args.profile:
         from venom_module_rider.navigation_profiles import parameters
 
         behavior = {"version": 1, "profile_id": args.profile, "profile_revision": 1}
-        params = parameters(behavior)
+        params = parameters(behavior, perception)
     else:
         if args.output.resolve() == args.params.resolve():
             raise ValueError("replay_output_overwrites_input")
         params = json.loads(args.params.read_text(encoding="utf-8"))
         if not isinstance(params, dict):
             raise ValueError("replay_params")
-    summary = replay(args.manifest, params, args.output, behavior=behavior)
+    summary = replay(
+        args.manifest, params, args.output, behavior=behavior, perception=perception
+    )
     summary_path = args.output.with_suffix(".summary.json")
     summary_path.write_text(
         json.dumps(summary, indent=2, allow_nan=False) + "\n", encoding="utf-8"
