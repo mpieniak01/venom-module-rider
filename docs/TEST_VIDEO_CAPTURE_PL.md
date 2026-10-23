@@ -6,8 +6,25 @@ współdzielonego natywnego strumienia `/api/v1/rider/camera/stream/raw`.
 Wykonuje tylko GET: nie uruchamia kamery, analizy, jazdy ani ARM.
 Kamerę i jazdę operator uruchamia osobno, istniejącymi kontrolkami.
 
-## Zapis
-W konsoli Ubuntu-Venom, z istniejącego checkoutu:
+## Zapis z PowerShell Windows
+Ścieżka w prompt zaczynająca się od \\wsl.localhost nie zmienia PowerShella
+w konsolę Linux. Nie uruchamiaj w nim cd /home/ubuntu/venom ani .venv/bin/python.
+Z dowolnego katalogu PowerShell użyj jawnie dystrybucji aplikacji:
+
+```powershell
+wsl.exe -d Ubuntu-Venom -u ubuntu --cd /home/ubuntu/venom -- /home/ubuntu/venom/.venv/bin/python -m venom_module_rider.video_capture check
+wsl.exe -d Ubuntu-Venom -u ubuntu --cd /home/ubuntu/venom -- /home/ubuntu/venom/.venv/bin/python -m venom_module_rider.video_capture record --seconds 60
+```
+
+Ubuntu-24.04 to środowisko Rider-Pi; ścieżka Venoma nie istnieje w tej dystrybucji.
+Aby otworzyć właściwą konsolę Linux z PowerShell:
+
+```powershell
+wsl.exe -d Ubuntu-Venom -u ubuntu --cd /home/ubuntu/venom
+```
+
+## Zapis wewnątrz Ubuntu-Venom
+Dopiero w tej konsoli Linux, z istniejącego checkoutu:
 
 ```sh
 cd /home/ubuntu/venom
