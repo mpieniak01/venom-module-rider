@@ -14,6 +14,7 @@ check-python:
 
 check-web:
 	node --check tests/browser/operator-workspace.js
+	node --check tests/browser/journey-start-prod.js
 	node --check tests/browser/operator-status.js
 	node --check tests/browser/model-tuning.js
 	node --check tests/browser/navigation-profiles.js

@@ -371,6 +371,33 @@ Run from the module checkout. Browser launch settings are environment-specific;
 the Node syntax check is included in the check-web target.
 
 
+### Cold journey start regression
+
+Explicit **Prepare** starts observation without granting motion. The primary
+button then offers image/steering confirmation after fresh matching frames arrive;
+**Start journey** remains a separate action. A rejected configuration write
+restores the observation requested by the operator and permits retry. STOP takes
+precedence over pending preparation or start operations.
+
+Before releasing changes to journey preparation, run
+`tests/browser/journey-start-prod.js` against both connection modes. The fixture
+begins with stopped, unverified revision 134, a historical GO result and Pi GET
+metadata. It checks missing/mismatched frames, a rejected save and recovery,
+retry, explicit Start, STOP and cancellation of delayed Start. Every Rider API
+request is intercepted; these runs never contact the physical executor.
+
+    playwright-cli -s=rider-regression open http://localhost:3300/rider
+    playwright-cli -s=rider-regression run-code --filename=tests/browser/journey-start-prod.js
+    playwright-cli -s=rider-regression goto 'http://localhost:3300/rider?fixtureMode=demo'
+    playwright-cli -s=rider-regression run-code --filename=tests/browser/journey-start-prod.js
+    playwright-cli -s=rider-regression close
+
+Run `tests/browser/operator-workspace.js` as well for camera/keypad stability,
+compact settings and nonoverlapping journey labels at seven viewport sizes.
+`make check-web` checks script syntax and web unit tests; it does **not** execute
+these browser flows. Fixture success does not replace physical operator acceptance.
+
+
 ### Bounded vision trial
 
 The operator starts a trial with one POST to /api/v1/rider/navigation/trial. The request identifies the current Pi generation, configuration and manual-settings revisions, a unique request_id, a fresh Pi-clock timestamp/TTL, and explicit operator consent/plan. The live executor must advertise scoped_stop_generation_supported and remote_decision_deadline_supported. Pi prepares its existing camera/goal/configuration services and grants one navigation ARM for at most 10 seconds. Requests are not replayed on refresh or reconnect.
