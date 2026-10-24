@@ -1,0 +1,79 @@
+import {useEffect,useRef,useState,type PointerEvent} from "react";
+import {apiFetch} from "@/lib/api-client";
+import {Ruler} from "lucide-react";
+import {imagePoint} from "../lib/corridor-editor";
+import {bodyEdges,emptyReference,moveReference,readReference,validReference,type ImageReference,type ReferenceState} from "../lib/image-reference";
+import {data,errorCode} from "../lib/model";
+import type {RiderClient} from "../lib/use-rider";
+import type {Translator} from "../lib/i18n";
+import {Button,Field,Input} from "./primitives";
+import styles from "../rider.module.css";
+
+export function useImageReference(session:string){
+  const [state,setState]=useState<ReferenceState|null>(null),[draft,setDraft]=useState<ImageReference|null>(null),[editing,setEditing]=useState(false),[error,setError]=useState(""),[saving,setSaving]=useState(false);
+  const owner=useRef(session);owner.current=session;
+  useEffect(()=>{
+    setState(null);setDraft(null);setEditing(false);setSaving(false);setError("");if(!session)return;
+    const abort=new AbortController();
+    void apiFetch("/api/v1/rider/navigation/image-reference",{signal:abort.signal}).then(result=>{if(abort.signal.aborted)return;const value=readReference(data(result));if(!value)throw new Error("invalid_reference");setState(value);}).catch(()=>{if(!abort.signal.aborted)setError("reference.unavailable");});
+    return ()=>abort.abort();
+  },[session]);
+  const save=async(client:RiderClient)=>{
+    if(!state||!draft||!validReference(draft)||saving)return false;
+    const origin=client.currentSession();setSaving(true);setError("");
+    try{const result=await client.mutate("/navigation/image-reference",{revision:state.revision,values:draft},"POST",true);if(owner.current!==origin||client.currentSession()!==origin)return false;const saved=readReference(data(result));if(!saved)throw new Error("invalid_reference");setState(saved);setDraft(null);setEditing(false);return true;}
+    catch(error){if(owner.current!==origin)return false;const conflict=errorCode(error).includes("conflict");if(conflict){const latest=await apiFetch("/api/v1/rider/navigation/image-reference").then(result=>readReference(data(result))).catch(()=>null);if(latest&&owner.current===origin){setState(latest);setDraft(null);setEditing(false);}}if(owner.current===origin)setError(conflict?"conflict":"reference.saveFailed");return false;}
+    finally{if(owner.current===origin)setSaving(false);}
+  };
+  return {state,draft,setDraft,editing,setEditing,error,saving,save,values:draft??state?.values??null};
+}
+export type ReferenceController=ReturnType<typeof useImageReference>;
+
+export function ImageReferenceControls({reference,client,size,t}:{reference:ReferenceController;client:RiderClient;size:[number,number];t:Translator}){
+  const [open,setOpen]=useState(false),v=reference.values;
+  const begin=()=>{reference.setDraft(structuredClone(v??emptyReference(size)));setOpen(true);};
+  const change=(next:ImageReference)=>reference.setDraft(next);
+  return <span className={styles.referenceControl}>
+    <Button data-testid="image-reference-toggle" aria-label={t("reference.title")} title={t("reference.title")} aria-pressed={!!v?.visible} onClick={()=>open?setOpen(false):begin()}><Ruler size={15}/></Button>
+    {open&&<div className={styles.referenceSettings} role="dialog" aria-label={t("reference.title")}>
+      <strong>{t("reference.title")}</strong><p className={styles.hint}>{t("reference.hint")}</p>
+      {reference.error&&<p role="alert">{t(reference.error)}</p>}
+      {!reference.state&&<p>{t(reference.error||"loading")}</p>}
+      {v&&<>
+        <label className={styles.flex}><input data-testid="reference-visible" type="checkbox" checked={v.visible} onChange={e=>change({...v,visible:e.target.checked})}/>{t("reference.visible")}</label>
+        <div className={styles.grid3}>{(["track_width_cm","robot_width_cm","camera_height_cm"] as const).map(key=><Field key={key} label={t("reference."+key)+" · cm"}><Input data-testid={"reference-"+key} type="number" min=".1" step=".1" value={v[key]>0?v[key]:""} onChange={e=>change({...v,[key]:e.target.value===""?0:Number(e.target.value)})}/></Field>)}</div>
+        <div className={styles.grid3}>{v.markers.map(([cm,y],i)=><Field key={i} label={t("reference.marker")+" "+(i+1)+" · cm"}><Input type="number" min=".1" step=".1" value={cm>0?cm:""} onChange={e=>change({...v,markers:v.markers.map((p,j)=>j===i?[Number(e.target.value),y]:p)})}/></Field>)}</div>
+        <p className={styles.hint}>{t("reference.dragHint")}</p>{!validReference(v)&&<p role="status">{t("reference.invalid")}</p>}
+        <div className={styles.flex}>
+          <Button data-testid="reference-edit" onClick={()=>{reference.setEditing(true);setOpen(false);}}>{t("reference.edit")}</Button>
+          <Button data-testid="reference-save" tone="primary" disabled={!reference.state||!client.canMutate||reference.saving||!validReference(v)} onClick={()=>void reference.save(client).then(saved=>{if(saved)setOpen(false);})}>{t("reference.save")}</Button>
+          <Button onClick={()=>{reference.setDraft(null);reference.setEditing(false);setOpen(false);}}>{t("cancel")}</Button>
+        </div>
+      </>}
+    </div>}
+  </span>;
+}
+
+export function ImageReferenceOverlay({reference,size,t}:{reference:ReferenceController;size:[number,number];t:Translator}){
+  const drag=useRef<string|null>(null),v=reference.values,[w,h]=size;
+  if(!v||(!v.visible&&!reference.editing)||v.frame_size[0]!==w||v.frame_size[1]!==h)return null;
+  const body=v.track_width_cm>0?bodyEdges(v):[[],[]],poly=(points:number[][])=>points.map(([x,y])=>(x*w)+","+Math.min(h-1,y*h)).join(" ");
+  const point=(e:PointerEvent<SVGSVGElement>)=>{const b=e.currentTarget.getBoundingClientRect();return imagePoint(e.clientX-b.left,e.clientY-b.top,b.width,b.height,w,h);};
+  return <svg data-testid="image-reference-overlay" data-purpose="visual_reference_only" aria-label={t("reference.title")} viewBox={"0 0 "+w+" "+h} preserveAspectRatio="xMidYMid meet" style={{position:"absolute",inset:0,width:"100%",height:"100%",pointerEvents:reference.editing?"auto":"none",touchAction:"none"}}
+    onPointerDown={e=>{if(!reference.editing)return;drag.current=(e.target as Element).closest("[data-reference-handle]")?.getAttribute("data-reference-handle")??null;if(drag.current)e.currentTarget.setPointerCapture(e.pointerId);}}
+    onPointerMove={e=>{const p=point(e);if(p&&drag.current&&reference.editing)reference.setDraft(moveReference(v,drag.current,p[0],p[1]));}}
+    onPointerUp={()=>{drag.current=null;}} onPointerCancel={()=>{drag.current=null;}}>
+    <g fill="none" stroke="#7edcff" strokeWidth="1" strokeDasharray="4 3">{[v.left_edge,v.right_edge].map((edge,i)=><polyline key={i} points={poly(edge)}/>)}</g>
+    {v.track_width_cm>0&&<g fill="none" stroke="white" strokeWidth=".8" strokeDasharray="2 3">{body.map((edge,i)=><polyline key={i} points={poly(edge)}/>)}</g>}
+    <g fontSize="7" fontFamily="sans-serif" fill="white" stroke="#061522" strokeWidth="2" paintOrder="stroke">
+      <text x="5" y="11">{t("reference.approximate")} · {t("reference.lowest")}</text>
+      <text x="5" y="21">{t("reference.track")} {v.track_width_cm} cm · {t("reference.robot")} {v.robot_width_cm} cm</text>
+      {v.markers.map(([cm,y],i)=><g key={i} data-reference-handle={"marker:"+i} style={{cursor:reference.editing?"ns-resize":undefined}}>
+        <line x1="3" y1={Math.min(h-1,y*h)} x2={w-3} y2={Math.min(h-1,y*h)} stroke="#7edcff" strokeWidth=".7" strokeDasharray="3 3"/>
+        <text x={i%2?w-5:5} y={Math.min(h-5,y*h-3)} textAnchor={i%2?"end":"start"}>{cm} cm</text>
+        {reference.editing&&<circle cx={w/2} cy={Math.min(h-3,y*h)} r="3" fill="#7edcff" stroke="white" strokeWidth="1"/>}
+      </g>)}
+    </g>
+    {reference.editing&&(["left","right"] as const).flatMap(side=>(side==="left"?v.left_edge:v.right_edge).map(([x,y],i)=><circle key={side+i} data-reference-handle={side+":"+i} cx={x*w} cy={Math.min(h-3,y*h)} r="3" fill="#7edcff" stroke="white" strokeWidth="1" style={{cursor:"move"}}/>))}
+  </svg>;
+}

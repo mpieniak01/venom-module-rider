@@ -417,3 +417,20 @@ async def validate_model_policy(request, device, frame):
         ):
             raise RiderError("model_selection_conflict", 409)
         models.observe_policy(device, policy)
+
+
+@router.get("/navigation/image-reference")
+async def image_reference(request: Request):
+    """Pi-owned measured display references, separate from navigation authority."""
+    return await request.app.state.rider.read(
+        "/api/navigation/image-reference", 0.2, force=True
+    )
+
+
+@router.post("/navigation/image-reference")
+async def configure_image_reference(request: Request):
+    return await request.app.state.rider.mutate(
+        "/api/navigation/image-reference",
+        await request.json(),
+        request.headers.get("X-Rider-Session"),
+    )
