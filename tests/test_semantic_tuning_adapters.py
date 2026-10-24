@@ -300,6 +300,7 @@ def test_native_semantic_adapters_receive_policy_and_keep_source_overlay(
 
     from venom_module_rider import perception_runtime
 
+    monkeypatch.setattr("venom_module_rider.cuda_execution.require_cuda", lambda: "cpu")
     # Both model adapters share semantic_output; the fixture still exercises
     # their native RGB preprocessor and actual classification/preview path.
     if adapter_name == "TorchSegformer":
@@ -342,6 +343,7 @@ def test_torch_rug_policy_rejects_checkpoint_with_incompatible_class_mapping(
 
     import torch
 
+    monkeypatch.setattr("venom_module_rider.cuda_execution.require_cuda", lambda: "cpu")
     from venom_module_rider.perception_runtime import TorchSegformer
 
     monkeypatch.setitem(

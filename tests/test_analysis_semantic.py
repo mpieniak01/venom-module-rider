@@ -71,7 +71,7 @@ def test_semantic_profile_reuses_live_files_and_receipt_without_paths(
     public = profile.describe()
     assert public["task"] == "semantic" and public["windows"] == [1]
     assert public["installed"] and not public["loaded"]
-    assert not public["drive_supported"] and public["device"] == "cpu"
+    assert not public["drive_supported"] and public["device"] == "cuda"
     assert str(tmp_path) not in json.dumps(public)
     qualified = profile.qualify()
     assert qualified["model_sha256"] == artifact["sha256"]
@@ -184,6 +184,7 @@ def execute(source, monkeypatch):
         sys.modules,
         "torch",
         SimpleNamespace(
+            cuda=SimpleNamespace(is_initialized=lambda: False),
             set_num_threads=thread_counts.append,
             set_num_interop_threads=lambda _value: None,
         ),
@@ -210,7 +211,7 @@ def test_real_archive_overlay_and_semantic_metrics_share_depth_report_schema(
     assert report["summary"]["frames"] == 3
     assert report["summary"]["temporal_pairs"] == 2
     assert report["summary"]["false_go"] is None
-    assert report["device"] == "cpu" and report["peak_vram_mib"] == 0
+    assert report["device"] == "cuda" and report["peak_vram_mib"] == 0
     assert report["model_load_ms"] is None
     assert report["model"]["load_timing"] == "included_in_first_perception_call"
     assert [row["state"] for row in report["rows"]] == ["clear", "obstacle", "unknown"]

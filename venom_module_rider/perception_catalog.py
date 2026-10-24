@@ -110,7 +110,7 @@ class LiveCatalog:
             "drive_supported": model_id == DEPTH,
             "distance_measurement": False,
             "provider": "venom",
-            "execution_provider": "torch-auto" if model_id == DEPTH else "cpu",
+            "execution_provider": "cuda",
             "qualification_details": (
                 ["external_data_missing", "preprocessing_unverified"]
                 if model_id == FAST

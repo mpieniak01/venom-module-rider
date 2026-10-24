@@ -1,4 +1,4 @@
-"""Owned CPU-only worker. Reads sources, returns derived bytes, never opens SQLite."""
+"""Owned CUDA model worker. Reads sources, returns derived bytes, never opens SQLite."""
 
 from __future__ import annotations
 
@@ -174,7 +174,7 @@ def run(job, output, *, candidate_factory=None, semantic_factory=None):
                     model = (candidate_factory or Candidate)(
                         profile["backend"],
                         profile["model"],
-                        "cpu",
+                        "cuda",
                         profile["resolution"],
                     )
                     model_load_ms = (time.perf_counter() - start) * 1000
@@ -309,6 +309,8 @@ def run(job, output, *, candidate_factory=None, semantic_factory=None):
         )
         row["timings_ms"].update(ack.get("timings_ms", {}))
         rows.append(row)
+    import torch
+
     summary = summarize(inputs, rows, order)
     report = {
         "schema_version": 1,
@@ -321,8 +323,12 @@ def run(job, output, *, candidate_factory=None, semantic_factory=None):
         "model": model_metadata,
         "model_load_ms": model_load_ms,
         "peak_rss_mib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024,
-        "peak_vram_mib": 0,
-        "device": "cpu",
+        "peak_vram_mib": (
+            torch.cuda.max_memory_allocated() / 1024**2
+            if torch.cuda.is_initialized()
+            else 0
+        ),
+        "device": "cuda",
         "drive_supported": False,
         "distance_measurement": False,
     }

@@ -88,6 +88,7 @@ def execute(job, monkeypatch):
         sys.modules,
         "torch",
         SimpleNamespace(
+            cuda=SimpleNamespace(is_initialized=lambda: False),
             set_num_threads=lambda value: None,
             set_num_interop_threads=lambda value: None,
         ),

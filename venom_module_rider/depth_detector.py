@@ -247,7 +247,7 @@ class DepthDetector:
         self.model = None
         self.processor = None
         self.digest = ""
-        self.device = "cpu"
+        self.device = "cuda"
 
     def status(self):
         manifest = self.path / "manifest.json"
@@ -265,7 +265,6 @@ class DepthDetector:
     def _load(self):
         if self.model is not None:
             return
-        import torch
         from transformers import AutoImageProcessor, AutoModelForDepthEstimation
 
         manifest = json.loads((self.path / "manifest.json").read_text())
@@ -279,7 +278,9 @@ class DepthDetector:
         self.digest = hashlib.sha256(
             json.dumps(manifest["files"], sort_keys=True).encode()
         ).hexdigest()
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        from .cuda_execution import require_cuda
+
+        self.device = require_cuda()
         self.processor = AutoImageProcessor.from_pretrained(
             self.path, local_files_only=True
         )

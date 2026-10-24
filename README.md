@@ -598,3 +598,7 @@ New profiles add source-region history, bounded SLOW and current-image boundary
 diagnostics while retaining legacy compatibility and independent motion gates.
 See [Temporal navigation v1](docs/TEMPORAL_NAVIGATION_V1.md) for capability,
 compact-map replay, tests and the required local acceptance.
+
+## CUDA requirement for Rider perception
+
+Live perception, model qualification and archive analysis require CUDA. Missing CUDA or a CUDA ONNX execution provider is an error; model inference does not fall back to CPU. Install the module vision extra with onnxruntime-gpu==1.27.0 for the CUDA 13 environment; do not install the CPU onnxruntime wheel into the same interpreter. GPU execution is verified from the loaded model/session, not from catalog labels. Existing CPU performance reports do not qualify the CUDA deployment.

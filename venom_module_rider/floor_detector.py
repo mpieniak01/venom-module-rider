@@ -24,6 +24,7 @@ class FloorDetector:
         return {
             "configured": self.path.is_file() and len(self.expected) == 64,
             "loaded": self.session is not None,
+            "device": "cuda",
             "model": "segformer-b0-ade",
             "sha256": self.digest or self.expected,
             "purpose": "floor_segmentation",
@@ -38,14 +39,17 @@ class FloorDetector:
         digest = hashlib.sha256(self.path.read_bytes()).hexdigest()
         if digest != self.expected:
             raise ValueError("vision_model_hash_mismatch")
+        from .cuda_execution import require_cuda
+
+        require_cuda()
         import onnxruntime as ort
 
         options = ort.SessionOptions()
         options.intra_op_num_threads = self.threads
         options.inter_op_num_threads = 1
-        session = ort.InferenceSession(
-            str(self.path), options, providers=["CPUExecutionProvider"]
-        )
+        from .cuda_execution import cuda_session
+
+        session = cuda_session(self.path, options)
         if len(session.get_inputs()) != 1:
             raise ValueError("vision_model_format")
         self.session, self.digest = session, digest

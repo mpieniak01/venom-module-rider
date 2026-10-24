@@ -166,6 +166,7 @@ export function PerceptionModelsPanel({ client, t, language, policy, goals, lock
       <Pill tone={runtime === "active" ? "good" : "warning"}>{t("perception.runtime." + runtime)}</Pill>
       <span>{t("perception.loaded")}: {active ?? "—"}</span>
       {catalog?.provider === "venom" && <span>{t("perception.effectiveProvider")}: {str(details.execution_provider) || "N/A"}</span>}
+      {String(details.error ?? "").startsWith("vision_cuda_") && <span role="status">{t("perception.cudaRequired")}</span>}
       <Pill>{t(selected?.drive_supported === false ? "perception.observeOnly" : "perception.noMotionGrant")}</Pill>
     </div>
     {block && <p className={styles.hint} role="status" data-testid="perception-switch-block">{t(block)}</p>}

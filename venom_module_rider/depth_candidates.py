@@ -82,6 +82,11 @@ class Candidate:
     """One model per benchmark process; official SDK network + input processor."""
 
     def __init__(self, name, path, device, resolution):
+        if device != "cuda":
+            raise ValueError("vision_cuda_required")
+        from .cuda_execution import require_cuda
+
+        require_cuda()
         import torch
 
         self.name, self.device, self.resolution = name, device, resolution

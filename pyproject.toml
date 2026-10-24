@@ -10,7 +10,7 @@ requires-python = ">=3.12"
 dependencies = ["fastapi>=0.115,<1", "httpx>=0.28,<1", "pydantic>=2,<3"]
 
 [project.optional-dependencies]
-vision = ["onnxruntime>=1.20,<2", "numpy>=1.26,<3", "pillow>=10,<13"]
+vision = ["onnxruntime-gpu==1.27.0", "torch==2.13.0", "numpy>=1.26,<3", "pillow>=10,<13"]
 vision_depth = ["torch>=2.6,<3", "transformers>=4.50,<6", "numpy>=1.26,<3", "pillow>=10,<13"]
 vision_temporal = ["opencv-python==4.11.0.86", "numpy>=1.26,<3", "pillow>=10,<13"]
 vision_export = ["torch>=2.6,<3", "transformers>=4.50,<6", "onnx>=1.17,<2"]

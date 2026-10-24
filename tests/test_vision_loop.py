@@ -183,6 +183,9 @@ def test_model_loading_hash_and_output_validation(tmp_path, monkeypatch):
     import sys
     from types import SimpleNamespace
 
+    monkeypatch.setattr(
+        "venom_module_rider.cuda_execution.require_cuda", lambda: "cuda"
+    )
     model = tmp_path / "model.onnx"
     model.write_bytes(b"fixture")
     detector = FloorDetector()
@@ -195,6 +198,12 @@ def test_model_loading_hash_and_output_validation(tmp_path, monkeypatch):
     class Session:
         def __init__(self, *args, **kwargs):
             self.inputs = [SimpleNamespace(name="pixels")]
+
+        def get_providers(self):
+            return ["CUDAExecutionProvider"]
+
+        def disable_fallback(self):
+            pass
 
         def get_inputs(self):
             return self.inputs
@@ -209,7 +218,12 @@ def test_model_loading_hash_and_output_validation(tmp_path, monkeypatch):
         sys.modules,
         "onnxruntime",
         SimpleNamespace(
-            SessionOptions=lambda: SimpleNamespace(), InferenceSession=Session
+            get_available_providers=lambda: ["CUDAExecutionProvider"],
+            preload_dlls=lambda: None,
+            SessionOptions=lambda: SimpleNamespace(
+                add_session_config_entry=lambda *args: None
+            ),
+            InferenceSession=Session,
         ),
     )
     detector._load()
@@ -666,7 +680,7 @@ def test_depth_detector_local_manifest_lazy_load_preview_and_bounds(
         sys.modules,
         "torch",
         SimpleNamespace(
-            cuda=SimpleNamespace(is_available=lambda: False), inference_mode=nullcontext
+            cuda=SimpleNamespace(is_available=lambda: True), inference_mode=nullcontext
         ),
     )
     monkeypatch.setitem(

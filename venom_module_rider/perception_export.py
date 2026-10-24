@@ -15,9 +15,15 @@ EXPORTER = "8.4.184"
 def provision_yolo(catalog):
     import httpx
     import numpy as np
+
+    from .cuda_execution import require_cuda
+
+    require_cuda()
     import onnxruntime as ort
     import torch
     import ultralytics
+
+    from .cuda_execution import cuda_session, require_cuda
 
     if ultralytics.__version__ != EXPORTER:
         raise ValueError("model_exporter_mismatch")
@@ -55,20 +61,24 @@ def provision_yolo(catalog):
 
         from ultralytics import YOLO as Loader
 
-        model = cast(torch.nn.Module, Loader(str(source), task="semantic").model).eval()
+        model = (
+            cast(torch.nn.Module, Loader(str(source), task="semantic").model)
+            .eval()
+            .to(require_cuda())
+        )
         if model.names.get(3) != "floor" or len(model.names) != 150:
             raise ValueError("model_labels_invalid")
         # Export raw logits rather than upstream's class-only export: uncertainty
         # remains available, and postprocessing preserves original coordinates.
         pixels = torch.from_numpy(
             np.random.default_rng(7).random((1, 3, 640, 640), dtype=np.float32)
-        )
+        ).to(require_cuda())
         target = staging / "model.onnx"
         with (
             torch.inference_mode(),
             contextlib.redirect_stdout(__import__("sys").stderr),
         ):
-            reference = model(pixels).numpy()
+            reference = model(pixels).cpu().numpy()
             torch.onnx.export(
                 model,
                 (pixels,),
@@ -78,8 +88,8 @@ def provision_yolo(catalog):
                 opset_version=17,
                 dynamo=False,
             )
-        session = ort.InferenceSession(str(target), providers=["CPUExecutionProvider"])
-        actual = session.run(None, {"images": pixels.numpy()})[0]
+        session = cuda_session(target, ort.SessionOptions())
+        actual = session.run(None, {"images": pixels.cpu().numpy()})[0]
         if (
             reference.shape != actual.shape
             or not np.allclose(reference, actual, rtol=1e-3, atol=1e-3)
