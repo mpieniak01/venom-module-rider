@@ -159,8 +159,6 @@ class VisionLoop:
         return row[1] if row is not None else None
 
     async def _admit_inference(self, device_id, frame, source_key, diagnostic):
-        if getattr(self, "resources_suspended", False):
-            raise RiderError("model_resources_released", 409)
         depth = frame.perception.engine == "depth_plane"
         key = self._inference_key(device_id, frame, source_key)
         cached = self._cached_inference(key)

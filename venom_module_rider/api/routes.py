@@ -116,6 +116,9 @@ async def lifespan(app):
     from ..perception_service import PerceptionService
 
     app.state.rider_models = PerceptionService(app.state.rider_vision)
+    service.observation_preparer = (
+        lambda session: app.state.rider_models.prepare_observation(service, session)
+    )
     from ..model_resources import RiderModelResources
 
     app.state.rider_model_resources = RiderModelResources(app)

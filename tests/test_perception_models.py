@@ -258,3 +258,153 @@ async def test_legacy_loaded_model_is_visible_without_changing_selection(catalog
     finally:
         await service.close()
         await loop.close()
+
+
+@pytest.mark.parametrize("model", [SEGFORMER, DEPTH])
+async def test_explicit_observation_reloads_released_selection_without_policy_write(
+    catalog, monkeypatch, model
+):
+    import copy
+
+    artifact = provision(catalog, model)
+    loop = VisionLoop()
+    service = PerceptionService(loop, catalog=catalog)
+    domain = Domain()
+    domain.policy.update(verified=True, calibration_id="accepted", model_sha256=DIGEST)
+    domain.policy["perception"].update(
+        model_id=model,
+        engine=catalog.definition(model)["engine"],
+        artifact_sha256=artifact["sha256"],
+    )
+    original = copy.deepcopy(domain.policy)
+    calls = []
+
+    def warm(perception):
+        calls.append(perception.model_id)
+        service.runtime.identity = model, artifact["sha256"]
+        service.runtime.state = "active"
+
+    monkeypatch.setattr(service.runtime, "warm", warm)
+    try:
+        service.runtime.reset()
+        await service.prepare_observation(domain, "fixture")
+        await service.prepare_observation(domain, "fixture")
+        assert calls == [model]
+        service.runtime.reset()
+        await service.prepare_observation(domain, "fixture")
+        assert calls == [model, model]
+        assert domain.policy == original and not domain.posts
+        assert not hasattr(loop, "resources_suspended")
+        assert not service.switching and loop.busy is None and loop.depth_busy is None
+    finally:
+        await service.close()
+        await loop.close()
+
+
+async def test_observation_load_failure_does_not_change_policy_or_hide_retry(
+    catalog, monkeypatch
+):
+    artifact = provision(catalog)
+    loop = VisionLoop()
+    service = PerceptionService(loop, catalog=catalog)
+    domain = Domain()
+    domain.policy["perception"].update(
+        model_id=SEGFORMER, artifact_sha256=artifact["sha256"]
+    )
+
+    def fail(_perception):
+        raise RiderError("vision_cuda_unavailable", 503)
+
+    monkeypatch.setattr(service.runtime, "warm", fail)
+    try:
+        with pytest.raises(RiderError, match="stale_device_session"):
+            await service.prepare_observation(domain, "old")
+        with pytest.raises(RiderError, match="vision_cuda_unavailable"):
+            await service.prepare_observation(domain, "fixture")
+        assert not domain.posts and not service.switching
+        assert loop.busy is None and loop.depth_busy is None
+        monkeypatch.setattr(service.runtime, "warm", lambda _perception: None)
+        await service.prepare_observation(domain, "fixture")
+    finally:
+        await service.close()
+        await loop.close()
+
+
+async def test_observation_does_not_resume_after_policy_changes_during_warmup(
+    catalog, monkeypatch
+):
+    artifact = provision(catalog)
+    loop = VisionLoop()
+    service = PerceptionService(loop, catalog=catalog)
+    domain = Domain()
+    domain.policy["perception"].update(
+        model_id=SEGFORMER, artifact_sha256=artifact["sha256"]
+    )
+    monkeypatch.setattr(
+        service.runtime, "warm", lambda _: domain.policy.update(revision=3)
+    )
+    try:
+        with pytest.raises(RiderError, match="model_selection_conflict"):
+            await service.prepare_observation(domain, "fixture")
+        assert not domain.posts and not service.switching
+    finally:
+        await service.close()
+        await loop.close()
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+async def test_goal_prepares_model_only_for_explicit_observation_start(enabled):
+    from unittest.mock import AsyncMock
+
+    from venom_module_rider.service import RiderService
+
+    domain = RiderService(())
+    events = []
+
+    async def prepare(session):
+        assert session == domain.session
+        events.append("load")
+
+    async def mutate(path, body, session):
+        assert path == "/api/logic/feature/s15_venom_perception"
+        assert body == {"enabled": enabled} and session == domain.session
+        events.append("goal")
+        return {"data": {"ok": True}}
+
+    domain.read = AsyncMock(
+        return_value={
+            "data": {"features": [{"name": "s15_venom_perception", "can_move": False}]},
+            "meta": {},
+        }
+    )
+    domain.mutate = mutate
+    domain.observation_preparer = prepare
+    try:
+        await domain.goal("s15_venom_perception", {"enabled": enabled}, domain.session)
+        assert events == (["load", "goal"] if enabled else ["goal"])
+    finally:
+        await domain.close()
+
+
+async def test_goal_does_not_start_observation_if_model_loading_fails():
+    from unittest.mock import AsyncMock
+
+    from venom_module_rider.service import RiderService
+
+    domain = RiderService(())
+    domain.read = AsyncMock(
+        return_value={
+            "data": {"features": [{"name": "s15_venom_perception", "can_move": False}]},
+            "meta": {},
+        }
+    )
+    domain.mutate = AsyncMock()
+    domain.observation_preparer = AsyncMock(
+        side_effect=RiderError("vision_cuda_unavailable", 503)
+    )
+    try:
+        with pytest.raises(RiderError, match="vision_cuda_unavailable"):
+            await domain.goal("s15_venom_perception", {"enabled": True}, domain.session)
+        domain.mutate.assert_not_awaited()
+    finally:
+        await domain.close()

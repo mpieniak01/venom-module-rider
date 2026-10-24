@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from venom_module_rider.errors import RiderError
 from venom_module_rider.model_resources import RiderModelResources
 from venom_module_rider.vision_loop import VisionLoop
 
@@ -37,7 +36,7 @@ async def test_release_unloads_only_after_confirmed_prepare_and_clears_both_dete
     assert resource.release_model_resource() is False
     await resource.prepare_model_release()
     assert resource.release_model_resource() is True
-    assert loop.resources_suspended
+    assert not hasattr(loop, "resources_suspended")
     assert loop.depth_detector.model is None
     assert loop.depth_detector.processor is None
     assert loop.detector.session is None
@@ -100,12 +99,13 @@ async def test_failed_device_confirmation_does_not_claim_vision_memory_released(
 
 
 @pytest.mark.asyncio
-async def test_suspended_vision_cannot_reload_from_passive_preview_polling():
+async def test_unloaded_vision_can_accept_a_new_requested_frame():
     loop = VisionLoop()
-    loop.resources_suspended = True
+    frame = SimpleNamespace(perception=SimpleNamespace(engine="depth_plane"))
     try:
-        with pytest.raises(RiderError, match="model_resources_released"):
-            await loop._admit_inference("device", None, None, True)
+        admitted, task = await loop._admit_inference("device", frame, None, True)
+        assert admitted is frame and task is None
+        assert not hasattr(loop, "resources_suspended")
     finally:
         await loop.close()
 

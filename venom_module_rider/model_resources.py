@@ -25,7 +25,6 @@ class RiderModelResources:
     async def prepare_model_release(self):
         self.prepared = False
         loop = self.app.state.rider_vision
-        loop.resources_suspended = True
         domain = self.app.state.rider
         runtime = getattr(
             getattr(self.app.state, "rider_models", None), "runtime", None
@@ -84,7 +83,6 @@ class RiderModelResources:
         if not self.prepared:
             return False
         loop = self.app.state.rider_vision
-        loop.resources_suspended = True
         self.app.state.rider_models.runtime.reset()
         loop.depth_detector.model = None
         loop.depth_detector.processor = None
