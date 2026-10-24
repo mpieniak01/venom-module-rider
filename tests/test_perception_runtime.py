@@ -392,3 +392,28 @@ async def test_double_cancel_close_and_retry_wait_for_reaped_child(monkeypatch):
     assert (
         not installer.children and installer.status(SEGFORMER)["state"] == "cancelled"
     )
+
+
+def test_released_runtime_never_reloads_from_a_frame_but_explicit_warmup_can(
+    monkeypatch,
+):
+    from unittest.mock import Mock
+
+    runtime = ModelRuntime(Catalog())
+    detector = SimpleNamespace(
+        detect=lambda *_args, **_kwargs: {
+            "state": "clear",
+            "reason": "floor_candidate",
+        },
+        status=lambda: {"loaded": True},
+    )
+    build = Mock(return_value=detector)
+    monkeypatch.setattr("venom_module_rider.perception_runtime.build_detector", build)
+    runtime.release()
+    with pytest.raises(RiderError, match="model_released"):
+        runtime.detect(b"fixture", frame())
+    build.assert_not_called()
+    assert runtime.status()["state"] == "released"
+    runtime.warm(frame().perception)
+    build.assert_called_once()
+    assert runtime.status()["state"] == "active"

@@ -11,13 +11,14 @@ import styles from "../rider.module.css";
 
 export function useImageReference(session:string){
   const [state,setState]=useState<ReferenceState|null>(null),[draft,setDraft]=useState<ImageReference|null>(null),[editing,setEditing]=useState(false),[error,setError]=useState(""),[saving,setSaving]=useState(false);
+  const [attempt,setAttempt]=useState(0);
   const owner=useRef(session);owner.current=session;
   useEffect(()=>{
     setState(null);setDraft(null);setEditing(false);setSaving(false);setError("");if(!session)return;
     const abort=new AbortController();
     void apiFetch("/api/v1/rider/navigation/image-reference",{signal:abort.signal}).then(result=>{if(abort.signal.aborted)return;const value=readReference(data(result));if(!value)throw new Error("invalid_reference");setState(value);}).catch(()=>{if(!abort.signal.aborted)setError("reference.unavailable");});
     return ()=>abort.abort();
-  },[session]);
+  },[session,attempt]);
   const save=async(client:RiderClient)=>{
     if(!state||!draft||!validReference(draft)||saving)return false;
     const origin=client.currentSession();setSaving(true);setError("");
@@ -25,20 +26,25 @@ export function useImageReference(session:string){
     catch(error){if(owner.current!==origin)return false;const conflict=errorCode(error).includes("conflict");if(conflict){const latest=await apiFetch("/api/v1/rider/navigation/image-reference").then(result=>readReference(data(result))).catch(()=>null);if(latest&&owner.current===origin){setState(latest);setDraft(null);setEditing(false);}}if(owner.current===origin)setError(conflict?"conflict":"reference.saveFailed");return false;}
     finally{if(owner.current===origin)setSaving(false);}
   };
-  return {state,draft,setDraft,editing,setEditing,error,saving,save,values:draft??state?.values??null};
+  return {state,draft,setDraft,editing,setEditing,error,saving,save,reload:()=>setAttempt(value=>value+1),values:draft??state?.values??null};
 }
 export type ReferenceController=ReturnType<typeof useImageReference>;
 
 export function ImageReferenceControls({reference,client,size,t}:{reference:ReferenceController;client:RiderClient;size:[number,number];t:Translator}){
   const [open,setOpen]=useState(false),v=reference.values;
-  const begin=()=>{reference.setDraft(structuredClone(v??emptyReference(size)));setOpen(true);};
+  const [width,height]=size;
+  const {state:loadedState,draft:loadedDraft,setDraft}=reference;
+  useEffect(()=>{
+    if(open&&loadedState&&!loadedDraft)setDraft(structuredClone(loadedState.values??emptyReference([width,height])));
+  },[open,loadedState,loadedDraft,setDraft,width,height]);
+  const begin=()=>{if(!reference.state){reference.reload();setOpen(true);return;}reference.setDraft(structuredClone(v??emptyReference(size)));setOpen(true);};
   const change=(next:ImageReference)=>reference.setDraft(next);
   return <span className={styles.referenceControl}>
     <Button data-testid="image-reference-toggle" aria-label={t("reference.title")} title={t("reference.title")} aria-pressed={!!v?.visible} onClick={()=>open?setOpen(false):begin()}><Ruler size={15}/></Button>
     {open&&<div className={styles.referenceSettings} role="dialog" aria-label={t("reference.title")}>
       <strong>{t("reference.title")}</strong><p className={styles.hint}>{t("reference.hint")}</p>
       {reference.error&&<p role="alert">{t(reference.error)}</p>}
-      {!reference.state&&<p>{t(reference.error||"loading")}</p>}
+      {!reference.state&&(reference.error?<Button data-testid="reference-retry" onClick={()=>reference.reload()}>{t("reference.retry")}</Button>:<p>{t("loading")}</p>)}
       {v&&<>
         <label className={styles.flex}><input data-testid="reference-visible" type="checkbox" checked={v.visible} onChange={e=>change({...v,visible:e.target.checked})}/>{t("reference.visible")}</label>
         <div className={styles.grid3}>{(["track_width_cm","robot_width_cm","camera_height_cm"] as const).map(key=><Field key={key} label={t("reference."+key)+" · cm"}><Input data-testid={"reference-"+key} type="number" min=".1" step=".1" value={v[key]>0?v[key]:""} onChange={e=>change({...v,[key]:e.target.value===""?0:Number(e.target.value)})}/></Field>)}</div>

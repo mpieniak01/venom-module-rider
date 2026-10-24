@@ -376,3 +376,93 @@ def test_model_threshold_and_custom_profile_precedence_is_visible_in_catalog():
     assert published["active_parameters"]["pixel_confidence"] == 0.9
     published["parameter_schema"]["enter_frames"]["max"] = 900
     assert catalog()["parameter_schema"]["enter_frames"]["max"] == 8
+
+
+def test_semantic_thresholding_precedes_persistence_and_cannot_restore_raw_noise():
+    observer = TemporalEvidence()
+    observer._persistence = ObstaclePersistence()
+    observer._persistence.motion = FixedMotion()
+    observer._motion = FixedMotion()
+    results = []
+    for sequence in (1, 2):
+        data = maps()
+        data["labels"] = np.where(data["obstacle"], 0, 3).astype(np.uint8)
+        data["confidence"] = np.ones((32, 32), np.float32)
+        # Stale precomputed masks must not hide the current semantic policy.
+        data["obstacle"][:] = False
+        data["floor"][:] = True
+        frame = SimpleNamespace(
+            behavior=BehaviorSettings.model_validate(behavior()),
+            perception=PerceptionSettings(engine="segformer"),
+            corridor=(0.0, 0.0, 1.0, 1.0),
+            sequence=sequence,
+            frame_id=f"semantic-{sequence}",
+        )
+        result = {
+            "state": "obstacle",
+            "reason": "floor_region",
+            "_navigation_maps": data,
+        }
+        results.append(
+            evaluate(
+                result,
+                frame,
+                observer,
+                context={"fixture": True},
+                captured_s=sequence * 0.06,
+            )
+        )
+    assert results[0]["persistence"]["raw_pixels"] == 6
+    assert results[0]["persistence"]["confirmed_pixels"] == 0
+    assert results[0]["spatial"]["candidate"] == "clear"
+    assert results[0]["spatial"]["guard_clear"] is True
+    assert results[1]["persistence"]["confirmed_pixels"] == 6
+    assert results[1]["spatial"]["hard_stop"] is True
+
+
+def test_opencv_diagnostic_failure_preserves_navigation_history():
+    from unittest.mock import Mock
+
+    import cv2
+
+    observer = TemporalEvidence()
+    observer._motion = FixedMotion()
+    ordinary = TemporalEvidence()
+    ordinary._motion = FixedMotion()
+    tracker = SimpleNamespace(
+        observe=Mock(side_effect=cv2.error("fixture")), reset=Mock()
+    )
+    observer._objects = tracker
+    for sequence in range(1, 5):
+        data = maps()
+        data["floor"][:] = True
+        data["obstacle"][:] = False
+        frame = SimpleNamespace(
+            behavior=BehaviorSettings.model_validate(
+                behavior(obstacle_support_frames=1)
+            ),
+            perception=PerceptionSettings(engine="depth_plane"),
+            corridor=(0.0, 0.0, 1.0, 1.0),
+            sequence=sequence,
+            frame_id=f"diagnostic-{sequence}",
+        )
+        raw = {
+            "state": "clear",
+            "reason": "floor_candidate",
+            "_navigation_maps": deepcopy(data),
+        }
+        baseline = evaluate(
+            raw, frame, ordinary, context={"fixture": True}, captured_s=sequence * 0.06
+        )
+        frame.behavior = BehaviorSettings.model_validate(
+            behavior(obstacle_support_frames=1, object_tracking_enabled=True)
+        )
+        raw = {"state": "clear", "reason": "floor_candidate", "_navigation_maps": data}
+        result = evaluate(
+            raw, frame, observer, context={"fixture": True}, captured_s=sequence * 0.06
+        )
+        assert result["action"] == baseline["action"]
+        assert result["reason"] == baseline["reason"]
+        assert result["objects"]["state"] == "unavailable"
+    assert len(observer._points) == len(ordinary._points) == 4
+    assert tracker.reset.call_count == 4

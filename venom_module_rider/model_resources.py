@@ -83,7 +83,7 @@ class RiderModelResources:
         if not self.prepared:
             return False
         loop = self.app.state.rider_vision
-        self.app.state.rider_models.runtime.reset()
+        self.app.state.rider_models.runtime.release()
         loop.depth_detector.model = None
         loop.depth_detector.processor = None
         loop.depth_detector.device = None

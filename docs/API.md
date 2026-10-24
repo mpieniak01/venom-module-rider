@@ -66,7 +66,7 @@ Default active-view cadence: control 500 ms, calibration 1000 ms, overview 2000 
 
 An explicit Analysis selection and observation start prepare the current host model,
 including after global memory release. Release stops consumers and unloads models;
-it leaves no persistent inference suspension flag. Model preparation preserves the
+unsolicited frames cannot reload the released model. Explicit preparation restores its runtime without changing global admission. Model preparation preserves the
 Pi policy revision and acceptance. Passive status reads never prepare a model.
 
 If an observe-only worker stopped while its goal remains requested, explicit

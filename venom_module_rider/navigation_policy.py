@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .navigation_maps import assess_evidence, public_spatial
+from .navigation_maps import assess_evidence, public_spatial, resolve_semantic_evidence
 from .navigation_profiles import parameters
 
 
@@ -37,6 +37,7 @@ def evaluate(result, frame, observer, *, context, captured_s, source=None):
                         "objects": [],
                     }
             if params.get("obstacle_support_frames", 1) > 1:
+                maps = resolve_semantic_evidence(maps, params)
                 maps, persistence = observer.prepare_maps(
                     maps,
                     frame.corridor,
@@ -45,6 +46,11 @@ def evaluate(result, frame, observer, *, context, captured_s, source=None):
                     else frame.frame_id,
                     **options,
                 )
+                maps = {
+                    key: value
+                    for key, value in maps.items()
+                    if key not in {"labels", "confidence"}
+                }
             spatial = assess_evidence(
                 maps, frame.corridor, params, raw_reason=raw_reason
             )

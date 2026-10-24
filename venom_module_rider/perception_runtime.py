@@ -158,6 +158,12 @@ class ModelRuntime:
             self.state = "unloaded"
             self.generation += 1
 
+    def release(self):
+        """Retire weights until an explicit selection or warmup requests them."""
+        with self.lock:
+            self.reset()
+            self.state = "released"
+
     def validate(self, device_id, frame):
         expected = self.expected.get(device_id)
         if expected is not None and (
@@ -170,6 +176,8 @@ class ModelRuntime:
     @model_operation
     def detect(self, payload, frame):
         with self.lock:
+            if self.state == "released":
+                raise RiderError("model_released", 409)
             model_id = frame.perception.model_id
             artifact = self.catalog.ready(model_id)
             if artifact["sha256"] != frame.perception.artifact_sha256:
@@ -273,7 +281,9 @@ class ModelRuntime:
             deadline_ms=500,
             perception=perception,
         )
-        self.detect(payload.getvalue(), frame)
+        with self.lock:
+            self.state = "loading"
+            self.detect(payload.getvalue(), frame)
         self.timings.clear()
         self.finishes.clear()
         self.last = None

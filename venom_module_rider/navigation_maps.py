@@ -173,9 +173,9 @@ def public_spatial(value):
     }
 
 
-def assess_evidence(maps, corridor, params, *, raw_reason=None):
-    """Identical live/replay spatial evidence, including independent 3D vetoes."""
-    from .spatial_evidence import assess_maps, semantic_masks
+def resolve_semantic_evidence(maps, params):
+    """Apply the current class policy before any temporal pixel filtering."""
+    from .spatial_evidence import semantic_masks
 
     if "labels" in maps and "confidence" in maps:
         maps = {
@@ -189,6 +189,14 @@ def assess_evidence(maps, corridor, params, *, raw_reason=None):
             # Thresholding cannot validate a previously rejected source.
             "valid": maps.get("valid", True),
         }
+    return maps
+
+
+def assess_evidence(maps, corridor, params, *, raw_reason=None):
+    """Identical live/replay spatial evidence, including independent 3D vetoes."""
+    from .spatial_evidence import assess_maps
+
+    maps = resolve_semantic_evidence(maps, params)
     spatial = assess_maps(
         maps["floor"],
         maps["obstacle"],

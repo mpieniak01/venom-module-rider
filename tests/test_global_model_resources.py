@@ -23,7 +23,7 @@ async def test_release_unloads_only_after_confirmed_prepare_and_clears_both_dete
         runs={"old": 1},
     )
     domain = SimpleNamespace(device=None)
-    runtime = SimpleNamespace(reset=Mock())
+    runtime = SimpleNamespace(release=Mock())
     app = SimpleNamespace(
         state=SimpleNamespace(
             rider=domain,
@@ -41,7 +41,7 @@ async def test_release_unloads_only_after_confirmed_prepare_and_clears_both_dete
     assert loop.depth_detector.processor is None
     assert loop.detector.session is None
     assert loop.previews == loop.inference_cache == loop.runs == {}
-    runtime.reset.assert_called_once()
+    runtime.release.assert_called_once()
 
 
 @pytest.mark.asyncio

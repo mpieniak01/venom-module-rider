@@ -103,11 +103,17 @@ class TemporalEvidence:
         return self._persistence.apply(maps, corridor, **options)
 
     def observe_objects(self, maps, corridor, **options):
+        import cv2
+
         from .object_diagnostics import ObjectDiagnostics
 
         if not hasattr(self, "_objects"):
             self._objects = ObjectDiagnostics()
-        return self._objects.observe(maps, corridor, **options)
+        try:
+            return self._objects.observe(maps, corridor, **options)
+        except (cv2.error, ValueError, KeyError, TypeError):
+            self._objects.reset()
+            return {"diagnostic_only": True, "state": "unavailable", "objects": []}
 
     def reset(self) -> None:
         if hasattr(self, "_persistence"):
