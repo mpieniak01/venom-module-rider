@@ -310,3 +310,11 @@ def test_adapter_requires_real_preview_and_valid_classification(result, error):
     adapter.identity = SEGFORMER, "a" * 64
     with pytest.raises(ValueError, match=error):
         adapter.detect(b"frame", (0.3, 0.6, 0.7, 0.9))
+
+
+@pytest.fixture(autouse=True)
+def archive_cuda_fixture(monkeypatch):
+    """Only model-free worker fixtures bypass the hardware prerequisite."""
+    monkeypatch.setattr(
+        "venom_module_rider.cuda_execution.require_cuda", lambda: "cuda"
+    )

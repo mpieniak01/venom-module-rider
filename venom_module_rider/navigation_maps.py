@@ -81,13 +81,17 @@ def letterbox_semantic_maps(
     import torch
 
     if (
-        not isinstance(logits, np.ndarray)
+        not isinstance(logits, (np.ndarray, torch.Tensor))
         or logits.ndim != 4
         or logits.shape[:2] != (1, 150)
         or min(logits.shape[2:]) < 4
         or logits.shape[2] > 720
         or logits.shape[3] > 1280
-        or not np.isfinite(logits).all()
+        or not (
+            torch.isfinite(logits).all().item()
+            if isinstance(logits, torch.Tensor)
+            else np.isfinite(logits).all()
+        )
         or not isinstance(output_size, (list, tuple))
         or len(output_size) != 2
         or any(type(value) is not int for value in output_size)
@@ -105,7 +109,11 @@ def letterbox_semantic_maps(
         and 0 <= top < top + height <= output_size[0]
     ):
         raise ValueError("vision_model_output")
-    tensor = torch.from_numpy(logits.astype(np.float32, copy=False))
+    tensor = (
+        logits.to(dtype=torch.float32)
+        if isinstance(logits, torch.Tensor)
+        else torch.from_numpy(logits.astype(np.float32, copy=False))
+    )
     if device is not None:
         tensor = tensor.to(device)
     maximum = torch.full(

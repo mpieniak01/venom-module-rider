@@ -24,7 +24,10 @@ class FloorDetector:
         return {
             "configured": self.path.is_file() and len(self.expected) == 64,
             "loaded": self.session is not None,
-            "device": "cuda",
+            "device": "cuda"
+            if self.session is not None
+            and self.session.get_providers()[0] == "CUDAExecutionProvider"
+            else None,
             "model": "segformer-b0-ade",
             "sha256": self.digest or self.expected,
             "purpose": "floor_segmentation",

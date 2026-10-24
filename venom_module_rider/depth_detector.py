@@ -247,14 +247,14 @@ class DepthDetector:
         self.model = None
         self.processor = None
         self.digest = ""
-        self.device = "cuda"
+        self.device = None
 
     def status(self):
         manifest = self.path / "manifest.json"
         return {
             "configured": manifest.is_file(),
             "loaded": self.model is not None,
-            "device": self.device,
+            "device": self.device if self.model is not None else None,
             "model": "depth-anything-v2-indoor-small",
             "sha256": self.digest,
             "purpose": "relative_ground_geometry",

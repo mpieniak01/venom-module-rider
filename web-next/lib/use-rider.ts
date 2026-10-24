@@ -662,7 +662,7 @@ export function useRider(section: Section) {
             }
           }
         }
-        catch (error) { if (current()) { replaceFrame("camera", null, keepCameraOnFailure(), expiredNativeCandidate(error)); setMediaError("frameStale"); } }
+        catch (error) { if (current()) { if (!expiredNativeCandidate(error)) replaceFrame("camera", null, keepCameraOnFailure()); setMediaError("frameStale"); } }
         finally { decoding = false; }
       };
       gap = setTimeout(expire, 5000);

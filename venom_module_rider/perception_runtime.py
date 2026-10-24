@@ -395,15 +395,9 @@ class YoloSemanticOnnx:
             from .cuda_execution import cuda_session
 
             self.session = cuda_session(self.path / "model.onnx", options)
-        logits = self.session.run(
-            None, {self.session.get_inputs()[0].name: pixels.transpose(2, 0, 1)[None]}
-        )[0]
-        if (
-            logits.ndim != 4
-            or logits.shape[:2] != (1, 150)
-            or not np.isfinite(logits).all()
-        ):
-            raise ValueError("vision_model_output")
+        from .cuda_execution import cuda_logits
+
+        logits = cuda_logits(self.session, pixels.transpose(2, 0, 1)[None])
         from .navigation_maps import (
             letterbox_semantic_maps,
             semantic_maps_from_compact,

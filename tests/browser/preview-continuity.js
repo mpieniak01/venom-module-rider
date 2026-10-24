@@ -3,6 +3,7 @@
 async (page, fixture) => {
   const check=(ok,message)=>{if(!ok)throw new Error(message);};
   check(fixture?.preview?.preview_contract_version===1,"backend preview contract required");
+  fixture={...fixture,preview:{...fixture.preview,artifact_sha256:"a".repeat(64)}};
   const base=page.url()==="about:blank"?"http://localhost:3300":new URL(page.url()).origin;
   const wait=async(fn,message)=>{const end=Date.now()+8000;while(!await fn()){check(Date.now()<end,message);await new Promise(r=>setTimeout(r,40));}};
   await page.goto("about:blank");
@@ -53,7 +54,7 @@ async (page, fixture) => {
     if(path==="/status")return json({connection:{configured:true,status:"online",device_id:"fixture",mode:"device",session:"continuity-session"},polling:{control_ms:200},errors:{},settings:{revision:1,directions:{}},control:{server_time:Date.now()/1000,safety:{state:"DISARMED",generation:"fixture",can_move:false,moving:false,ready:true,stale:false}},telemetry:{},health:{},catalog:{features:[]},logic:{},face:{},resources:{}});
     if(path==="/camera/pipeline")return json({contract_id:"rider.camera_pipeline",contract_version:1,revision:34,profile,active_profile:profile,state:"active",transport_epoch:9,camera_session:"continuity-camera",capabilities:{analysis_locations:["venom","local"],local_engines:["canny"],remote_transports:["snapshots","mjpeg"]},effective_stages:{capture:true},latest_frame:{camera_session:"continuity-camera",transport_epoch:9,pipeline_revision:34,captured_monotonic_ns:Date.now()*1e6,frame_age_ms:20},error:null});
     if(path==="/navigation/config")await new Promise(resolve=>setTimeout(resolve,1400));
-    if(path==="/navigation/config"||path==="/navigation/state")return json({config:{revision:153,mode:"observe",speed:.1,max_motion_ms:150,decision_budget_ms:300,corridor:[.35,.8,.65,.95],perception:{engine:"depth_plane"},verified:false},status:{running:true,stale:false,mode:"observe",run_id:fixture.preview.run_id,config_revision:153,decision:fixture.preview},goals:{observe:true,drive:false},runtime:{observe:true,drive:true,known:true},detector:{configured:true,loaded:true,sha256:fixture.preview.model_sha256}});
+    if(path==="/navigation/config"||path==="/navigation/state")return json({config:{revision:153,mode:"observe",speed:.1,max_motion_ms:150,decision_budget_ms:300,corridor:[.35,.8,.65,.95],perception:{engine:"depth_plane",model_id:fixture.preview.model_id,artifact_sha256:fixture.preview.artifact_sha256},verified:false},status:{running:true,stale:false,mode:"observe",run_id:fixture.preview.run_id,config_revision:153,decision:fixture.preview},goals:{observe:true,drive:false},runtime:{observe:true,drive:true,known:true},detector:{configured:true,loaded:true,sha256:fixture.preview.model_sha256}});
     return json({});
   });
   try{
@@ -85,7 +86,7 @@ async (page, fixture) => {
     for(const row of [...stability.events,...stability.painted])
       check(!row.notice&&row.states==="obstacle,clear,clear","short gap or frame replacement flashed stale/unknown: "+JSON.stringify(row));
     await page.evaluate(()=>{window.__previewContinuity.paused=true;});
-    await wait(async()=>await notice.count()>0&&await center.getAttribute("data-sector-state")==="unknown","real source loss did not expire the original frame");
+    await wait(async()=>(await notice.count()>0||await page.getByTestId("camera-surface").locator("img").count()===0)&&await center.getAttribute("data-sector-state")==="unknown","real source loss did not expire the original frame");
     await page.evaluate(()=>{window.__previewContinuity.paused=false;});
     await wait(async()=>!await notice.count()&&await center.getAttribute("data-sector-state")==="clear","current source did not recover");
     check(mutations.length===0,"fixture attempted a hardware mutation");

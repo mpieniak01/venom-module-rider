@@ -176,6 +176,9 @@ def test_preview_rug_changes_to_floor_green_only_when_explicitly_selected():
 
 
 class Session:
+    def get_providers(self):
+        return ["CUDAExecutionProvider"]
+
     def get_inputs(self):
         return [SimpleNamespace(name="pixels")]
 
@@ -301,6 +304,10 @@ def test_native_semantic_adapters_receive_policy_and_keep_source_overlay(
     from venom_module_rider import perception_runtime
 
     monkeypatch.setattr("venom_module_rider.cuda_execution.require_cuda", lambda: "cpu")
+    monkeypatch.setattr(
+        "venom_module_rider.cuda_execution.cuda_logits",
+        lambda session, pixels: session.run(None, {"pixels": pixels})[0],
+    )
     # Both model adapters share semantic_output; the fixture still exercises
     # their native RGB preprocessor and actual classification/preview path.
     if adapter_name == "TorchSegformer":
@@ -344,6 +351,10 @@ def test_torch_rug_policy_rejects_checkpoint_with_incompatible_class_mapping(
     import torch
 
     monkeypatch.setattr("venom_module_rider.cuda_execution.require_cuda", lambda: "cpu")
+    monkeypatch.setattr(
+        "venom_module_rider.cuda_execution.cuda_logits",
+        lambda session, pixels: session.run(None, {"pixels": pixels})[0],
+    )
     from venom_module_rider.perception_runtime import TorchSegformer
 
     monkeypatch.setitem(
@@ -461,6 +472,10 @@ def test_native_yolo_always_requests_cuda_for_logit_reduction(monkeypatch):
 
     monkeypatch.setattr(
         "venom_module_rider.cuda_execution.require_cuda", lambda: "cuda"
+    )
+    monkeypatch.setattr(
+        "venom_module_rider.cuda_execution.cuda_logits",
+        lambda session, pixels: session.run(None, {"pixels": pixels})[0],
     )
     seen = []
 

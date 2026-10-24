@@ -73,6 +73,9 @@ def side_of(assessment):
 
 def run(job, output, *, candidate_factory=None, semantic_factory=None):
     """Use the retained adapter and exactly the live decoder/geometry/overlay."""
+    from .cuda_execution import require_cuda
+
+    require_cuda()
     emit(output, {"type": "compute", "done": 0, "phase": "loading"})
     import numpy as np
     from PIL import Image
