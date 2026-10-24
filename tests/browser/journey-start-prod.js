@@ -2,6 +2,7 @@
 // Run against /rider for device/Prod or /rider?fixtureMode=demo for the same Demo contract.
 async page => {
   const base = page.url() === "about:blank" ? "http://localhost:3300" : new URL(page.url()).origin;
+  const continuous = new URL(page.url()==="about:blank"?"http://localhost:3300":page.url()).searchParams.get("approval")!=="legacy";
   const fixtureMode = new URL(page.url()==="about:blank"?base:page.url()).searchParams.get("fixtureMode")==="demo"?"demo":"device";
   const check = (value, message) => { if (!value) throw new Error(message); };
   check(["localhost", "127.0.0.1", "[::1]"].includes(new URL(base).hostname), "loopback UI required");
@@ -29,7 +30,7 @@ async page => {
   await page.goto("about:blank");
   await page.addInitScript(()=>{
     const realFetch=window.fetch.bind(window),encoder=new TextEncoder();
-    window.__journeyStartProd={frames:0,paused:true,revision:134,run:"prod-observe",source:"pi-status-anchor-plus-host-elapsed"};
+    window.__journeyStartProd={frames:0,paused:true,revision:134,run:"prod-observe",source:"pi-status-anchor-plus-host-elapsed",producerActive:false};
     window.fetch=(input,options={})=>{
       const url=typeof input==="string"?input:input instanceof URL?input.href:input.url;
       if(!new URL(url,location.href).pathname.endsWith("/api/v1/rider/camera/stream/venom"))return realFetch(input,options);
@@ -39,7 +40,7 @@ async page => {
       const stream=new ReadableStream({start(controller){
         const stop=()=>{if(closed)return;closed=true;clearInterval(timer);controller.close();};
         options.signal?.addEventListener("abort",stop,{once:true});
-        const emit=()=>{const fixture=window.__journeyStartProd;if(closed||fixture.paused)return;
+        const emit=()=>{const fixture=window.__journeyStartProd;if(closed||fixture.paused||!fixture.producerActive)return;
           const sequence=++fixture.frames,source={contract_version:1,camera_session:"prod-camera",transport_epoch:6,pipeline_revision:34,sequence,frame_id:"prod-camera-"+sequence,captured_monotonic_ns:Date.now()*1e6,sha256:"b".repeat(64)};
           const analysis={run_id:fixture.run,frame_id:"decision-"+sequence,sequence,config_revision:fixture.revision,state:"clear",vision_action:"go",source};
           const headers={"Content-Type":"image/jpeg","Content-Length":jpeg.length,"X-Rider-Stale":"false","X-Rider-Frame-Id":source.frame_id,"X-Rider-Frame-Age-Ms":"20","X-Rider-Frame-Age-Source":fixture.source,"X-Rider-Source":"venom","X-Rider-Source-Json":JSON.stringify(source),"X-Rider-Analysis-Json":JSON.stringify(analysis),"X-Rider-Vision-State":"clear"};
@@ -59,6 +60,7 @@ async page => {
         check(typeof body.enabled==="boolean","observation intent invalid");
         if(body.enabled&&rejectObservation)return json({detail:{code:"fixture_observer_unavailable"}},503);
         observe=body.enabled;running=observe||drive;stale=!running;if(observe)cameraState="active";
+        await page.evaluate(active=>{window.__journeyStartProd.producerActive=active;},running);
         return json({ok:true,meta:{},data:{ok:true}});
       }
       if(path==="/navigation/config"){
@@ -66,7 +68,7 @@ async page => {
         if(JSON.stringify(keys)!==JSON.stringify(writable)){
           violations.push(keys);return json({detail:{code:"navigation_configuration_invalid"}},422);
         }
-        check(!observe&&!drive,"configuration write while loops active");
+        check(continuous?observe&&!drive:!observe&&!drive,"approval did not respect the negotiated observer contract");
         check(body.revision===policy.revision,"configuration revision stale");
         check(body.values.verified===true&&body.values.avoidance.sweep_verified===true,"joint acceptance incomplete");
         check(body.values.model_sha256===sha&&body.values.calibration_id.startsWith("operator-"),"acceptance identity missing");
@@ -164,11 +166,16 @@ async page => {
     await start.click();
     await wait(()=>rejectedWrites===2,"second save rejection was not exercised");
     await wait(async()=>(await page.getByTestId("command-reason").innerText()).includes("navigation_configuration_conflict"),"observer recovery failure replaced the original save failure");
-    await wait(async()=>(await page.locator("body").innerText()).includes("fixture_observer_unavailable"),"observer recovery failure is hidden");
-    check(!observe&&!drive&&saves.length===0,"failed recovery fabricated acceptance or motion");
-    scenarios.push("save and observer-recovery failures remain separately visible without admission");
+    if(continuous){
+      check(observe&&running&&!drive&&saves.length===0,"rejected approval interrupted the current observer");
+      scenarios.push("rejected approval leaves the existing producer running without restart");
+    }else{
+      await wait(async()=>(await page.locator("body").innerText()).includes("fixture_observer_unavailable"),"observer recovery failure is hidden");
+      check(!observe&&!drive&&saves.length===0,"failed recovery fabricated acceptance or motion");
+      scenarios.push("save and observer-recovery failures remain separately visible without admission");
+    }
     rejectObservation=false;
-    await page.getByTestId("prepare-navigation").click();
+    if(!continuous)await page.getByTestId("prepare-navigation").click();
     await wait(()=>observe&&running&&!stale,"explicit observation did not recover after a rejected restart");
     await wait(async()=>!await start.isDisabled(),"fresh recovery did not permit another explicit Start");
     rejectSave=false;
@@ -180,6 +187,7 @@ async page => {
     check(policy.verified&&policy.avoidance.sweep_verified&&policy.behavior.profile_id==="balanced","acceptance changed profile or omitted qualification");
     const transaction=calls.slice(beforeConfirmStart).map(call=>call.path);
     check(transaction.indexOf("/navigation/config")<transaction.indexOf("/navigation/journey"),"journey preceded successful acceptance");
+    if(continuous)check(!transaction.some(path=>path.startsWith("/goal/")||path.startsWith("/camera/")),"approval/start stopped a producer or camera");
     check(!calls.slice(beforeConfirmStart).some(call=>call.path==="/goal/s15_venom_perception"&&call.body.enabled),"confirm-and-start unnecessarily restarted observation before journey preparation");
     scenarios.push("one explicit primary click saves both qualifications with Pi writable keys then starts revision135");
     check(calls.filter(call=>call.path==="/navigation/journey").length===1,"Start submitted duplicate journey");
@@ -190,6 +198,11 @@ async page => {
     delayJourney=true;
     await start.click();
     await wait(()=>journeyPending,"delayed Start not admitted");
+    if(continuous){
+      const before=await page.evaluate(()=>window.__journeyStartProd.frames);
+      await new Promise(resolve=>setTimeout(resolve,250));
+      check(await page.evaluate(()=>window.__journeyStartProd.frames)>before,"pending Start interrupted the visible stream");
+    }
     await page.getByTestId("rider-pad-stop").click();
     await wait(()=>!journeyPending,"cancelled Start did not settle");
     check(state==="DISARMED"&&!journey?.active&&!drive,"late Start reclaimed motion after STOP");
@@ -203,6 +216,11 @@ async page => {
     delaySave=true;
     await start.click();
     await wait(()=>savePending,"confirmation write not pending");
+    if(continuous){
+      const before=await page.evaluate(()=>window.__journeyStartProd.frames);
+      await new Promise(resolve=>setTimeout(resolve,250));
+      check(await page.evaluate(()=>window.__journeyStartProd.frames)>before,"acceptance write stopped live frames");
+    }
     const beforeStopDuringSave=calls.length;
     await page.getByTestId("rider-pad-stop").click();
     await wait(()=>!savePending,"late confirmation write never settled");
@@ -222,7 +240,7 @@ async page => {
     check(saveRowHeight>0&&saveRowHeight<80,"settings actions inherited tall cockpit mode-row height: "+saveRowHeight);
     check(violations.length===0,"opening settings introduced a mutation");
     scenarios.push("settings action row stays compact below 80px rather than inheriting cockpit toolbar height");
-    return {fixtureOnly:true,fixtureMode,passed:scenarios,revision:policy.revision,saveRowHeight,mutationPaths:calls.map(call=>call.path),strictWritableKeys:writable};
+    return {fixtureOnly:true,fixtureMode,continuous,passed:scenarios,revision:policy.revision,saveRowHeight,mutationPaths:calls.map(call=>call.path),strictWritableKeys:writable};
   } finally {
     await page.goto("about:blank");
     await page.unrouteAll({behavior:"wait"});

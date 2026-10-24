@@ -18,6 +18,29 @@ async def diagnostic_preview_allowed(domain, status, goals):
         return True
     journey = status.get("journey") or {}
     preparation = status.get("preparation") or {}
+    preparing = (
+        status.get("running") is False
+        and preparation.get("state") == "preparing"
+        and preparation.get("fresh") is True
+        and type(preparation.get("journey_version")) is int
+        and preparation["journey_version"] == 1
+    )
+    if preparing:
+        # Cold producer handoff does not stop the camera or host model. These
+        # frames remain a distinct observe-only run and cannot qualify Pi motion.
+        control = (await domain.read("/api/control/state", 0.2))["data"]
+        safety = control.get("safety") or {}
+        if safety.get("stale") is not False:
+            return False
+        if safety.get("state") == "DISARMED":
+            return safety.get("can_move") is False and safety.get("moving") is False
+        return (
+            safety.get("state") == "ARMED"
+            and safety.get("owner") == "navigation"
+            and safety.get("arming_mode") == "journey"
+            and safety.get("can_move") is True
+            and (safety.get("operator_control") or {}).get("state") == "qualifying"
+        )
     if not (
         goals.get("drive") is True
         and goals.get("observe") is False

@@ -230,14 +230,17 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
     const visible=client.currentCamera();
     if(current.revision!==policy.revision||calibrationScope(current,model)!==calibrationScope(policy,detector)||decisionView(record(loaded.status),model).vision!=="go"||!freshPolicyFrame(visible.frame,visible.stream,record(loaded.status),current))throw Object.assign(new Error("navigation_configuration_changed"),{data:{error:"navigation_configuration_changed"}});
     const resumeObservation=record(loaded.goals).observe===true;
-    await stopGoals(origin);ensureOperation(origin);
+    const continuous=current.approval_without_restart_version===1;
+    // Updated Pi accepts only approval metadata while observing. Parameter/model
+    // edits still use stopGoals; older peers keep their stopped-write contract.
+    if(!continuous){await stopGoals(origin);ensureOperation(origin);}
     let saved:JsonRecord;
     try {
       saved=await persist(calibrationAcceptance(current,model,"operator-"+createBrowserUuid(),acceptSweep));ensureOperation(origin);
     } catch (saveError) {
       // Restore only observation explicitly requested before this transaction.
       // STOP/cancellation prevents both recovery and a following journey request.
-      if(resumeObservation){
+      if(resumeObservation&&!continuous){
         ensureOperation(origin);
         try{await ensureAnalysis(origin);}
         catch(restoreError){
@@ -249,7 +252,7 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
       throw saveError;
     }
     setTrialResult("trialAcceptanceSaved");
-    if(resumeAfterSave)await ensureAnalysis(origin);
+    if(resumeAfterSave&&!continuous)await ensureAnalysis(origin);
     return saved;
   };
   const acceptTrial=async()=>{
