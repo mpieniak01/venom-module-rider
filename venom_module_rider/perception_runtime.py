@@ -15,6 +15,7 @@ from .floor_detector import (
     classify_logits,
     render_preview,
 )
+from .model_resources import model_operation
 from .perception_catalog import DEPTH, SEGFORMER, YOLO
 
 
@@ -166,6 +167,7 @@ class ModelRuntime:
         ):
             raise RiderError("model_selection_conflict", 409)
 
+    @model_operation
     def detect(self, payload, frame):
         with self.lock:
             model_id = frame.perception.model_id

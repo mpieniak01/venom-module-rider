@@ -116,6 +116,9 @@ async def lifespan(app):
     from ..perception_service import PerceptionService
 
     app.state.rider_models = PerceptionService(app.state.rider_vision)
+    from ..model_resources import RiderModelResources
+
+    app.state.rider_model_resources = RiderModelResources(app)
     default = os.getenv("RIDER_DEFAULT_DEVICE")
     if existing is None:
         await service.restore(default)

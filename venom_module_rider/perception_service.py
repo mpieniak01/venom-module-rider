@@ -6,6 +6,7 @@ import asyncio
 
 from .analysis_profiles import ProfileCatalog
 from .errors import RiderError
+from .model_resources import model_operation
 from .perception_catalog import SOURCES, selected_identity
 from .perception_install import ModelInstaller
 from .perception_runtime import ModelRuntime
@@ -109,6 +110,7 @@ class PerceptionService:
             "local_models_error": local_error,
         }
 
+    @model_operation
     async def select(self, domain, body, session):
         domain.check_session(session)
         if (
@@ -198,6 +200,7 @@ class PerceptionService:
                 self.loop.inference_cache.clear()
                 self.loop.runs.clear()
                 self.runtime.reset()
+                self.loop.resources_suspended = False
                 self.loop.detector = type(self.loop.detector)()
                 from .depth_detector import DepthDetector
 
