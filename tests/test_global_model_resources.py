@@ -72,7 +72,9 @@ async def test_preparation_disarms_before_stopping_camera_and_never_arms():
         goal=AsyncMock(),
         stop_camera=AsyncMock(),
     )
-    loop = SimpleNamespace(busy=None, depth_busy=None)
+    loop = SimpleNamespace(
+        busy=None, depth_busy=None, depth_detector=SimpleNamespace(model=object())
+    )
     app = SimpleNamespace(
         state=SimpleNamespace(rider=domain, rider_vision=loop, rider_analysis=None)
     )
@@ -88,7 +90,7 @@ async def test_failed_device_confirmation_does_not_claim_vision_memory_released(
     domain = SimpleNamespace(
         device=object(), read=AsyncMock(side_effect=RuntimeError("offline"))
     )
-    loop = SimpleNamespace()
+    loop = SimpleNamespace(depth_detector=SimpleNamespace(model=object()))
     resource = RiderModelResources(
         SimpleNamespace(state=SimpleNamespace(rider=domain, rider_vision=loop))
     )
@@ -106,3 +108,18 @@ async def test_suspended_vision_cannot_reload_from_passive_preview_polling():
             await loop._admit_inference("device", None, None, True)
     finally:
         await loop.close()
+
+
+@pytest.mark.asyncio
+async def test_cold_host_release_does_not_require_an_online_robot():
+    domain = SimpleNamespace(
+        device=object(), read=AsyncMock(side_effect=RuntimeError("offline"))
+    )
+    loop = SimpleNamespace(busy=None, depth_busy=None)
+    app = SimpleNamespace(
+        state=SimpleNamespace(rider=domain, rider_vision=loop, rider_analysis=None)
+    )
+    resource = RiderModelResources(app)
+    await resource.prepare_model_release()
+    domain.read.assert_not_awaited()
+    assert resource.prepared

@@ -26,7 +26,19 @@ class RiderModelResources:
         loop = self.app.state.rider_vision
         loop.resources_suspended = True
         domain = self.app.state.rider
-        if domain.device is not None:
+        runtime = getattr(
+            getattr(self.app.state, "rider_models", None), "runtime", None
+        )
+        loaded = (
+            getattr(runtime, "detector", None) is not None
+            or getattr(getattr(loop, "depth_detector", None), "model", None) is not None
+            or getattr(getattr(loop, "detector", None), "session", None) is not None
+            or getattr(loop, "busy", None) is not None
+            or getattr(loop, "depth_busy", None) is not None
+        )
+        # Cold host vision owns no model or in-flight decisions. An unrelated
+        # offline Pi must not prevent releasing the host's voice/LLM resources.
+        if domain.device is not None and loaded:
             safety = (await domain.read("/api/control/state", 0, force=True))["data"]
             safety = safety.get("safety", safety)
             if safety.get("can_move") or safety.get("state") == "ARMED":
