@@ -3,23 +3,30 @@
 async page => {
   const base = page.url() === "about:blank" ? "http://localhost:3300" : new URL(page.url()).origin;
   const continuous = new URL(page.url()==="about:blank"?"http://localhost:3300":page.url()).searchParams.get("approval")!=="legacy";
-  const fixtureMode = new URL(page.url()==="about:blank"?base:page.url()).searchParams.get("fixtureMode")==="demo"?"demo":"device";
+  const parameters = new URL(page.url()==="about:blank"?base:page.url()).searchParams;
+  const fixtureMode = parameters.get("fixtureMode")==="demo"?"demo":"device";
+  const profileId = parameters.get("profile")??"balanced";
+  const modelId = parameters.get("model")??"depth-anything-v2-indoor-small";
+  const engine = modelId==="depth-anything-v2-indoor-small"?"depth_plane":"segformer";
+  const allowedProfiles=["legacy","cautious","balanced","fluid"];
+  const allowedModels=["depth-anything-v2-indoor-small","segformer-b0-ade20k","yolo26n-sem-ade20k"];
   const check = (value, message) => { if (!value) throw new Error(message); };
   check(["localhost", "127.0.0.1", "[::1]"].includes(new URL(base).hostname), "loopback UI required");
+  check(allowedProfiles.includes(profileId)&&allowedModels.includes(modelId),"unsupported model/profile fixture");
   const wait = async (fn, message) => { const end=Date.now()+10000; while (!await fn()) { check(Date.now()<end,message); await new Promise(resolve=>setTimeout(resolve,40)); } };
   const sha="a".repeat(64), calls=[], saves=[], scenarios=[], violations=[];
   // Exactly the writable top-level keys from services.navigation_config.DEFAULT, minus protocol_version and revision (update_from_body allowlist).
   const writable = ["behavior","mode","speed","decision_budget_ms","max_motion_ms","corridor","perception","avoidance","verified","calibration_id","model_sha256"].sort();
   const profiles = ["legacy","cautious","balanced","fluid"].map(id=>({id,profile_revision:1,status:id==="legacy"?"legacy":"experimental",parameters:{}}));
-  let policy={protocol_version:1,revision:134,behavior:{version:1,profile_id:"balanced",profile_revision:1},
+  let policy={protocol_version:1,revision:134,behavior:{version:1,profile_id:profileId,profile_revision:1},
     mode:"observe",speed:.1,decision_budget_ms:300,max_motion_ms:150,corridor:[.35,.8,.65,.95],
-    perception:{engine:"depth_plane",residual_limit:.06,outlier_limit:.005,slope_min:2},
+    perception:{engine,model_id:modelId,artifact_sha256:sha,residual_limit:.06,outlier_limit:.005,slope_min:2},
     avoidance:{protocol_version:3,enabled:true,sweep_verified:false,mirrored:false,turn_speed:.05,turn_ms:100,max_turn_pulses:3,max_stalled_corrections:2,progress_min_delta:.03,
       geometry:{mode:"image",fx:null,fy:null,cx:.5,cy:.5,radius_ratio:null,lookahead_ratio:2,max_heading_deg:45}},
     verified:false,calibration_id:"",model_sha256:""};
   const configView=()=>({...structuredClone(policy),
     behavior_catalog:{version:1,supported:true,active:policy.behavior,profiles,effective_policy_sha256:"c".repeat(64)},
-    model_tuning_supported:true,perception_tuning:{version:1,active_model_id:"depth-anything-v2-indoor-small",effective:{}}});
+    ...(continuous?{approval_without_restart_version:1}:{}),model_tuning_supported:true,perception_tuning:{version:1,active_model_id:modelId,effective:{}}});
   let observe=false,drive=false,running=false,stale=true,cameraState="stopped",journey=null,rejectSave=true,rejectedWrites=0,delaySave=false,savePending=false,rejectObservation=false;
   let state="DISARMED",owner=null,holder=null,generation="prod-0",operation="idle",serial=0,journeyPending=false,delayJourney=false;
   const settings={revision:1,directions:Object.fromEntries(["forward","backward","left","right"].map(key=>[key,{speed:.2,duration:.25,minimum:0,maximum:1,step:.01}])),parameter_schema:{direction_fields:{speed:{display_factor:100,display_precision:0,display_unit:"%"}}},control_modes:{version:1,supported:["pulse","hold","release"],hold_renewal_ms:150,hold_timeout_ms:500,click_threshold_ms:180,request_ttl_ms:500}};
@@ -28,9 +35,9 @@ async page => {
     goals:{observe,drive},runtime:{drive:true,observe:true,known:true},detector:{configured:true,loaded:true,sha256:sha,drive_supported:true,navigation_journey_version:1,ground_geometry_supported:true,supported_protocol_versions:[3],temporal_navigation_v1:true,semantic_model_policy_v1:true}});
   const profile={analysis_location:"venom",local_engine:"canny",remote_transport:"mjpeg"};
   await page.goto("about:blank");
-  await page.addInitScript(()=>{
+  await page.addInitScript(({modelId,sha})=>{
     const realFetch=window.fetch.bind(window),encoder=new TextEncoder();
-    window.__journeyStartProd={frames:0,paused:true,revision:134,run:"prod-observe",source:"pi-status-anchor-plus-host-elapsed",producerActive:false};
+    window.__journeyStartProd={modelId,sha,frames:0,paused:true,revision:134,run:"prod-observe",source:"pi-status-anchor-plus-host-elapsed",producerActive:false};
     window.fetch=(input,options={})=>{
       const url=typeof input==="string"?input:input instanceof URL?input.href:input.url;
       if(!new URL(url,location.href).pathname.endsWith("/api/v1/rider/camera/stream/venom"))return realFetch(input,options);
@@ -42,7 +49,7 @@ async page => {
         options.signal?.addEventListener("abort",stop,{once:true});
         const emit=()=>{const fixture=window.__journeyStartProd;if(closed||fixture.paused||!fixture.producerActive)return;
           const sequence=++fixture.frames,source={contract_version:1,camera_session:"prod-camera",transport_epoch:6,pipeline_revision:34,sequence,frame_id:"prod-camera-"+sequence,captured_monotonic_ns:Date.now()*1e6,sha256:"b".repeat(64)};
-          const analysis={run_id:fixture.run,frame_id:"decision-"+sequence,sequence,config_revision:fixture.revision,state:"clear",vision_action:"go",source};
+          const analysis={model_id:fixture.modelId,artifact_sha256:fixture.sha,run_id:fixture.run,frame_id:"decision-"+sequence,sequence,config_revision:fixture.revision,state:"clear",vision_action:"go",source};
           const headers={"Content-Type":"image/jpeg","Content-Length":jpeg.length,"X-Rider-Stale":"false","X-Rider-Frame-Id":source.frame_id,"X-Rider-Frame-Age-Ms":"20","X-Rider-Frame-Age-Source":fixture.source,"X-Rider-Source":"venom","X-Rider-Source-Json":JSON.stringify(source),"X-Rider-Analysis-Json":JSON.stringify(analysis),"X-Rider-Vision-State":"clear"};
           const crlf=String.fromCharCode(13,10);
           controller.enqueue(encoder.encode("--startup"+crlf+Object.entries(headers).map(([key,value])=>key+": "+value).join(crlf)+crlf+crlf));controller.enqueue(jpeg);controller.enqueue(Uint8Array.of(13,10));
@@ -50,7 +57,7 @@ async page => {
       },cancel(){closed=true;clearInterval(timer);}});
       return Promise.resolve(new Response(stream,{headers:{"Content-Type":"multipart/x-mixed-replace; boundary=startup"}}));
     };
-  });
+  },{modelId,sha});
   await page.route("**/api/v1/rider/**",async route=>{
     const req=route.request(),path=new URL(req.url()).pathname.slice("/api/v1/rider".length);
     const json=(body,status=200)=>route.fulfill({status,contentType:"application/json",body:JSON.stringify(body)});
@@ -89,6 +96,7 @@ async page => {
         journeyPending=false;
         if(operation!==pending)return json({detail:{code:"navigation_trial_cancelled"}},409);
         state="ARMED";owner="navigation";holder=body.panel_id;generation="prod-"+(++serial);drive=true;observe=true;running=true;stale=false;
+        await page.evaluate(()=>{window.__journeyStartProd.producerActive=true;});
         journey={version:1,id:"journey-"+serial,active:true,state:"forward",reason:"clear",elapsed_s:0,maneuver_epoch:0};
         return json({ok:true,meta:{},data:{ok:true,config:configView()}});
       }
@@ -184,7 +192,7 @@ async page => {
     await wait(()=>policy.revision===135,"strict Pi writer rejected acceptance; echoed read-only metadata: "+JSON.stringify(violations));
     await wait(()=>journey?.active===true,"primary confirm-and-start click did not reach journey endpoint");
     check(saves.length===1,"acceptance must save once");
-    check(policy.verified&&policy.avoidance.sweep_verified&&policy.behavior.profile_id==="balanced","acceptance changed profile or omitted qualification");
+    check(policy.verified&&policy.avoidance.sweep_verified&&policy.behavior.profile_id===profileId,"acceptance changed profile or omitted qualification");
     const transaction=calls.slice(beforeConfirmStart).map(call=>call.path);
     check(transaction.indexOf("/navigation/config")<transaction.indexOf("/navigation/journey"),"journey preceded successful acceptance");
     if(continuous)check(!transaction.some(path=>path.startsWith("/goal/")||path.startsWith("/camera/")),"approval/start stopped a producer or camera");
@@ -240,7 +248,7 @@ async page => {
     check(saveRowHeight>0&&saveRowHeight<80,"settings actions inherited tall cockpit mode-row height: "+saveRowHeight);
     check(violations.length===0,"opening settings introduced a mutation");
     scenarios.push("settings action row stays compact below 80px rather than inheriting cockpit toolbar height");
-    return {fixtureOnly:true,fixtureMode,continuous,passed:scenarios,revision:policy.revision,saveRowHeight,mutationPaths:calls.map(call=>call.path),strictWritableKeys:writable};
+    return {fixtureOnly:true,fixtureMode,continuous,profileId,modelId,passed:scenarios,revision:policy.revision,saveRowHeight,mutationPaths:calls.map(call=>call.path),strictWritableKeys:writable};
   } finally {
     await page.goto("about:blank");
     await page.unrouteAll({behavior:"wait"});
