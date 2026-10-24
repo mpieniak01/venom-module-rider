@@ -14,7 +14,9 @@ async (page, fixture) => {
     window.__previewContinuity={frames:0,paused:false,recover:false,connections:0};
     window.fetch=(input,options={})=>{
       const url=typeof input==="string"?input:input instanceof URL?input.href:input.url;
-      if(!new URL(url,location.href).pathname.endsWith("/api/v1/rider/camera/stream/venom"))return original(input,options);
+      const path=new URL(url,location.href).pathname;
+      if(!/\/api\/v1\/rider\/camera\/stream\/(raw|venom)$/.test(path))return original(input,options);
+      const kind=path.endsWith("/raw")?"raw":"venom";
       window.__previewContinuity.connections++;
       const canvas=document.createElement("canvas");canvas.width=320;canvas.height=240;
       const ctx=canvas.getContext("2d");ctx.fillStyle="#008040";ctx.fillRect(0,0,320,240);
@@ -33,7 +35,7 @@ async (page, fixture) => {
             ...(state.recover?{state:"unknown",reason:"navigation_frame_gap",vision_action:"stop"}:{})};
           state.recover=false;
           const headers={"Content-Type":"image/jpeg","Content-Length":jpeg.length,
-            "X-Rider-Stale":sequence%11===0?"true":"false","X-Rider-Source":"venom","X-Rider-Source-Json":JSON.stringify(source),
+            "X-Rider-Stale":sequence%11===0?"true":"false","X-Rider-Source":kind,"X-Rider-Source-Json":JSON.stringify(source),
             "X-Rider-Frame-Id":source.frame_id,"X-Rider-Frame-Age-Ms":sequence%11===0?"550":"160",
             "X-Rider-Frame-Age-Source":"pi-status-anchor-plus-host-elapsed",
             "X-Rider-Analysis-Json":JSON.stringify(analysis),"X-Rider-Vision-State":analysis.state};
@@ -93,7 +95,27 @@ async (page, fixture) => {
     check(preparations.length===1,"explicit Analysis must prepare once; passive polling must not prepare");
     await analysis.click();
     await wait(async()=>preparations.length===2,"a new explicit Analysis click did not prepare again");
+    const imageFit=[];
+    for(const viewport of [{width:1282,height:913},{width:1440,height:1000},{width:390,height:844}]){
+      await page.setViewportSize(viewport);
+      const expand=page.getByRole("button",{name:"Rozwiń pulpit sterowania",exact:true});
+      if(await expand.count())await expand.click();
+      let rawSurface=null;
+      for(const name of ["Obraz surowy","Wizja Venom"]){
+        await page.getByRole("button",{name,exact:true}).click();
+        await wait(async()=>await page.getByRole("button",{name,exact:true}).getAttribute("aria-pressed")==="true"&&await page.getByTestId("camera-surface").locator("img").count()>0,"requested source not visible");
+        const fit=await page.getByTestId("camera-surface").evaluate(surface=>{
+          const image=surface.querySelector("img"),box=surface.getBoundingClientRect(),img=image.getBoundingClientRect();
+          return {surface:[box.x,box.y,box.width,box.height],image:[img.x,img.y,img.width,img.height],natural:[image.naturalWidth,image.naturalHeight],top:Math.max(0,box.top-img.top),bottom:Math.max(0,img.bottom-box.bottom),left:Math.max(0,box.left-img.left),right:Math.max(0,img.right-box.right),fit:getComputedStyle(image).objectFit};
+        });
+        check(fit.natural.join(",")==="320,240"&&fit.fit==="contain","source dimensions or fit changed");
+        check(Math.max(fit.top,fit.bottom,fit.left,fit.right)<=1,"camera image clipped: "+JSON.stringify({viewport,name,fit}));
+        if(name==="Obraz surowy")rawSurface=fit.surface;
+        else check(fit.surface.every((value,index)=>Math.abs(value-rawSurface[index])<=1),"RAW/analysis frame moved or resized: "+JSON.stringify({viewport,rawSurface,analysis:fit.surface}));
+        imageFit.push({viewport,name,...fit});
+      }
+    }
     check(mutations.length===0,"fixture attempted a hardware mutation");
-    return {result:"PASS",fixtureOnly:true,stability,realExpiryAndRecovery:true,preparations,mutations};
+    return {result:"PASS",fixtureOnly:true,stability,realExpiryAndRecovery:true,preparations,imageFit,mutations};
   }finally{await page.goto("about:blank");await page.unrouteAll({behavior:"wait"});}
 }
