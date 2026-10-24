@@ -296,12 +296,12 @@
 .pageFocused > .header { top:0; }
 .controlPanel, .controlWorkspace { min-width:0; overflow-anchor:none; }
 .controlWorkspace [hidden] { display:none !important; }
-.drivingSurface { min-height:max(500px,calc(100dvh - var(--rider-page-top, 0px) - var(--rider-header-height, 80px) - 90px)); display:grid; grid-template-rows:44px 84px minmax(0,1fr); gap:8px; }
+.drivingSurface { min-height:max(500px,calc(100dvh - var(--rider-page-top, 0px) - var(--rider-header-height, 80px) - 90px)); display:grid; grid-template-rows:minmax(44px,auto) 84px minmax(0,1fr); gap:8px; }
+.drivingSurface[data-view="manual"] { grid-template-rows:minmax(44px,auto) minmax(0,1fr); }
 .pageFocused .drivingSurface { min-height:max(480px,calc(100dvh - var(--rider-header-height, 80px) - 82px)); }
-.controlModeRow { display:flex; justify-content:space-between; align-items:center; gap:12px; min-width:0; }
+.controlModeRow { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:12px; min-width:0; }
 .controlModes { display:flex; gap:6px; }
-.workspaceOwner { font-size:12px; color:var(--ui-muted); white-space:nowrap; }
-.commandDeck { min-width:0; position:relative; padding-right:190px; display:grid; grid-template-rows:44px 40px; }
+.commandDeck { min-width:0; display:grid; grid-template-rows:44px 40px; }
 .commandDeck .panel { padding:0; margin:0; background:none; border:0; display:flex; align-items:center; gap:12px; }
 .commandDeck .panelHeader { display:none; }
 .commandDeck .loopStatus { order:2; flex:1 1 0; min-width:0; height:22px; margin:0; gap:6px; flex-wrap:nowrap; font-size:12px; overflow:hidden; white-space:nowrap; }
@@ -314,7 +314,7 @@
 .commandReason { display:flex; align-items:center; gap:8px; min-width:0; height:40px; font-size:12px; color:var(--tone-warning-text); }
 .commandReason > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .commandReason .button { flex-shrink:0; height:36px; min-height:36px; padding:0 8px; }
-.commandAccess { position:absolute; right:0; top:22px; }
+.commandAccess { flex-shrink:0; margin-left:auto; }
 .driveWorkspace { display:grid; grid-template-columns:minmax(0,1fr) 310px; align-items:stretch; gap:16px; min-height:0; min-width:0; }
 .workspaceContent { min-height:0; min-width:0; }
 .loopCamera { box-sizing:border-box; height:100%; min-height:0; padding:10px; border:1px solid var(--r-border); border-radius:16px; background:var(--bg-panel); }
@@ -432,16 +432,15 @@
   .toolbar [data-testid="rider-stop"] { grid-column:3 / 5; grid-row:2; width:100%; padding:0 8px; }
   .tabs { margin-bottom:6px; }
   .tab { padding:8px; font-size:12px; }
-  .drivingSurface, .pageFocused .drivingSurface { height:auto; grid-template-rows:40px 84px auto; gap:6px; }
+  .drivingSurface, .pageFocused .drivingSurface { height:auto; grid-template-rows:minmax(40px,auto) 84px auto; gap:6px; }
+  .drivingSurface[data-view="manual"], .pageFocused .drivingSurface[data-view="manual"] { grid-template-rows:auto auto; }
   .controlModeRow { gap:4px; }
   .controlModes { gap:4px; flex-wrap:nowrap; }
   .controlModes .button { padding:0 8px; font-size:12px; }
-  .workspaceOwner { display:none; }
-  .commandDeck { padding-right:0; grid-template-rows:44px 40px; }
+  .commandDeck { grid-template-rows:44px 40px; }
   .commandDeck .loopStatus { display:none; }
   .commandDeck .loopActions .small { display:none; }
   .commandDeck .loopActions .button { padding:0 10px; }
-  .commandAccess { top:0; right:0; }
   .commandAccess .button { min-height:36px; height:36px; font-size:12px; padding:0 6px; }
   .commandReason { font-size:11px; }
   .commandReason .button { font-size:11px; }
