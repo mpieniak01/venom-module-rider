@@ -391,3 +391,16 @@ async def test_legacy_peer_rejects_unknown_slow_action_even_with_valid_capture(p
         assert lease.latched
     finally:
         await loop.close()
+
+
+@pytest.mark.parametrize("profile", ["cautious", "balanced", "fluid"])
+def test_real_peers_share_corrected_v2_policy_and_defaults(pi, profile):
+    value = {
+        "version": 1,
+        "profile_id": profile,
+        "profile_revision": 2,
+        "overrides": {"obstacle_support_frames": 3, "object_growth_min": 1.2},
+    }
+    assert pi.profiles.parameters(value) == parameters(value)
+    assert pi.profiles.policy_digest(value) == policy_digest(value)
+    assert pi.profiles.validate_behavior(value) == value

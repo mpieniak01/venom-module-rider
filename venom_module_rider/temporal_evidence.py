@@ -95,7 +95,25 @@ class TemporalEvidence:
         self._motion = OpticalMotion()
         self.reset()
 
+    def prepare_maps(self, maps, corridor, **options):
+        from .obstacle_persistence import ObstaclePersistence
+
+        if not hasattr(self, "_persistence"):
+            self._persistence = ObstaclePersistence()
+        return self._persistence.apply(maps, corridor, **options)
+
+    def observe_objects(self, maps, corridor, **options):
+        from .object_diagnostics import ObjectDiagnostics
+
+        if not hasattr(self, "_objects"):
+            self._objects = ObjectDiagnostics()
+        return self._objects.observe(maps, corridor, **options)
+
     def reset(self) -> None:
+        if hasattr(self, "_persistence"):
+            self._persistence.reset()
+        if hasattr(self, "_objects"):
+            self._objects.reset()
         self._points: deque[_Point] = deque(maxlen=64)
         self._context: str | None = None
         self._last_sequence: int | None = None

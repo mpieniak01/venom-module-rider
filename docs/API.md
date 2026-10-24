@@ -76,3 +76,7 @@ a driving goal or unknown driving ownership is never restarted by this action.
 ## Measured image references
 
 GET/POST /navigation/image-reference proxies the Pi-owned visual reference. CAS revision, validation and storage are on Pi. The overlay shows measured track/body widths and marker rows for the recorded lowest pose. Its purpose is visual_reference_only: it does not change navigation policy, lens intrinsics, model decisions or motion approval. SVG points use the original frame coordinates and preserve letterboxing. Operator edits stay a draft until Save on robot; viewing never writes configuration.
+
+### Operator vision policy corrections
+
+Revision 2 presets accept bounded `behavior.overrides` through the existing device-owned navigation configuration transaction. `behavior_catalog.parameter_schema` and `active_parameters` expose the editable and effective values. Revision 1 definitions remain pinned. See [Vision policy parameters](VISION_PARAMETERS.md) for defaults, units, precedence, reset semantics and diagnostic-only object tracking.
