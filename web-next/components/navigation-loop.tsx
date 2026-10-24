@@ -230,14 +230,17 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
     const visible=client.currentCamera();
     if(current.revision!==policy.revision||calibrationScope(current,model)!==calibrationScope(policy,detector)||decisionView(record(loaded.status),model).vision!=="go"||!freshPolicyFrame(visible.frame,visible.stream,record(loaded.status),current))throw Object.assign(new Error("navigation_configuration_changed"),{data:{error:"navigation_configuration_changed"}});
     const resumeObservation=record(loaded.goals).observe===true;
-    await stopGoals(origin);ensureOperation(origin);
+    const continuous=current.approval_without_restart_version===1;
+    // Updated Pi accepts only approval metadata while observing. Parameter/model
+    // edits still use stopGoals; older peers keep their stopped-write contract.
+    if(!continuous){await stopGoals(origin);ensureOperation(origin);}
     let saved:JsonRecord;
     try {
       saved=await persist(calibrationAcceptance(current,model,"operator-"+createBrowserUuid(),acceptSweep));ensureOperation(origin);
     } catch (saveError) {
       // Restore only observation explicitly requested before this transaction.
       // STOP/cancellation prevents both recovery and a following journey request.
-      if(resumeObservation){
+      if(resumeObservation&&!continuous){
         ensureOperation(origin);
         try{await ensureAnalysis(origin);}
         catch(restoreError){
@@ -249,7 +252,7 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
       throw saveError;
     }
     setTrialResult("trialAcceptanceSaved");
-    if(resumeAfterSave)await ensureAnalysis(origin);
+    if(resumeAfterSave&&!continuous)await ensureAnalysis(origin);
     return saved;
   };
   const acceptTrial=async()=>{
@@ -375,7 +378,6 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
   const sharedRecovery=sharedTrial&&recoveryFailure?.runId===sharedTrial.run_id?recoveryFailure:null;
 
   const safety = safetyOf(client.status);
-  const owner = safety.owner;
   const operator = record(safety.operator_control);
   const priority = operatorPrioritySupported(client.status);
   const automaticActive = priority ? operator.state === "active" || operator.state === "qualifying" : phase === "running" && goals.drive === true;
@@ -398,14 +400,16 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
     commandReason=t(!active||loopState.running!==true?"workspace.prepareImage":acceptanceBlock||"workspace.confirmReady");
   }
   return <section className={styles.controlWorkspace} data-testid="control-workspace">
-    <div className={styles.drivingSurface} data-testid="driving-surface">
+    <div className={styles.drivingSurface} data-testid="driving-surface" data-view={view}>
     <div className={styles.controlModeRow}>
       <div className={styles.controlModes} role="group" aria-label={t("workspaceView")}>
         {(["manual", "automatic", "journey"] as const).map(mode => <Button key={mode} data-testid={"workspace-" + mode} aria-pressed={view === mode} tone={view === mode ? "primary" : undefined} onClick={() => setView(mode)}>{t(mode === "manual" ? "workspaceManual" : mode === "journey" ? "workspaceJourney" : "workspaceAutomatic")}</Button>)}
       </div>
-      <span className={styles.workspaceOwner} role="status">{t("workspaceOwner")}: <strong>{t(owner === "manual" ? "workspaceManual" : owner === "navigation" ? safety.arming_mode === "journey" ? "workspaceJourney" : "workspaceAutomatic" : safety.state === "DISARMED" ? "workspaceDisarmedOwner" : "workspaceNoOwner")}</strong></span>
+      <div className={styles.commandAccess}>
+        <Button data-testid="workspace-settings-toggle" aria-expanded={detailsOpen} aria-controls="rider-workspace-details" onClick={()=>{if(workspaceDetailsRef.current){workspaceDetailsRef.current.open=!workspaceDetailsRef.current.open;if(workspaceDetailsRef.current.open)workspaceDetailsRef.current.scrollIntoView({block:"nearest",behavior:"smooth"});}}}>{t("cockpitDetails")}</Button>
+      </div>
     </div>
-    <div className={styles.commandDeck} data-testid="command-deck">
+    <div className={styles.commandDeck} data-testid="command-deck" hidden={view === "manual"}>
         <div hidden={view !== "automatic"} data-testid="automatic-commands">
           <Panel title={t("loopTitle")} extra={<Button aria-label={t("loopLoad")} disabled={loading||!!operation||!connected} onClick={()=>setRefresh(v=>v+1)}><RefreshCw size={14}/>{t("refresh")}</Button>}>
     <div className={styles.loopStatus} role="status" data-testid="loop-state">
@@ -442,9 +446,7 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
         <span>{commandReason}</span>
         {prepareAction&&!(view==="journey"&&confirmJourney)&&<Button data-testid="prepare-navigation" disabled={!connected||!!operation||loading||!!observeBlock||goals.drive===true} onClick={()=>{if(!acceptanceBlock)void acceptTrial();else showPreparation();}}>{t(!acceptanceBlock?"workspace.confirm":active?"workspace.preparation":"workspace.prepare")}</Button>}
       </div>
-      <div className={styles.commandAccess}>
-        <Button data-testid="workspace-settings-toggle" aria-expanded={detailsOpen} aria-controls="rider-workspace-details" onClick={()=>{if(workspaceDetailsRef.current){workspaceDetailsRef.current.open=!workspaceDetailsRef.current.open;if(workspaceDetailsRef.current.open)workspaceDetailsRef.current.scrollIntoView({block:"nearest",behavior:"smooth"});}}}>{t("cockpitDetails")}</Button>
-      </div>
+
     </div>
     <div className={styles.driveWorkspace}>
       <div className={styles.workspaceContent} data-testid="workspace-content" role="region" aria-label={t("workspaceObservation")}>

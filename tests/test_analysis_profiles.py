@@ -64,7 +64,7 @@ def test_retained_profiles_share_config_and_model_presence_is_not_inference(
     assert presence["resolution"] == "production_preprocessor"
     assert str(tmp_path) not in json.dumps(presence)
     qualified = profile.qualify()
-    assert qualified["content_verified"] and qualified["device"] == "cpu"
+    assert qualified["content_verified"] and qualified["device"] == "cuda"
     assert qualified["drive_supported"] is False
     assert len(qualified["fingerprint"]) == 64
     assert configured.resolve("da3-small-280").describe()["windows"] == [1, 3, 5]

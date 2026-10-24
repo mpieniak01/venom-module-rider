@@ -98,7 +98,7 @@ async def test_one_install_shared_admission_and_protocol(monkeypatch):
     await installer.handles[job["id"]]
     assert installer.status(SEGFORMER)["state"] == "ready"
     assert tasks.finished[0][1] == "succeeded"
-    assert calls[0][1]["env"]["CUDA_VISIBLE_DEVICES"] == ""
+    assert calls[0][1]["env"].get("CUDA_VISIBLE_DEVICES") != ""
     assert calls[0][0][-3] == SEGFORMER
     assert calls[0][0][-2] == "--parent-pid"
     await installer.close()

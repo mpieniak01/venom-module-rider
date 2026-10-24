@@ -6,11 +6,11 @@ import { freshnessCadence, previewInterval } from "./loop-timing";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api-client";
 import { getApiBaseUrl } from "@/lib/env";
-import { readCameraSource, cameraSourceMatches, cameraPipelineIdentity, cameraPreviewStopped, nativePreview, anchoredPreviewAge, nativeAnalysisMatches } from "./camera-pipeline";
+import { readCameraSource, framePipelineCurrent, cameraSourceMatches, cameraPipelineIdentity, cameraPreviewStopped, nativePreview, anchoredPreviewAge, nativeAnalysisMatches } from "./camera-pipeline";
 import { useCameraPipeline } from "./use-camera-pipeline";
 import { readMjpeg, type MjpegPart } from "./mjpeg";
 import { readAnalysis } from "./vision-frame";
-import { perceptionPolicy, perceptionResultMatches, type PerceptionSelection } from "./perception";
+import { perceptionPolicy, perceptionResultMatches, previewMatchesSelection, type PerceptionSelection } from "./perception";
 import { decodePreview, nextPreviewDelay, previewLifetime, previewRequestCurrent, retainedPreview, expiredNativeCandidate } from "./preview-media";
 import { configForConnection } from "./device-session";
 import { adoptIntervention } from "./operator-control";
@@ -92,7 +92,9 @@ export function useRider(section: Section) {
   const setPerceptionPolicy = useCallback((policy: JsonRecord | null) => {
     const next = perceptionPolicy(policy);
     if (JSON.stringify(next) === JSON.stringify(perceptionExpected.current)) return;
+    const keep = previewMatchesSelection(cameraRef.current, next) && framePipelineCurrent(cameraRef.current, pipelineRef.current);
     perceptionExpected.current = next; setPerceptionSelection(next);
+    if (keep) return;
     cameraTransitionEpoch.current += 1; setPerceptionEpoch(value => value + 1);
     if (mediaRef.current.camera === "venom") { cameraRef.current = null; replaceFrame("camera", null); setMediaError("perception.previewWaiting"); }
   }, [replaceFrame]);
@@ -585,10 +587,14 @@ export function useRider(section: Section) {
       || !Number.isFinite(anchor.latest.captured_monotonic_ns)) throw new Error("stream_age_unavailable");
     const headerAge = Number(headers.get("X-Rider-Frame-Age-Ms"));
     const ageMs = anchoredPreviewAge(source, headerAge, part.receivedAt, pipelineRef.current?.previewAnchor);
-    if (headers.get("X-Rider-Stale") !== "false" || headers.get("X-Rider-Placeholder") === "true"
+    const freshness = headers.get("X-Rider-Stale");
+    if (!["true", "false"].includes(freshness ?? "") || headers.get("X-Rider-Placeholder") === "true"
       || !headers.has("X-Rider-Frame-Age-Ms") || !Number.isFinite(ageMs) || ageMs < 0
       || source.contract_version !== 1 || !source.camera_session || !Number.isSafeInteger(source.sequence) || Number(source.sequence) < 1
       || headers.get("X-Rider-Frame-Id") !== source.frame_id) throw new Error("stream_source_invalid");
+    // A structurally valid, late part is not corruption of the prior image.
+    // Keep aging that image to its own deadline; this part renews nothing.
+    if (freshness === "true") throw new Error("stream_source_expired");
     const analysis = readAnalysis(headers.get("X-Rider-Analysis-Json"));
     if (headers.get("X-Rider-Source") === "venom" && !nativeAnalysisMatches(analysis, source)) throw new Error("stream_analysis_mismatch");
     if (headers.get("X-Rider-Source") === "venom" && !perceptionResultMatches(analysis, perceptionExpected.current)) {
@@ -656,7 +662,7 @@ export function useRider(section: Section) {
             }
           }
         }
-        catch (error) { if (current()) { replaceFrame("camera", null, keepCameraOnFailure(), expiredNativeCandidate(error)); setMediaError("frameStale"); } }
+        catch (error) { if (current()) { if (!expiredNativeCandidate(error)) replaceFrame("camera", null, keepCameraOnFailure()); setMediaError("frameStale"); } }
         finally { decoding = false; }
       };
       gap = setTimeout(expire, 5000);

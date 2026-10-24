@@ -208,3 +208,11 @@ def test_probe_preserves_raw_model_state_but_invalid_quality_evidence_cannot_dri
     )
     maps = decode_evidence(base64.b64decode(encoded["data"]))
     assert maps["valid"] is False and maps["uncertain"].all()
+
+
+@pytest.fixture(autouse=True)
+def archive_cuda_fixture(monkeypatch):
+    """Only model-free worker fixtures bypass the hardware prerequisite."""
+    monkeypatch.setattr(
+        "venom_module_rider.cuda_execution.require_cuda", lambda: "cuda"
+    )

@@ -69,6 +69,16 @@ export function perceptionFrameCurrent(frame: Preview | null, expected: Percepti
   return !frame.stale && frame.knownFreshness && frame.decoded === true && age !== null && age < 1000;
 }
 
+/** A delayed policy read may confirm the image already being shown.
+ * Keep that exact fresh capture; changed revisions/artifacts still invalidate it.
+ */
+export function previewMatchesSelection(frame: Preview | null, expected: PerceptionSelection | null, now = performance.now()): boolean {
+  const age = frameAge(frame, now);
+  return !!expected && !!frame && frame.analysis?.config_revision === expected.revision
+    && perceptionResultMatches(frame.analysis, expected)
+    && !frame.stale && frame.knownFreshness && frame.decoded === true && age !== null && age < 1000;
+}
+
 /** UI guidance only. Pi and host independently enforce the atomic switch reservation. */
 export function perceptionSwitchBlock(status: RiderStatus | null, controlFresh: boolean, goals: JsonRecord, policy: JsonRecord | null, busy: boolean): string {
   if (!status || !["online", "degraded"].includes(status.connection.status)) return "perception.block.offline";

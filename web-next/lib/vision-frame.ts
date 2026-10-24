@@ -5,8 +5,9 @@ export function frameAge(frame: FrameTiming | null, now = performance.now()): nu
   if (!frame || !Number.isFinite(frame.ageMs) || !Number.isFinite(frame.receivedAt)) return null;
   return Math.max(0, frame.ageMs! + Math.max(0, now - frame.receivedAt!));
 }
+export const PREVIEW_ANALYSIS_MAX_CHARS = 4096;
 export function readAnalysis(header: string | null): JsonRecord | undefined {
-  if (!header || header.length > 4096) return undefined;
+  if (!header || header.length > PREVIEW_ANALYSIS_MAX_CHARS) return undefined;
   try {
     const row = record(JSON.parse(header));
     if (typeof row.run_id !== "string" || typeof row.frame_id !== "string"

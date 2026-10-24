@@ -88,6 +88,7 @@ def execute(job, monkeypatch):
         sys.modules,
         "torch",
         SimpleNamespace(
+            cuda=SimpleNamespace(is_initialized=lambda: False),
             set_num_threads=lambda value: None,
             set_num_interop_threads=lambda value: None,
         ),
@@ -255,3 +256,11 @@ print(json.dumps({"paused_orphan_killed":True,"reaped":True}))
     )
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["paused_orphan_killed"]
+
+
+@pytest.fixture(autouse=True)
+def archive_cuda_fixture(monkeypatch):
+    """Only model-free worker fixtures bypass the hardware prerequisite."""
+    monkeypatch.setattr(
+        "venom_module_rider.cuda_execution.require_cuda", lambda: "cuda"
+    )

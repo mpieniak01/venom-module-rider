@@ -7,6 +7,7 @@ from fastapi import Request, Response
 
 from ..depth_detector import PerceptionSettings
 from ..errors import RiderError
+from ..preview_metadata import analysis_header
 from ..vision_contract import VisionFrame
 from .vision_routes import loop_goals
 
@@ -17,6 +18,29 @@ async def diagnostic_preview_allowed(domain, status, goals):
         return True
     journey = status.get("journey") or {}
     preparation = status.get("preparation") or {}
+    preparing = (
+        status.get("running") is False
+        and preparation.get("state") == "preparing"
+        and preparation.get("fresh") is True
+        and type(preparation.get("journey_version")) is int
+        and preparation["journey_version"] == 1
+    )
+    if preparing:
+        # Cold producer handoff does not stop the camera or host model. These
+        # frames remain a distinct observe-only run and cannot qualify Pi motion.
+        control = (await domain.read("/api/control/state", 0.2))["data"]
+        safety = control.get("safety") or {}
+        if safety.get("stale") is not False:
+            return False
+        if safety.get("state") == "DISARMED":
+            return safety.get("can_move") is False and safety.get("moving") is False
+        return (
+            safety.get("state") == "ARMED"
+            and safety.get("owner") == "navigation"
+            and safety.get("arming_mode") == "journey"
+            and safety.get("can_move") is True
+            and (safety.get("operator_control") or {}).get("state") == "qualifying"
+        )
     if not (
         goals.get("drive") is True
         and goals.get("observe") is False
@@ -194,14 +218,6 @@ async def processed_camera(request: Request):
             "x-rider-vision-inference-ms": str(elapsed),
             "x-rider-vision-policy": source,
             "x-rider-vision-action": "stop",
-            "x-rider-analysis-json": json.dumps(
-                {
-                    key: value
-                    for key, value in result.items()
-                    if key not in {"_preview", "corridor"}
-                },
-                separators=(",", ":"),
-                allow_nan=False,
-            ),
+            "x-rider-analysis-json": analysis_header(result),
         },
     )

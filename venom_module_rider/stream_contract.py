@@ -199,13 +199,13 @@ def canonical_jpeg(frame: NativeFrame) -> bytes:
         raise RiderError("stream_invalid_jpeg", 502) from exc
 
 
-def source_headers(frame, now, *, source="pi-camera"):
+def source_headers(frame, now, *, source="pi-camera", max_age_ms=300):
     metadata = frame.source.model_dump(mode="json")
     return {
         "cache-control": "no-store",
         "x-rider-source": source,
         "x-rider-source-json": json.dumps(metadata, separators=(",", ":")),
-        "x-rider-stale": "true" if frame.age_ms(now) >= 300 else "false",
+        "x-rider-stale": "true" if frame.age_ms(now) >= max_age_ms else "false",
         "x-rider-placeholder": "false",
         "x-rider-camera-session": frame.source.camera_session,
         "x-rider-transport-epoch": str(frame.source.transport_epoch),

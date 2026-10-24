@@ -101,7 +101,6 @@ class ModelInstaller:
                 raise asyncio.CancelledError
             environment = dict(os.environ)
             environment.update(
-                CUDA_VISIBLE_DEVICES="",
                 HF_HUB_DISABLE_PROGRESS_BARS="1",
                 TOKENIZERS_PARALLELISM="false",
                 OMP_NUM_THREADS="2",

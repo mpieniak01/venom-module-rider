@@ -68,7 +68,9 @@ def semantic_maps_from_compact(labels, confidence, source_size, *, semantic=None
     }
 
 
-def letterbox_semantic_maps(logits, crop, *, output_size=(640, 640), batch_size=8):
+def letterbox_semantic_maps(
+    logits, crop, *, output_size=(640, 640), batch_size=8, device=None
+):
     """Inverse-letterbox logits in bounded channel batches.
 
     Streaming log-sum-exp retains the native bilinear channel interpolation,
@@ -79,13 +81,17 @@ def letterbox_semantic_maps(logits, crop, *, output_size=(640, 640), batch_size=
     import torch
 
     if (
-        not isinstance(logits, np.ndarray)
+        not isinstance(logits, (np.ndarray, torch.Tensor))
         or logits.ndim != 4
         or logits.shape[:2] != (1, 150)
         or min(logits.shape[2:]) < 4
         or logits.shape[2] > 720
         or logits.shape[3] > 1280
-        or not np.isfinite(logits).all()
+        or not (
+            torch.isfinite(logits).all().item()
+            if isinstance(logits, torch.Tensor)
+            else np.isfinite(logits).all()
+        )
         or not isinstance(output_size, (list, tuple))
         or len(output_size) != 2
         or any(type(value) is not int for value in output_size)
@@ -103,25 +109,34 @@ def letterbox_semantic_maps(logits, crop, *, output_size=(640, 640), batch_size=
         and 0 <= top < top + height <= output_size[0]
     ):
         raise ValueError("vision_model_output")
-    maximum = np.full((height, width), -np.inf, dtype=np.float32)
-    denominator = np.zeros((height, width), dtype=np.float32)
-    labels = np.zeros((height, width), dtype=np.uint8)
-    tensor = torch.from_numpy(logits.astype(np.float32, copy=False))
+    tensor = (
+        logits.to(dtype=torch.float32)
+        if isinstance(logits, torch.Tensor)
+        else torch.from_numpy(logits.astype(np.float32, copy=False))
+    )
+    if device is not None:
+        tensor = tensor.to(device)
+    maximum = torch.full(
+        (height, width), -torch.inf, dtype=torch.float32, device=tensor.device
+    )
+    denominator = torch.zeros_like(maximum)
+    labels = torch.zeros((height, width), dtype=torch.uint8, device=tensor.device)
     for offset in range(0, 150, batch_size):
         values = torch.nn.functional.interpolate(
             tensor[:, offset : offset + batch_size],
             size=output_size,
             mode="bilinear",
             align_corners=False,
-        ).numpy()[0, :, top : top + height, left : left + width]
-        best = values.max(axis=0)
-        updated = np.maximum(maximum, best)
-        denominator *= np.exp(maximum - updated)
-        denominator += np.exp(values - updated).sum(axis=0)
-        changed = best > maximum
-        labels[changed] = (values.argmax(axis=0) + offset)[changed]
+        )[0, :, top : top + height, left : left + width]
+        best, index = values.max(dim=0)
+        updated = torch.maximum(maximum, best)
+        denominator *= torch.exp(maximum - updated)
+        denominator += torch.exp(values - updated).sum(dim=0)
+        labels = torch.where(best > maximum, (index + offset).to(torch.uint8), labels)
         maximum = updated
-    return semantic_maps_from_compact(labels, 1.0 / denominator, (width, height))
+    return semantic_maps_from_compact(
+        labels.cpu().numpy(), (1.0 / denominator).cpu().numpy(), (width, height)
+    )
 
 
 def depth_maps(errors, signed, limit, *, valid):

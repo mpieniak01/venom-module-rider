@@ -214,7 +214,11 @@ class AnalysisManager:
                         "LANG": "C.UTF-8",
                         "PYTHONPATH": str(self.catalog.module)
                         + (os.pathsep + str(profile.sdk) if profile.sdk else ""),
-                        "CUDA_VISIBLE_DEVICES": "",
+                        **(
+                            {"CUDA_VISIBLE_DEVICES": os.environ["CUDA_VISIBLE_DEVICES"]}
+                            if "CUDA_VISIBLE_DEVICES" in os.environ
+                            else {}
+                        ),
                         "HF_HUB_OFFLINE": "1",
                         "TRANSFORMERS_OFFLINE": "1",
                         "HF_HUB_DISABLE_TELEMETRY": "1",

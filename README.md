@@ -598,3 +598,21 @@ New profiles add source-region history, bounded SLOW and current-image boundary
 diagnostics while retaining legacy compatibility and independent motion gates.
 See [Temporal navigation v1](docs/TEMPORAL_NAVIGATION_V1.md) for capability,
 compact-map replay, tests and the required local acceptance.
+
+## CUDA requirement for Rider perception
+
+Live perception, model qualification and archive analysis require CUDA. Missing CUDA or a CUDA ONNX execution provider is an error; model inference does not fall back to CPU. Install the module vision extra with onnxruntime-gpu==1.27.0 for the CUDA 13 environment; do not install the CPU onnxruntime wheel into the same interpreter. GPU execution is verified from the loaded model/session, not from catalog labels. Existing CPU performance reports do not qualify the CUDA deployment.
+
+
+### Observation continuity during journey preparation
+
+Pi capability `approval_without_restart_version: 1` allows image/steering
+acceptance to save only approval metadata without stopping the running observer.
+Model, profile, ROI, speed and deadline edits retain their existing stopped-write
+contract. Older Pi versions keep the previous acceptance flow.
+
+A cold S15 → S14 producer handoff still uses the existing bounded Pi preparation.
+The camera and host inference can continue displaying a separate passive preview
+while preparation is fresh and the executor is disarmed or qualifying. A healthy
+Pi producer then takes over the preview; diagnostic results never qualify motion,
+carry journey authority or renew a movement deadline. STOP still cancels Start.

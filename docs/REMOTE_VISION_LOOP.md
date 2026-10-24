@@ -222,3 +222,35 @@ terminal behavior. Bounded trials keep their existing stop behavior.
 Pi status `request_attempt` identifies the current run and sequence, pending,
 completed or failed state, elapsed request time and capture age. A failed or
 pending request no longer displays the preceding successful roundtrip as its own.
+
+
+### Image-bound preview metadata v1
+
+Snapshot and native MJPEG previews use the same compact
+`X-Rider-Analysis-Json` projection (`preview_contract_version=1`, at most 4096
+ASCII characters). It carries the exact camera reference, model/configuration
+identity and the visible image's L/C/R assessment. Full temporal histories,
+spatial regions, paths and movement leases remain in navigation diagnostics;
+adding diagnostic fields must not enlarge the preview header.
+
+The existing one-second display lifetime and one-second text sampling are
+unchanged. A short pause does not renew the displayed capture or force a false
+unknown state before that lifetime ends. Changed source/model/configuration,
+mismatched provenance and genuine expiry still invalidate the display.
+Preview metadata never grants movement permission.
+
+Regression checks use a shared production-shaped fixture for both producers and
+the browser parser, plus `tests/browser/preview-continuity.js` for decoded MJPEG
+replacement, a short failed-cycle gap, actual expiry and recovery. That browser
+test intercepts every Rider API request and never reaches a physical robot.
+
+
+Preview publication uses the existing 500ms native display bound consistently
+for both the admission check and X-Rider-Stale. The default source/ticket contract
+still uses 300ms. A correctly identified stale multipart part is discarded without
+invalidating a different, still-current visible image. It does not renew the
+image's one-second display lifetime or the three-second reconnect watchdog.
+
+A delayed policy read that confirms the displayed image's exact revision and
+model artifact does not tear down that image or its stream. Changed selections,
+uncertain timing and expired captures still clear it.

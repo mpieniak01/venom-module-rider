@@ -176,6 +176,9 @@ def test_preview_rug_changes_to_floor_green_only_when_explicitly_selected():
 
 
 class Session:
+    def get_providers(self):
+        return ["CUDAExecutionProvider"]
+
     def get_inputs(self):
         return [SimpleNamespace(name="pixels")]
 
@@ -300,6 +303,11 @@ def test_native_semantic_adapters_receive_policy_and_keep_source_overlay(
 
     from venom_module_rider import perception_runtime
 
+    monkeypatch.setattr("venom_module_rider.cuda_execution.require_cuda", lambda: "cpu")
+    monkeypatch.setattr(
+        "venom_module_rider.cuda_execution.cuda_logits",
+        lambda session, pixels: session.run(None, {"pixels": pixels})[0],
+    )
     # Both model adapters share semantic_output; the fixture still exercises
     # their native RGB preprocessor and actual classification/preview path.
     if adapter_name == "TorchSegformer":
@@ -342,6 +350,11 @@ def test_torch_rug_policy_rejects_checkpoint_with_incompatible_class_mapping(
 
     import torch
 
+    monkeypatch.setattr("venom_module_rider.cuda_execution.require_cuda", lambda: "cpu")
+    monkeypatch.setattr(
+        "venom_module_rider.cuda_execution.cuda_logits",
+        lambda session, pixels: session.run(None, {"pixels": pixels})[0],
+    )
     from venom_module_rider.perception_runtime import TorchSegformer
 
     monkeypatch.setitem(
@@ -434,3 +447,49 @@ def test_bounded_yolo_rejects_invalid_geometry_or_memory_budget(kwargs):
     arguments = {"crop": (0, 0, 96, 64), "output_size": (64, 96), **kwargs}
     with pytest.raises(ValueError, match="vision_model_output"):
         letterbox_semantic_maps(logits(shape=(8, 8)), **arguments)
+
+
+def test_cuda_letterbox_reduction_matches_array_reference():
+    import torch
+
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA hardware parity; CPU fixtures run the same bounded math")
+    from venom_module_rider.navigation_maps import letterbox_semantic_maps
+
+    rng = np.random.default_rng(46)
+    values = rng.normal(size=(1, 150, 9, 13)).astype(np.float32)
+    cpu = letterbox_semantic_maps(values, (7, 9, 70, 45), output_size=(64, 96))
+    gpu = letterbox_semantic_maps(
+        values, (7, 9, 70, 45), output_size=(64, 96), device="cuda"
+    )
+    np.testing.assert_array_equal(gpu["labels"], cpu["labels"])
+    np.testing.assert_allclose(gpu["confidence"], cpu["confidence"], atol=1e-6)
+
+
+def test_native_yolo_always_requests_cuda_for_logit_reduction(monkeypatch):
+    from venom_module_rider import navigation_maps
+    from venom_module_rider.perception_runtime import YoloSemanticOnnx
+
+    monkeypatch.setattr(
+        "venom_module_rider.cuda_execution.require_cuda", lambda: "cuda"
+    )
+    monkeypatch.setattr(
+        "venom_module_rider.cuda_execution.cuda_logits",
+        lambda session, pixels: session.run(None, {"pixels": pixels})[0],
+    )
+    seen = []
+
+    def reduce(values, crop, **kwargs):
+        seen.append(kwargs.get("device"))
+        assert kwargs.get("device") == "cuda"
+        return navigation_maps.semantic_maps_from_compact(
+            np.full((8, 8), 3, dtype=np.uint8),
+            np.ones((8, 8), dtype=np.float32),
+            (8, 8),
+        )
+
+    monkeypatch.setattr(navigation_maps, "letterbox_semantic_maps", reduce)
+    detector = YoloSemanticOnnx(None)
+    detector.session = Session()
+    assert detector.detect(png(), CORRIDOR)["state"] == "clear"
+    assert seen == ["cuda"]

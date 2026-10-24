@@ -1,0 +1,317 @@
+{
+  "description": "Anonymized production-shaped DA2 result with temporal and region diagnostics. No image, device address or credentials.",
+  "result": {
+    "state": "clear",
+    "reason": "navigation_stable_clear",
+    "sectors": {
+      "left": {
+        "state": "obstacle",
+        "coverage_complete": true,
+        "corridor": [
+          0.04999999999999993,
+          0.8,
+          0.35,
+          0.95
+        ]
+      },
+      "center": {
+        "state": "clear",
+        "coverage_complete": true,
+        "corridor": [
+          0.35,
+          0.8,
+          0.65,
+          0.95
+        ]
+      },
+      "right": {
+        "state": "clear",
+        "coverage_complete": true,
+        "corridor": [
+          0.65,
+          0.8,
+          0.9500000000000001,
+          0.95
+        ]
+      }
+    },
+    "paths": {
+      "left": {
+        "coverage_complete": true,
+        "zone_pixels": 3455,
+        "geometry": "image_corridor_approximation",
+        "state": "obstacle",
+        "nearer_outlier_pixels": 900,
+        "farther_outlier_pixels": 0,
+        "outlier_fraction": 0.26049204052098407,
+        "allowed_outlier_pixels": 17,
+        "outlier_centroid_image": [
+          0.19345138888888888,
+          0.841925925925926
+        ],
+        "outlier_bounds_image": [
+          0.05,
+          0.8,
+          0.315625,
+          0.925
+        ]
+      },
+      "right": {
+        "coverage_complete": true,
+        "zone_pixels": 3459,
+        "geometry": "image_corridor_approximation",
+        "state": "clear",
+        "nearer_outlier_pixels": 0,
+        "farther_outlier_pixels": 0,
+        "outlier_fraction": 0.0,
+        "allowed_outlier_pixels": 17,
+        "outlier_centroid_image": null,
+        "outlier_bounds_image": null
+      },
+      "guard": {
+        "coverage_complete": true,
+        "zone_pixels": 1152,
+        "geometry": "image_corridor_approximation",
+        "state": "clear",
+        "nearer_outlier_pixels": 0,
+        "farther_outlier_pixels": 0,
+        "outlier_fraction": 0.0,
+        "allowed_outlier_pixels": 5,
+        "outlier_centroid_image": null,
+        "outlier_bounds_image": null
+      }
+    },
+    "perception_engine": "depth_plane",
+    "plane_residual_p99": 0.03880545230699172,
+    "plane_slope": 3.8813019178861747,
+    "plane_reference_corridor": [
+      0.35,
+      0.65,
+      0.65,
+      0.95
+    ],
+    "outlier_fraction": 0.0,
+    "outlier_pixels": 0,
+    "zone_pixels": 3456,
+    "allowed_outlier_pixels": 17,
+    "nearer_outlier_pixels": 0,
+    "farther_outlier_pixels": 0,
+    "reference_outlier_fraction": 0.0,
+    "ground_reference_valid": true,
+    "reference_fit": "least_squares",
+    "reference_inlier_fraction": 1.0,
+    "nearer_outlier_fraction": 0.0,
+    "farther_outlier_fraction": 0.0,
+    "residual_limit": 0.06,
+    "outlier_limit": 0.005,
+    "slope_min": 2.0,
+    "drive_supported": true,
+    "distance_measurement": false,
+    "model_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "raw_state": "clear",
+    "raw_reason": "depth_plane_candidate",
+    "temporal": {
+      "action": "go",
+      "state": "clear",
+      "risk": "clear",
+      "reason": "navigation_stable_clear",
+      "speed_factor": 1.0,
+      "evidence_frames": 5,
+      "history_ms": 372.06130899721757,
+      "near_guard_clear": true,
+      "counts": {
+        "clear": 5,
+        "uncertain": 0,
+        "obstacle": 0
+      },
+      "tracking": {
+        "status": "ok",
+        "points": 122,
+        "retained_points": 122,
+        "retained_ratio": 1.0,
+        "shared_scale": 0.9999317529145418,
+        "inlier_ratio": 1.0,
+        "median_motion_px": 0.14758679175392467,
+        "residual_motion_px": 0.19758813449682525
+      },
+      "region_growth": 1.0,
+      "distance_measurement": false,
+      "version": 1,
+      "spatial": {
+        "valid": true,
+        "reason": "navigation_floor_supported",
+        "candidate": "clear",
+        "guard_clear": true,
+        "hard_stop": false,
+        "floor_fraction": 1.0,
+        "uncertain_fraction": 0.0,
+        "obstacle_fraction": 0.0,
+        "near_floor_fraction": 1.0,
+        "near_uncertain_fraction": 0.0,
+        "counts": {
+          "corridor_pixels": 3456,
+          "near_pixels": 1248,
+          "floor_pixels": 3456,
+          "uncertain_pixels": 0,
+          "obstacle_pixels": 0,
+          "critical_pixels": 0,
+          "regions": 0,
+          "regions_returned": 0,
+          "ignored_obstacle_pixels": 0
+        },
+        "source_dimensions": {
+          "width": 320,
+          "height": 240
+        },
+        "regions": [
+          {
+            "bounds": [
+              0.4,
+              0.8,
+              0.45,
+              0.85
+            ],
+            "pixels": 8,
+            "fraction": 0.0023148148148148147,
+            "near": true
+          }
+        ],
+        "boundary": [
+          {
+            "x": 112,
+            "y": 192
+          },
+          {
+            "x": 120,
+            "y": 192
+          },
+          {
+            "x": 129,
+            "y": 192
+          },
+          {
+            "x": 138,
+            "y": 192
+          },
+          {
+            "x": 147,
+            "y": 192
+          },
+          {
+            "x": 156,
+            "y": 192
+          },
+          {
+            "x": 165,
+            "y": 192
+          },
+          {
+            "x": 174,
+            "y": 192
+          },
+          {
+            "x": 183,
+            "y": 192
+          },
+          {
+            "x": 192,
+            "y": 192
+          },
+          {
+            "x": 201,
+            "y": 192
+          }
+        ]
+      }
+    },
+    "model_id": "depth-anything-v2-indoor-small",
+    "artifact_sha256": "",
+    "model_generation": 0,
+    "terminal_stop": false,
+    "maneuver_clear_count": 0,
+    "maneuver_phase": "avoidance_not_accepted",
+    "turn_count": 0,
+    "stalled_corrections": 0,
+    "progress_delta": null,
+    "pose_resets": 0,
+    "sector_space": "image",
+    "frame_id": "job-jjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjj",
+    "run_id": "fixture-run-rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+    "sequence": 3064,
+    "capture_key": "fixture-capture-kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk",
+    "clear_count": 10,
+    "vision_action": "go",
+    "source": {
+      "camera_session": "cccccccccccccccccccccccccccccccc",
+      "sequence": 5776,
+      "transport_epoch": 1,
+      "pipeline_revision": 34,
+      "frame_id": "cccccccccccccccccccccccccccccccc-5776",
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "age_source": "pi-send-plus-host-elapsed",
+    "config_revision": 153,
+    "observed_at": 1792820781.646557
+  },
+  "preview": {
+    "preview_contract_version": 1,
+    "state": "clear",
+    "reason": "navigation_stable_clear",
+    "run_id": "fixture-run-rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+    "frame_id": "job-jjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjj",
+    "sequence": 3064,
+    "config_revision": 153,
+    "perception_engine": "depth_plane",
+    "model_id": "depth-anything-v2-indoor-small",
+    "model_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "artifact_sha256": "",
+    "model_generation": 0,
+    "clear_count": 10,
+    "vision_action": "go",
+    "capture_key": "fixture-capture-kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk",
+    "age_source": "pi-send-plus-host-elapsed",
+    "observed_at": 1792820781.646557,
+    "sector_space": "image",
+    "action": "stop",
+    "sectors": {
+      "left": {
+        "state": "obstacle",
+        "coverage_complete": true,
+        "corridor": [
+          0.04999999999999993,
+          0.8,
+          0.35,
+          0.95
+        ]
+      },
+      "center": {
+        "state": "clear",
+        "coverage_complete": true,
+        "corridor": [
+          0.35,
+          0.8,
+          0.65,
+          0.95
+        ]
+      },
+      "right": {
+        "state": "clear",
+        "coverage_complete": true,
+        "corridor": [
+          0.65,
+          0.8,
+          0.9500000000000001,
+          0.95
+        ]
+      }
+    },
+    "source": {
+      "camera_session": "cccccccccccccccccccccccccccccccc",
+      "sequence": 5776,
+      "transport_epoch": 1,
+      "pipeline_revision": 34,
+      "frame_id": "cccccccccccccccccccccccccccccccc-5776",
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  }
+}

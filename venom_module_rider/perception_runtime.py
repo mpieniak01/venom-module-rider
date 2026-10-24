@@ -24,7 +24,12 @@ class TorchSegformer:
         self.model = None
 
     def status(self):
-        return {"loaded": self.model is not None, "device": "cpu"}
+        return {
+            "loaded": self.model is not None,
+            "device": next(self.model.parameters()).device.type
+            if self.model is not None
+            else None,
+        }
 
     def detect(self, payload, corridor, *, evidence=False, semantic=None):
         import numpy as np
@@ -43,10 +48,17 @@ class TorchSegformer:
             )
             / 255
         )
+        from .cuda_execution import require_cuda
+
+        device = require_cuda()
         if self.model is None:
-            self.model = SegformerForSemanticSegmentation.from_pretrained(
-                self.path, local_files_only=True, use_safetensors=True
-            ).eval()
+            self.model = (
+                SegformerForSemanticSegmentation.from_pretrained(
+                    self.path, local_files_only=True, use_safetensors=True
+                )
+                .eval()
+                .to(device)
+            )
             if self.model.config.id2label.get(3) != "floor":
                 self.model = None
                 raise ValueError("model_labels_invalid")
@@ -56,7 +68,9 @@ class TorchSegformer:
         ).transpose(2, 0, 1)[None]
         with torch.inference_mode():
             logits = (
-                self.model(pixel_values=torch.from_numpy(pixels)).logits.cpu().numpy()
+                self.model(pixel_values=torch.from_numpy(pixels).to(device))
+                .logits.cpu()
+                .numpy()
             )
         if semantic is not None and 28 in semantic["traversable_labels"]:
             if self.model.config.id2label.get(28) != "rug":
@@ -125,6 +139,7 @@ class ModelRuntime:
         self.detector = None
         self.identity = None
         self.generation = 0
+        self.failure = None
         self.state = "unloaded"
         self.timings: deque[float] = deque(maxlen=100)
         self.last = None
@@ -138,6 +153,7 @@ class ModelRuntime:
             self.timings.clear()
             self.last = None
             self.finishes.clear()
+            self.failure = None
             self.state = "unloaded"
             self.generation += 1
 
@@ -210,6 +226,7 @@ class ModelRuntime:
                 self.timings.append(elapsed)
                 self.last = time.monotonic()
                 self.finishes.append(self.last)
+                self.failure = None
                 self.state = "active"
                 return {
                     **result,
@@ -219,7 +236,17 @@ class ModelRuntime:
                     "drive_supported": model_id == DEPTH,
                     "distance_measurement": False,
                 }
-            except Exception:
+            except Exception as exc:
+                self.failure = (
+                    str(exc)
+                    if str(exc)
+                    in {
+                        "vision_cuda_unavailable",
+                        "vision_cuda_provider_unavailable",
+                        "vision_cuda_required",
+                    }
+                    else "model_inference_failed"
+                )
                 self.state = "unavailable"
                 raise
 
@@ -252,10 +279,11 @@ class ModelRuntime:
     def status(self):
         return {
             "state": self.state,
+            **({"error": self.failure} if self.failure else {}),
             "active_model_id": self.identity[0] if self.identity else None,
             "model_generation": self.generation,
             "execution_provider": (
-                self.detector.status().get("device", "cpu") if self.detector else None
+                self.detector.status().get("device") if self.detector else None
             ),
         }
 
@@ -325,10 +353,20 @@ class YoloSemanticOnnx:
         self.session = None
 
     def status(self):
-        return {"loaded": self.session is not None, "device": "cpu"}
+        return {
+            "loaded": self.session is not None,
+            "device": "cuda"
+            if self.session is not None
+            and self.session.get_providers()[0] == "CUDAExecutionProvider"
+            else None,
+        }
 
     def detect(self, payload, corridor, *, evidence=False, semantic=None):
         import numpy as np
+
+        from .cuda_execution import require_cuda
+
+        device = require_cuda()
         import onnxruntime as ort
         from PIL import Image
 
@@ -354,27 +392,21 @@ class YoloSemanticOnnx:
             options = ort.SessionOptions()
             options.intra_op_num_threads = self.threads
             options.inter_op_num_threads = 1
-            self.session = ort.InferenceSession(
-                str(self.path / "model.onnx"),
-                options,
-                providers=["CPUExecutionProvider"],
-            )
-        logits = self.session.run(
-            None, {self.session.get_inputs()[0].name: pixels.transpose(2, 0, 1)[None]}
-        )[0]
-        if (
-            logits.ndim != 4
-            or logits.shape[:2] != (1, 150)
-            or not np.isfinite(logits).all()
-        ):
-            raise ValueError("vision_model_output")
+            from .cuda_execution import cuda_session
+
+            self.session = cuda_session(self.path / "model.onnx", options)
+        from .cuda_execution import cuda_logits
+
+        logits = cuda_logits(self.session, pixels.transpose(2, 0, 1)[None])
         from .navigation_maps import (
             letterbox_semantic_maps,
             semantic_maps_from_compact,
             source_gray,
         )
 
-        native = letterbox_semantic_maps(logits, (left, top, width, height))
+        native = letterbox_semantic_maps(
+            logits, (left, top, width, height), device=device
+        )
         maps = semantic_maps_from_compact(
             native["labels"], native["confidence"], image.size, semantic=semantic
         )

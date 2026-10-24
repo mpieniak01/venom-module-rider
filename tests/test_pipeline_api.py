@@ -643,24 +643,28 @@ def test_network_delayed_part_is_stale_despite_small_send_age_and_never_infers(
     from venom_module_rider.stream_contract import NativeFrame
 
     app, service, pi = fixture(monkeypatch)
-    pi.latest = native(2)
-    delayed = native(1)
-    descriptor_source = delayed.source.model_copy(
-        update={
-            "captured_monotonic_ns": time.monotonic_ns() - 350_000_000,
-            "frame_age_ms": 10.0,
-        }
-    )
-    delayed = NativeFrame(descriptor_source, delayed.payload, time.monotonic())
 
     async def backlogged():
-        yield delayed
+        # Introduce the measured network delay at delivery, not before ASGI
+        # startup: 350ms is stale for inference but still within the 500ms
+        # display window. Lifespan scheduling is not part of that experiment.
+        delayed = native(1)
+        descriptor_source = delayed.source.model_copy(
+            update={
+                "captured_monotonic_ns": time.monotonic_ns() - 350_000_000,
+                "frame_age_ms": 10.0,
+            }
+        )
+        yield NativeFrame(descriptor_source, delayed.payload, time.monotonic())
         await asyncio.Event().wait()
 
     pi.mjpeg = backlogged
     with TestClient(app) as client:
         detector = Detector()
         app.state.rider_vision.detector = detector
+        # The Pi status describes a fresh capture independently of the older
+        # network part delivered below.
+        pi.latest = native(2)
         current = warmup(client)
         raw = client.get("/api/v1/rider/camera/raw")
         assert raw.status_code == 200

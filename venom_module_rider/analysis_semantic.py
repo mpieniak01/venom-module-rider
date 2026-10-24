@@ -1,4 +1,4 @@
-"""Offline semantic adapter inside the existing CPU-only analysis worker."""
+"""Offline semantic adapter inside the existing CUDA analysis worker."""
 
 from __future__ import annotations
 
@@ -55,7 +55,7 @@ class SemanticCandidate:
         self.metadata = {
             **qualified,
             "threads": threads,
-            "device": "cpu",
+            "device": "cuda",
             "load_timing": "included_in_first_perception_call",
             "perception_timing": "decode_preprocess_load_infer_postprocess_overlay",
         }
