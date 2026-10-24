@@ -13,6 +13,7 @@ from .depth_detector import DepthDetector
 from .errors import RiderError
 from .floor_detector import FloorDetector
 from .journey import planner_history, record_result
+from .model_resources import model_operation
 from .sector_trend import update as sector_trend
 from .steering import plan as steering_plan
 from .vision_overlay import preview_sectors
@@ -51,6 +52,7 @@ class VisionLoop:
         self.production_waiters = {False: 0, True: 0}
         self.workers = VisionWorkers("rider-vision")
 
+    @model_operation
     def _detect_floor(self, payload, frame):
         from .navigation_profiles import parameters
 
@@ -72,6 +74,7 @@ class VisionLoop:
             )
         return self.detector.detect(payload, frame.corridor, **options)
 
+    @model_operation
     def _detect_depth(self, payload, frame):
         from .navigation_profiles import parameters
 
@@ -96,6 +99,7 @@ class VisionLoop:
             payload, frame.corridor, frame.perception, **options
         )
 
+    @model_operation
     def _detect_model(self, payload, frame):
         assert self.models is not None
         return self.models.runtime.detect(payload, frame)
@@ -155,6 +159,8 @@ class VisionLoop:
         return row[1] if row is not None else None
 
     async def _admit_inference(self, device_id, frame, source_key, diagnostic):
+        if getattr(self, "resources_suspended", False):
+            raise RiderError("model_resources_released", 409)
         depth = frame.perception.engine == "depth_plane"
         key = self._inference_key(device_id, frame, source_key)
         cached = self._cached_inference(key)

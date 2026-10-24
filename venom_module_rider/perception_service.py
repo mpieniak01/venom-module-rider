@@ -198,6 +198,7 @@ class PerceptionService:
                 self.loop.inference_cache.clear()
                 self.loop.runs.clear()
                 self.runtime.reset()
+                self.loop.resources_suspended = False
                 self.loop.detector = type(self.loop.detector)()
                 from .depth_detector import DepthDetector
 
