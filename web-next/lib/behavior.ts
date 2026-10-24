@@ -5,7 +5,7 @@ export type BehaviorId = typeof BEHAVIOR_IDS[number];
 export type BehaviorSelection = { version: 1; profile_id: BehaviorId; profile_revision: number; overrides?: Record<string, number | boolean> };
 export type ParameterSpec = { kind: "int" | "float" | "bool"; min: number; max: number; step: number; group: string };
 export type BehaviorProfile = { id: BehaviorId; profile_revision: number; status: "legacy" | "experimental"; parameters: JsonRecord };
-export type BehaviorCatalog = { supported: boolean; active: BehaviorSelection; effective_policy_sha256: string; profiles: BehaviorProfile[]; editable?: boolean; parameterSchema?: Record<string, ParameterSpec>; activeParameters?: JsonRecord };
+export type BehaviorCatalog = { supported: boolean; active: BehaviorSelection; effective_policy_sha256: string; profiles: BehaviorProfile[]; editable?: boolean; parameterSchema?: Record<string, ParameterSpec>; activeParameters?: JsonRecord; activeBaseParameters?: JsonRecord };
 export type BehaviorDraft = { selection: BehaviorSelection; revision: number; effectiveHash: string; session: string };
 const legacy: BehaviorSelection = { version: 1, profile_id: "legacy", profile_revision: 1 };
 const knownId = (value: unknown): value is BehaviorId => BEHAVIOR_IDS.includes(value as BehaviorId);
@@ -43,7 +43,16 @@ export function behaviorCatalog(policy: JsonRecord | null): BehaviorCatalog {
       || !finite(spec.min) || !finite(spec.max) || !finite(spec.step) || spec.min > spec.max || spec.step <= 0 || !["evidence", "temporal", "persistence", "objects"].includes(str(spec.group))) return fallback;
     parameterSchema[key] = spec as ParameterSpec;
   }
-  return { supported: true, active, effective_policy_sha256: str(raw.effective_policy_sha256), profiles, editable, parameterSchema, activeParameters: editable ? record(raw.active_parameters) : profiles.find(p => p.id === active.profile_id)?.parameters };
+  return { supported: true, active, effective_policy_sha256: str(raw.effective_policy_sha256), profiles, editable, parameterSchema, activeBaseParameters: editable ? record(raw.active_base_parameters) : undefined, activeParameters: editable ? record(raw.active_parameters) : profiles.find(p => p.id === active.profile_id)?.parameters };
+}
+/** Saved model settings are included when editing the current device profile. */
+function parameterBase(selection: BehaviorSelection, policy: JsonRecord | null): JsonRecord {
+  const catalog = behaviorCatalog(policy), preset = catalog.profiles.find(p => p.id === selection.profile_id)?.parameters ?? {};
+  return selection.profile_id === catalog.active.profile_id && selection.profile_revision === catalog.active.profile_revision
+    ? { ...preset, ...catalog.activeBaseParameters } : preset;
+}
+export function behaviorParameterValues(selection: BehaviorSelection, policy: JsonRecord | null): JsonRecord {
+  return { ...parameterBase(selection, policy), ...selection.overrides };
 }
 export function behaviorDraft(policy: JsonRecord, id: string, session: string): BehaviorDraft | null {
   const catalog = behaviorCatalog(policy), profile = catalog.profiles.find(row => row.id === id);
@@ -79,7 +88,7 @@ export function validBehaviorDraft(draft: BehaviorDraft, policy: JsonRecord | nu
     && Number(values.object_area_ratio_min) <= Number(values.object_area_ratio_max);
 }
 export function editBehaviorParameter(draft: BehaviorDraft, policy: JsonRecord, key: string, value: number | boolean): BehaviorDraft {
-  const base = behaviorCatalog(policy).profiles.find(p => p.id === draft.selection.profile_id)?.parameters ?? {};
+  const base = parameterBase(draft.selection, policy);
   const overrides = { ...draft.selection.overrides, [key]: value };
   if (value === base[key]) delete overrides[key];
   return { ...draft, selection: { ...draft.selection, ...(Object.keys(overrides).length ? { overrides } : { overrides: undefined }) } };

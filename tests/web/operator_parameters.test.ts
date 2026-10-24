@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { behaviorCatalog, behaviorDraft, behaviorEditDraft, behaviorWrite, editBehaviorParameter, sameBehavior, validBehaviorDraft } from "../../web-next/lib/behavior";
+import { behaviorCatalog, behaviorDraft, behaviorEditDraft, behaviorWrite, editBehaviorParameter, sameBehavior, validBehaviorDraft, behaviorParameterValues } from "../../web-next/lib/behavior";
 import type { JsonRecord } from "../../web-next/lib/model";
 const catalog = JSON.parse(readFileSync(new URL("../fixtures/policy-catalog-v2.json", import.meta.url), "utf8"));
 function fixture() { return { revision: 9, behavior: { ...catalog.active }, behavior_catalog: structuredClone(catalog) }; }
@@ -37,4 +37,17 @@ test("older device exposes presets and no unsupported parameter editor", () => {
  const p=fixture() as JsonRecord;const raw={...(p.behavior_catalog as JsonRecord)};
  delete raw.parameter_editing_version;delete raw.parameter_schema;delete raw.active_parameters;
  p.behavior_catalog=raw;assert.equal(behaviorCatalog(p).editable,false);assert.equal(behaviorEditDraft(p,"one"),null);
+});
+test("editing saved model values keeps intentional corrections equal to a preset default", () => {
+ const p=fixture() as JsonRecord, raw=p.behavior_catalog as JsonRecord;
+ raw.active_base_parameters={...(catalog.profiles.at(-1).parameters),pixel_confidence:.82};
+ raw.active={version:1,profile_id:"fluid",profile_revision:2,overrides:{pixel_confidence:.9}};
+ const base=behaviorEditDraft(p,"one")!;
+ assert.equal(behaviorParameterValues(base.selection,p).pixel_confidence,.9);
+ const custom=editBehaviorParameter(base,p,"pixel_confidence",.7);
+ assert.equal(custom.selection.overrides?.pixel_confidence,.7);
+ assert.equal(behaviorParameterValues(custom.selection,p).pixel_confidence,.7);
+ const restored=editBehaviorParameter(custom,p,"pixel_confidence",.82);
+ assert.equal(restored.selection.overrides,undefined);
+ assert.equal(behaviorParameterValues(restored.selection,p).pixel_confidence,.82);
 });

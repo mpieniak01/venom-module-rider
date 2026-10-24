@@ -1,6 +1,6 @@
 # Vision policy parameters
 
-The operator selects an immutable preset (Cautious, Balanced, Fluid) or custom corrections based on one preset. Selecting a preset restores its versioned values. Editing an advanced value displays **Custom based on: Fluid**, rather than silently changing the meaning of Fluid. Legacy remains a separate compatibility policy with no corrections.
+The operator selects an immutable preset (Cautious, Balanced, Fluid) or custom corrections based on one preset. Selecting a preset restores its versioned values. Editing an advanced value displays **Custom settings (Fluid)**, rather than silently changing the meaning of Fluid. Legacy remains a separate compatibility policy with no corrections.
 
 ## Revisions and ownership
 
@@ -71,6 +71,6 @@ The matching controls reject implausible area changes, retain a bounded missed-d
 
 ## Operator flow
 
-Open **Caution level → Profile parameters**, select a revision 2 preset, edit values and explicitly Apply. The current device revision and custom label remain visible. Restore preset removes corrections; Refresh discards an unsaved draft. Another panel's save invalidates an old draft rather than overwriting it. The selected-model thresholds remain in their existing model-tuning section.
+Open **Obstacle assessment → Details and custom settings**, select a revision 2 preset, edit values and explicitly Apply. The current device revision and custom label remain visible. Restore preset removes corrections; Refresh discards an unsaved draft. Another panel's save invalidates an old draft rather than overwriting it. The selected-model thresholds remain in their existing model-tuning section.
 
 Calibration, known-room assumptions, transport freshness and physical acceptance remain independent from these adjustable interpretation values. No centimetre geometry is inferred from confidence or residual thresholds.

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { data, type JsonRecord } from "../lib/model";
-import { BEHAVIOR_IDS, behaviorCatalog, behaviorDraft, behaviorDraftStale, behaviorError, behaviorSwitchBlock, behaviorWrite, behaviorEditDraft, editBehaviorParameter, sameBehavior, validBehaviorDraft, type BehaviorDraft } from "../lib/behavior";
+import { BEHAVIOR_IDS, behaviorCatalog, behaviorDraft, behaviorDraftStale, behaviorError, behaviorSwitchBlock, behaviorWrite, behaviorEditDraft, editBehaviorParameter, sameBehavior, validBehaviorDraft, behaviorParameterValues, type BehaviorDraft } from "../lib/behavior";
 import type { RiderClient } from "../lib/use-rider";
 import type { Translator } from "../lib/i18n";
 import { Button, Field, Input, Pill, Select } from "./primitives";
@@ -24,7 +24,9 @@ export function NavigationProfiles({ client, policy, goals, locked, t, onApplied
   const invalid = !!visibleDraft && !validBehaviorDraft(visibleDraft, policy);
   const selection = visibleDraft?.selection ?? catalog.active;
   const custom = !!Object.keys(selection.overrides ?? {}).length;
-  const values = { ...candidate?.parameters, ...selection.overrides };
+  const values = behaviorParameterValues(selection, policy);
+  const profileName = (value: typeof selection) => Object.keys(value.overrides ?? {}).length
+    ? t("behavior.custom", { profile: t("behavior.profile." + value.profile_id) }) : t("behavior.profile." + value.profile_id);
   const editParameter = (key: string, value: number | boolean) => {
     if (!policy) return;
     const base = visibleDraft ?? editBase.current ?? behaviorEditDraft(policy, session);
@@ -50,7 +52,7 @@ export function NavigationProfiles({ client, policy, goals, locked, t, onApplied
     finally { applying.current = false; setPending(false); onPendingChange?.(false); }
   };
   return <section className={styles.navigationProfiles} aria-label={t("behavior.title")} data-testid="navigation-profiles">
-    <div className={styles.perceptionSummary} data-testid="behavior-summary"><strong>{t("behavior.title")}</strong><Pill tone={catalog.active.profile_id === "legacy" ? undefined : "warning"}>{catalog.active.overrides ? t("behavior.custom", { profile: t("behavior.profile." + catalog.active.profile_id) }) : t("behavior.profile." + catalog.active.profile_id)} · r{catalog.active.profile_revision}</Pill></div>
+    <div className={styles.perceptionSummary} data-testid="behavior-summary"><strong>{t("behavior.title")}</strong><Pill tone={catalog.active.profile_id === "legacy" ? undefined : "warning"}>{profileName(catalog.active)} · r{catalog.active.profile_revision}</Pill></div>
     <div className={styles.perceptionBody}>
 
     <div className={styles.perceptionSelection}>
@@ -67,8 +69,8 @@ export function NavigationProfiles({ client, policy, goals, locked, t, onApplied
       <Button data-testid="behavior-apply" disabled={!changed || !!block || !client.canMutate} title={t("behavior.applyHint")} onClick={() => void apply()}>{t(pending ? "behavior.saving" : "behavior.apply")}</Button>
       <Button data-testid="behavior-refresh" disabled={pending} onClick={discard}>{t(visibleDraft ? "behavior.discard" : "behavior.refresh")}</Button>
     </div>
-    <p className={styles.small} data-testid="behavior-current">{t("behavior.current", { profile: t("behavior.profile." + catalog.active.profile_id), revision: String(policy?.revision ?? "—") })}</p>
-    {visibleDraft && <p className={styles.hint} data-testid="behavior-draft">{t("behavior.draft", { profile: t("behavior.profile." + selected) })}</p>}
+    <p className={styles.small} data-testid="behavior-current">{t("behavior.current", { profile: profileName(catalog.active), revision: String(policy?.revision ?? "—") })}</p>
+    {visibleDraft && <p className={styles.hint} data-testid="behavior-draft">{t("behavior.draft", { profile: profileName(selection) })}</p>}
     {!!(failure || block) && <p className={failure || conflict ? styles.loopError : styles.hint} role={failure || conflict ? "alert" : "status"} data-testid="behavior-message">{t(failure || block, { model: localModel })}</p>}
     {saved !== null && policy?.revision === saved && <p className={styles.hint} role="status" data-testid="behavior-saved">{t("behavior.saved", { revision: String(saved) })}</p>}
     {local && !(failure || block === "behavior.localOnly") && <p className={styles.hint} data-testid="behavior-provider-hint">{t("behavior.localOnly", { model: localModel })}</p>}
@@ -83,7 +85,9 @@ export function NavigationProfiles({ client, policy, goals, locked, t, onApplied
       {selection.profile_revision === 2 && <div data-testid="behavior-editor" onFocusCapture={() => { if (policy && !visibleDraft) editBase.current = behaviorEditDraft(policy, session); }}>
         {["evidence", "temporal", "persistence", "objects"].map(group => <fieldset key={group} disabled={locked || pending} className={styles.parameterGroup}>
           <legend>{t("behavior.group." + group)}</legend>
-          {group === "persistence" && <p className={styles.hint}>{t("behavior.persistenceHint")}</p>}
+          {group === "evidence" && <p className={styles.hint}>{t("behavior.evidenceHint")}</p>}
+          {group === "temporal" && <p className={styles.hint}>{t("behavior.temporalHint")}</p>}
+          {group === "persistence" && <p className={styles.hint}>{t("behavior.persistenceHint", { required: String(values.obstacle_support_frames), window: String(values.obstacle_window_frames) })}</p>}
           {group === "objects" && <p className={styles.hint}>{t("behavior.objectsHint")}</p>}
           <div className={styles.grid3}>{Object.entries(catalog.parameterSchema ?? {}).filter(([key, spec]) => spec.group === group && (key !== "pixel_confidence" || (policy?.perception as JsonRecord)?.engine === "segformer")).map(([key, spec]) => <Field key={key} label={t("behavior.param." + key)}>
             {spec.kind === "bool" ? <input data-testid={"behavior-param-" + key} type="checkbox" checked={values[key] === true} onChange={e => editParameter(key, e.target.checked)}/>
@@ -95,10 +99,10 @@ export function NavigationProfiles({ client, policy, goals, locked, t, onApplied
     </>}
     <p className={styles.hint} data-testid="behavior-description">{t("behavior.description." + selected)}</p>
     {candidate?.status === "experimental" && <p className={styles.hint}>{t("behavior.experimentalHint")}</p>}
-    {catalog.supported && <>
+    {catalog.supported && <details data-testid="behavior-technical"><summary>{t("behavior.technicalDetails")}</summary>
       <p className={styles.small}>{t("behavior.effectiveHash")}: <code>{catalog.effective_policy_sha256}</code></p>
-      <pre className={styles.pre} data-testid="behavior-parameters">{JSON.stringify(candidate?.parameters ?? {}, null, 2)}</pre>
-    </>}
+      <pre className={styles.pre} data-testid="behavior-parameters">{JSON.stringify(catalog.activeParameters ?? candidate?.parameters ?? {}, null, 2)}</pre>
+    </details>}
     </details>
     </div>
   </section>;
