@@ -23,6 +23,7 @@ class RiderModelResources:
         register_model_resource(self, "vision", "release_model_resource")
 
     async def prepare_model_release(self):
+        self.prepared = False
         loop = self.app.state.rider_vision
         loop.resources_suspended = True
         domain = self.app.state.rider
@@ -63,6 +64,10 @@ class RiderModelResources:
                 await asyncio.gather(
                     *(task for _, task in tasks), return_exceptions=True
                 )
+            if getattr(analysis, "children", None) or getattr(
+                analysis, "resource_failures", None
+            ):
+                raise RuntimeError("vision_release_analysis_unconfirmed")
         pending = [task for task in (loop.busy, loop.depth_busy) if task is not None]
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
@@ -72,6 +77,7 @@ class RiderModelResources:
         if not self.prepared:
             return False
         loop = self.app.state.rider_vision
+        loop.resources_suspended = True
         self.app.state.rider_models.runtime.reset()
         loop.depth_detector.model = None
         loop.depth_detector.processor = None

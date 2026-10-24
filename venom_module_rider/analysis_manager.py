@@ -15,6 +15,7 @@ from .analysis_priority import AnalysisPriority
 from .analysis_profiles import ProfileCatalog, code_fingerprint
 from .analysis_store import MAX_ARTIFACT_BYTES, AnalysisStore
 from .errors import RiderError
+from .model_resources import model_operation
 from .samples_archive import canonical
 
 MAX_MESSAGE = 16 * 1024**2
@@ -83,6 +84,7 @@ class AnalysisManager:
                 await self.registry.release_writer("analysis-recovery")
         return True
 
+    @model_operation
     async def submit(self, request_id, session_id, spec):
         if self.closed:
             raise RiderError("analysis_closed", 503)
@@ -99,6 +101,7 @@ class AnalysisManager:
         handle.add_done_callback(observed)
         return await asyncio.shield(handle)
 
+    @model_operation
     async def _submit(self, request_id, session_id, spec):
         async with self.operations:
             if self.closed:

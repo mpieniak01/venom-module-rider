@@ -123,3 +123,22 @@ async def test_cold_host_release_does_not_require_an_online_robot():
     await resource.prepare_model_release()
     domain.read.assert_not_awaited()
     assert resource.prepared
+
+
+@pytest.mark.asyncio
+async def test_unconfirmed_archive_child_cannot_reuse_previous_preparation():
+    loop = SimpleNamespace(busy=None, depth_busy=None)
+    analysis = SimpleNamespace(tasks={}, children={"orphan": object()})
+    resource = RiderModelResources(
+        SimpleNamespace(
+            state=SimpleNamespace(
+                rider=SimpleNamespace(device=None),
+                rider_vision=loop,
+                rider_analysis=analysis,
+            )
+        )
+    )
+    resource.prepared = True
+    with pytest.raises(RuntimeError, match="analysis_unconfirmed"):
+        await resource.prepare_model_release()
+    assert resource.release_model_resource() is False
