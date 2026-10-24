@@ -61,3 +61,23 @@ test("changed source and missing coverage cannot borrow an earlier clear corrido
   assert.ok(sectorPresentation(sample,changed,false,1100).view.rows.every(row=>row.state==="unknown"));
   assert.equal(nativeAnalysisMatches(base,{...base.source,sha256:"f".repeat(64)}),false);
 });
+
+test("late matching policy metadata keeps the exact fresh displayed capture", async()=>{
+  const {previewMatchesSelection}=await import("../../web-next/lib/perception");
+  const analysis=fixture.preview,frame={analysis,ageMs:160,receivedAt:1000,decoded:true,stale:false,knownFreshness:true};
+  const policy={model_id:"",artifact_sha256:"",revision:analysis.config_revision};
+  assert.equal(previewMatchesSelection(frame,policy,1100),true);
+  assert.equal(previewMatchesSelection({...frame,analysis:{...analysis,model_id:"segformer-b0-ade20k",artifact_sha256:"d".repeat(64)}},{model_id:"segformer-b0-ade20k",artifact_sha256:"d".repeat(64),revision:analysis.config_revision},1100),true);
+  assert.equal(frame.receivedAt,1000);
+});
+
+test("policy adoption never keeps expired, undecoded or differently configured model output", async()=>{
+  const {previewMatchesSelection}=await import("../../web-next/lib/perception");
+  const analysis={...fixture.preview,model_id:"segformer-b0-ade20k",artifact_sha256:"d".repeat(64)};
+  const frame={analysis,ageMs:160,receivedAt:1000,decoded:true,stale:false,knownFreshness:true};
+  const policy={model_id:analysis.model_id,artifact_sha256:analysis.artifact_sha256,revision:analysis.config_revision};
+  for(const candidate of [null,{...frame,decoded:false},{...frame,stale:true},{...frame,knownFreshness:false},{...frame,analysis:{...analysis,config_revision:analysis.config_revision-1}},{...frame,analysis:{...analysis,artifact_sha256:"e".repeat(64)}}])
+    assert.equal(previewMatchesSelection(candidate,policy,1100),false);
+  assert.equal(previewMatchesSelection(frame,null,1100),false);
+  assert.equal(previewMatchesSelection(frame,policy,1840),false);
+});

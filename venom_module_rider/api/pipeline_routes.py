@@ -15,6 +15,7 @@ from ..preview_metadata import analysis_header
 from ..sample_sources import native_ticket
 from ..stream_contract import PipelineAction, SourceReference, source_headers
 from ..stream_contract import PipelineProfile as PipelineProfile
+from ..stream_hub import MAX_FRAME_AGE_MS
 from .routing import RiderRoute
 
 router = APIRouter(route_class=RiderRoute)
@@ -213,10 +214,12 @@ async def processed_native(request, connection, incoming):
         result["preview_only"] = True
     if connection.closed:
         raise RiderError("stream_epoch_changed", 409)
-    if incoming.age_ms(hub.clock()) >= 500:
+    if incoming.age_ms(hub.clock()) >= MAX_FRAME_AGE_MS:
         raise RiderError("frame_stale", 409)
     headers = {
-        **source_headers(incoming, hub.clock(), source="venom"),
+        **source_headers(
+            incoming, hub.clock(), source="venom", max_age_ms=MAX_FRAME_AGE_MS
+        ),
         "x-rider-run-id": result["run_id"],
         "x-rider-config-revision": str(result["config_revision"]),
         "x-rider-vision-state": result["state"],
@@ -260,9 +263,11 @@ async def browser_stream(kind: Literal["raw", "venom"], request: Request):
                         )
                     else:
                         payload = await hub.canonical_frame(connection, frame)
-                        if frame.age_ms(hub.clock()) >= 500:
+                        if frame.age_ms(hub.clock()) >= MAX_FRAME_AGE_MS:
                             return
-                        headers = source_headers(frame, hub.clock())
+                        headers = source_headers(
+                            frame, hub.clock(), max_age_ms=MAX_FRAME_AGE_MS
+                        )
                         if (
                             connection.closed
                             or hub.binding(domain, pipeline) != binding

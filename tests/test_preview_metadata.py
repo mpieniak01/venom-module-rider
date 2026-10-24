@@ -135,3 +135,92 @@ def test_planner_diagnostics_cannot_grow_the_preview_header():
     header = analysis_header(result)
     assert json.loads(header) == FIXTURE["preview"]
     assert len(header) < MAX_PREVIEW_ANALYSIS_CHARS
+
+
+@pytest.mark.parametrize("age", [299, 350, 499])
+async def test_native_preview_uses_display_age_without_changing_motion_source_limit(
+    age,
+):
+    from venom_module_rider.api.pipeline_routes import processed_native
+    from venom_module_rider.stream_contract import source_headers
+
+    result = FIXTURE["result"]
+    incoming = SimpleNamespace(
+        source=SimpleNamespace(
+            **result["source"],
+            model_dump=lambda **_kwargs: {
+                **result["source"],
+                "contract_version": 1,
+            },
+        ),
+        age_ms=lambda _now: age,
+    )
+
+    class Domain:
+        async def read(self, path, *_args):
+            if path.endswith("config"):
+                return {
+                    "data": {
+                        "corridor": [0.35, 0.8, 0.65, 0.95],
+                        "revision": result["config_revision"],
+                    }
+                }
+            return {
+                "data": {"running": True, "stale": False, "run_id": result["run_id"]}
+            }
+
+        def transport(self):
+            return SimpleNamespace(device=SimpleNamespace(id="fixture"))
+
+    class Loop:
+        async def wait_for_preview(self, *_args, **_kwargs):
+            return 10.0, b"jpeg", result, 48.0
+
+    class Hub:
+        def clock(self):
+            return 10.0
+
+        async def frame(self, *_args, **_kwargs):
+            return incoming
+
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                rider=Domain(),
+                rider_vision=Loop(),
+                rider_stream=Hub(),
+            )
+        )
+    )
+    _, image, headers = await processed_native(
+        request, SimpleNamespace(closed=False), incoming
+    )
+    assert image == b"jpeg" and headers["x-rider-stale"] == "false"
+    assert float(headers["x-rider-frame-age-ms"]) == age
+    # Tickets/decisions still use the original300ms source contract by default.
+    assert source_headers(incoming, 10.0)["x-rider-stale"] == (
+        "true" if age >= 300 else "false"
+    )
+
+
+async def test_raw_browser_preview_uses_the_same_display_age_bound(monkeypatch):
+    from test_stream_browser import Browser, setup, unpack
+
+    from venom_module_rider.api.pipeline_routes import browser_stream
+    from venom_module_rider.stream_contract import NativeFrame
+
+    pi, domain, hub, loop, state = await setup()
+    monkeypatch.setattr(NativeFrame, "age_ms", lambda *_args: 350)
+    iterator = None
+    try:
+        iterator = (await browser_stream("raw", Browser(state))).body_iterator
+        headers, _ = unpack(await anext(iterator))
+        assert headers["x-rider-stale"] == "false"
+        assert headers["x-rider-frame-age-ms"] == "350"
+        assert loop.detector.calls == 0 and pi.snapshot_requests == 0
+    finally:
+        if iterator:
+            await iterator.aclose()
+        await hub.close()
+        await loop.close()
+        await domain.close()

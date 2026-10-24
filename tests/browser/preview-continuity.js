@@ -32,8 +32,8 @@ async (page, fixture) => {
             ...(state.recover?{state:"unknown",reason:"navigation_frame_gap",vision_action:"stop"}:{})};
           state.recover=false;
           const headers={"Content-Type":"image/jpeg","Content-Length":jpeg.length,
-            "X-Rider-Stale":"false","X-Rider-Source":"venom","X-Rider-Source-Json":JSON.stringify(source),
-            "X-Rider-Frame-Id":source.frame_id,"X-Rider-Frame-Age-Ms":"160",
+            "X-Rider-Stale":sequence%11===0?"true":"false","X-Rider-Source":"venom","X-Rider-Source-Json":JSON.stringify(source),
+            "X-Rider-Frame-Id":source.frame_id,"X-Rider-Frame-Age-Ms":sequence%11===0?"550":"160",
             "X-Rider-Frame-Age-Source":"pi-status-anchor-plus-host-elapsed",
             "X-Rider-Analysis-Json":JSON.stringify(analysis),"X-Rider-Vision-State":analysis.state};
           const crlf=String.fromCharCode(13,10);
@@ -45,13 +45,14 @@ async (page, fixture) => {
       return Promise.resolve(new Response(stream,{headers:{"Content-Type":"multipart/x-mixed-replace; boundary=continuity"}}));
     };
   },fixture);
-  await page.route("**/api/v1/rider/**",route=>{
+  await page.route("**/api/v1/rider/**",async route=>{
     const req=route.request(),path=new URL(req.url()).pathname.slice("/api/v1/rider".length);
     const json=body=>route.fulfill({status:200,contentType:"application/json",body:JSON.stringify(body)});
     if(req.method()!=="GET"){mutations.push(path);return route.abort();}
     if(path==="/config")return json({devices:[{id:"fixture",label:"Prod fixture",mode:"device"}],device_id:"fixture",session:"continuity-session"});
     if(path==="/status")return json({connection:{configured:true,status:"online",device_id:"fixture",mode:"device",session:"continuity-session"},polling:{control_ms:200},errors:{},settings:{revision:1,directions:{}},control:{server_time:Date.now()/1000,safety:{state:"DISARMED",generation:"fixture",can_move:false,moving:false,ready:true,stale:false}},telemetry:{},health:{},catalog:{features:[]},logic:{},face:{},resources:{}});
     if(path==="/camera/pipeline")return json({contract_id:"rider.camera_pipeline",contract_version:1,revision:34,profile,active_profile:profile,state:"active",transport_epoch:9,camera_session:"continuity-camera",capabilities:{analysis_locations:["venom","local"],local_engines:["canny"],remote_transports:["snapshots","mjpeg"]},effective_stages:{capture:true},latest_frame:{camera_session:"continuity-camera",transport_epoch:9,pipeline_revision:34,captured_monotonic_ns:Date.now()*1e6,frame_age_ms:20},error:null});
+    if(path==="/navigation/config")await new Promise(resolve=>setTimeout(resolve,1400));
     if(path==="/navigation/config"||path==="/navigation/state")return json({config:{revision:153,mode:"observe",speed:.1,max_motion_ms:150,decision_budget_ms:300,corridor:[.35,.8,.65,.95],perception:{engine:"depth_plane"},verified:false},status:{running:true,stale:false,mode:"observe",run_id:fixture.preview.run_id,config_revision:153,decision:fixture.preview},goals:{observe:true,drive:false},runtime:{observe:true,drive:true,known:true},detector:{configured:true,loaded:true,sha256:fixture.preview.model_sha256}});
     return json({});
   });
