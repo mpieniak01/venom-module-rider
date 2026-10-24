@@ -11,7 +11,7 @@ All paths below are under /api/v1/rider. Mutations carry X-Rider-Session from GE
 | POST /control | /api/safety or /api/control; manual panel ARM/disarm/STOP/clear, move, height, balance |
 | POST /settings | /api/calibration/controls; revisioned values/directions/profile operations |
 | GET /camera/raw, /camera/proc | Original binary frame and available source metadata |
-| POST /perception/prepare | Load the selected host vision model for an explicit Analysis action; no Pi goal, policy edit or motion |
+| POST /perception/prepare | Load the selected host vision model for explicit Analysis; restart an already requested failed observation, never driving |
 | POST /goal/{name} | /api/logic/feature/{name}; Pi-owned goal/resource orchestration |
 | POST /resource/{name} | /api/resource/{name}; explicit power, stop or release |
 | GET /navigation/config, /navigation/state | Pi navigation policy/status plus host detector capability |
@@ -68,3 +68,7 @@ An explicit Analysis selection and observation start prepare the current host mo
 including after global memory release. Release stops consumers and unloads models;
 it leaves no persistent inference suspension flag. Model preparation preserves the
 Pi policy revision and acceptance. Passive status reads never prepare a model.
+
+If an observe-only worker stopped while its goal remains requested, explicit
+Analysis restarts that observation after model preparation. A running worker,
+a driving goal or unknown driving ownership is never restarted by this action.

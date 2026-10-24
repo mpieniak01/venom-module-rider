@@ -410,7 +410,19 @@ async def test_goal_does_not_start_observation_if_model_loading_fails():
         await domain.close()
 
 
-async def test_analysis_prepare_route_loads_without_starting_device_goals():
+@pytest.mark.parametrize(
+    ("running", "observe", "drive", "restart"),
+    [
+        (False, True, False, True),
+        (True, True, False, False),
+        (False, False, False, False),
+        (False, True, True, False),
+        (False, True, None, False),
+    ],
+)
+async def test_analysis_prepare_route_only_restarts_failed_observation(
+    running, observe, drive, restart
+):
     from unittest.mock import AsyncMock
 
     import httpx
@@ -420,7 +432,20 @@ async def test_analysis_prepare_route_loads_without_starting_device_goals():
 
     app = FastAPI()
     app.include_router(router)
-    app.state.rider = domain = object()
+
+    async def read(path, *_args, **_kwargs):
+        if path == "/api/navigation/status":
+            return {"data": {"mode": "observe", "running": running}}
+        return {
+            "data": {
+                "features": {
+                    "s15_venom_perception": {"requested": observe},
+                    "s14_venom_navigation": {"requested": drive},
+                }
+            }
+        }
+
+    app.state.rider = domain = SimpleNamespace(read=read, goal=AsyncMock())
     app.state.rider_models = SimpleNamespace(prepare_observation=AsyncMock())
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://fixture"
@@ -432,3 +457,9 @@ async def test_analysis_prepare_route_loads_without_starting_device_goals():
         app.state.rider_models.prepare_observation.assert_awaited_once_with(
             domain, "fixture-session"
         )
+        assert domain.goal.await_count == (2 if restart else 0)
+        if restart:
+            assert [call.args for call in domain.goal.await_args_list] == [
+                ("s15_venom_perception", {"enabled": False}, "fixture-session"),
+                ("s15_venom_perception", {"enabled": True}, "fixture-session"),
+            ]
