@@ -7,14 +7,17 @@ async (page, fixture) => {
   const base=page.url()==="about:blank"?"http://localhost:3300":new URL(page.url()).origin;
   const wait=async(fn,message)=>{const end=Date.now()+8000;while(!await fn()){check(Date.now()<end,message);await new Promise(r=>setTimeout(r,40));}};
   await page.goto("about:blank");
-  const mutations=[];
+  const mutations=[],preparations=[],referenceSaves=[];
+  let imageReference={version:1,revision:4,purpose:"visual_reference_only",values:{visible:true,frame_size:[320,240],track_width_cm:16,robot_width_cm:11.5,camera_height_cm:14,reference_pose:"lowest",left_edge:[[.39,.65],[.29,1]],right_edge:[[.58,.65],[.74,1]],markers:[[18,1],[20,227/240],[40,181/240],[60,160/240]]}};
   const profile={analysis_location:"venom",local_engine:"canny",remote_transport:"mjpeg"};
   await page.addInitScript(fixture=>{
     const original=window.fetch.bind(window),encoder=new TextEncoder();
     window.__previewContinuity={frames:0,paused:false,recover:false,connections:0};
     window.fetch=(input,options={})=>{
       const url=typeof input==="string"?input:input instanceof URL?input.href:input.url;
-      if(!new URL(url,location.href).pathname.endsWith("/api/v1/rider/camera/stream/venom"))return original(input,options);
+      const path=new URL(url,location.href).pathname;
+      if(!/\/api\/v1\/rider\/camera\/stream\/(raw|venom)$/.test(path))return original(input,options);
+      const kind=path.endsWith("/raw")?"raw":"venom";
       window.__previewContinuity.connections++;
       const canvas=document.createElement("canvas");canvas.width=320;canvas.height=240;
       const ctx=canvas.getContext("2d");ctx.fillStyle="#008040";ctx.fillRect(0,0,320,240);
@@ -33,7 +36,7 @@ async (page, fixture) => {
             ...(state.recover?{state:"unknown",reason:"navigation_frame_gap",vision_action:"stop"}:{})};
           state.recover=false;
           const headers={"Content-Type":"image/jpeg","Content-Length":jpeg.length,
-            "X-Rider-Stale":sequence%11===0?"true":"false","X-Rider-Source":"venom","X-Rider-Source-Json":JSON.stringify(source),
+            "X-Rider-Stale":sequence%11===0?"true":"false","X-Rider-Source":kind,"X-Rider-Source-Json":JSON.stringify(source),
             "X-Rider-Frame-Id":source.frame_id,"X-Rider-Frame-Age-Ms":sequence%11===0?"550":"160",
             "X-Rider-Frame-Age-Source":"pi-status-anchor-plus-host-elapsed",
             "X-Rider-Analysis-Json":JSON.stringify(analysis),"X-Rider-Vision-State":analysis.state};
@@ -49,6 +52,14 @@ async (page, fixture) => {
   await page.route("**/api/v1/rider/**",async route=>{
     const req=route.request(),path=new URL(req.url()).pathname.slice("/api/v1/rider".length);
     const json=body=>route.fulfill({status:200,contentType:"application/json",body:JSON.stringify(body)});
+    if(path==="/perception/prepare"&&req.method()==="POST"){preparations.push(path);return json({ok:true});}
+    if(path==="/navigation/image-reference"){
+      if(req.method()==="POST"){
+        const body=req.postDataJSON();check(body.revision===imageReference.revision,"reference save lost CAS revision");
+        imageReference={...imageReference,revision:imageReference.revision+1,values:body.values};referenceSaves.push(body);
+      }
+      return json({meta:{envelope_version:1},ok:true,data:imageReference});
+    }
     if(req.method()!=="GET"){mutations.push(path);return route.abort();}
     if(path==="/config")return json({devices:[{id:"fixture",label:"Prod fixture",mode:"device"}],device_id:"fixture",session:"continuity-session"});
     if(path==="/status")return json({connection:{configured:true,status:"online",device_id:"fixture",mode:"device",session:"continuity-session"},polling:{control_ms:200},errors:{},settings:{revision:1,directions:{}},control:{server_time:Date.now()/1000,safety:{state:"DISARMED",generation:"fixture",can_move:false,moving:false,ready:true,stale:false}},telemetry:{},health:{},catalog:{features:[]},logic:{},face:{},resources:{}});
@@ -64,6 +75,7 @@ async (page, fixture) => {
     await analysis.click();
     const center=page.getByTestId("sector-center"),notice=page.getByTestId("vision-preview-paused");
     await wait(async()=>await center.getAttribute("data-sector-state")==="clear"&&!await notice.count(),"initial current corridor not visible");
+    await wait(async()=>await page.getByTestId("image-reference-overlay").count()===1,"saved image references not visible");
     const stability=await page.evaluate(async()=>{
       const events=[],painted=[];let last="",lastPaint="",active=true;
       const read=()=>({notice:!!document.querySelector('[data-testid="vision-preview-paused"]'),
@@ -89,7 +101,48 @@ async (page, fixture) => {
     await wait(async()=>(await notice.count()>0||await page.getByTestId("camera-surface").locator("img").count()===0)&&await center.getAttribute("data-sector-state")==="unknown","real source loss did not expire the original frame");
     await page.evaluate(()=>{window.__previewContinuity.paused=false;});
     await wait(async()=>!await notice.count()&&await center.getAttribute("data-sector-state")==="clear","current source did not recover");
+    check(preparations.length===1,"explicit Analysis must prepare once; passive polling must not prepare");
+    await analysis.click();
+    await wait(async()=>preparations.length===2,"a new explicit Analysis click did not prepare again");
+    const imageFit=[];
+    for(const viewport of [{width:1282,height:913},{width:1440,height:1000},{width:390,height:844}]){
+      await page.setViewportSize(viewport);
+      const expand=page.getByRole("button",{name:"Rozwiń pulpit sterowania",exact:true});
+      if(await expand.count())await expand.click();
+      let rawSurface=null;
+      for(const name of ["Obraz surowy","Wizja Venom"]){
+        await page.getByRole("button",{name,exact:true}).click();
+        await wait(async()=>await page.getByRole("button",{name,exact:true}).getAttribute("aria-pressed")==="true"&&await page.getByTestId("camera-surface").locator("img").count()>0,"requested source not visible");
+        const fit=await page.getByTestId("camera-surface").evaluate(surface=>{
+          const image=surface.querySelector("img"),box=surface.getBoundingClientRect(),img=image.getBoundingClientRect();
+          return {surface:[box.x,box.y,box.width,box.height],image:[img.x,img.y,img.width,img.height],natural:[image.naturalWidth,image.naturalHeight],top:Math.max(0,box.top-img.top),bottom:Math.max(0,img.bottom-box.bottom),left:Math.max(0,box.left-img.left),right:Math.max(0,img.right-box.right),fit:getComputedStyle(image).objectFit};
+        });
+        check(fit.natural.join(",")==="320,240"&&fit.fit==="contain","source dimensions or fit changed");
+        check(Math.max(fit.top,fit.bottom,fit.left,fit.right)<=1,"camera image clipped: "+JSON.stringify({viewport,name,fit}));
+        if(name==="Obraz surowy")rawSurface=fit.surface;
+        else check(fit.surface.every((value,index)=>Math.abs(value-rawSurface[index])<=1),"RAW/analysis frame moved or resized: "+JSON.stringify({viewport,rawSurface,analysis:fit.surface}));
+        imageFit.push({viewport,name,...fit});
+      }
+    }
+    check(referenceSaves.length===0,"viewing or resizing unexpectedly saved calibration");
+    await page.getByTestId("image-reference-toggle").click();
+    await page.getByTestId("reference-track_width_cm").fill("17");
+    await page.getByTestId("reference-edit").click();
+    const handle=page.getByTestId("image-reference-overlay").locator('[data-reference-handle="marker:1"] circle');
+    const box=await handle.boundingBox();check(box,"marker handle missing");
+    await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();
+    await page.mouse.move(box.x+box.width/2,box.y+box.height/2-12,{steps:4});await page.mouse.up();
+    await page.getByTestId("image-reference-toggle").click();
+    await page.getByTestId("reference-save").click();
+    await wait(async()=>referenceSaves.length===1,"explicit save did not persist references");
+    check(referenceSaves[0].values.track_width_cm===17,"edited track width was not saved");
+    check(referenceSaves[0].values.markers[1][1]<227/240,"marker dragging did not use source coordinates");
+    await page.reload({waitUntil:"domcontentloaded"});
+    await page.getByRole("button",{name:"Wizja Venom",exact:true}).click();
+    await wait(async()=>await page.getByTestId("image-reference-overlay").count()===1,"references not restored after reload");
+    check((await page.getByTestId("image-reference-overlay").textContent()).includes("17 cm"),"persisted dimensions not rendered");
+    check(referenceSaves.length===1,"reload rewrote reference calibration");
     check(mutations.length===0,"fixture attempted a hardware mutation");
-    return {result:"PASS",fixtureOnly:true,stability,realExpiryAndRecovery:true,mutations};
+    return {result:"PASS",fixtureOnly:true,stability,realExpiryAndRecovery:true,preparations,imageFit,referenceSaves,mutations};
   }finally{await page.goto("about:blank");await page.unrouteAll({behavior:"wait"});}
 }

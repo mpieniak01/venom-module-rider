@@ -11,6 +11,7 @@ All paths below are under /api/v1/rider. Mutations carry X-Rider-Session from GE
 | POST /control | /api/safety or /api/control; manual panel ARM/disarm/STOP/clear, move, height, balance |
 | POST /settings | /api/calibration/controls; revisioned values/directions/profile operations |
 | GET /camera/raw, /camera/proc | Original binary frame and available source metadata |
+| POST /perception/prepare | Load the selected host vision model for explicit Analysis; restart an already requested failed observation, never driving |
 | POST /goal/{name} | /api/logic/feature/{name}; Pi-owned goal/resource orchestration |
 | POST /resource/{name} | /api/resource/{name}; explicit power, stop or release |
 | GET /navigation/config, /navigation/state | Pi navigation policy/status plus host detector capability |
@@ -62,3 +63,20 @@ STOP uses a separate connection pool, cancels pending local actuator requests an
 Source measurement timestamps and unknown values are preserved. Host last contact is separate from a device observation. Binary frame metadata is passed through; stale/placeholder images are not presented as current.
 
 Default active-view cadence: control 500 ms, calibration 1000 ms, overview 2000 ms, resources/Face 5000 ms. Held intent renewal and timeout come from Pi descriptors. Read cache TTLs differ by domain and concurrent callers share a request. Collection is demand-driven: selecting/mounting a view does not start camera, LCD, a goal or physical motion.
+
+An explicit Analysis selection and observation start prepare the current host model,
+including after global memory release. Release stops consumers and unloads models;
+unsolicited frames cannot reload the released model. Explicit preparation restores its runtime without changing global admission. Model preparation preserves the
+Pi policy revision and acceptance. Passive status reads never prepare a model.
+
+If an observe-only worker stopped while its goal remains requested, explicit
+Analysis restarts that observation after model preparation. A running worker,
+a driving goal or unknown driving ownership is never restarted by this action.
+
+## Measured image references
+
+GET/POST /navigation/image-reference proxies the Pi-owned visual reference. CAS revision, validation and storage are on Pi. The overlay shows measured track/body widths and marker rows for the recorded lowest pose. Its purpose is visual_reference_only: it does not change navigation policy, lens intrinsics, model decisions or motion approval. SVG points use the original frame coordinates and preserve letterboxing. Operator edits stay a draft until Save on robot; viewing never writes configuration.
+
+### Operator vision policy corrections
+
+Revision 2 presets accept bounded `behavior.overrides` through the existing device-owned navigation configuration transaction. `behavior_catalog.parameter_schema` and `active_parameters` expose the editable and effective values. Revision 1 definitions remain pinned. See [Vision policy parameters](VISION_PARAMETERS.md) for defaults, units, precedence, reset semantics and diagnostic-only object tracking.

@@ -98,6 +98,7 @@ export function perceptionRuntime(catalog: PerceptionCatalog | null): string {
   if (catalog.switching) return "loading";
   const runtime = record(catalog.diagnostics.runtime);
   const state = str(runtime.state) || str(catalog.diagnostics.state);
+  if (state === "released") return "unloaded";
   return ["unloaded", "loading", "warming", "active", "unavailable"].includes(state) ? state : "unavailable";
 }
 export function perceptionMetric(value: unknown, language: string, precision = 1): string {

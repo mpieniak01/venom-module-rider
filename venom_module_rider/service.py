@@ -8,6 +8,7 @@ import logging
 import math
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -91,6 +92,7 @@ class RiderService:
         self.selection_file = selection_file
         self.switching = False
         self.selection_warning: str | None = None
+        self.observation_preparer: Callable[[str | None], Awaitable[None]] | None = None
         self.conversation_invalidator = None
         self.conversation_drainer = None
         from .study_sampling import StudySampler
@@ -682,6 +684,10 @@ class RiderService:
             if safety.get("owner") != owner or safety.get("can_move") is not True:
                 raise RiderError("operator_motion_permission_required")
             self.sequences[intent["generation"]] = body["seq"]
+        if name == "s15_venom_perception" and body.get("enabled") is True:
+            self.check_session(session)
+            if self.observation_preparer is not None:
+                await self.observation_preparer(session)
         started = time.time()
         try:
             return await self.mutate("/api/logic/feature/" + name, body, session)

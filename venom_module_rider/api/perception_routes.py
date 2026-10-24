@@ -41,6 +41,31 @@ async def cancel(model_id: str, request: Request):
     return {"job": manager(request).installer.cancel(model_id)}
 
 
+@router.post("/perception/prepare")
+async def prepare(request: Request):
+    """Explicit Analysis loads the selection and recovers a failed observation."""
+    await manager(request).prepare_observation(
+        request.app.state.rider, request.headers.get("X-Rider-Session")
+    )
+    from .vision_routes import loop_goals
+
+    domain = request.app.state.rider
+    session = request.headers.get("X-Rider-Session")
+    status = (await domain.read("/api/navigation/status", 0, force=True))["data"]
+    goals = await loop_goals(domain)
+    if (
+        goals.get("observe") is True
+        and goals.get("drive") is False
+        and status.get("mode") == "observe"
+        and status.get("running") is False
+    ):
+        # A failed worker can leave its requested goal ON. Only this explicit
+        # operator action retires it and starts a new observe-only producer.
+        await domain.goal("s15_venom_perception", {"enabled": False}, session)
+        await domain.goal("s15_venom_perception", {"enabled": True}, session)
+    return {"ok": True}
+
+
 @router.post("/perception/selection")
 async def select(request: Request):
     return await manager(request).select(

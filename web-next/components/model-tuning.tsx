@@ -84,7 +84,7 @@ export function ModelTuning({ client, policy, goals, locked, t, onApplied, onRef
         <p className={styles.hint}>{t("perceptionGeometryHint")}</p>
       </fieldset>}
       {host && !semantic && !depth && <p className={styles.hint}>{t("tuning.noModel")}</p>}
-      {host && effective && <div data-testid="tuning-effective"><strong>{t("tuning.effective")}</strong><pre className={styles.pre}>{JSON.stringify(effective, null, 2)}</pre></div>}
+      {host && effective && <details data-testid="tuning-effective"><summary>{t("behavior.technicalDetails")}</summary><strong>{t("tuning.effective")}</strong><pre className={styles.pre}>{JSON.stringify(effective, null, 2)}</pre></details>}
       {host && visibleDraft && <Pill tone={valid && !conflict ? "warning" : "danger"}>{t(valid && !conflict ? "unsaved" : "invalidDraft")}</Pill>}
       {!!(failure || block) && <p role={failure || conflict ? "alert" : "status"} data-testid="tuning-message" className={failure || conflict ? styles.loopError : styles.hint}>{t(failure || block, { model: pipeline?.profile.local_engine ?? "—" })}</p>}
       {saved !== null && saved === policy?.revision && <p data-testid="tuning-saved" role="status" className={styles.hint}>{t("tuning.saved", { revision: saved })}</p>}

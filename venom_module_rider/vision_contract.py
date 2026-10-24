@@ -8,6 +8,7 @@ from pydantic import (
     Field,
     StrictBool,
     StrictInt,
+    model_serializer,
     model_validator,
 )
 
@@ -20,7 +21,15 @@ class BehaviorSettings(BaseModel):
 
     version: Annotated[StrictInt, Field(ge=1, le=1)] = 1
     profile_id: Literal["legacy", "cautious", "balanced", "fluid"] = "legacy"
-    profile_revision: Annotated[StrictInt, Field(ge=1, le=1)] = 1
+    profile_revision: Annotated[StrictInt, Field(ge=1, le=2)] = 1
+    overrides: dict = Field(default_factory=dict)
+
+    @model_serializer(mode="wrap")
+    def serialize_selection(self, handler):
+        value = handler(self)
+        if not self.overrides:
+            value.pop("overrides", None)
+        return value
 
     @model_validator(mode="after")
     def validate_definition(self):

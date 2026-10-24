@@ -4,7 +4,7 @@ import type { Frame } from "../lib/use-rider";
 import type { Translator } from "../lib/i18n";
 import styles from "../rider.module.css";
 
-export function VisionSectors({frame,t,compact=false}:{frame:Frame|null;t:Translator;compact?:boolean}) {
+export function VisionSectors({frame,t,compact=false,concealed=false}:{frame:Frame|null;t:Translator;compact?:boolean;concealed?:boolean}) {
   const latest = useRef(frame);
   const [sample, setSample] = useState(() => sectorPresentation(null, frame));
   useEffect(() => { latest.current = frame; }, [frame]);
@@ -16,7 +16,7 @@ export function VisionSectors({frame,t,compact=false}:{frame:Frame|null;t:Transl
   // Only source/policy changes or invalidation adjust state between timer ticks.
   if (presentation !== sample) setSample(presentation);
   const view = presentation.view;
-  return <section className={styles.sectorLegend} data-compact={compact} data-testid="directional-results" data-sector-space={view.space} data-assessment-frame={presentation.frameId} aria-label={t("sectorsTitle")}>
+  return <section className={styles.sectorLegend} style={concealed?{visibility:"hidden"}:undefined} aria-hidden={concealed||undefined} data-compact={compact} data-testid="directional-results" data-sector-space={view.space} data-assessment-frame={presentation.frameId} aria-label={t("sectorsTitle")}>
     <p hidden={compact} className={styles.hint} data-testid="sector-legend">{t(view.space === "projected_paths" ? "sectorsProjectedLegend" : view.space === "image" ? "sectorsImageLegend" : "sectorsUnavailable")}</p>
     <div className={styles.sectorGrid}>{view.rows.map(row=><div key={row.side} className={styles.sectorCard} data-testid={"sector-"+row.side} data-sector-state={row.state}>
       <b><span className={styles.sectorBadge} data-side={row.side}>{row.code}{row.state === "unknown" ? "?" : ""}</span>{t((view.space === "projected_paths" ? "sector.path." : "sector.")+row.side)}</b>

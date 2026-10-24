@@ -200,7 +200,6 @@ class PerceptionService:
                 self.loop.inference_cache.clear()
                 self.loop.runs.clear()
                 self.runtime.reset()
-                self.loop.resources_suspended = False
                 self.loop.detector = type(self.loop.detector)()
                 from .depth_detector import DepthDetector
 
@@ -220,6 +219,66 @@ class PerceptionService:
                     self.loop.busy = warmup
                 warmup.add_done_callback(self.loop._drain)
                 return {"selection": selected, "config": config}
+            finally:
+                self.switching = False
+
+    @model_operation
+    async def prepare_observation(self, domain, session):
+        """Explicit analysis may reload the current model without editing Pi policy."""
+        domain.check_session(session)
+        if self.lock.locked():
+            raise RiderError("model_busy", 409)
+        async with self.lock:
+            pipeline = await domain.pipeline(force=True)
+            if (pipeline.get("profile") or {}).get("analysis_location") != "venom":
+                return
+            policy = (await domain.read("/api/navigation/config", 0, force=True))[
+                "data"
+            ]
+            perception = policy.get("perception") or {}
+            if not perception.get("model_id"):
+                return
+            device, epoch = domain.transport().device.id, domain.epoch
+            selected = selected_identity(policy)
+            artifact = await asyncio.to_thread(self.catalog.ready, selected["model_id"])
+            if artifact["sha256"] != selected["artifact_sha256"]:
+                raise RiderError("model_hash_mismatch", 409)
+            self.observe_policy(device, policy)
+            if self.runtime.state == "active" and self.runtime.identity == (
+                selected["model_id"],
+                artifact["sha256"],
+            ):
+                return
+            if any(
+                task is not None and not task.done()
+                for task in (self.loop.busy, self.loop.depth_busy)
+            ):
+                raise RiderError("model_busy", 409)
+            self.switching = True
+            try:
+                from .depth_detector import PerceptionSettings
+
+                self.runtime.state = "loading"
+                warmup = asyncio.create_task(
+                    self.loop.workers.run(
+                        self.runtime.warm, PerceptionSettings.model_validate(perception)
+                    )
+                )
+                if perception["engine"] == "depth_plane":
+                    self.loop.depth_busy = warmup
+                else:
+                    self.loop.busy = warmup
+                warmup.add_done_callback(self.loop._drain)
+                # Cancellation cannot free a native model still loading in its thread.
+                await asyncio.shield(warmup)
+                domain.check_session(session)
+                if domain.epoch != epoch or domain.transport().device.id != device:
+                    raise RiderError("stale_device_session", 409)
+                current = (await domain.read("/api/navigation/config", 0, force=True))[
+                    "data"
+                ]
+                if selected_identity(current) != selected:
+                    raise RiderError("model_selection_conflict", 409)
             finally:
                 self.switching = False
 
