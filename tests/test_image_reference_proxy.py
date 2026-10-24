@@ -7,6 +7,14 @@ import httpx
 from fastapi import FastAPI
 
 from venom_module_rider.api.vision_routes import router
+from venom_module_rider.client import expected_contract
+
+
+def test_image_reference_uses_negotiated_pi_navigation_contract():
+    assert expected_contract("/api/navigation/image-reference") == (
+        "rider.navigation_loop",
+        1,
+    )
 
 
 async def test_read_and_save_reference_use_pi_domain_and_original_session():

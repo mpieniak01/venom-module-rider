@@ -72,3 +72,7 @@ Pi policy revision and acceptance. Passive status reads never prepare a model.
 If an observe-only worker stopped while its goal remains requested, explicit
 Analysis restarts that observation after model preparation. A running worker,
 a driving goal or unknown driving ownership is never restarted by this action.
+
+## Measured image references
+
+GET/POST /navigation/image-reference proxies the Pi-owned visual reference. CAS revision, validation and storage are on Pi. The overlay shows measured track/body widths and marker rows for the recorded lowest pose. Its purpose is visual_reference_only: it does not change navigation policy, lens intrinsics, model decisions or motion approval. SVG points use the original frame coordinates and preserve letterboxing. Operator edits stay a draft until Save on robot; viewing never writes configuration.

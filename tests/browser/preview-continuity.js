@@ -7,7 +7,8 @@ async (page, fixture) => {
   const base=page.url()==="about:blank"?"http://localhost:3300":new URL(page.url()).origin;
   const wait=async(fn,message)=>{const end=Date.now()+8000;while(!await fn()){check(Date.now()<end,message);await new Promise(r=>setTimeout(r,40));}};
   await page.goto("about:blank");
-  const mutations=[],preparations=[];
+  const mutations=[],preparations=[],referenceSaves=[];
+  let imageReference={version:1,revision:4,purpose:"visual_reference_only",values:{visible:true,frame_size:[320,240],track_width_cm:16,robot_width_cm:11.5,camera_height_cm:14,reference_pose:"lowest",left_edge:[[.39,.65],[.29,1]],right_edge:[[.58,.65],[.74,1]],markers:[[18,1],[20,227/240],[40,181/240],[60,160/240]]}};
   const profile={analysis_location:"venom",local_engine:"canny",remote_transport:"mjpeg"};
   await page.addInitScript(fixture=>{
     const original=window.fetch.bind(window),encoder=new TextEncoder();
@@ -52,6 +53,13 @@ async (page, fixture) => {
     const req=route.request(),path=new URL(req.url()).pathname.slice("/api/v1/rider".length);
     const json=body=>route.fulfill({status:200,contentType:"application/json",body:JSON.stringify(body)});
     if(path==="/perception/prepare"&&req.method()==="POST"){preparations.push(path);return json({ok:true});}
+    if(path==="/navigation/image-reference"){
+      if(req.method()==="POST"){
+        const body=req.postDataJSON();check(body.revision===imageReference.revision,"reference save lost CAS revision");
+        imageReference={...imageReference,revision:imageReference.revision+1,values:body.values};referenceSaves.push(body);
+      }
+      return json({meta:{envelope_version:1},ok:true,data:imageReference});
+    }
     if(req.method()!=="GET"){mutations.push(path);return route.abort();}
     if(path==="/config")return json({devices:[{id:"fixture",label:"Prod fixture",mode:"device"}],device_id:"fixture",session:"continuity-session"});
     if(path==="/status")return json({connection:{configured:true,status:"online",device_id:"fixture",mode:"device",session:"continuity-session"},polling:{control_ms:200},errors:{},settings:{revision:1,directions:{}},control:{server_time:Date.now()/1000,safety:{state:"DISARMED",generation:"fixture",can_move:false,moving:false,ready:true,stale:false}},telemetry:{},health:{},catalog:{features:[]},logic:{},face:{},resources:{}});
@@ -67,6 +75,7 @@ async (page, fixture) => {
     await analysis.click();
     const center=page.getByTestId("sector-center"),notice=page.getByTestId("vision-preview-paused");
     await wait(async()=>await center.getAttribute("data-sector-state")==="clear"&&!await notice.count(),"initial current corridor not visible");
+    await wait(async()=>await page.getByTestId("image-reference-overlay").count()===1,"saved image references not visible");
     const stability=await page.evaluate(async()=>{
       const events=[],painted=[];let last="",lastPaint="",active=true;
       const read=()=>({notice:!!document.querySelector('[data-testid="vision-preview-paused"]'),
@@ -115,7 +124,25 @@ async (page, fixture) => {
         imageFit.push({viewport,name,...fit});
       }
     }
+    check(referenceSaves.length===0,"viewing or resizing unexpectedly saved calibration");
+    await page.getByTestId("image-reference-toggle").click();
+    await page.getByTestId("reference-track_width_cm").fill("17");
+    await page.getByTestId("reference-edit").click();
+    const handle=page.getByTestId("image-reference-overlay").locator('[data-reference-handle="marker:1"] circle');
+    const box=await handle.boundingBox();check(box,"marker handle missing");
+    await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();
+    await page.mouse.move(box.x+box.width/2,box.y+box.height/2-12,{steps:4});await page.mouse.up();
+    await page.getByTestId("image-reference-toggle").click();
+    await page.getByTestId("reference-save").click();
+    await wait(async()=>referenceSaves.length===1,"explicit save did not persist references");
+    check(referenceSaves[0].values.track_width_cm===17,"edited track width was not saved");
+    check(referenceSaves[0].values.markers[1][1]<227/240,"marker dragging did not use source coordinates");
+    await page.reload({waitUntil:"domcontentloaded"});
+    await page.getByRole("button",{name:"Wizja Venom",exact:true}).click();
+    await wait(async()=>await page.getByTestId("image-reference-overlay").count()===1,"references not restored after reload");
+    check((await page.getByTestId("image-reference-overlay").textContent()).includes("17 cm"),"persisted dimensions not rendered");
+    check(referenceSaves.length===1,"reload rewrote reference calibration");
     check(mutations.length===0,"fixture attempted a hardware mutation");
-    return {result:"PASS",fixtureOnly:true,stability,realExpiryAndRecovery:true,preparations,imageFit,mutations};
+    return {result:"PASS",fixtureOnly:true,stability,realExpiryAndRecovery:true,preparations,imageFit,referenceSaves,mutations};
   }finally{await page.goto("about:blank");await page.unrouteAll({behavior:"wait"});}
 }
