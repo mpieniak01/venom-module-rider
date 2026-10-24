@@ -366,7 +366,7 @@ class YoloSemanticOnnx:
 
         from .cuda_execution import require_cuda
 
-        require_cuda()
+        device = require_cuda()
         import onnxruntime as ort
         from PIL import Image
 
@@ -410,7 +410,9 @@ class YoloSemanticOnnx:
             source_gray,
         )
 
-        native = letterbox_semantic_maps(logits, (left, top, width, height))
+        native = letterbox_semantic_maps(
+            logits, (left, top, width, height), device=device
+        )
         maps = semantic_maps_from_compact(
             native["labels"], native["confidence"], image.size, semantic=semantic
         )
