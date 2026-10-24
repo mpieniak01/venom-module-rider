@@ -7,6 +7,7 @@ from fastapi import Request, Response
 
 from ..depth_detector import PerceptionSettings
 from ..errors import RiderError
+from ..preview_metadata import analysis_header
 from ..vision_contract import VisionFrame
 from .vision_routes import loop_goals
 
@@ -194,14 +195,6 @@ async def processed_camera(request: Request):
             "x-rider-vision-inference-ms": str(elapsed),
             "x-rider-vision-policy": source,
             "x-rider-vision-action": "stop",
-            "x-rider-analysis-json": json.dumps(
-                {
-                    key: value
-                    for key, value in result.items()
-                    if key not in {"_preview", "corridor"}
-                },
-                separators=(",", ":"),
-                allow_nan=False,
-            ),
+            "x-rider-analysis-json": analysis_header(result),
         },
     )

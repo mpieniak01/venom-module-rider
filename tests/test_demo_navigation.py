@@ -46,7 +46,13 @@ def jpeg():
 
 @pytest.fixture
 def replay():
-    nav = ReplayNavigation(jpeg(), PermitFixture, model_sha="a" * 64)
+    async def observation(_meta, _payload):
+        # A retry must never fall back to whichever API happens to own port8800.
+        return {"state": "unknown", "reason": "fixture_observation", "action": "stop"}
+
+    nav = ReplayNavigation(
+        jpeg(), PermitFixture, model_sha="a" * 64, request=observation
+    )
     pi = DemoPi(navigation=nav)
     return pi, nav
 

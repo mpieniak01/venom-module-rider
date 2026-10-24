@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 from typing import Literal
 
@@ -12,6 +11,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 
 from ..errors import RiderError
+from ..preview_metadata import analysis_header
 from ..sample_sources import native_ticket
 from ..stream_contract import PipelineAction, SourceReference, source_headers
 from ..stream_contract import PipelineProfile as PipelineProfile
@@ -228,15 +228,7 @@ async def processed_native(request, connection, incoming):
             if result.get("capture_key")
             else {}
         ),
-        "x-rider-analysis-json": json.dumps(
-            {
-                key: value
-                for key, value in result.items()
-                if key not in {"_preview", "corridor"}
-            },
-            separators=(",", ":"),
-            allow_nan=False,
-        ),
+        "x-rider-analysis-json": analysis_header(result),
     }
     return incoming, image, headers
 
