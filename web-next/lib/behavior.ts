@@ -19,7 +19,7 @@ export function behaviorSelection(value: unknown): BehaviorSelection | null {
 }
 export function sameBehavior(a: BehaviorSelection, b: BehaviorSelection): boolean {
   return a.profile_id === b.profile_id && a.profile_revision === b.profile_revision
-    && JSON.stringify(Object.entries(a.overrides ?? {}).sort()) === JSON.stringify(Object.entries(b.overrides ?? {}).sort());
+    && JSON.stringify(Object.entries(a.overrides ?? {}).sort(([left], [right]) => left.localeCompare(right))) === JSON.stringify(Object.entries(b.overrides ?? {}).sort(([left], [right]) => left.localeCompare(right)));
 }
 /** Only the device catalog supplies available revisions and effective parameters. */
 export function behaviorCatalog(policy: JsonRecord | null): BehaviorCatalog {
