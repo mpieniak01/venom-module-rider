@@ -154,6 +154,21 @@ def assess_depth(depth, corridor, settings, *, evidence=False):
             settings.residual_limit,
             valid=reference_valid and oriented,
         )
+        if (
+            isinstance(evidence, dict)
+            and evidence.get("object_tracking_enabled") is True
+        ):
+            plane = coefficients[0] * x / w + coefficients[1] * y / h + coefficients[2]
+            signed_context = (1.0 / depth - plane) / scale
+            context = (y >= h * 0.35) & (y < h * 0.98)
+            signed_context = np.where(context, signed_context, np.nan)
+            assessment["_object_maps"] = depth_maps(
+                abs(signed_context),
+                signed_context,
+                settings.residual_limit,
+                valid=reference_valid and oriented,
+            )
+
     return assessment
 
 
@@ -361,6 +376,10 @@ class DepthDetector:
             from .navigation_maps import source_gray
 
             assessment["_navigation_maps"]["gray"] = source_gray(image)
+            if "_object_maps" in assessment:
+                assessment["_object_maps"]["gray"] = assessment["_navigation_maps"][
+                    "gray"
+                ]
         preview = render_depth(image, depth, assessment, corridor, settings, geometry)
         return {
             **assessment,

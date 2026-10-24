@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { data, type JsonRecord } from "../lib/model";
-import { BEHAVIOR_IDS, behaviorCatalog, behaviorDraft, behaviorDraftStale, behaviorError, behaviorSwitchBlock, behaviorWrite, type BehaviorDraft } from "../lib/behavior";
+import { BEHAVIOR_IDS, behaviorCatalog, behaviorDraft, behaviorDraftStale, behaviorError, behaviorSwitchBlock, behaviorWrite, behaviorEditDraft, editBehaviorParameter, sameBehavior, validBehaviorDraft, type BehaviorDraft } from "../lib/behavior";
 import type { RiderClient } from "../lib/use-rider";
 import type { Translator } from "../lib/i18n";
-import { Button, Field, Pill, Select } from "./primitives";
+import { Button, Field, Input, Pill, Select } from "./primitives";
 import styles from "../rider.module.css";
 
 type Props = { client: RiderClient; policy: JsonRecord | null; goals: JsonRecord; locked: boolean; t: Translator; onApplied: (config: JsonRecord) => void; onRefresh: () => void; onPendingChange?: (pending: boolean) => void };
@@ -20,8 +20,18 @@ export function NavigationProfiles({ client, policy, goals, locked, t, onApplied
   const local = client.pipeline?.status?.profile.analysis_location === "local";
   const localModel = client.pipeline?.status?.profile.local_engine ?? "—";
   const conflict = !!visibleDraft && behaviorDraftStale(visibleDraft, policy, session);
-  const changed = !!visibleDraft && (selected !== catalog.active.profile_id || visibleDraft.selection.profile_revision !== catalog.active.profile_revision);
-  const block = !catalog.supported ? "behavior.unsupported" : conflict ? "behavior.conflict" : local && selected !== "legacy" ? "behavior.localOnly" : behaviorSwitchBlock(client.status, client.controlFresh, goals, locked || pending || !!client.busy);
+  const changed = !!visibleDraft && !sameBehavior(visibleDraft.selection, catalog.active);
+  const invalid = !!visibleDraft && !validBehaviorDraft(visibleDraft, policy);
+  const selection = visibleDraft?.selection ?? catalog.active;
+  const custom = !!Object.keys(selection.overrides ?? {}).length;
+  const values = { ...candidate?.parameters, ...selection.overrides };
+  const editParameter = (key: string, value: number | boolean) => {
+    if (!policy) return;
+    const base = visibleDraft ?? editBase.current ?? behaviorEditDraft(policy, session);
+    if (base) setDraft(editBehaviorParameter(base, policy, key, value));
+    setFailure(""); setSaved(null);
+  };
+  const block = invalid ? "behavior.invalidParameters" : !catalog.supported ? "behavior.unsupported" : conflict ? "behavior.conflict" : local && selected !== "legacy" ? "behavior.localOnly" : behaviorSwitchBlock(client.status, client.controlFresh, goals, locked || pending || !!client.busy);
   const discard = () => { editBase.current = null; setDraft(null); setFailure(""); setSaved(null); onRefresh(); };
   const apply = async () => {
     if (!visibleDraft || !changed || block || applying.current || !client.canMutate) return;
@@ -40,7 +50,7 @@ export function NavigationProfiles({ client, policy, goals, locked, t, onApplied
     finally { applying.current = false; setPending(false); onPendingChange?.(false); }
   };
   return <section className={styles.navigationProfiles} aria-label={t("behavior.title")} data-testid="navigation-profiles">
-    <div className={styles.perceptionSummary} data-testid="behavior-summary"><strong>{t("behavior.title")}</strong><Pill tone={catalog.active.profile_id === "legacy" ? undefined : "warning"}>{t("behavior.profile." + catalog.active.profile_id)} · r{catalog.active.profile_revision}</Pill></div>
+    <div className={styles.perceptionSummary} data-testid="behavior-summary"><strong>{t("behavior.title")}</strong><Pill tone={catalog.active.profile_id === "legacy" ? undefined : "warning"}>{catalog.active.overrides ? t("behavior.custom", { profile: t("behavior.profile." + catalog.active.profile_id) }) : t("behavior.profile." + catalog.active.profile_id)} · r{catalog.active.profile_revision}</Pill></div>
     <div className={styles.perceptionBody}>
 
     <div className={styles.perceptionSelection}>
@@ -64,6 +74,25 @@ export function NavigationProfiles({ client, policy, goals, locked, t, onApplied
     {local && !(failure || block === "behavior.localOnly") && <p className={styles.hint} data-testid="behavior-provider-hint">{t("behavior.localOnly", { model: localModel })}</p>}
     <details className={styles.details}><summary>{t("behavior.parameters")}</summary>
     <p className={styles.hint}>{t("behavior.hint")}</p>
+    {catalog.editable && selected !== "legacy" && <>
+      <p className={styles.hint}>{t("behavior.customHint")}</p>
+      <div className={styles.flex}>
+        <Button data-testid="behavior-customize" disabled={locked || pending || !!visibleDraft} onClick={() => { if (policy) setDraft(behaviorEditDraft(policy, session)); }}>{t("behavior.customize")}</Button>
+        <Button data-testid="behavior-reset-preset" disabled={locked || pending} onClick={() => { if (policy) setDraft(behaviorDraft(policy, selected, session)); }}>{t("behavior.resetPreset")}</Button>
+      </div>
+      {selection.profile_revision === 2 && <div data-testid="behavior-editor" onFocusCapture={() => { if (policy && !visibleDraft) editBase.current = behaviorEditDraft(policy, session); }}>
+        {["evidence", "temporal", "persistence", "objects"].map(group => <fieldset key={group} disabled={locked || pending} className={styles.parameterGroup}>
+          <legend>{t("behavior.group." + group)}</legend>
+          {group === "persistence" && <p className={styles.hint}>{t("behavior.persistenceHint")}</p>}
+          {group === "objects" && <p className={styles.hint}>{t("behavior.objectsHint")}</p>}
+          <div className={styles.grid3}>{Object.entries(catalog.parameterSchema ?? {}).filter(([key, spec]) => spec.group === group && (key !== "pixel_confidence" || (policy?.perception as JsonRecord)?.engine === "segformer")).map(([key, spec]) => <Field key={key} label={t("behavior.param." + key)}>
+            {spec.kind === "bool" ? <input data-testid={"behavior-param-" + key} type="checkbox" checked={values[key] === true} onChange={e => editParameter(key, e.target.checked)}/>
+              : <Input data-testid={"behavior-param-" + key} type="number" min={spec.min} max={spec.max} step={spec.step} value={typeof values[key] === "number" && Number.isFinite(values[key]) ? Number(values[key]) : ""} onChange={e => editParameter(key, e.target.value === "" ? Number.NaN : Number(e.target.value))}/>}
+          </Field>)}</div>
+        </fieldset>)}
+        <p role="status" data-testid="behavior-custom-state">{t(custom ? "behavior.custom" : "behavior.profile." + selected, { profile: t("behavior.profile." + selected) })}</p>
+      </div>}
+    </>}
     <p className={styles.hint} data-testid="behavior-description">{t("behavior.description." + selected)}</p>
     {candidate?.status === "experimental" && <p className={styles.hint}>{t("behavior.experimentalHint")}</p>}
     {catalog.supported && <>

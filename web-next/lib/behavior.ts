@@ -2,16 +2,24 @@ import { finite, record, safetyOf, str, type JsonRecord, type RiderStatus } from
 
 export const BEHAVIOR_IDS = ["legacy", "cautious", "balanced", "fluid"] as const;
 export type BehaviorId = typeof BEHAVIOR_IDS[number];
-export type BehaviorSelection = { version: 1; profile_id: BehaviorId; profile_revision: number };
+export type BehaviorSelection = { version: 1; profile_id: BehaviorId; profile_revision: number; overrides?: Record<string, number | boolean> };
+export type ParameterSpec = { kind: "int" | "float" | "bool"; min: number; max: number; step: number; group: string };
 export type BehaviorProfile = { id: BehaviorId; profile_revision: number; status: "legacy" | "experimental"; parameters: JsonRecord };
-export type BehaviorCatalog = { supported: boolean; active: BehaviorSelection; effective_policy_sha256: string; profiles: BehaviorProfile[] };
+export type BehaviorCatalog = { supported: boolean; active: BehaviorSelection; effective_policy_sha256: string; profiles: BehaviorProfile[]; editable?: boolean; parameterSchema?: Record<string, ParameterSpec>; activeParameters?: JsonRecord };
 export type BehaviorDraft = { selection: BehaviorSelection; revision: number; effectiveHash: string; session: string };
 const legacy: BehaviorSelection = { version: 1, profile_id: "legacy", profile_revision: 1 };
 const knownId = (value: unknown): value is BehaviorId => BEHAVIOR_IDS.includes(value as BehaviorId);
 export function behaviorSelection(value: unknown): BehaviorSelection | null {
-  const row = record(value);
-  return row.version === 1 && knownId(row.profile_id) && Number.isSafeInteger(row.profile_revision) && Number(row.profile_revision) > 0
-    ? { version: 1, profile_id: row.profile_id, profile_revision: Number(row.profile_revision) } : null;
+  const row = record(value), corrections = row.overrides;
+  if (row.version !== 1 || !knownId(row.profile_id) || !Number.isSafeInteger(row.profile_revision) || Number(row.profile_revision) < 1) return null;
+  if (corrections !== undefined && (typeof corrections !== "object" || corrections === null || Array.isArray(corrections)
+    || Object.values(corrections).some(v => typeof v !== "boolean" && !finite(v)))) return null;
+  return { version: 1, profile_id: row.profile_id, profile_revision: Number(row.profile_revision),
+    ...(corrections && Object.keys(corrections).length ? { overrides: { ...corrections } as Record<string, number | boolean> } : {}) };
+}
+export function sameBehavior(a: BehaviorSelection, b: BehaviorSelection): boolean {
+  return a.profile_id === b.profile_id && a.profile_revision === b.profile_revision
+    && JSON.stringify(Object.entries(a.overrides ?? {}).sort()) === JSON.stringify(Object.entries(b.overrides ?? {}).sort());
 }
 /** Only the device catalog supplies available revisions and effective parameters. */
 export function behaviorCatalog(policy: JsonRecord | null): BehaviorCatalog {
@@ -25,8 +33,17 @@ export function behaviorCatalog(policy: JsonRecord | null): BehaviorCatalog {
       || row.status !== (row.id === "legacy" ? "legacy" : "experimental") || profiles.some(item => item.id === row.id)) return fallback;
     profiles.push({ id: row.id, profile_revision: Number(row.profile_revision), status: row.id === "legacy" ? "legacy" : "experimental", parameters: record(row.parameters) });
   }
-  if (!behaviorSelection(raw.active) || !profiles.some(row => row.id === active.profile_id && row.profile_revision === active.profile_revision)) return fallback;
-  return { supported: true, active, effective_policy_sha256: str(raw.effective_policy_sha256), profiles };
+  const editable = raw.parameter_editing_version === 1;
+  if (!behaviorSelection(raw.active) || !profiles.some(row => row.id === active.profile_id && (row.profile_revision === active.profile_revision || editable && active.profile_revision === 1 && row.profile_revision === 2))) return fallback;
+  if (active.overrides && !editable) return fallback;
+  const parameterSchema: Record<string, ParameterSpec> = {};
+  if (editable) for (const [key, item] of Object.entries(record(raw.parameter_schema))) {
+    const spec = record(item);
+    if (!/^[a-z][a-z0-9_]{0,63}$/.test(key) || !["int", "float", "bool"].includes(str(spec.kind))
+      || !finite(spec.min) || !finite(spec.max) || !finite(spec.step) || spec.min > spec.max || spec.step <= 0 || !["evidence", "temporal", "persistence", "objects"].includes(str(spec.group))) return fallback;
+    parameterSchema[key] = spec as ParameterSpec;
+  }
+  return { supported: true, active, effective_policy_sha256: str(raw.effective_policy_sha256), profiles, editable, parameterSchema, activeParameters: editable ? record(raw.active_parameters) : profiles.find(p => p.id === active.profile_id)?.parameters };
 }
 export function behaviorDraft(policy: JsonRecord, id: string, session: string): BehaviorDraft | null {
   const catalog = behaviorCatalog(policy), profile = catalog.profiles.find(row => row.id === id);
@@ -41,7 +58,31 @@ export function behaviorDraftStale(draft: BehaviorDraft, policy: JsonRecord | nu
     || !catalog.profiles.some(row => row.id === draft.selection.profile_id && row.profile_revision === draft.selection.profile_revision);
 }
 export function behaviorWrite(draft: BehaviorDraft, policy: JsonRecord | null, session: string): JsonRecord | null {
-  return behaviorDraftStale(draft, policy, session) ? null : { revision: draft.revision, values: { behavior: draft.selection } };
+  return behaviorDraftStale(draft, policy, session) || !validBehaviorDraft(draft, policy) ? null : { revision: draft.revision, values: { behavior: draft.selection } };
+}
+export function behaviorEditDraft(policy: JsonRecord, session: string): BehaviorDraft | null {
+  const catalog = behaviorCatalog(policy), draft = behaviorDraft(policy, catalog.active.profile_id, session);
+  return draft && catalog.editable ? { ...draft, selection: catalog.active.profile_revision === 2 ? structuredClone(catalog.active) : draft.selection } : null;
+}
+export function validBehaviorDraft(draft: BehaviorDraft, policy: JsonRecord | null): boolean {
+  const catalog = behaviorCatalog(policy), overrides = draft.selection.overrides ?? {};
+  if (!Object.keys(overrides).length) return true;
+  if (!catalog.editable || draft.selection.profile_revision !== 2 || draft.selection.profile_id === "legacy") return false;
+  for (const [key, value] of Object.entries(overrides)) {
+    const spec = catalog.parameterSchema?.[key];
+    if (!spec || (spec.kind === "bool" ? typeof value !== "boolean" : !finite(value) || value < spec.min || value > spec.max || spec.kind === "int" && !Number.isInteger(value))) return false;
+  }
+  const base = catalog.profiles.find(p => p.id === draft.selection.profile_id)?.parameters ?? {};
+  const values = { ...base, ...overrides };
+  return ["enter_ms", "release_ms", "max_gap_ms", "max_uncertain_ms"].every(k => Number(values[k]) <= Number(values.history_ms))
+    && Number(values.obstacle_support_frames) <= Number(values.obstacle_window_frames)
+    && Number(values.object_area_ratio_min) <= Number(values.object_area_ratio_max);
+}
+export function editBehaviorParameter(draft: BehaviorDraft, policy: JsonRecord, key: string, value: number | boolean): BehaviorDraft {
+  const base = behaviorCatalog(policy).profiles.find(p => p.id === draft.selection.profile_id)?.parameters ?? {};
+  const overrides = { ...draft.selection.overrides, [key]: value };
+  if (value === base[key]) delete overrides[key];
+  return { ...draft, selection: { ...draft.selection, ...(Object.keys(overrides).length ? { overrides } : { overrides: undefined }) } };
 }
 /** UI guidance; the device repeats the idle and revision checks atomically. */
 export function behaviorSwitchBlock(status: RiderStatus | null, controlFresh: boolean, goals: JsonRecord, locked: boolean): string {
@@ -61,11 +102,11 @@ export function behaviorError(error: unknown): string {
   if (code.includes("active") || code.includes("idle") || code.includes("motion") || code.includes("stopped")) return "behavior.block.motion";
   return "behavior.failed";
 }
-export type TemporalView = { available: boolean; current: boolean; raw: string; stabilized: string; risk: string; action: string; reason: string; profile: string; revision: string; nearGuard: boolean | null; boundaryPoints: number; evidenceFrames: number | null; speedFactor: number | null };
+export type TemporalView = { available: boolean; current: boolean; raw: string; stabilized: string; risk: string; action: string; reason: string; profile: string; revision: string; nearGuard: boolean | null; boundaryPoints: number; evidenceFrames: number | null; speedFactor: number | null; custom?: boolean; persistence?: JsonRecord; objects?: JsonRecord };
 /** Diagnostics never infer a physical boundary or grant movement permission. */
 export function temporalView(state: JsonRecord): TemporalView {
   const decision = record(state.decision), temporal = record(decision.temporal), behavior = record(decision.behavior);
-  return { available: typeof temporal.action === "string" && typeof temporal.state === "string", current: state.running === true && state.stale !== true,
+  return { custom: !!Object.keys(record(behavior.overrides)).length, persistence: record(temporal.persistence), objects: record(temporal.objects), available: typeof temporal.action === "string" && typeof temporal.state === "string", current: state.running === true && state.stale !== true,
     raw: str(decision.raw_state), stabilized: str(temporal.state), risk: str(temporal.risk), action: str(temporal.action), reason: str(temporal.reason),
     profile: str(behavior.profile_id), revision: finite(behavior.profile_revision) ? String(behavior.profile_revision) : "",
     nearGuard: typeof temporal.near_guard_clear === "boolean" ? temporal.near_guard_clear : null,
@@ -81,7 +122,7 @@ export function slowLeaseFactor(state: JsonRecord, policy: JsonRecord | null, sa
   const factor = temporal.speed_factor, permit = state.permit_remaining_ms, age = state.age_s;
   if (!catalog.supported || !expected || expected.profile_id === "legacy" || !received
     || expected.profile_id !== catalog.active.profile_id || expected.profile_revision !== catalog.active.profile_revision
-    || received.profile_id !== expected.profile_id || received.profile_revision !== expected.profile_revision
+    || !sameBehavior(received, expected)
     || decision.effective_policy_sha256 !== catalog.effective_policy_sha256
     || state.running !== true || state.stale === true || state.latched === true || state.paused !== false
     || state.mode !== "drive" || policy?.mode !== "drive" || policy.verified !== true
@@ -93,7 +134,7 @@ export function slowLeaseFactor(state: JsonRecord, policy: JsonRecord | null, sa
     || temporal.version !== 1 || temporal.action !== "slow" || temporal.risk !== "caution" || temporal.near_guard_clear !== true
     || !Number.isSafeInteger(temporal.evidence_frames) || Number(temporal.evidence_frames) < 3 || Number(temporal.evidence_frames) > 64
     || !Number.isSafeInteger(decision.clear_count) || Number(decision.clear_count) < 3
-    || !finite(factor) || factor <= 0 || factor > 1 || factor !== profile?.parameters.slow_speed_factor
+    || !finite(factor) || factor <= 0 || factor > 1 || factor !== (catalog.activeParameters ?? profile?.parameters)?.slow_speed_factor
     || !finite(age) || age < 0 || age > 1 || !finite(permit) || permit - age * 1000 < 50
     || !Number.isInteger(decision.valid_for_ms) || Number(decision.valid_for_ms) < 1 || Number(decision.valid_for_ms) > 200)
     return null;

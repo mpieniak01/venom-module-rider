@@ -476,7 +476,7 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
         </div>
       </details>
       <PerceptionModelsPanel client={client} t={t} language={language} policy={policy} goals={goals} locked={!!operation||dirty||loading} onApplied={applyPolicy} onRefresh={refreshPerception}/>
-      <details className={styles.workspaceDisclosure} data-testid="caution-settings"><summary><span>{t("behavior.title")}</span><span>{policy?t("behavior.profile."+String(record(policy.behavior).profile_id??"legacy")):t("loading")}</span></summary><div className={styles.disclosureBody}>
+      <details className={styles.workspaceDisclosure} data-testid="caution-settings"><summary><span>{t("behavior.title")}</span><span>{policy?(Object.keys(record(record(policy.behavior).overrides)).length?t("behavior.custom",{profile:t("behavior.profile."+String(record(policy.behavior).profile_id??"legacy"))}):t("behavior.profile."+String(record(policy.behavior).profile_id??"legacy"))):t("loading")}</span></summary><div className={styles.disclosureBody}>
         <NavigationProfiles key={session} client={client} t={t} policy={profileSnapshot.session===session?profileSnapshot.policy:null} goals={goals} locked={!!operation||dirty||loading||!!readError} onApplied={applyPolicy} onRefresh={refreshPerception} onPendingChange={setProfileBusy}/>
       </div></details>
       <ModelTuning key={"tuning-"+session} client={client} t={t} policy={profileSnapshot.session===session?profileSnapshot.policy:null} goals={goals} locked={!!operation||dirty||loading||!!readError} onApplied={applyPolicy} onRefresh={refreshPerception} onPendingChange={setProfileBusy}/>

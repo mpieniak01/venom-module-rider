@@ -62,3 +62,8 @@ STOP uses a separate connection pool, cancels pending local actuator requests an
 Source measurement timestamps and unknown values are preserved. Host last contact is separate from a device observation. Binary frame metadata is passed through; stale/placeholder images are not presented as current.
 
 Default active-view cadence: control 500 ms, calibration 1000 ms, overview 2000 ms, resources/Face 5000 ms. Held intent renewal and timeout come from Pi descriptors. Read cache TTLs differ by domain and concurrent callers share a request. Collection is demand-driven: selecting/mounting a view does not start camera, LCD, a goal or physical motion.
+
+
+### Operator vision policy corrections
+
+Revision 2 presets accept bounded `behavior.overrides` through the existing device-owned navigation configuration transaction. `behavior_catalog.parameter_schema` and `active_parameters` expose the editable and effective values. Revision 1 definitions remain pinned. See [Vision policy parameters](VISION_PARAMETERS.md) for defaults, units, precedence, reset semantics and diagnostic-only object tracking.
