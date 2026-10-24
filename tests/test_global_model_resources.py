@@ -142,3 +142,92 @@ async def test_unconfirmed_archive_child_cannot_reuse_previous_preparation():
     with pytest.raises(RuntimeError, match="analysis_unconfirmed"):
         await resource.prepare_model_release()
     assert resource.release_model_resource() is False
+
+
+@pytest.mark.asyncio
+async def test_allocated_but_unloaded_detector_does_not_require_an_online_robot():
+    domain = SimpleNamespace(
+        device=object(), read=AsyncMock(side_effect=RuntimeError("offline"))
+    )
+    loop = SimpleNamespace(busy=None, depth_busy=None)
+    detector = SimpleNamespace(status=lambda: {"loaded": False})
+    app = SimpleNamespace(
+        state=SimpleNamespace(
+            rider=domain,
+            rider_vision=loop,
+            rider_analysis=None,
+            rider_models=SimpleNamespace(runtime=SimpleNamespace(detector=detector)),
+        )
+    )
+    resource = RiderModelResources(app)
+    await resource.prepare_model_release()
+    domain.read.assert_not_awaited()
+    assert resource.prepared
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "safety",
+    [
+        {},
+        {"state": "DISARMED"},
+        {"can_move": None},
+        {"can_move": 0},
+        {"can_move": False, "state": "ARMED"},
+    ],
+)
+async def test_unknown_or_conflicting_safety_requires_confirmed_disarm(safety):
+    domain = SimpleNamespace(
+        device=object(),
+        session="fixture",
+        read=AsyncMock(return_value={"data": {"safety": safety}}),
+        control=AsyncMock(),
+        pipeline=AsyncMock(),
+        stop_camera=AsyncMock(),
+    )
+    loop = SimpleNamespace(depth_detector=SimpleNamespace(model=object()))
+    resource = RiderModelResources(
+        SimpleNamespace(
+            state=SimpleNamespace(
+                rider=domain,
+                rider_vision=loop,
+            )
+        )
+    )
+    with pytest.raises(RuntimeError, match="disarm_unconfirmed"):
+        await resource.prepare_model_release()
+    domain.control.assert_awaited_once_with({"action": "disarm"}, "fixture")
+    domain.pipeline.assert_not_awaited()
+    domain.stop_camera.assert_not_awaited()
+    assert resource.release_model_resource() is False
+
+
+@pytest.mark.asyncio
+async def test_initially_unknown_safety_can_be_explicitly_disarmed():
+    domain = SimpleNamespace(
+        device=object(),
+        session="fixture",
+        read=AsyncMock(
+            side_effect=[
+                {"data": {"safety": {}}},
+                {"data": {"safety": {"can_move": False, "state": "DISARMED"}}},
+            ]
+        ),
+        control=AsyncMock(),
+        pipeline=AsyncMock(return_value={"effective_stages": {"capture": False}}),
+    )
+    loop = SimpleNamespace(
+        busy=None, depth_busy=None, depth_detector=SimpleNamespace(model=object())
+    )
+    resource = RiderModelResources(
+        SimpleNamespace(
+            state=SimpleNamespace(
+                rider=domain,
+                rider_vision=loop,
+                rider_analysis=None,
+            )
+        )
+    )
+    await resource.prepare_model_release()
+    domain.control.assert_awaited_once_with({"action": "disarm"}, "fixture")
+    assert resource.prepared

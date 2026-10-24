@@ -30,8 +30,12 @@ class RiderModelResources:
         runtime = getattr(
             getattr(self.app.state, "rider_models", None), "runtime", None
         )
+        runtime_detector = getattr(runtime, "detector", None)
         loaded = (
-            getattr(runtime, "detector", None) is not None
+            (
+                runtime_detector is not None
+                and runtime_detector.status().get("loaded") is True
+            )
             or getattr(getattr(loop, "depth_detector", None), "model", None) is not None
             or getattr(getattr(loop, "detector", None), "session", None) is not None
             or getattr(loop, "busy", None) is not None
@@ -42,13 +46,16 @@ class RiderModelResources:
         if domain.device is not None and loaded:
             safety = (await domain.read("/api/control/state", 0, force=True))["data"]
             safety = safety.get("safety", safety)
-            if safety.get("can_move") or safety.get("state") == "ARMED":
+            if safety.get("can_move") is not False or safety.get("state") == "ARMED":
                 await domain.control({"action": "disarm"}, domain.session)
                 safety = (await domain.read("/api/control/state", 0, force=True))[
                     "data"
                 ]
                 safety = safety.get("safety", safety)
-                if safety.get("can_move") or safety.get("state") == "ARMED":
+                if (
+                    safety.get("can_move") is not False
+                    or safety.get("state") == "ARMED"
+                ):
                     raise RuntimeError("vision_release_disarm_unconfirmed")
             pipeline = await domain.pipeline(force=True)
             if pipeline.get("effective_stages", {}).get("capture"):
