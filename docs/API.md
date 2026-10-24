@@ -11,6 +11,7 @@ All paths below are under /api/v1/rider. Mutations carry X-Rider-Session from GE
 | POST /control | /api/safety or /api/control; manual panel ARM/disarm/STOP/clear, move, height, balance |
 | POST /settings | /api/calibration/controls; revisioned values/directions/profile operations |
 | GET /camera/raw, /camera/proc | Original binary frame and available source metadata |
+| POST /perception/prepare | Load the selected host vision model for an explicit Analysis action; no Pi goal, policy edit or motion |
 | POST /goal/{name} | /api/logic/feature/{name}; Pi-owned goal/resource orchestration |
 | POST /resource/{name} | /api/resource/{name}; explicit power, stop or release |
 | GET /navigation/config, /navigation/state | Pi navigation policy/status plus host detector capability |
@@ -62,3 +63,8 @@ STOP uses a separate connection pool, cancels pending local actuator requests an
 Source measurement timestamps and unknown values are preserved. Host last contact is separate from a device observation. Binary frame metadata is passed through; stale/placeholder images are not presented as current.
 
 Default active-view cadence: control 500 ms, calibration 1000 ms, overview 2000 ms, resources/Face 5000 ms. Held intent renewal and timeout come from Pi descriptors. Read cache TTLs differ by domain and concurrent callers share a request. Collection is demand-driven: selecting/mounting a view does not start camera, LCD, a goal or physical motion.
+
+An explicit Analysis selection and observation start prepare the current host model,
+including after global memory release. Release stops consumers and unloads models;
+it leaves no persistent inference suspension flag. Model preparation preserves the
+Pi policy revision and acceptance. Passive status reads never prepare a model.

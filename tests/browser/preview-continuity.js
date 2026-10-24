@@ -7,7 +7,7 @@ async (page, fixture) => {
   const base=page.url()==="about:blank"?"http://localhost:3300":new URL(page.url()).origin;
   const wait=async(fn,message)=>{const end=Date.now()+8000;while(!await fn()){check(Date.now()<end,message);await new Promise(r=>setTimeout(r,40));}};
   await page.goto("about:blank");
-  const mutations=[];
+  const mutations=[],preparations=[];
   const profile={analysis_location:"venom",local_engine:"canny",remote_transport:"mjpeg"};
   await page.addInitScript(fixture=>{
     const original=window.fetch.bind(window),encoder=new TextEncoder();
@@ -49,6 +49,7 @@ async (page, fixture) => {
   await page.route("**/api/v1/rider/**",async route=>{
     const req=route.request(),path=new URL(req.url()).pathname.slice("/api/v1/rider".length);
     const json=body=>route.fulfill({status:200,contentType:"application/json",body:JSON.stringify(body)});
+    if(path==="/perception/prepare"&&req.method()==="POST"){preparations.push(path);return json({ok:true});}
     if(req.method()!=="GET"){mutations.push(path);return route.abort();}
     if(path==="/config")return json({devices:[{id:"fixture",label:"Prod fixture",mode:"device"}],device_id:"fixture",session:"continuity-session"});
     if(path==="/status")return json({connection:{configured:true,status:"online",device_id:"fixture",mode:"device",session:"continuity-session"},polling:{control_ms:200},errors:{},settings:{revision:1,directions:{}},control:{server_time:Date.now()/1000,safety:{state:"DISARMED",generation:"fixture",can_move:false,moving:false,ready:true,stale:false}},telemetry:{},health:{},catalog:{features:[]},logic:{},face:{},resources:{}});
@@ -89,7 +90,10 @@ async (page, fixture) => {
     await wait(async()=>(await notice.count()>0||await page.getByTestId("camera-surface").locator("img").count()===0)&&await center.getAttribute("data-sector-state")==="unknown","real source loss did not expire the original frame");
     await page.evaluate(()=>{window.__previewContinuity.paused=false;});
     await wait(async()=>!await notice.count()&&await center.getAttribute("data-sector-state")==="clear","current source did not recover");
+    check(preparations.length===1,"explicit Analysis must prepare once; passive polling must not prepare");
+    await analysis.click();
+    await wait(async()=>preparations.length===2,"a new explicit Analysis click did not prepare again");
     check(mutations.length===0,"fixture attempted a hardware mutation");
-    return {result:"PASS",fixtureOnly:true,stability,realExpiryAndRecovery:true,mutations};
+    return {result:"PASS",fixtureOnly:true,stability,realExpiryAndRecovery:true,preparations,mutations};
   }finally{await page.goto("about:blank");await page.unrouteAll({behavior:"wait"});}
 }

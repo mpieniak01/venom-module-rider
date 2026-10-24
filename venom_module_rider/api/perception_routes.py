@@ -41,6 +41,15 @@ async def cancel(model_id: str, request: Request):
     return {"job": manager(request).installer.cancel(model_id)}
 
 
+@router.post("/perception/prepare")
+async def prepare(request: Request):
+    """An explicit Analysis click loads the selection without starting Pi goals."""
+    await manager(request).prepare_observation(
+        request.app.state.rider, request.headers.get("X-Rider-Session")
+    )
+    return {"ok": True}
+
+
 @router.post("/perception/selection")
 async def select(request: Request):
     return await manager(request).select(

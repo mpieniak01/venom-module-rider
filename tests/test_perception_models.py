@@ -408,3 +408,27 @@ async def test_goal_does_not_start_observation_if_model_loading_fails():
         domain.mutate.assert_not_awaited()
     finally:
         await domain.close()
+
+
+async def test_analysis_prepare_route_loads_without_starting_device_goals():
+    from unittest.mock import AsyncMock
+
+    import httpx
+    from fastapi import FastAPI
+
+    from venom_module_rider.api.perception_routes import router
+
+    app = FastAPI()
+    app.include_router(router)
+    app.state.rider = domain = object()
+    app.state.rider_models = SimpleNamespace(prepare_observation=AsyncMock())
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://fixture"
+    ) as client:
+        result = await client.post(
+            "/perception/prepare", headers={"X-Rider-Session": "fixture-session"}
+        )
+        assert result.status_code == 200 and result.json() == {"ok": True}
+        app.state.rider_models.prepare_observation.assert_awaited_once_with(
+            domain, "fixture-session"
+        )

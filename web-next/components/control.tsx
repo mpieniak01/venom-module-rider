@@ -178,6 +178,7 @@ export function CameraPanel({ client, t, language, compact = false, showTools = 
       if(!client.cameraStream) {
         if (!client.pipeline.status) await client.mutate("/goal/s2_camera_preview",{enabled:true},"POST",true);
       }
+      if(stream==="venom") await client.mutate("/perception/prepare",{},"POST",true);
       client.setCameraStream(stream);
     }catch{setPreviewFailure("requestFailed");}
     finally{setPreviewBusy(false);}
