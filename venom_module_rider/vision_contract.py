@@ -87,6 +87,23 @@ class VisionFrame(BaseModel):
             raise ValueError("journey_requires_accepted_steering_v3")
         return self
 
+    @model_validator(mode="after")
+    def valid_model_input(self):
+        """Reject crops incompatible with the active engine, corridor or ground mode."""
+        region = self.perception.input_region
+        if region is not None:
+            if self.perception.engine != "depth_plane":
+                raise ValueError("navigation_input_region_unsupported")
+            if not region.covers(self.corridor):
+                raise ValueError("navigation_input_region_excludes_reference")
+            if (
+                self.protocol_version == 3
+                and self.avoidance.geometry.mode == "ground"
+                and not region.full
+            ):
+                raise ValueError("navigation_input_region_requires_image_geometry")
+        return self
+
     def valid_corridor(self):
         x0, y0, x1, y1 = self.corridor
         return 0 <= x0 < x1 <= 1 and 0 <= y0 < y1 <= 1

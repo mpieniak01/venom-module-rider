@@ -56,10 +56,19 @@ class AnalysisSpec(StrictModel):
 
     @model_validator(mode="after")
     def matching_engine(self):
+        """Check profile, crop, window and geometry compatibility."""
         from .perception_catalog import FAST, SEGFORMER, YOLO
 
         if self.input_source == "video" and self.capture_evidence:
             raise ValueError("analysis_video_evidence_unsupported")
+        region = self.perception.input_region
+        if region is not None:
+            if self.profile != "da2-default" or self.window != 1:
+                raise ValueError("analysis_input_region_unsupported")
+            if not region.covers(self.corridor):
+                raise ValueError("navigation_input_region_excludes_reference")
+            if self.geometry.mode != "image" and not region.full:
+                raise ValueError("navigation_input_region_requires_image_geometry")
         semantic = self.profile in {SEGFORMER, YOLO, FAST}
         if semantic and "perception" not in self.model_fields_set:
             self.perception = self.perception.model_copy(update={"engine": "segformer"})

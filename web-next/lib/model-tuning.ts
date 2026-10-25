@@ -1,3 +1,4 @@
+import {inputCovers} from "./input-region";
 import { record, str, type JsonRecord } from "./model";
 
 export const SEMANTIC_MODEL_IDS = ["segformer-b0-ade20k", "yolo26n-sem-ade20k"] as const;
@@ -38,8 +39,10 @@ export function validTuning(draft: ModelTuningDraft): boolean {
     && Number.isFinite(draft.perception[field as string]) && Number(draft.perception[field as string]) >= Number(low)
     && Number(draft.perception[field as string]) <= Number(high));
 }
+/** Build a revision-checked write only for supported and valid operator settings. */
 export function tuningWrite(draft: ModelTuningDraft, policy: JsonRecord | null, session: string): JsonRecord | null {
   if (tuningDraftStale(draft, policy, session) || !validTuning(draft)
+    || draft.perception.input_region !== undefined && (!inputCovers(draft.perception.input_region,policy?.corridor) || policy?.input_region_supported !== true)
     || semanticModel(draft.modelId) && policy?.model_tuning_supported !== true) return null;
   return { revision: draft.revision, values: { perception: draft.perception } };
 }

@@ -54,6 +54,7 @@ class VisionLoop:
 
     @model_operation
     def _detect_floor(self, payload, frame):
+        """Run semantic detection with policy settings and source-bound metadata."""
         from .navigation_profiles import parameters
 
         options = (
@@ -72,7 +73,13 @@ class VisionLoop:
             options["semantic"] = semantic_parameters(
                 perception, frame.behavior.model_dump()
             )
-        return self.detector.detect(payload, frame.corridor, **options)
+        from .overlay_geometry import source_geometry
+
+        return source_geometry(
+            self.detector.detect(payload, frame.corridor, **options),
+            payload,
+            frame.corridor,
+        )
 
     @model_operation
     def _detect_depth(self, payload, frame):
@@ -101,10 +108,16 @@ class VisionLoop:
 
     @model_operation
     def _detect_model(self, payload, frame):
+        """Run the selected adapter and retain geometry in source-image coordinates."""
         assert self.models is not None
-        return self.models.runtime.detect(payload, frame)
+        from .overlay_geometry import source_geometry
+
+        return source_geometry(
+            self.models.runtime.detect(payload, frame), payload, frame.corridor
+        )
 
     def status(self, perception=None):
+        """Advertise runtime state and supported versioned perception contracts."""
         selected = (
             self.depth_detector
             if perception and perception.get("engine") == "depth_plane"
@@ -121,6 +134,7 @@ class VisionLoop:
             "supported_protocol_versions": [1, 2, 3],
             "navigation_journey_version": 1,
             "temporal_navigation_v1": importlib.util.find_spec("cv2") is not None,
+            "input_region_version": 1,
             "semantic_model_policy_v1": importlib.util.find_spec("cv2") is not None,
             "ground_geometry_supported": callable(
                 getattr(self.depth_detector, "detect_ground", None)

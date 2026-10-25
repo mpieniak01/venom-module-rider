@@ -781,6 +781,7 @@ async def test_real_pi_has_priority_over_same_engine_demo_admission():
 
 
 def test_rejected_dark_capture_replaces_previous_preview_without_model_load():
+    """Publish the actual rejected frame with separate geometry and no model load."""
     from venom_module_rider.depth_detector import DepthDetector, PerceptionSettings
 
     detector = DepthDetector()
@@ -792,9 +793,10 @@ def test_rejected_dark_capture_replaces_previous_preview_without_model_load():
     assert result["state"] == "unknown"
     assert detector.model is None
     pixels = np.asarray(Image.open(io.BytesIO(result["_preview"])))
-    # The current dark capture remains dark; only new uncertainty labels are bright.
+    # Source stays dark. Geometry now travels separately for vector drawing.
     assert pixels[24:48, 24:48].max() == 0
-    assert pixels.max() > 100
+    assert pixels.max() == 0
+    assert result["overlay_geometry"]["input_bounds"] == [0, 0, 64, 64]
     assert all(row["state"] == "unknown" for row in result["sectors"].values())
 
 

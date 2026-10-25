@@ -15,6 +15,7 @@ def sector_regions(corridor):
 
 
 def assess_sectors(depth, corridor, coefficients, scale, settings, oriented):
+    """Assess only side regions with complete observed depth coverage."""
     import numpy as np
 
     h, w = depth.shape
@@ -24,6 +25,9 @@ def assess_sectors(depth, corridor, coefficients, scale, settings, oriented):
         left, top, right, bottom = bounds
         complete = 0 <= left < right <= 1
         mask = (x >= left * w) & (x < right * w) & (y >= top * h) & (y < bottom * h)
+        complete = complete and bool(
+            np.isfinite(depth[mask]).all() and (depth[mask] > 0).all()
+        )
         pixels = int(mask.sum())
         row = {"corridor": bounds, "coverage_complete": complete, "zone_pixels": pixels}
         if not complete or pixels < 64 or not oriented:
@@ -90,6 +94,9 @@ def assess_paths(depth, corridor, coefficients, scale, settings, oriented):
             (y / h >= top) & (y / h < y1) & (x / w >= x0 + shift) & (x / w < x1 + shift)
         )
         complete = 0 <= x0 + sign * width and x1 + sign * width <= 1
+        complete = complete and bool(
+            np.isfinite(depth[mask]).all() and (depth[mask] > 0).all()
+        )
         pixels = int(mask.sum())
         row = {
             "coverage_complete": complete,

@@ -7,6 +7,7 @@ from .navigation_profiles import parameters
 
 
 def evaluate(result, frame, observer, *, context, captured_s, source=None):
+    """Combine spatial and temporal evidence independently of preview drawing."""
     raw_state, raw_reason = result["state"], result["reason"]
     maps = result.pop("_navigation_maps", None)
     params = parameters(frame.behavior.model_dump(), frame.perception.model_dump())
@@ -102,7 +103,13 @@ def evaluate(result, frame, observer, *, context, captured_s, source=None):
             "history_ms": 0,
             "tracking": {"status": "unavailable"},
         }
-    if "_preview" in result:
+    if "overlay_geometry" in result:
+        from .overlay_geometry import with_evidence
+
+        result["overlay_geometry"] = with_evidence(
+            result["overlay_geometry"], spatial, objects
+        )
+    elif "_preview" in result:
         from .navigation_overlay import render_evidence
 
         result["_preview"] = render_evidence(result["_preview"], spatial)

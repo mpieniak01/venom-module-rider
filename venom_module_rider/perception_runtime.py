@@ -94,7 +94,7 @@ def semantic_output(logits, corridor, image, rgb, semantic, evidence):
     if rgb.mean() < 0.04 or rgb.std() < 0.01:
         result.update(state="unknown", reason="vision_image_quality")
     result["_preview"] = render_preview(
-        rgb, logits, corridor, semantic=semantic, source_maps=maps
+        rgb, logits, corridor, semantic=semantic, source_maps=maps, draw_geometry=False
     )
     return result
 
@@ -374,6 +374,7 @@ class YoloSemanticOnnx:
         }
 
     def detect(self, payload, corridor, *, evidence=False, semantic=None):
+        """Produce source-bound classification without rasterizing display geometry."""
         import numpy as np
 
         from .cuda_execution import require_cuda
@@ -432,6 +433,11 @@ class YoloSemanticOnnx:
         if rgb.mean() < 0.04 or rgb.std() < 0.01:
             result.update(state="unknown", reason="vision_image_quality")
         result["_preview"] = render_preview(
-            rgb, None, corridor, semantic=semantic, source_maps=maps
+            rgb,
+            None,
+            corridor,
+            semantic=semantic,
+            source_maps=maps,
+            draw_geometry=False,
         )
         return result

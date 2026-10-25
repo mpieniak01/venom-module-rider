@@ -335,6 +335,12 @@ async def _reference_decision(request, device, descriptor, admitted_at):
 def profile_presentation(config, detector):
     """Expose pair support without mutating a cached authoritative Pi snapshot."""
     result = dict(config)
+    result["input_region_supported"] = (
+        type(config.get("input_region_version")) is int
+        and config["input_region_version"] == 1
+        and type(detector.get("input_region_version")) is int
+        and detector["input_region_version"] == 1
+    )
     result["model_tuning_supported"] = (
         config.get("model_tuning_supported") is True
         and detector.get("semantic_model_policy_v1") is True

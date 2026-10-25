@@ -163,7 +163,12 @@ def run(job, output, *, candidate_factory=None, semantic_factory=None):
             images.clear()
         previous_input = sample
         image = decode_payload(payload)
-        rgb = np.asarray(image, dtype=np.float32) / 255
+        from .model_input import input_box, restore_depth
+        from .overlay_geometry import analysis_geometry
+
+        box = input_box(image, settings.input_region)
+        model_image = image.crop(box) if box != (0, 0, *image.size) else image
+        rgb = np.asarray(model_image, dtype=np.float32) / 255
         mean, std = float(rgb.mean()), float(rgb.std())
         quality = mean >= 0.04 and std >= 0.01
         timings["decode"] = (time.perf_counter() - start) * 1000
@@ -222,6 +227,9 @@ def run(job, output, *, candidate_factory=None, semantic_factory=None):
                     **({"evidence": True} if capture_evidence or video else {}),
                 )
                 timings["perception_total"] = (time.perf_counter() - start) * 1000
+                assessment["overlay_geometry"] = analysis_geometry(
+                    image.size, assessment, spec["corridor"]
+                )
                 if video:
                     name = f"{index:04d}-mask.png"
                     layer, layer_metadata = classification_layer(
@@ -232,6 +240,7 @@ def run(job, output, *, candidate_factory=None, semantic_factory=None):
                         name,
                         raw["sha256"],
                         semantic=True,
+                        vector=True,
                     )
                     artifacts.append(artifact(name, layer, "image/png"))
                 else:
@@ -240,10 +249,11 @@ def run(job, output, *, candidate_factory=None, semantic_factory=None):
                     )
             else:
                 depth = (
-                    cast(Candidate, model).infer(image)
+                    cast(Candidate, model).infer(model_image)
                     if spec["window"] == 1
                     else cast(Candidate, model).infer_window(images)
                 )
+                depth = restore_depth(depth, image.size, box)
                 timings["inference"] = (time.perf_counter() - start) * 1000
                 emit(output, {"type": "compute", "done": index, "phase": "geometry"})
                 start = time.perf_counter()
@@ -252,6 +262,7 @@ def run(job, output, *, candidate_factory=None, semantic_factory=None):
                         depth,
                         tuple(spec["corridor"]),
                         settings,
+                        input_bounds=box if settings.input_region is not None else None,
                         **({"evidence": True} if capture_evidence or video else {}),
                     )
                 else:
@@ -276,11 +287,19 @@ def run(job, output, *, candidate_factory=None, semantic_factory=None):
                         geometry,
                         **evidence_options,
                     )
+                assessment["overlay_geometry"] = analysis_geometry(
+                    image.size, assessment, spec["corridor"], box
+                )
                 timings["geometry"] = (time.perf_counter() - start) * 1000
                 start = time.perf_counter()
                 if not video:
                     overlay = render_depth(
-                        image, depth, assessment, spec["corridor"], settings
+                        image,
+                        depth,
+                        assessment,
+                        spec["corridor"],
+                        settings,
+                        draw_geometry=False,
                     )
                     stream = io.BytesIO()
                     np.save(stream, depth.astype(np.float32), allow_pickle=False)
@@ -291,9 +310,11 @@ def run(job, output, *, candidate_factory=None, semantic_factory=None):
                             "application/octet-stream",
                         )
                     )
-                    low, high = np.quantile(depth, [0.01, 0.99])
+                    low, high = np.quantile(depth[np.isfinite(depth)], [0.01, 0.99])
                     grey = (
-                        (np.clip((depth - low) / max(float(high - low), 1e-8), 0, 1))
+                        np.nan_to_num(
+                            np.clip((depth - low) / max(float(high - low), 1e-8), 0, 1)
+                        )
                         * 255
                     ).astype(np.uint8)
                     stream = io.BytesIO()
@@ -313,6 +334,7 @@ def run(job, output, *, candidate_factory=None, semantic_factory=None):
                         settings,
                         name,
                         raw["sha256"],
+                        vector=True,
                     )
                     artifacts.append(artifact(name, layer, "image/png"))
                 timings["render"] = (time.perf_counter() - start) * 1000
