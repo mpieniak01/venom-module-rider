@@ -788,15 +788,16 @@ def test_active_native_preview_keeps_camera_source_distinct_from_pi_run_identity
     import hashlib
 
     app, service, pi = fixture(monkeypatch)
-    pi.latest = native(101)
+    pi.latest = native(100)
     with TestClient(app) as client:
         detector = Detector()
         app.state.rider_vision.detector = detector
-        current = warmup(client)
+        warmup(client)
         pi.running = True
         for request_sequence, camera_sequence in ((1, 101), (2, 107)):
-            if request_sequence > 1:
-                current = client.portal.call(pi.emit, camera_sequence)
+            # Warmup may consume the initial frame budget on a busy test host.
+            # Publish a fresh capture after setup without relaxing any deadline.
+            current = client.portal.call(pi.emit, camera_sequence)
             # Pi hashes its request input and counts admitted loop cycles. Those
             # identifiers need not equal sensor frame IDs or camera sequence.
             request_id = hashlib.sha256(
