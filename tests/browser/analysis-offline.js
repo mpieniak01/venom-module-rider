@@ -11,7 +11,8 @@ async page => {
   const session=sessions.sessions.find(item=>item.policy?.scene_group==="inputs-floor");
   check(session,"historical dataset required");
   await page.reload();
-  await page.getByTestId("samples-browser").locator("summary").first().click();
+  if(await page.getByRole("tab",{name:"Próbki",exact:true}).count())await page.getByRole("tab",{name:"Próbki",exact:true}).click();
+  if(await page.getByTestId("samples-browser").locator(":scope > summary").count())await page.getByTestId("samples-browser").locator(":scope > summary").click();
   await page.getByTestId("samples-session").selectOption(session.session_id);
   const panel=page.getByTestId("analysis-panel");
   await panel.locator("summary").filter({hasText:"Parametry analizy"}).click();

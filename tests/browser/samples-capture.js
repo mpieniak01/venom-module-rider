@@ -47,8 +47,9 @@ async page => {
   await page.waitForTimeout(600);
   check(await page.getByTestId("rider-forward").getAttribute("aria-pressed")==="false","STOP failed during data collection");
   await page.getByTestId("samples-end").click();
-  await page.getByRole("tab",{name:"Percepcja",exact:true}).click();
-  await page.getByTestId("samples-browser").locator("summary").first().click();
+  await page.getByRole("tab",{name:"Próbki",exact:true}).click();
+  if(await page.getByRole("tab",{name:"Próbki",exact:true}).count())await page.getByRole("tab",{name:"Próbki",exact:true}).click();
+  if(await page.getByTestId("samples-browser").locator(":scope > summary").count())await page.getByTestId("samples-browser").locator(":scope > summary").click();
   await page.getByTestId("samples-session").selectOption(first.session_id);
   await page.getByTestId("sample-thumbnail").first().click();
   await page.getByLabel("Scena",{exact:true}).fill("fixture floor");

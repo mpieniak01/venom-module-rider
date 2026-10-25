@@ -20,7 +20,7 @@ async page=>{
  check(active.length===1,"Exactly one active recording required");
  const sid=active[0].session_id;
  check(label.includes(sid.slice(0,8)),"Header session identity missing");
- for(const index of [2,3,4,5,0]){
+ for(const index of [2,3,4,5,6,0]){
    await page.getByRole("tab").nth(index).click();
    check(await state.innerText()===label,"Tab replaced recording identity");
    check(await page.getByTestId("study-end").isEnabled(),"End unavailable across tabs");
@@ -35,8 +35,8 @@ async page=>{
  await page.getByTestId("rider-forward").focus();
  await page.getByTestId("rider-forward").press("Enter");
  await page.waitForFunction(()=>document.querySelector('[data-testid="rider-arm"]')?.getAttribute("aria-pressed")==="true");
- await page.getByRole("tab").nth(1).click();
- await page.getByTestId("rider-pause").click();
+ await page.getByRole("tab").nth(0).click();
+ await page.getByTestId("rider-pad-stop").click();
  check(await page.getByTestId("study-end").isEnabled(),"Motion stop ended recording");
  let observed=false;
  for(let attempt=0;attempt<40;attempt++){

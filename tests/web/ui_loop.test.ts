@@ -529,7 +529,7 @@ test("recovery brackets preview polling and late processed GETs cannot publish o
  assert.ok(client.indexOf("!currentPreview()",dispatch)>dispatch);
  assert.ok(client.indexOf("!currentPreview()",client.indexOf("await decodePreview",dispatch))>dispatch);
  assert.ok(client.includes('cameraStream === "venom" && cameraTransition'));
- assert.ok(client.includes('if (!cameraStream || !["control", "vision"].includes(section) || processedTransition || nativeStreaming || pipelineBusy || pipelineStopped) return;'));
+ assert.ok(client.includes('if (!cameraStream || !["control", "vision", "samples"].includes(section) || processedTransition || nativeStreaming || pipelineBusy || pipelineStopped) return;'));
  assert.ok(client.includes("stale: true, knownFreshness: false"));
 });
 

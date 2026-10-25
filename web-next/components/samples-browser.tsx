@@ -12,8 +12,9 @@ import { Button, Details, Empty, Field, Input, Panel, Select, Textarea } from ".
 import styles from "../rider.module.css";
 
 const emptyLabel={class_name:"",scene:"",expected_state:"unknown",obstacle_side:"unknown",review:"pending",note:""};
-export function SamplesBrowser({t,language,refreshKey}:{t:Translator;language:string;refreshKey?:string}) {
+export function SamplesBrowser({t,language,refreshKey,standalone=false}:{t:Translator;language:string;refreshKey?:string;standalone?:boolean}) {
   const [open,setOpen]=useState(false);
+  if(standalone)return <div data-testid="samples-browser"><SampleLibrary t={t} language={language} refreshKey={refreshKey}/></div>;
   return <details className={styles.details} onToggle={event=>setOpen(event.currentTarget.open)} data-testid="samples-browser">
     <summary>{t("samples.library")}</summary>{open&&<SampleLibrary t={t} language={language} refreshKey={refreshKey}/>}
   </details>;

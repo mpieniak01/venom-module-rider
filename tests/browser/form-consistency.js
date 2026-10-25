@@ -52,7 +52,7 @@ async page => {
         for(let i=0;i<await children.count();i++)check(await children.nth(i).isDisabled(),"fieldset disabled semantics lost");
         await fieldset.evaluate(node=>{node.disabled=false;});
       }
-      for(const tab of ["Pomiary","Kalibracja","Cele i zasoby","Face Studio","Percepcja"]){
+      for(const tab of ["Pomiary","Kalibracja","Cele i zasoby","Face Studio","Percepcja","Próbki"]){
         await page.getByRole("tab",{name:tab,exact:true}).click();
         if(tab==="Kalibracja"){
           const field=page.getByTestId("rider-page").locator('input[type="number"]').first();
@@ -67,8 +67,7 @@ async page => {
           const toggle=page.getByTestId("rider-page").locator('input[type="checkbox"]').first();
           await toggle.check();check(await toggle.isChecked(),"native checkbox change lost");
         }
-        if(tab==="Percepcja"){
-          await page.getByTestId("samples-browser").locator("summary").first().click();
+        if(tab==="Próbki"){
           await page.getByTestId("samples-session").selectOption("form-fixture");
           await page.getByTestId("sample-thumbnail").first().click();
           const note=page.getByTestId("sample-editor").locator("textarea");await note.fill("First line\nSecond line");

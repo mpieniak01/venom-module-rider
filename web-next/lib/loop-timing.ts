@@ -2,7 +2,7 @@ import { finite, record, type JsonRecord, type Section } from "./model";
 
 // Preserve the original freshness budget when the display cadence is changed.
 export function freshnessCadence(section: Section): number {
-  return ({control:500,vision:500,calibration:1000,overview:2000,resources:5000,face:5000,compute:5000})[section];
+  return ({control:500,vision:500,calibration:1000,overview:2000,resources:5000,face:5000,compute:5000,samples:2000})[section];
 }
 export function previewInterval(status: unknown): number {
   const value = record(record(status).effective).preview_ms;

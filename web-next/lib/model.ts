@@ -1,5 +1,5 @@
 export type JsonRecord = Record<string, unknown>;
-export type Section = "control" | "vision" | "overview" | "calibration" | "resources" | "face" | "compute";
+export type Section = "control" | "vision" | "overview" | "calibration" | "resources" | "face" | "compute" | "samples";
 export type Direction = "forward" | "backward" | "left" | "right";
 export const DIRECTIONS: Direction[] = ["forward", "backward", "left", "right"];
 export type DeviceConfig = { devices: { id: string; label: string; mode: "demo" | "device"; transport_profile?: "secure" | "trusted_lan" }[]; device_id: string | null; session: string; selection_warning?: string | null };
@@ -38,7 +38,7 @@ export function canRequestArm(status: RiderStatus | null): boolean {
   return !!status?.connection.configured && !!str(safety.generation) && ["DISARMED", "ESTOP", "ARMED"].includes(str(safety.state));
 }
 export function frameRequested(kind: "camera" | "face", path: string, section: Section, media: { camera: "raw" | "proc" | "venom" | null; face: boolean }): boolean {
-  return kind === "camera" ? ["control", "vision"].includes(section) && media.camera !== null && path === `/camera/${media.camera}` : section === "face" && media.face && path === "/face/runtime/frame";
+  return kind === "camera" ? ["control", "vision", "samples"].includes(section) && media.camera !== null && path === `/camera/${media.camera}` : section === "face" && media.face && path === "/face/runtime/frame";
 }
 export const timestampMs = (value: unknown): number | null => { if (finite(value)) return value < 1e12 ? value * 1000 : value; if (typeof value === "string") { const at = Date.parse(value); return Number.isFinite(at) ? at : null; } return null; };
 export const formatNumber = (value: unknown, locale: string, precision = 1): string => finite(value) ? new Intl.NumberFormat(locale, { maximumFractionDigits: precision }).format(value) : "—";
