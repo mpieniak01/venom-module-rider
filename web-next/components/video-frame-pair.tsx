@@ -8,7 +8,7 @@ import styles from "../rider.module.css";
 
 export type VideoComparison={report:JsonRecord;runId:string;rows:AnalysisRow[]};
 export type DisplayFrame={key:string;index:number;src:string;raw_sha256:string;width:number;height:number;comparison:VideoComparison|null};
-export function VideoFramePair({frame,session,active,onReady,onFailure,t}:{frame:DisplayFrame;session:string;active:boolean;onReady:(frame:DisplayFrame)=>void;onFailure:()=>void;t:Translator}){
+export function VideoFramePair({frame,session,active,requested,onReady,onFailure,t}:{frame:DisplayFrame;session:string;active:boolean;requested:boolean;onReady:(frame:DisplayFrame)=>void;onFailure:()=>void;t:Translator}){
   const raw=useRef<HTMLImageElement>(null),canvas=useRef<HTMLCanvasElement>(null),layer=useRef<HTMLImageElement|null>(null);
   const rawLoaded=useRef(false),layerState=useRef("loading");
   const [failed,setFailed]=useState(false),[painted,setPainted]=useState(false);
@@ -45,6 +45,12 @@ export function VideoFramePair({frame,session,active,onReady,onFailure,t}:{frame
     image.src=getApiBaseUrl()+result.asset.path;
     return()=>{alive=false;image.onload=null;image.onerror=null;layer.current=null;};
   },[result.asset,complete]);
+  useEffect(()=>{
+    const source=raw.current;
+    if(requested&&rawLoaded.current&&source&&(!result.asset||layerState.current!=="loading")){
+      onReady({...frame,width:source.naturalWidth,height:source.naturalHeight});
+    }
+  },[requested,frame,result.asset,onReady]);
   const error=result.error||(failed?"analysis.artifactFailed":"");
   const placeholder=error||(!comparison?"analysis.video.noResult":!result.asset?"analysis.noOverlay":"");
   return <div className={styles.videoPair} style={{visibility:active?"visible":"hidden"}} aria-hidden={!active} data-testid={active?"analysis-frame-media":undefined} data-run-id={comparison?.runId} data-source-index={frame.index}>

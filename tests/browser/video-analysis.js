@@ -160,6 +160,9 @@ async page=>{
  check(await page.getByTestId("analysis-frame-overlay").getAttribute("data-source-index")==="150","processed half drifted during buffering");
  check(requests.filter(x=>x.path.endsWith("/0150-mask.png")).length===previousMaskRequests,"retaining the old pair reloaded its mask");
  await page.getByTestId("source-video-play").click();
+ await page.waitForTimeout(700);
+ check(await page.getByTestId("source-video-image").getAttribute("data-source-index")==="150","paused buffering advanced the displayed pair");
+ await page.getByTestId("source-video-play").click();
  await page.waitForFunction(()=>document.querySelector('[data-testid="source-video-image"]')?.getAttribute("data-source-index")==="151");
  check(await page.getByTestId("analysis-frame-overlay").getAttribute("data-source-index")==="151","mask did not advance with RAW");
  slowLayerIndex=-1;
