@@ -53,9 +53,10 @@ class ObjectDiagnostics:
         route = corridor_mask(maps.get("corridor", corridor), raw.shape)
         h, w = raw.shape
         labels = maps.get("labels")
-        foreground = (
-            ~np.isin(labels, [0, 3, 5, 8, 14, 28]) if labels is not None else raw
-        )
+        excluded = [0, 3, 5, 8, 14, 28]
+        if params.get("object_policy_enabled"):
+            excluded = [0, 5, 8, 14, *params.get("traversable_labels", (3,))]
+        foreground = ~np.isin(labels, excluded) if labels is not None else raw
         foreground = cv2.morphologyEx(
             foreground.astype(np.uint8), cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8)
         )
@@ -163,6 +164,7 @@ class ObjectDiagnostics:
             "ground_reference_valid": maps.get("valid", True) is True,
             "tracking": tracking["status"],
             "objects": objects,
+            **({"_motion": tracking} if params.get("object_policy_enabled") else {}),
         }
 
 
@@ -185,7 +187,11 @@ def render_objects(payload, diagnostics):
                 outline=(195, 130, 255),
                 width=1,
             )
-            text = f"T{item['id']} x{item['growth']:.2f} y{item['lower_px']:+d}"
+            lower = item["lower_px"]
+            displacement = (
+                f"{lower:+.1f}" if isinstance(lower, float) else f"{lower:+d}"
+            )
+            text = f"T{item['id']} x{item['growth']:.2f} y{displacement}"
             draw.text(
                 (box[0], max(0, box[1] - 11)),
                 text,

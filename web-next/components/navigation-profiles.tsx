@@ -84,12 +84,12 @@ export function NavigationProfiles({ client, policy, goals, locked, t, onApplied
       </div>
       {selection.profile_revision === 2 && <div data-testid="behavior-editor" onFocusCapture={() => { if (policy && !visibleDraft) editBase.current = behaviorEditDraft(policy, session); }}>
         {["evidence", "temporal", "persistence", "objects"].map(group => <fieldset key={group} disabled={locked || pending} className={styles.parameterGroup}>
-          <legend>{t("behavior.group." + group)}</legend>
+          <legend>{t(group === "objects" && selected === "room_fluid" ? "behavior.group.roomObjects" : "behavior.group." + group)}</legend>
           {group === "evidence" && <p className={styles.hint}>{t("behavior.evidenceHint")}</p>}
           {group === "temporal" && <p className={styles.hint}>{t("behavior.temporalHint")}</p>}
           {group === "persistence" && <p className={styles.hint}>{t("behavior.persistenceHint", { required: String(values.obstacle_support_frames), window: String(values.obstacle_window_frames) })}</p>}
-          {group === "objects" && <p className={styles.hint}>{t("behavior.objectsHint")}</p>}
-          <div className={styles.grid3}>{Object.entries(catalog.parameterSchema ?? {}).filter(([key, spec]) => spec.group === group && (key !== "pixel_confidence" || (policy?.perception as JsonRecord)?.engine === "segformer")).map(([key, spec]) => <Field key={key} label={t("behavior.param." + key)}>
+          {group === "objects" && <p className={styles.hint}>{t(selected === "room_fluid" ? "behavior.roomObjectsHint" : "behavior.objectsHint")}</p>}
+          <div className={styles.grid3}>{Object.entries(catalog.parameterSchema ?? {}).filter(([key, spec]) => spec.group === group && Object.hasOwn(values,key) && (key !== "pixel_confidence" || (policy?.perception as JsonRecord)?.engine === "segformer")).map(([key, spec]) => <Field key={key} label={t(key === "object_tracking_enabled" && selected === "room_fluid" ? "behavior.param.roomTrackingEnabled" : "behavior.param." + key)}>
             {spec.kind === "bool" ? <input data-testid={"behavior-param-" + key} type="checkbox" checked={values[key] === true} onChange={e => editParameter(key, e.target.checked)}/>
               : <Input data-testid={"behavior-param-" + key} type="number" min={spec.min} max={spec.max} step={spec.step} value={typeof values[key] === "number" && Number.isFinite(values[key]) ? Number(values[key]) : ""} onChange={e => editParameter(key, e.target.value === "" ? Number.NaN : Number(e.target.value))}/>}
           </Field>)}</div>

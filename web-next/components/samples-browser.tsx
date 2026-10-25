@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api-client";
 import { getApiBaseUrl } from "@/lib/env";
 import { errorCode, formatTime, record, str, type JsonRecord } from "../lib/model";
-import { SAMPLES_BASE, type Collection, type Sample, type SamplePage } from "../lib/samples";
+import { SAMPLES_BASE, videoErrorKey, type Collection, type Sample, type SamplePage } from "../lib/samples";
 import type { Translator } from "../lib/i18n";
 import { EvidenceSummary } from "./evidence-summary";
 import { MotionEvidencePanel } from "./motion-evidence-panel";
@@ -12,13 +12,13 @@ import { Button, Details, Empty, Field, Input, Panel, Select, Textarea } from ".
 import styles from "../rider.module.css";
 
 const emptyLabel={class_name:"",scene:"",expected_state:"unknown",obstacle_side:"unknown",review:"pending",note:""};
-export function SamplesBrowser({t,language}:{t:Translator;language:string}) {
+export function SamplesBrowser({t,language,refreshKey}:{t:Translator;language:string;refreshKey?:string}) {
   const [open,setOpen]=useState(false);
   return <details className={styles.details} onToggle={event=>setOpen(event.currentTarget.open)} data-testid="samples-browser">
-    <summary>{t("samples.library")}</summary>{open&&<SampleLibrary t={t} language={language}/>}
+    <summary>{t("samples.library")}</summary>{open&&<SampleLibrary t={t} language={language} refreshKey={refreshKey}/>}
   </details>;
 }
-function SampleLibrary({t,language}:{t:Translator;language:string}) {
+function SampleLibrary({t,language,refreshKey}:{t:Translator;language:string;refreshKey?:string}) {
   const [sessions,setSessions]=useState<Collection[]>([]);
   const [selected,setSelected]=useState("");
   const [offset,setOffset]=useState(0);
@@ -30,18 +30,20 @@ function SampleLibrary({t,language}:{t:Translator;language:string}) {
   const [writing,setWriting]=useState(false);
   const [updated,setUpdated]=useState(0);
   const inspectEpoch=useRef(0);
+  const refreshEpoch=useRef(0);
   const refresh=useCallback(async()=>{
-    try{const result=await apiFetch<{sessions:Collection[]}>(SAMPLES_BASE+"/sessions");setSessions(result.sessions);setError("");}
-    catch(err){setError(errorCode(err));}
+    const current=++refreshEpoch.current;
+    try{const result=await apiFetch<{sessions:Collection[]}>(SAMPLES_BASE+"/sessions");if(current===refreshEpoch.current){setSessions(result.sessions);setError("");}}
+    catch(err){if(current===refreshEpoch.current)setError(errorCode(err));}
   },[]);
-  useEffect(()=>{void refresh();},[refresh]);
+  useEffect(()=>{void refresh();},[refresh,refreshKey]);
   useEffect(()=>{
     if(!selected)return;
     let current=true;
     setPage(null);setSample(null);
     void apiFetch<SamplePage>(SAMPLES_BASE+"/sessions/"+selected+"?offset="+offset+"&limit=12").then(result=>{if(current){setPage(result);setError("");}}).catch(err=>{if(current)setError(errorCode(err));});
     return()=>{current=false;};
-  },[selected,offset,updated]);
+  },[selected,offset,updated,refreshKey]);
   const inspect=async(id:string)=>{
     const current=++inspectEpoch.current;
     try{
@@ -72,6 +74,12 @@ function SampleLibrary({t,language}:{t:Translator;language:string}) {
     <Field label={t("samples.session")}><Select data-testid="samples-session" value={selected} onChange={event=>{inspectEpoch.current++;setSelected(event.target.value);setOffset(0);setPage(null);setSample(null);}}><option value="">{t("samples.choose")}</option>{sessions.map(row=><option key={row.session_id} value={row.session_id}>{formatTime(row.started_at,language)} · {row.source_device_id} · {t("samples.session."+row.state)} · {row.counts.saved??0} · {row.session_id.slice(0,8)}</option>)}</Select></Field>
     {page&&<>
       <EvidenceSummary value={page.session.evidence} t={t}/>
+      {page.session.video&&<section data-testid="archive-video-status" aria-label={t("study.video")}>
+        <strong>{t("study.video")}: {t("study.video."+page.session.video.state)}</strong>
+        <p>{t("study.videoStats",{frames:page.session.video.frames,seconds:page.session.video.duration_s.toFixed(1),mib:(page.session.video.bytes/1024/1024).toFixed(1),fps:page.session.video.target_fps,gaps:page.session.video.gaps})}</p>
+        {page.session.video.error&&<p role="alert">{t(videoErrorKey(page.session.video.error))}</p>}
+        {!!page.session.video.frames&&page.session.video.ended_at!==null&&<a data-testid="archive-video-download" className={styles.button} href={getApiBaseUrl()+SAMPLES_BASE+"/sessions/"+page.session.session_id+"/video"} download>{t("study.downloadVideo")}</a>}
+      </section>}
       <p className={styles.meta}>{t("samples.savedCount")}: {page.total} · {t("samples.request.failed")}: {page.session.counts.failed??0}</p>
       <div className={styles.samplesGrid}>{page.samples.map((item:Sample)=><button type="button" key={item.sample_id} data-testid="sample-thumbnail" className={styles.sampleThumb} disabled={writing} aria-pressed={sample?.sample_id===item.sample_id} onClick={()=>void inspect(item.sample_id)}><img src={source(item.sample_id)} alt={t("samples.original")} loading="lazy"/><span>#{String(item.ordinal)} · {String(item.frame_id??"—").slice(0,12)}</span>{Array.isArray(item.quality.flags)&&item.quality.flags.length>0&&<span>{t("samples.quality")}: {qualityText(item.quality)}</span>}</button>)}</div>
       {page.total===0&&<Empty>{t("samples.empty")}</Empty>}

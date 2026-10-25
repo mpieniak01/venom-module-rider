@@ -119,3 +119,18 @@ async def export(request: Request, session_id: str):
         headers={"X-Rider-Dataset-Revision": revision},
         background=BackgroundTask(path.unlink, missing_ok=True),
     )
+
+
+@router.get("/sessions/{session_id}/video")
+async def video(request: Request, session_id: str):
+    """Download a finalized session video without contacting the robot."""
+    from starlette.responses import FileResponse
+
+    domain = registry(request)
+    path = await domain.read(domain.store.video.download, session_id)
+    return FileResponse(
+        path,
+        media_type="video/x-motion-jpeg",
+        filename=f"rider-session-{session_id}.mjpeg",
+        headers={"cache-control": "no-store"},
+    )

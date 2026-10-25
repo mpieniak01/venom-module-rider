@@ -12,6 +12,7 @@ import tempfile
 import time
 import zipfile
 from pathlib import Path, PurePosixPath
+from typing import Protocol
 
 from .errors import RiderError
 from .evidence_store import EvidenceStore, validate_extension
@@ -24,6 +25,18 @@ def canonical(value):
     return json.dumps(
         value, sort_keys=True, separators=(",", ":"), allow_nan=False
     ).encode()
+
+
+class ByteReader(Protocol):
+    def read(self, size: int = -1, /) -> bytes: ...
+
+
+def sha256_stream(stream: ByteReader) -> str:
+    """Hash ordinary and ZIP streams in bounded blocks, without readinto()."""
+    digest = hashlib.sha256()
+    while chunk := stream.read(1024 * 1024):
+        digest.update(chunk)
+    return digest.hexdigest()
 
 
 class SampleArchive:
@@ -77,6 +90,20 @@ class SampleArchive:
         }
         if evidence is not None:
             dataset["evidence"] = evidence
+        video = self.store.video.artifacts(session_id)
+        if video:
+            files = []
+            for name, path in video:
+                with path.open("rb") as stream:
+                    digest = sha256_stream(stream)
+                files.append(
+                    {
+                        "file": "video/" + name,
+                        "bytes": path.stat().st_size,
+                        "sha256": digest,
+                    }
+                )
+            dataset["video"] = {"version": 1, "files": files}
         raw = canonical(dataset)
         if len(raw) > MAX_MANIFEST_BYTES:
             raise RiderError("samples_export_size", 413)
@@ -107,7 +134,10 @@ class SampleArchive:
                 row["raw"]["sha256"]: row["raw"]["bytes"] for row in dataset["samples"]
             }.values()
         )
-        self.store._space(size + len(manifest))
+        video_size = sum(
+            row["bytes"] for row in dataset.get("video", {}).get("files", [])
+        )
+        self.store._space(size + len(manifest) + video_size)
         with tempfile.NamedTemporaryFile(
             dir=self.directory, prefix="rider-export-", suffix=".zip", delete=False
         ) as temporary:
@@ -128,6 +158,16 @@ class SampleArchive:
                         raise RiderError("samples_source_corrupt", 409)
                     archive.writestr(row["raw"]["file"], payload)
                     seen.add(digest)
+                for row in dataset.get("video", {}).get("files", []):
+                    source = self.store.video.path(
+                        session_id, row["file"].split("/")[-1]
+                    )
+                    if source.stat().st_size != row["bytes"]:
+                        raise RiderError("samples_video_invalid", 409)
+                    with source.open("rb") as stream:
+                        if sha256_stream(stream) != row["sha256"]:
+                            raise RiderError("samples_video_invalid", 409)
+                    archive.write(source, row["file"])
             with path.open("rb") as stream:
                 os.fsync(stream.fileno())
             return path, revision
@@ -167,7 +207,7 @@ class SampleArchive:
         try:
             with zipfile.ZipFile(source) as archive:
                 entries = archive.infolist()
-                if len(entries) > 1001 or len(
+                if len(entries) > 1004 or len(
                     {entry.filename for entry in entries}
                 ) != len(entries):
                     raise RiderError("samples_import_invalid", 400)
@@ -201,6 +241,14 @@ class SampleArchive:
                     payload = archive.read(info)
                     if hashlib.sha256(payload).hexdigest() != raw["sha256"]:
                         raise RiderError("samples_import_hash", 400)
+                for video in manifest.get("video", {}).get("files", []):
+                    expected.add(video["file"])
+                    info = archive.getinfo(video["file"])
+                    if info.file_size != video["bytes"]:
+                        raise RiderError("samples_import_hash", 400)
+                    with archive.open(info) as stream:
+                        if sha256_stream(stream) != video["sha256"]:
+                            raise RiderError("samples_import_hash", 400)
                 if set(archive.namelist()) != expected:
                     raise RiderError("samples_import_invalid", 400)
                 return manifest
@@ -219,6 +267,30 @@ class SampleArchive:
             or not isinstance(manifest["session"].get("policy", {}), dict)
         ):
             raise RiderError("samples_import_invalid", 400)
+        if "video" in manifest:
+            video = manifest["video"]
+            if (
+                not isinstance(video, dict)
+                or video.get("version") != 1
+                or not isinstance(video.get("files"), list)
+                or len(video["files"]) != 3
+            ):
+                raise RiderError("samples_video_invalid", 400)
+            if {row.get("file") for row in video["files"] if isinstance(row, dict)} != {
+                "video/video.json",
+                "video/capture.mjpeg",
+                "video/frames.jsonl",
+            }:
+                raise RiderError("samples_video_invalid", 400)
+            for row in video["files"]:
+                if (
+                    not isinstance(row, dict)
+                    or type(row.get("bytes")) is not int
+                    or row["bytes"] < 0
+                    or not isinstance(row.get("sha256"), str)
+                    or re.fullmatch(r"[a-f0-9]{64}", row["sha256"]) is None
+                ):
+                    raise RiderError("samples_video_invalid", 400)
         if "evidence" in manifest:
             validate_extension(manifest["evidence"])
         seen = set()

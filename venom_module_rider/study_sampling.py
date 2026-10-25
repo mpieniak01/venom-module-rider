@@ -71,7 +71,10 @@ class StudySampler:
             self.task = asyncio.create_task(self.run())
         if (
             collecting(self.domain)
-            and getattr(getattr(self.domain, "samples", None), "study_images", {})
+            and (
+                getattr(getattr(self.domain, "samples", None), "study_images", {})
+                or getattr(getattr(self.domain, "samples", None), "study_videos", {})
+            )
             and (
                 self.image_task is None
                 or self.image_task.done()
@@ -130,7 +133,15 @@ class StudySampler:
             and row["count"] < row["limit"]
             and not registry.evidence.sessions[sid]["retired"]
         }
-        if not pending:
+        videos = {
+            sid: row
+            for sid, row in registry.study_videos.items()
+            if sid in registry.active
+            and sid not in registry.closing
+            and row["device"] == domain.device.id
+            and not registry.evidence.sessions[sid]["retired"]
+        }
+        if not pending and not videos:
             return
         # Read only: neither camera power nor robot control may be changed here.
         camera = domain.data(await domain.read("/api/resource/camera", 0.5))
@@ -140,6 +151,10 @@ class StudySampler:
         if enabled is False or (
             enabled is not True and state not in {"on", "active", "running"}
         ):
+            for sid in videos:
+                await registry.read(
+                    registry.store.video.note, sid, "samples_video_camera_off"
+                )
             return
         _, _, headers = await domain.camera("raw")
         key = headers.get("x-rider-capture-key")
@@ -167,6 +182,17 @@ class StudySampler:
                 or received != tuple(str(value) for value in expected)
             ):
                 raise RiderError("stream_epoch_changed", 409)
+        for sid, row in videos.items():
+            if (
+                domain.session == session
+                and registry.study_videos.get(sid) is row
+                and sid not in registry.closing
+            ):
+                result = await registry.read(
+                    registry.store.video.append, sid, registry.frames.get(key)
+                )
+                if result and result["state"] in {"error", "limit"}:
+                    registry.study_videos.pop(sid, None)
         for sid, row in pending.items():
             if (
                 domain.session != session
@@ -175,10 +201,34 @@ class StudySampler:
                 or row["last"] == key
             ):
                 continue
+            now = time.monotonic()
+            if videos and now - row.get("last_saved_mono", -1000) < 1:
+                continue
+            row["last_saved_mono"] = now
             registry.capture(sid, f"study-image-{sid}-{row['count']}", key)
             row["count"] += 1
             row["last"] = key
         self.image_reads += 1
+
+    async def video_error(self, reason):
+        registry = getattr(self.domain, "samples", None)
+        if registry is None:
+            return
+        for sid in tuple(getattr(registry, "study_videos", {})):
+            if sid not in registry.active or sid in registry.closing:
+                continue
+            try:
+                result = await registry.read(
+                    registry.store.video.note,
+                    sid,
+                    reason,
+                    terminal=reason == "stream_epoch_changed",
+                )
+                if result and result["state"] == "error":
+                    registry.study_videos.pop(sid, None)
+            except Exception:
+                # An unavailable optional writer must never hold up control IO.
+                pass
 
     async def images(self):
         session = self.domain.session
@@ -192,12 +242,16 @@ class StudySampler:
                 if task is not None and task.cancelling():
                     raise
                 self.image_error = "study_image_read_cancelled"
+                await self.video_error(self.image_error)
             except Exception as exc:
                 self.image_error = (
                     exc.code if isinstance(exc, RiderError) else "study_image_failed"
                 )
-            # One bounded source read per second, independent of UI tab/polling.
-            await asyncio.sleep(max(0.05, 1.0 - (time.monotonic() - started)))
+                await self.video_error(self.image_error)
+            # Video targets five RAW receipts/second; still samples remain one/second.
+            videos = getattr(getattr(self.domain, "samples", None), "study_videos", {})
+            interval = 0.2 if videos else 1.0
+            await asyncio.sleep(max(0.05, interval - (time.monotonic() - started)))
 
     def cancel(self):
         if self.task is not None:

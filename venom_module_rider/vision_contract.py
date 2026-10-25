@@ -20,7 +20,9 @@ class BehaviorSettings(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     version: Annotated[StrictInt, Field(ge=1, le=1)] = 1
-    profile_id: Literal["legacy", "cautious", "balanced", "fluid"] = "legacy"
+    profile_id: Literal["legacy", "cautious", "balanced", "fluid", "room_fluid"] = (
+        "legacy"
+    )
     profile_revision: Annotated[StrictInt, Field(ge=1, le=2)] = 1
     overrides: dict = Field(default_factory=dict)
 

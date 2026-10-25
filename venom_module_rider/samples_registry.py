@@ -52,6 +52,7 @@ class SamplesRegistry:
         self.sequences: dict[str, dict] = {}
         self.deadlines: dict[str, asyncio.TimerHandle] = {}
         self.study_images: dict[str, dict] = {}
+        self.study_videos: dict[str, dict] = {}
         self.lease: BinaryIO | None = None
         self.failures = 0
         from .automatic_capture import AutomaticCapture
@@ -141,6 +142,19 @@ class SamplesRegistry:
                     self.store.start, request_id, device_id, values
                 )
                 if session["state"] == "collecting":
+                    if values["record_video"]:
+                        try:
+                            session["video"] = await self.read(
+                                self.store.video.start, session["session_id"]
+                            )
+                        except Exception:
+                            await self.read(
+                                self.store.end, session["session_id"], incomplete=True
+                            )
+                            raise
+                        self.study_videos.setdefault(
+                            session["session_id"], {"device": device_id}
+                        )
                     self.active.add(session["session_id"])
                     self.evidence.start(session)
                     if (
@@ -236,6 +250,12 @@ class SamplesRegistry:
             self._open()
             self.closing.add(session_id)
             self.study_images.pop(session_id, None)
+            self.study_videos.pop(session_id, None)
+            with self.evidence.lock:
+                retired = self.evidence.sessions.get(session_id, {}).get(
+                    "retired", False
+                )
+            incomplete = incomplete or retired
             self.evidence.retire("collection_ended", session_id)
             deadline = self.deadlines.pop(session_id, None)
             if deadline is not None:
@@ -248,6 +268,7 @@ class SamplesRegistry:
             # One serialized close marker follows admitted writes even when all
             # capture slots are occupied. It is not another source-data job.
             def finish():
+                self.store.video.finish(session_id, interrupted=incomplete)
                 self._finish_evidence(session_id)
                 return self.store.end(session_id, incomplete=incomplete)
 
@@ -445,6 +466,7 @@ class SamplesRegistry:
                 row["timer"].cancel()
             self.sequences.clear()
             self.study_images.clear()
+            self.study_videos.clear()
             for timer in self.deadlines.values():
                 timer.cancel()
             self.deadlines.clear()
@@ -453,6 +475,7 @@ class SamplesRegistry:
                 try:
                     if self.lease is not None:
                         for session_id in tuple(self.evidence.sessions):
+                            self.store.video.finish(session_id, interrupted=True)
                             self._finish_evidence(session_id)
                         self.store.recover_interrupted()
                 finally:

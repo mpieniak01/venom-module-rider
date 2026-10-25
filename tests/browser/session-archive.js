@@ -1,0 +1,60 @@
+// Isolated session UI; all data/video endpoints are fixtures with no device connection.
+async page=>{
+ const check=(value,message)=>{if(!value)throw new Error(message);};
+ const sessions=[],writes=[];
+ const video=state=>({state,frames:state==="waiting_camera"?0:5,bytes:5000,duration_s:1,target_fps:5,gaps:0,error:null,ended_at:state==="complete"?1002:null});
+ const base="/api/v1/rider/samples";
+ await page.route("**/api/**",async route=>{
+  const request=route.request(),path=new URL(request.url()).pathname,method=request.method();
+  const reply=value=>route.fulfill({status:200,contentType:"application/json",body:JSON.stringify(value)});
+  if(method!=="GET")writes.push({path,body:request.postDataJSON()});
+  if(path===base+"/automatic")return reply({state:"off"});
+  if(path===base+"/sessions"&&method==="POST"){
+   const body=request.postDataJSON();
+   check(body.policy.record_video===true&&body.policy.record_images===true,"record omitted video opt-in");
+   const session={session_id:String(sessions.length+1).repeat(32),source_device_id:"fixture-robot",started_at:1000+sessions.length,state:"collecting",counts:{},policy:body.policy,video:video("waiting_camera")};
+   sessions.unshift(session);return reply(session);
+  }
+  if(path===base+"/sessions")return reply({sessions});
+  if(path.startsWith(base+"/sessions/")){
+   const id=path.split("/")[6],session=sessions.find(row=>row.session_id===id);
+   check(!!session,"unknown fixture session");
+   if(path.endsWith("/end")){session.state="closed";session.video=video("complete");return reply(session);}
+   if(session.state==="collecting")session.video=video("recording");
+   return reply({session,samples:[],offset:0,limit:12,total:0});
+  }
+  if(path.endsWith("/analysis/profiles"))return reply({profiles:[]});
+  if(path.endsWith("/analysis/runs"))return reply({runs:[]});
+  return route.abort();
+ });
+ await page.goto("http://127.0.0.1:3313/");
+ const bar=page.getByTestId("study-recording-bar"),record=page.getByTestId("study-record"),end=page.getByTestId("study-end");
+ await record.click();
+ await page.getByTestId("study-video-status").waitFor();
+ check((await page.getByTestId("study-video-status").textContent()).includes("Oczekiwanie"),"missing waiting-camera state");
+ await bar.locator("details").first().locator(":scope > summary").click();
+ await page.getByTestId("samples-browser").locator(":scope > summary").click();
+ await page.getByTestId("samples-session").waitFor();
+ check(await page.getByTestId("samples-session").locator("option").count()===2,"active recording missing from archive");
+ check(await end.isEnabled(),"opening archive ended recording");
+ await end.click();
+ await page.waitForFunction(()=>document.querySelector('[data-testid="study-record"]')?.disabled===false);
+ const first=sessions[0].session_id;
+ await record.click();
+ await page.waitForFunction(()=>document.querySelector('[data-testid="study-end"]')?.disabled===false);
+ await end.click();
+ await page.waitForFunction(()=>document.querySelector('[data-testid="study-record"]')?.disabled===false);
+ check(sessions.length===2&&new Set(sessions.map(row=>row.session_id)).size===2,"second recording overwrote first");
+ await page.waitForFunction(()=>document.querySelectorAll('[data-testid="samples-session"] option').length===3);
+ await page.getByTestId("samples-refresh").click();
+ await page.getByTestId("samples-session").selectOption(first);
+ await page.getByTestId("archive-video-download").waitFor();
+ check((await page.getByTestId("archive-video-download").getAttribute("href")).includes(first),"download points to another session");
+ check((await page.getByTestId("samples-export").getAttribute("href")).includes(first),"export points to another session");
+ await page.reload();
+ await bar.locator("details").first().locator(":scope > summary").click();
+ await page.getByTestId("samples-browser").locator(":scope > summary").click();
+ await page.waitForFunction(()=>document.querySelectorAll('[data-testid="samples-session"] option').length===3);
+ check(writes.every(row=>row.path===base+"/sessions"||row.path.endsWith("/end")),"unexpected actuator or camera write");
+ return{result:"PASS",sessions:sessions.length,reloaded:true,archiveDuringRecording:true,videoOptIn:true,robotContacted:false};
+}

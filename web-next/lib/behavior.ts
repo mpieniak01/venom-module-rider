@@ -1,6 +1,6 @@
 import { finite, record, safetyOf, str, type JsonRecord, type RiderStatus } from "./model";
 
-export const BEHAVIOR_IDS = ["legacy", "cautious", "balanced", "fluid"] as const;
+export const BEHAVIOR_IDS = ["legacy", "cautious", "balanced", "fluid", "room_fluid"] as const;
 export type BehaviorId = typeof BEHAVIOR_IDS[number];
 export type BehaviorSelection = { version: 1; profile_id: BehaviorId; profile_revision: number; overrides?: Record<string, number | boolean> };
 export type ParameterSpec = { kind: "int" | "float" | "bool"; min: number; max: number; step: number; group: string };
@@ -77,15 +77,17 @@ export function validBehaviorDraft(draft: BehaviorDraft, policy: JsonRecord | nu
   const catalog = behaviorCatalog(policy), overrides = draft.selection.overrides ?? {};
   if (!Object.keys(overrides).length) return true;
   if (!catalog.editable || draft.selection.profile_revision !== 2 || draft.selection.profile_id === "legacy") return false;
+  const base = catalog.profiles.find(p => p.id === draft.selection.profile_id)?.parameters ?? {};
   for (const [key, value] of Object.entries(overrides)) {
+    if (!Object.hasOwn(base,key)) return false;
     const spec = catalog.parameterSchema?.[key];
     if (!spec || (spec.kind === "bool" ? typeof value !== "boolean" : !finite(value) || value < spec.min || value > spec.max || spec.kind === "int" && !Number.isInteger(value))) return false;
   }
-  const base = catalog.profiles.find(p => p.id === draft.selection.profile_id)?.parameters ?? {};
   const values = { ...base, ...overrides };
   return ["enter_ms", "release_ms", "max_gap_ms", "max_uncertain_ms"].every(k => Number(values[k]) <= Number(values.history_ms))
     && Number(values.obstacle_support_frames) <= Number(values.obstacle_window_frames)
-    && Number(values.object_area_ratio_min) <= Number(values.object_area_ratio_max);
+    && Number(values.object_area_ratio_min) <= Number(values.object_area_ratio_max)
+    && (!values.object_policy_enabled || values.object_tracking_enabled === true);
 }
 export function editBehaviorParameter(draft: BehaviorDraft, policy: JsonRecord, key: string, value: number | boolean): BehaviorDraft {
   const base = parameterBase(draft.selection, policy);

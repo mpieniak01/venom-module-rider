@@ -106,18 +106,24 @@ class TemporalEvidence:
         import cv2
 
         from .object_diagnostics import ObjectDiagnostics
+        from .object_policy import RoomObjectPolicy
 
-        if not hasattr(self, "_objects"):
-            self._objects = ObjectDiagnostics()
+        room = options["params"].get("object_policy_enabled", False)
+        name = "_room_objects" if room else "_objects"
+        if not hasattr(self, name):
+            setattr(self, name, RoomObjectPolicy() if room else ObjectDiagnostics())
+        observer = getattr(self, name)
         try:
-            return self._objects.observe(maps, corridor, **options)
+            return observer.observe(maps, corridor, **options)
         except (cv2.error, ValueError, KeyError, TypeError):
-            self._objects.reset()
-            return {"diagnostic_only": True, "state": "unavailable", "objects": []}
+            observer.reset()
+            return {"diagnostic_only": not room, "state": "unavailable", "objects": []}
 
     def reset(self) -> None:
         if hasattr(self, "_persistence"):
             self._persistence.reset()
+        if hasattr(self, "_room_objects"):
+            self._room_objects.reset()
         if hasattr(self, "_objects"):
             self._objects.reset()
         self._points: deque[_Point] = deque(maxlen=64)

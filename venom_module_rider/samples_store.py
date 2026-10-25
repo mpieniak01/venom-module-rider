@@ -104,6 +104,9 @@ class SampleStore:
         from .evidence_store import EvidenceStore
 
         self.evidence = EvidenceStore(self)
+        from .session_video import SessionVideoStore
+
+        self.video = SessionVideoStore(self)
         # A previous crash may have left an uncommitted blob. Count it against
         # quota; never silently remove a source to create more free space.
         self.total_bytes = sum(p.stat().st_size for p in self.blobs.glob("*.bin"))
@@ -116,6 +119,7 @@ class SampleStore:
     def recover_interrupted(self):
         """The collection service calls this while holding its process lease."""
         self.refresh_usage()
+        self.video.recover()
         with self.db() as db:
             # Interrupted work never becomes saved on a restart.
             db.execute(
@@ -175,7 +179,13 @@ class SampleStore:
                 except FileNotFoundError:
                     # Atomic writers may unlink their private temporary name.
                     continue
-        return self.total_bytes + metadata + exports + artifact_bytes
+        video_bytes = 0
+        for path in self.video.root.rglob("*"):
+            if path.is_symlink():
+                raise RiderError("samples_root_invalid", 400)
+            if path.is_file():
+                video_bytes += path.stat().st_size
+        return self.total_bytes + metadata + exports + artifact_bytes + video_bytes
 
     def _space(self, extra=0):
         if self.usage() + extra > self.limits.total_bytes:
@@ -237,6 +247,7 @@ class SampleStore:
             "policy": json.loads(row["policy"]),
             "counts": counts,
             "evidence": self.evidence.summary(db, session_id),
+            "video": self.video.summary(session_id),
         }
 
     def session(self, session_id):
@@ -408,7 +419,10 @@ class SampleStore:
                 evidence_bytes = self.evidence.size(db, session_id)
             if (
                 count >= self.limits.session_samples
-                or size + evidence_bytes + len(frame.payload)
+                or size
+                + evidence_bytes
+                + self.video.size(session_id)
+                + len(frame.payload)
                 > self.limits.session_bytes
             ):
                 raise RiderError("samples_quota_reached", 507)

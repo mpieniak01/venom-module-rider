@@ -54,7 +54,7 @@ export function useSamples(deviceId:string|null, previewVisible:boolean, purpose
     try{
       const next=await apiFetch<Collection>(SAMPLES_BASE+"/sessions",{method:"POST",body:JSON.stringify({
         request_id:createBrowserUuid(),source_device_id:deviceId,
-        policy:{kind,duration_s:10,interval_ms:purpose?.startsWith("motion-study-v1:")?1000:200,max_frames:purpose?.startsWith("motion-study-v1:")?150:50,...(purpose?.startsWith("motion-study-v1:")?{record_images:true}:{}),...(purpose?{scene_group:purpose}:{})},
+        policy:{kind,duration_s:10,interval_ms:purpose?.startsWith("motion-study-v1:")?1000:200,max_frames:purpose?.startsWith("motion-study-v1:")?150:50,...(purpose?.startsWith("motion-study-v1:")?{record_images:true,record_video:true}:{}),...(purpose?{scene_group:purpose}:{})},
       })});
       if(requestEpoch!==epoch.current||!alive.current){finishDetached(next.session_id);return;}
       syncSession(next);

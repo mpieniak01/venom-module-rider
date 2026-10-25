@@ -1,6 +1,6 @@
 # Vision policy parameters
 
-The operator selects an immutable preset (Cautious, Balanced, Fluid) or custom corrections based on one preset. Selecting a preset restores its versioned values. Editing an advanced value displays **Custom settings (Fluid)**, rather than silently changing the meaning of Fluid. Legacy remains a separate compatibility policy with no corrections.
+The operator selects an immutable preset (Cautious, Balanced, Fluid, or Fluid — known room) or custom corrections based on one preset. Selecting a preset restores its versioned values. Editing an advanced value displays **Custom settings (Fluid)**, rather than silently changing the meaning of Fluid. Legacy remains a separate compatibility policy with no corrections.
 
 ## Revisions and ownership
 
@@ -63,7 +63,7 @@ Fractions use 0–1. Millisecond and pixel units are part of the field names. Co
 
 ## Object diagnostics
 
-Object tracking is **disabled by default** and is diagnostic only. It uses the current model maps; it does not load another model. Semantic maps can supply full-frame proposals. DA2 exposes a wider relative-depth context using the same fitted plane while keeping its scoring region unchanged. Object proposals are not guaranteed instance masks.
+For the original Cautious, Balanced and Fluid presets, object tracking is **disabled by default** and is diagnostic only. It uses the current model maps; it does not load another model. Semantic maps can supply full-frame proposals. DA2 exposes a wider relative-depth context using the same fitted plane while keeping its scoring region unchanged. Object proposals are not guaranteed instance masks.
 
 When enabled, diagnostic frames show purple boxes with track ID, growth and downward displacement. The source capture and annotation are the same frame. Returned `temporal.objects` includes size, route intersection, clipping and available semantic confidence. Neither enabling diagnostics nor any object-growth parameter changes GO/SLOW/STOP.
 
@@ -74,3 +74,16 @@ The matching controls reject implausible area changes, retain a bounded missed-d
 Open **Obstacle assessment → Details and custom settings**, select a revision 2 preset, edit values and explicitly Apply. The current device revision and custom label remain visible. Restore preset removes corrections; Refresh discards an unsaved draft. Another panel's save invalidates an old draft rather than overwriting it. The selected-model thresholds remain in their existing model-tuning section.
 
 Calibration, known-room assumptions, transport freshness and physical acceptance remain independent from these adjustable interpretation values. No centimetre geometry is inferred from confidence or residual thresholds.
+
+
+## Fluid — known room
+
+`room_fluid` revision 2 is a separate explicit preset. It is not selected automatically, and the released definitions and digests of all previous presets remain unchanged. It targets a familiar indoor scene without thin obstacles; preview and manual acceptance remain required before driving.
+
+It starts from Fluid r2 with `object_tracking_enabled=true`, `object_policy_enabled=true` and `thin_span_fraction=1.0` (no special promotion of small thin regions below full span). Whole proposals are associated in the wider model context before their current, reliable obstacle pixels are intersected with the actual route mask. Model confidence is applied before history confirmation. Initial support is 2 of the last 3 observations; growth uses 3 observations, area ratio 1.1 and downward movement 2 pixels. These values and the existing model thresholds are editable by the operator. Any correction is labelled Custom settings (Fluid — known room); Restore preset removes it.
+
+Only this preset exposes `object_policy_enabled`. Turning tracking off while object assessment is on is invalid. Setting both off allows explicit comparison with the base temporal policy. Object controls in the older presets continue to be diagnostic only.
+
+A persistent large object can matter even when the part intersecting the route is small. Compensated growth and downward motion may trigger an earlier stop after route intersection; absence of growth never turns a stationary obstacle into floor. A recently seen near obstacle may retain STOP briefly within the configured missed-frame/time limits. Unknown input, critical/3D evidence, data freshness, operator STOP and drive acceptance remain independent guards. The image and temporal status distinguish transient, confirmed, approaching and recently seen objects.
+
+This is a local candidate pending operator acceptance. Offline replay is a regression and inspection tool; a lower number of decision changes alone is not proof of smoother or safer driving.

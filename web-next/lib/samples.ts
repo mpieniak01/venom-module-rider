@@ -3,7 +3,8 @@ import { record, str, type JsonRecord } from "./model";
 import type { Frame } from "./use-rider";
 
 export const SAMPLES_BASE = "/api/v1/rider/samples";
-export type Collection = { session_id:string; source_device_id:string; state:string; started_at:number; policy:JsonRecord; counts:Record<string,number>; evidence?:JsonRecord };
+export type SessionVideo = {state:string;frames:number;bytes:number;duration_s:number;target_fps:number;gaps:number;error:string|null;ended_at:number|null};
+export type Collection = { session_id:string; source_device_id:string; state:string; started_at:number; policy:JsonRecord; counts:Record<string,number>; evidence?:JsonRecord; video?:SessionVideo|null };
 export type CaptureIntent = { session_id:string; capture_request_id:string; frame_key:string; allow_historical:boolean };
 export type CaptureOutcome = { id:string; state:string; sample_id?:string|null; error?:string|null; saved_at?:number|null };
 export type Sample = JsonRecord & { sample_id:string; frame_id?:string|null; sequence?:number|null; raw:JsonRecord; quality:JsonRecord };
@@ -36,4 +37,10 @@ export function readSessions(value:unknown):Collection[] {
       &&typeof row.started_at==="number"&&Number.isFinite(row.started_at);
   }))throw new Error("sample_sessions_invalid");
   return sessions as Collection[];
+}
+
+/** Keep storage diagnostics understandable without exposing raw server errors in the UI. */
+export function videoErrorKey(error:string):string {
+  const errors=["samples_video_invalid","samples_video_camera_off","samples_video_source_invalid","samples_video_source_stale","samples_video_source_changed","samples_video_source_time","samples_video_size_limit","samples_video_write_failed","samples_video_no_frames","samples_video_recovery_incomplete","samples_quota_reached","samples_disk_full"];
+  return "study.videoError."+(errors.includes(error)?error:"unknown");
 }
