@@ -18,6 +18,7 @@ from pathlib import Path
 from PIL import Image, ImageStat
 
 from .errors import RiderError
+from .sample_usage import tree_bytes
 from .samples_frame import MAX_CONTEXT_BYTES, CapturedFrame
 
 
@@ -107,6 +108,9 @@ class SampleStore:
         from .session_video import SessionVideoStore
 
         self.video = SessionVideoStore(self)
+        from .sample_quota import QuotaLedger
+
+        self.quota = QuotaLedger(self)
         # A previous crash may have left an uncommitted blob. Count it against
         # quota; never silently remove a source to create more free space.
         self.total_bytes = sum(p.stat().st_size for p in self.blobs.glob("*.bin"))
@@ -118,6 +122,7 @@ class SampleStore:
 
     def recover_interrupted(self):
         """The collection service calls this while holding its process lease."""
+        self.quota.invalidate()
         self.refresh_usage()
         self.video.recover()
         with self.db() as db:
@@ -160,38 +165,12 @@ class SampleStore:
             for path in (self.root / "exports").glob("*.zip")
             if not path.is_symlink()
         )
-        derived = self.root / "analysis"
-        if derived.is_symlink():
-            raise RiderError("samples_root_invalid", 400)
-        artifact_bytes = 0
-        seen = set()
-        if derived.is_dir():
-            for path in derived.rglob("*"):
-                if path.is_symlink():
-                    raise RiderError("samples_root_invalid", 400)
-                try:
-                    if path.is_file():
-                        info = path.stat()
-                        inode = (info.st_dev, info.st_ino)
-                        if inode not in seen:
-                            artifact_bytes += info.st_size
-                            seen.add(inode)
-                except FileNotFoundError:
-                    # Atomic writers may unlink their private temporary name.
-                    continue
-        video_bytes = 0
-        for path in self.video.root.rglob("*"):
-            if path.is_symlink():
-                raise RiderError("samples_root_invalid", 400)
-            if path.is_file():
-                video_bytes += path.stat().st_size
+        artifact_bytes = tree_bytes(self.root / "analysis", deduplicate=True)
+        video_bytes = tree_bytes(self.video.root)
         return self.total_bytes + metadata + exports + artifact_bytes + video_bytes
 
     def _space(self, extra=0):
-        if self.usage() + extra > self.limits.total_bytes:
-            raise RiderError("samples_quota_reached", 507)
-        if shutil.disk_usage(self.root).free < self.limits.min_free_bytes + extra:
-            raise RiderError("samples_disk_full", 507)
+        return self.quota.admit(extra)
 
     def start(self, request_id, device_id, policy=None):
         identifier(request_id)

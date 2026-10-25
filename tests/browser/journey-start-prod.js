@@ -58,10 +58,18 @@ async page => {
       return Promise.resolve(new Response(stream,{headers:{"Content-Type":"multipart/x-mixed-replace; boundary=startup"}}));
     };
   },{modelId,sha});
+  let preparedAt=0,prepareCalls=0;
   await page.route("**/api/v1/rider/**",async route=>{
     const req=route.request(),path=new URL(req.url()).pathname.slice("/api/v1/rider".length);
     const json=(body,status=200)=>route.fulfill({status,contentType:"application/json",body:JSON.stringify(body)});
     if(req.method()!=="GET"){
+      if(path==="/perception/prepare"){
+        // The model may need longer than the later ARM intent's short TTL.
+        check(!(journey?.active),"model preparation overlapped an active journey");
+        await new Promise(resolve=>setTimeout(resolve,600));
+        preparedAt=Date.now()/1000;prepareCalls++;
+        return json({ok:true});
+      }
       const body=req.postDataJSON();calls.push({path,body});
       if(path==="/goal/s15_venom_perception"){
         check(typeof body.enabled==="boolean","observation intent invalid");
@@ -88,6 +96,8 @@ async page => {
         return json({ok:true,meta:{},data:{ok:true,persisted:true,config:configView()}});
       }
       if(path==="/navigation/journey"){
+        check(prepareCalls>0&&preparedAt>0,"Start bypassed explicit model preparation");
+        check(typeof body.ts==="number"&&body.ts>=preparedAt-.05,"ARM intent was created before model preparation completed");
         check(body.operator_consent===true&&body.operator_control_version===1&&body.journey_version===1,"explicit journey consent contract missing");
         check(body.config_revision===policy.revision&&body.generation===generation&&!!body.panel_id&&!!body.request_id&&!!body.operator_plan,"journey identity contract invalid");
         check(!("action" in body)&&!("seq" in body),"journey request contains control-only keys");
@@ -111,6 +121,7 @@ async page => {
     if(path==="/config")return json({devices:[{id:"fixture-prod",label:"Prod fixture",mode:fixtureMode}],device_id:"fixture-prod",session:"journey-start-prod"});
     if(path==="/status")return json({connection:{configured:true,status:"online",session:"journey-start-prod",device_id:"fixture-prod",mode:fixtureMode},polling:{control_ms:100},settings,errors:{},control:{server_time:Date.now()/1000,safety:safety()},health:{},telemetry:{},resources:{},catalog:{features:[]},logic:{},face:{}});
     if(path==="/navigation/config"||path==="/navigation/state")return json(navigation());
+    if(path==="/navigation/image-reference")return json({supported:false});
     // No broad /navigation/* response: a misspelt endpoint is a real fixture failure.
     if(path.startsWith("/navigation/")){violations.push("GET "+path);return json({detail:{code:"unexpected_fixture_navigation_endpoint"}},404);}
     if(path==="/camera/pipeline")return json({contract_id:"rider.camera_pipeline",contract_version:1,revision:34,profile,active_profile:cameraState==="active"?profile:null,state:cameraState,transport_epoch:6,camera_session:"prod-camera",capabilities:{analysis_locations:["venom","local"],local_engines:["canny"],remote_transports:["snapshots","mjpeg"]},effective_stages:{capture:cameraState==="active",hardware_mjpeg:cameraState==="active"},error:null,latest_frame:cameraState==="active"?{camera_session:"prod-camera",transport_epoch:6,pipeline_revision:34,captured_monotonic_ns:Date.now()*1e6,frame_age_ms:20}:null});

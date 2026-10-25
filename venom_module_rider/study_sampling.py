@@ -6,6 +6,8 @@ import asyncio
 import time
 
 from .errors import RiderError
+from .recording_metrics import RecordingMetrics
+from .study_frame_source import StudyFrameSource
 
 INTERVAL_S = 0.1
 ERROR_BACKOFF_S = 1.0
@@ -38,6 +40,8 @@ class StudySampler:
 
     def __init__(self, domain):
         self.domain = domain
+        self.source = StudyFrameSource(domain)
+        self.metrics = RecordingMetrics()
         self.task: asyncio.Task | None = None
         self.image_task: asyncio.Task | None = None
         self.image_reads = 0
@@ -57,6 +61,14 @@ class StudySampler:
             "reads": self.reads,
             "image_reads": self.image_reads,
             "image_error": self.image_error,
+            "image_stages_ms": self.metrics.snapshot(),
+            "native_stages_ms": self.source.metrics.snapshot(),
+            "video_writer_ms": self.domain.samples.store.video.metrics.snapshot()
+            if getattr(self.domain, "samples", None)
+            else {},
+            "quota_stages_ms": self.domain.samples.store.quota.metrics.snapshot()
+            if getattr(self.domain, "samples", None)
+            else {},
             "errors": self.errors,
             "last_error": self.last_error,
             "last_success_age_s": None
@@ -143,54 +155,66 @@ class StudySampler:
         }
         if not pending and not videos:
             return
-        # Read only: neither camera power nor robot control may be changed here.
-        camera = domain.data(await domain.read("/api/resource/camera", 0.5))
-        activity = camera.get("activity") or camera
-        enabled = activity.get("on", activity.get("enabled"))
-        state = str(activity.get("state") or camera.get("state")).lower()
-        if enabled is False or (
-            enabled is not True and state not in {"on", "active", "running"}
-        ):
-            for sid in videos:
-                await registry.read(
-                    registry.store.video.note, sid, "samples_video_camera_off"
-                )
-            return
-        _, _, headers = await domain.camera("raw")
-        key = headers.get("x-rider-capture-key")
-        if not key:
-            raise RiderError("samples_frame_unavailable", 409)
-        latest = await domain.pipeline(force=True)
-        if latest.get("supported"):
-            expected = (
-                latest.get("camera_session"),
-                latest.get("transport_epoch"),
-                latest.get("revision"),
-            )
-            received = tuple(
-                headers.get(name)
-                for name in (
-                    "x-rider-camera-session",
-                    "x-rider-transport-epoch",
-                    "x-rider-pipeline-revision",
-                )
-            )
-            if (
-                latest.get("state") not in {"active", "waiting_frame"}
-                or expected[0] is None
-                or any(value is None for value in expected[1:])
-                or received != tuple(str(value) for value in expected)
+        if self.source.connection is not None:
+            key = await self.source.key()
+        else:
+            # Read only: neither camera power nor robot control may be changed here.
+            camera = domain.data(await domain.read("/api/resource/camera", 0.5))
+            activity = camera.get("activity") or camera
+            enabled = activity.get("on", activity.get("enabled"))
+            state = str(activity.get("state") or camera.get("state")).lower()
+            if enabled is False or (
+                enabled is not True and state not in {"on", "active", "running"}
             ):
-                raise RiderError("stream_epoch_changed", 409)
+                for sid in videos:
+                    await registry.read(
+                        registry.store.video.note, sid, "samples_video_camera_off"
+                    )
+                return
+            _, _, headers = await domain.camera("raw")
+            key = headers.get("x-rider-capture-key")
+            if not key:
+                raise RiderError("samples_frame_unavailable", 409)
+            latest = await domain.pipeline(force=True)
+            if latest.get("supported"):
+                expected = (
+                    latest.get("camera_session"),
+                    latest.get("transport_epoch"),
+                    latest.get("revision"),
+                )
+                received = tuple(
+                    headers.get(name)
+                    for name in (
+                        "x-rider-camera-session",
+                        "x-rider-transport-epoch",
+                        "x-rider-pipeline-revision",
+                    )
+                )
+                if (
+                    latest.get("state") not in {"active", "waiting_frame"}
+                    or expected[0] is None
+                    or any(value is None for value in expected[1:])
+                    or received != tuple(str(value) for value in expected)
+                ):
+                    raise RiderError("stream_epoch_changed", 409)
         for sid, row in videos.items():
             if (
                 domain.session == session
                 and registry.study_videos.get(sid) is row
                 and sid not in registry.closing
             ):
-                result = await registry.read(
-                    registry.store.video.append, sid, registry.frames.get(key)
-                )
+                submitted = time.perf_counter()
+
+                captured = registry.frames.get(key)
+
+                def append_video(sid=sid, submitted=submitted, captured=captured):
+                    self.metrics.record(
+                        "writer_queue_ms", (time.perf_counter() - submitted) * 1000
+                    )
+                    with self.metrics.track("writer_append_ms"):
+                        return registry.store.video.append(sid, captured)
+
+                result = await registry.read(append_video)
                 if result and result["state"] in {"error", "limit"}:
                     registry.study_videos.pop(sid, None)
         for sid, row in pending.items():
@@ -235,11 +259,14 @@ class StudySampler:
         while session == self.domain.session and collecting(self.domain):
             started = time.monotonic()
             try:
-                await self.image_tick()
+                with self.metrics.track("cycle_ms"):
+                    await self.source.start()
+                    await self.image_tick()
                 self.image_error = None
             except asyncio.CancelledError:
                 task = asyncio.current_task()
                 if task is not None and task.cancelling():
+                    await self.source.close()
                     raise
                 self.image_error = "study_image_read_cancelled"
                 await self.video_error(self.image_error)
@@ -252,6 +279,8 @@ class StudySampler:
             videos = getattr(getattr(self.domain, "samples", None), "study_videos", {})
             interval = 0.2 if videos else 1.0
             await asyncio.sleep(max(0.05, interval - (time.monotonic() - started)))
+
+        await self.source.close()
 
     def cancel(self):
         if self.task is not None:

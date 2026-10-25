@@ -440,6 +440,10 @@ export function useRider(section: Section) {
       // STOP must take this path before any journey HTTP request exists.
       const acceptedRevision = prepare ? await prepare() : revision;
       if (sessionRef.current !== origin || motionEpoch.current !== epoch || document.hidden) throw new Error("navigation_trial_cancelled");
+      // Loading/warming the selected model is part of this explicit Start,
+      // before creating the short-lived Pi ARM intent or enabling motion.
+      await mutation("/perception/prepare", {}, "POST", true);
+      if (sessionRef.current !== origin || motionEpoch.current !== epoch || document.hidden) throw new Error("navigation_trial_cancelled");
       await poll("control", true);
       if (sessionRef.current !== origin || motionEpoch.current !== epoch || document.hidden) throw new Error("navigation_trial_cancelled");
       if (safetyOf(statusRef.current).navigation_journey_version !== 1) throw new Error("navigation_journey_update_required");

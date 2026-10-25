@@ -86,9 +86,11 @@ class SamplesRegistry:
             stream.close()
             raise RiderError("samples_registry_busy", 409) from exc
         self.lease = stream
+        self.store.quota.ownership(True)
 
     def _release(self):
         if self.lease is not None:
+            self.store.quota.ownership(False)
             fcntl.flock(self.lease, fcntl.LOCK_UN)
             self.lease.close()
             self.lease = None
@@ -115,12 +117,16 @@ class SamplesRegistry:
             if not self.active and not self.writer_owners:
                 self._release()
 
+    def _run_io(self, call):
+        with self.store.quota.job():
+            return call()
+
     def _submit(self, call):
         self._open()
         if not self.slots.acquire(blocking=False):
             raise RiderError("samples_queue_full", 429)
         try:
-            future = self.io.submit(call)
+            future = self.io.submit(self._run_io, call)
         except Exception:
             self.slots.release()
             raise
@@ -280,7 +286,7 @@ class SamplesRegistry:
                 self._finish_evidence(session_id)
                 return self.store.end(session_id, incomplete=incomplete)
 
-            result = await asyncio.wrap_future(self.io.submit(finish))
+            result = await asyncio.wrap_future(self.io.submit(self._run_io, finish))
             self.active.discard(session_id)
             self.closing.discard(session_id)
             if not self.active and not self.writer_owners:
@@ -493,7 +499,7 @@ class SamplesRegistry:
 
             # One final cleanup behind at most queue_slots admitted operations.
             try:
-                await asyncio.wrap_future(self.io.submit(finish))
+                await asyncio.wrap_future(self.io.submit(self._run_io, finish))
             except Exception:
                 self.failures += 1
             finally:

@@ -13,13 +13,23 @@ async page => {
   const policy={revision:1,mode:"drive",speed:.1,max_motion_ms:150,decision_budget_ms:300,corridor:[.35,.65,.65,.95],perception:{engine:"depth_plane"},verified:true,calibration_id:"operator-fixture",model_sha256:sha,avoidance:{enabled:false,protocol_version:3,sweep_verified:true,turn_speed:.05,turn_ms:100,max_turn_pulses:3,geometry:{mode:"image"}}};
   const safety=()=>({state:armed?"ARMED":"DISARMED",owner,arming_mode:arming,generation,navigation_journey_version:capability?1:undefined,panel_motion_enabled:true,ready:true,can_move:armed,stale:false,observed_at:Date.now()/1000,capabilities:{move:{available:true}},panel_control:{version:1,holder},operator_control:{version:1,state:operator},remote_decision_deadline_supported:true,scoped_stop_generation_supported:true});
   const navigation=()=>({config:policy,status:{running:!!journey?.active,stale,mode:"drive",run_id:"fixture-run",operator_control_version:1,journey,decision:{state:"clear",clear_count:3,action:journey?.active?"go":"stop",vision_action:"go"}},goals:{drive:!!journey?.active,observe:false},runtime:{drive:true,observe:true,known:true},detector:{configured:true,loaded:true,sha256:sha,drive_supported:true,clear_frames_required:3,navigation_journey_version:capability?1:undefined,ground_geometry_supported:true,supported_protocol_versions:[3]}});
+  let preparedAt=0,prepareCalls=0;
   await page.route("**/api/v1/rider/**",async route=>{
     const req=route.request(),path=new URL(req.url()).pathname.slice("/api/v1/rider".length);
     const json=(body,status=200)=>route.fulfill({status,contentType:"application/json",body:JSON.stringify(body)});
     if(req.method()!=="GET"){
+      if(path==="/perception/prepare"){
+        // The model may need longer than the later ARM intent's short TTL.
+        check(!(journey?.active),"model preparation overlapped an active journey");
+        await new Promise(resolve=>setTimeout(resolve,600));
+        preparedAt=Date.now()/1000;prepareCalls++;
+        return json({ok:true});
+      }
       const body=req.postDataJSON();calls.push({path,body});
       if(path==="/connection/refresh")return json({connection:{status:"online"},recovery:{attempted:false,state:"connected"}});
       if(path==="/navigation/journey"){
+        check(prepareCalls>0&&preparedAt>0,"Start bypassed explicit model preparation");
+        check(typeof body.ts==="number"&&body.ts>=preparedAt-.05,"ARM intent was created before model preparation completed");
         check(body.journey_version===1&&body.operator_control_version===1&&typeof body.panel_id==="string"&&body.operator_consent===true,"journey consent/version missing");
         check(body.config_revision===policy.revision&&body.generation===generation,"journey stale policy or generation");
         check(body.action===undefined,"journey sent direct ARM action");
@@ -61,9 +71,10 @@ async page => {
     check((await page.getByTestId("journey-blocks").innerText()).includes("Włącz omijanie"),"avoidance gap not explained");
     const calibratedModel=policy.model_sha256;
     policy.model_sha256="b".repeat(64);policy.revision+=1;
+    await page.getByTestId("navigation-preparation").locator("summary").first().click();
     await wait(async()=>await page.getByTestId("calibration-acceptance-help").isVisible(),"missing calibration guidance");
     const acceptance=await page.getByTestId("calibration-acceptance-help").innerText();
-    check(acceptance.includes("Rozpocznij podróż")&&!acceptance.includes("10 s"),"journey calibration points to bounded trial");
+    check(acceptance.includes("tor jazdy")&&acceptance.includes("skrętu")&&!acceptance.includes("10 s"),"journey calibration does not explain path and turning-space acceptance");
     policy.model_sha256=calibratedModel;
     policy.avoidance.enabled=true;policy.revision+=1;
     await wait(async()=>!await page.getByTestId("journey-start").isDisabled(),"valid existing image policy blocked journey");

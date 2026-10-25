@@ -9,6 +9,7 @@ import os
 import re
 
 from .errors import RiderError
+from .recording_metrics import RecordingMetrics
 
 TARGET_FPS = 5
 
@@ -18,6 +19,7 @@ class SessionVideoStore:
 
     def __init__(self, store):
         self.store = store
+        self.metrics = RecordingMetrics()
         self.root = store.root / "videos"
         if self.root.is_symlink():
             raise RiderError("samples_root_invalid", 400)
@@ -117,6 +119,10 @@ class SessionVideoStore:
             }
 
     def _save(self, session_id, value):
+        with self.metrics.track("metadata_fsync_ms"):
+            return self._save_json(session_id, value)
+
+    def _save_json(self, session_id, value):
         path = self.path(session_id, "video.json")
         temporary = self.folder(session_id) / "video.json.tmp"
         if temporary.is_symlink():
@@ -180,13 +186,18 @@ class SessionVideoStore:
         return self._save(session_id, row)
 
     def append(self, session_id, frame):
+        with self.metrics.track("append_total_ms"):
+            return self._append(session_id, frame)
+
+    def _append(self, session_id, frame):
         row = self.summary(session_id)
         if row is None or row["state"] in {"complete", "interrupted", "error", "limit"}:
             return row
         context = frame.context()
         if frame.mime != "image/jpeg" or context.get("stale") is True:
             return self.note(session_id, "samples_video_source_invalid")
-        self.store.quality(frame)
+        with self.metrics.track("quality_ms"):
+            self.store.quality(frame)
         age = context.get("source_age_ms")
         if isinstance(age, (int, float)) and (not math.isfinite(age) or age > 1000):
             return self.note(session_id, "samples_video_source_stale")
@@ -252,12 +263,19 @@ class SessionVideoStore:
             row.update(state="limit", error="samples_video_size_limit")
             return self._save(session_id, row)
         try:
-            self.store._space(extra + 4096)
-            with self.path(session_id, "capture.mjpeg").open("ab") as stream:
+            with self.metrics.track("quota_ms"):
+                self.store._space(extra + 4096)
+            with (
+                self.metrics.track("video_fsync_ms"),
+                self.path(session_id, "capture.mjpeg").open("ab") as stream,
+            ):
                 stream.write(frame.payload)
                 stream.flush()
                 os.fsync(stream.fileno())
-            with self.path(session_id, "frames.jsonl").open("ab") as stream:
+            with (
+                self.metrics.track("index_fsync_ms"),
+                self.path(session_id, "frames.jsonl").open("ab") as stream,
+            ):
                 stream.write(encoded)
                 stream.flush()
                 os.fsync(stream.fileno())
