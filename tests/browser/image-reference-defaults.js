@@ -25,6 +25,13 @@ async page=>{
  for(const [key,value]of [["track_width_cm","16"],["robot_width_cm","11.5"],["camera_height_cm","14"]])check(await page.getByTestId("reference-"+key).inputValue()===value,"initial field missing: "+key);
  for(const [index,value]of ["18","20","40","60"].entries())check(await page.getByTestId("reference-marker-"+index).inputValue()===value,"initial distance missing");
  check(await page.evaluate(()=>window.referenceFixtureSaves.length)===0,"opening saved defaults automatically");
+ check((await page.getByTestId("reference-source").textContent()).includes("Wartości początkowe"),"opening relabelled unchanged defaults");
+ check((await overlay.textContent()).includes("Domyślne pomiary"),"opening lost default overlay label");
+ await page.getByTestId("reference-camera_height_cm").fill("15");
+ check((await page.getByTestId("reference-source").textContent()).includes("czekają"),"changed draft was not labelled");
+ await page.getByTestId("reference-camera_height_cm").fill("14");
+ check((await page.getByTestId("reference-source").textContent()).includes("Wartości początkowe"),"reverting did not restore default source");
+ check((await overlay.textContent()).includes("Domyślne pomiary"),"reverting did not restore default overlay");
  await page.getByTestId("reference-save").click();
  await page.getByRole("dialog").waitFor({state:"hidden"});
  const saves=await page.evaluate(()=>window.referenceFixtureSaves);

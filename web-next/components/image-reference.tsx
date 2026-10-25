@@ -26,7 +26,9 @@ export function useImageReference(session:string){
     catch(error){if(owner.current!==origin)return false;const conflict=errorCode(error).includes("conflict");if(conflict){const latest=await apiFetch("/api/v1/rider/navigation/image-reference").then(result=>readReference(data(result))).catch(()=>null);if(latest&&owner.current===origin){setState(latest);setDraft(null);setEditing(false);}}if(owner.current===origin)setError(conflict?"conflict":"reference.saveFailed");return false;}
     finally{if(owner.current===origin)setSaving(false);}
   };
-  return {state,draft,setDraft,editing,setEditing,error,saving,save,reload:()=>setAttempt(value=>value+1),defaulted:!draft&&!state?.values,values:draft??state?.values??initialReference()};
+  const baseline=state?.values??initialReference(),values=draft??baseline;
+  const changed=!!draft&&JSON.stringify(draft)!==JSON.stringify(baseline);
+  return {state,draft,setDraft,editing,setEditing,error,saving,save,reload:()=>setAttempt(value=>value+1),changed,defaulted:!state?.values&&!changed,values};
 }
 export type ReferenceController=ReturnType<typeof useImageReference>;
 
@@ -35,7 +37,7 @@ export function ImageReferenceControls({reference,client,size,t}:{reference:Refe
   const unavailable=!reference.state||reference.saving;
   let sourceLabel="reference.defaults";
   if(reference.state?.values)sourceLabel="reference.saved";
-  if(reference.draft&&JSON.stringify(reference.draft)!==JSON.stringify(reference.state?.values))sourceLabel="reference.pending";
+  if(reference.changed)sourceLabel="reference.pending";
   const {state:loadedState,draft:loadedDraft,setDraft}=reference;
   useEffect(()=>{
     if(open&&loadedState&&!loadedDraft)setDraft(structuredClone(loadedState.values??initialReference()));
