@@ -1,0 +1,465 @@
+{
+  "version": 1,
+  "supported": true,
+  "active": {
+    "version": 1,
+    "profile_id": "fluid",
+    "profile_revision": 2
+  },
+  "parameter_editing_version": 1,
+  "parameter_schema": {
+    "object_policy_enabled": {
+      "kind": "bool",
+      "min": 0,
+      "max": 1,
+      "step": 1,
+      "group": "objects"
+    },
+    "pixel_confidence": {
+      "kind": "float",
+      "min": 0.05,
+      "max": 1.0,
+      "step": 0.01,
+      "group": "evidence"
+    },
+    "min_region_fraction": {
+      "kind": "float",
+      "min": 0.0,
+      "max": 0.02,
+      "step": 0.001,
+      "group": "evidence"
+    },
+    "thin_span_fraction": {
+      "kind": "float",
+      "min": 0.01,
+      "max": 1.0,
+      "step": 0.01,
+      "group": "evidence"
+    },
+    "near_zone_fraction": {
+      "kind": "float",
+      "min": 0.05,
+      "max": 1.0,
+      "step": 0.05,
+      "group": "evidence"
+    },
+    "min_floor_fraction": {
+      "kind": "float",
+      "min": 0.5,
+      "max": 1.0,
+      "step": 0.01,
+      "group": "evidence"
+    },
+    "min_near_floor_fraction": {
+      "kind": "float",
+      "min": 0.5,
+      "max": 1.0,
+      "step": 0.01,
+      "group": "evidence"
+    },
+    "max_uncertain_fraction": {
+      "kind": "float",
+      "min": 0.0,
+      "max": 0.5,
+      "step": 0.01,
+      "group": "evidence"
+    },
+    "enter_frames": {
+      "kind": "int",
+      "min": 1,
+      "max": 8,
+      "step": 1,
+      "group": "temporal"
+    },
+    "enter_ms": {
+      "kind": "int",
+      "min": 0,
+      "max": 1000,
+      "step": 10,
+      "group": "temporal"
+    },
+    "release_frames": {
+      "kind": "int",
+      "min": 1,
+      "max": 8,
+      "step": 1,
+      "group": "temporal"
+    },
+    "release_ms": {
+      "kind": "int",
+      "min": 0,
+      "max": 1000,
+      "step": 10,
+      "group": "temporal"
+    },
+    "history_ms": {
+      "kind": "int",
+      "min": 100,
+      "max": 2000,
+      "step": 50,
+      "group": "temporal"
+    },
+    "max_gap_ms": {
+      "kind": "int",
+      "min": 50,
+      "max": 1000,
+      "step": 10,
+      "group": "temporal"
+    },
+    "max_uncertain_ms": {
+      "kind": "int",
+      "min": 0,
+      "max": 1000,
+      "step": 10,
+      "group": "temporal"
+    },
+    "min_tracking_ratio": {
+      "kind": "float",
+      "min": 0.1,
+      "max": 1.0,
+      "step": 0.05,
+      "group": "temporal"
+    },
+    "slow_speed_factor": {
+      "kind": "float",
+      "min": 0.1,
+      "max": 1.0,
+      "step": 0.05,
+      "group": "temporal"
+    },
+    "obstacle_support_frames": {
+      "kind": "int",
+      "min": 1,
+      "max": 5,
+      "step": 1,
+      "group": "persistence"
+    },
+    "obstacle_window_frames": {
+      "kind": "int",
+      "min": 2,
+      "max": 5,
+      "step": 1,
+      "group": "persistence"
+    },
+    "obstacle_match_overlap": {
+      "kind": "float",
+      "min": 0.01,
+      "max": 1.0,
+      "step": 0.01,
+      "group": "persistence"
+    },
+    "obstacle_match_tolerance_px": {
+      "kind": "int",
+      "min": 0,
+      "max": 3,
+      "step": 1,
+      "group": "persistence"
+    },
+    "obstacle_min_previous_coverage": {
+      "kind": "float",
+      "min": 0.5,
+      "max": 1.0,
+      "step": 0.05,
+      "group": "persistence"
+    },
+    "object_tracking_enabled": {
+      "kind": "bool",
+      "min": 0,
+      "max": 1,
+      "step": 1,
+      "group": "objects"
+    },
+    "object_min_area_px": {
+      "kind": "int",
+      "min": 8,
+      "max": 4096,
+      "step": 8,
+      "group": "objects"
+    },
+    "object_match_iou": {
+      "kind": "float",
+      "min": 0.01,
+      "max": 0.9,
+      "step": 0.01,
+      "group": "objects"
+    },
+    "object_appearance_min": {
+      "kind": "float",
+      "min": 0.0,
+      "max": 1.0,
+      "step": 0.05,
+      "group": "objects"
+    },
+    "object_area_ratio_min": {
+      "kind": "float",
+      "min": 0.1,
+      "max": 1.0,
+      "step": 0.05,
+      "group": "objects"
+    },
+    "object_area_ratio_max": {
+      "kind": "float",
+      "min": 1.0,
+      "max": 5.0,
+      "step": 0.1,
+      "group": "objects"
+    },
+    "object_max_gap_frames": {
+      "kind": "int",
+      "min": 0,
+      "max": 3,
+      "step": 1,
+      "group": "objects"
+    },
+    "object_trend_frames": {
+      "kind": "int",
+      "min": 2,
+      "max": 5,
+      "step": 1,
+      "group": "objects"
+    },
+    "object_growth_min": {
+      "kind": "float",
+      "min": 1.0,
+      "max": 3.0,
+      "step": 0.05,
+      "group": "objects"
+    },
+    "object_lower_min_px": {
+      "kind": "int",
+      "min": 0,
+      "max": 40,
+      "step": 1,
+      "group": "objects"
+    }
+  },
+  "active_parameters": {
+    "pixel_confidence": 0.7,
+    "min_region_fraction": 0.003,
+    "thin_span_fraction": 0.15,
+    "near_zone_fraction": 0.35,
+    "min_floor_fraction": 0.92,
+    "min_near_floor_fraction": 0.95,
+    "max_uncertain_fraction": 0.06,
+    "enter_frames": 3,
+    "enter_ms": 100,
+    "release_frames": 3,
+    "release_ms": 100,
+    "history_ms": 500,
+    "max_gap_ms": 300,
+    "max_uncertain_ms": 200,
+    "min_tracking_ratio": 0.5,
+    "slow_speed_factor": 0.6,
+    "obstacle_support_frames": 2,
+    "obstacle_window_frames": 3,
+    "obstacle_match_overlap": 0.1,
+    "obstacle_match_tolerance_px": 1,
+    "obstacle_min_previous_coverage": 0.9,
+    "object_tracking_enabled": false,
+    "object_min_area_px": 80,
+    "object_match_iou": 0.1,
+    "object_appearance_min": 0.2,
+    "object_area_ratio_min": 0.5,
+    "object_area_ratio_max": 2.0,
+    "object_max_gap_frames": 2,
+    "object_trend_frames": 3,
+    "object_growth_min": 1.1,
+    "object_lower_min_px": 2
+  },
+  "active_base_parameters": {
+    "pixel_confidence": 0.7,
+    "min_region_fraction": 0.003,
+    "thin_span_fraction": 0.15,
+    "near_zone_fraction": 0.35,
+    "min_floor_fraction": 0.92,
+    "min_near_floor_fraction": 0.95,
+    "max_uncertain_fraction": 0.06,
+    "enter_frames": 3,
+    "enter_ms": 100,
+    "release_frames": 3,
+    "release_ms": 100,
+    "history_ms": 500,
+    "max_gap_ms": 300,
+    "max_uncertain_ms": 200,
+    "min_tracking_ratio": 0.5,
+    "slow_speed_factor": 0.6,
+    "obstacle_support_frames": 2,
+    "obstacle_window_frames": 3,
+    "obstacle_match_overlap": 0.1,
+    "obstacle_match_tolerance_px": 1,
+    "obstacle_min_previous_coverage": 0.9,
+    "object_tracking_enabled": false,
+    "object_min_area_px": 80,
+    "object_match_iou": 0.1,
+    "object_appearance_min": 0.2,
+    "object_area_ratio_min": 0.5,
+    "object_area_ratio_max": 2.0,
+    "object_max_gap_frames": 2,
+    "object_trend_frames": 3,
+    "object_growth_min": 1.1,
+    "object_lower_min_px": 2
+  },
+  "custom": false,
+  "effective_policy_sha256": "912b3ba5451c3c46b9e05dbd713ca4707d929ac839133d7a2bea1b2ef9e56869",
+  "profiles": [
+    {
+      "id": "legacy",
+      "profile_revision": 1,
+      "status": "legacy",
+      "parameters": {}
+    },
+    {
+      "id": "cautious",
+      "profile_revision": 2,
+      "status": "experimental",
+      "parameters": {
+        "pixel_confidence": 0.8,
+        "min_region_fraction": 0.001,
+        "thin_span_fraction": 0.15,
+        "near_zone_fraction": 0.35,
+        "min_floor_fraction": 0.98,
+        "min_near_floor_fraction": 0.99,
+        "max_uncertain_fraction": 0.01,
+        "enter_frames": 1,
+        "enter_ms": 0,
+        "release_frames": 3,
+        "release_ms": 60,
+        "history_ms": 500,
+        "max_gap_ms": 300,
+        "max_uncertain_ms": 100,
+        "min_tracking_ratio": 0.5,
+        "slow_speed_factor": 0.35,
+        "obstacle_support_frames": 1,
+        "obstacle_window_frames": 3,
+        "obstacle_match_overlap": 0.1,
+        "obstacle_match_tolerance_px": 1,
+        "obstacle_min_previous_coverage": 0.9,
+        "object_tracking_enabled": false,
+        "object_min_area_px": 80,
+        "object_match_iou": 0.1,
+        "object_appearance_min": 0.2,
+        "object_area_ratio_min": 0.5,
+        "object_area_ratio_max": 2.0,
+        "object_max_gap_frames": 2,
+        "object_trend_frames": 3,
+        "object_growth_min": 1.1,
+        "object_lower_min_px": 2
+      }
+    },
+    {
+      "id": "balanced",
+      "profile_revision": 2,
+      "status": "experimental",
+      "parameters": {
+        "pixel_confidence": 0.75,
+        "min_region_fraction": 0.002,
+        "thin_span_fraction": 0.15,
+        "near_zone_fraction": 0.35,
+        "min_floor_fraction": 0.95,
+        "min_near_floor_fraction": 0.97,
+        "max_uncertain_fraction": 0.03,
+        "enter_frames": 2,
+        "enter_ms": 60,
+        "release_frames": 3,
+        "release_ms": 100,
+        "history_ms": 500,
+        "max_gap_ms": 300,
+        "max_uncertain_ms": 160,
+        "min_tracking_ratio": 0.5,
+        "slow_speed_factor": 0.5,
+        "obstacle_support_frames": 1,
+        "obstacle_window_frames": 3,
+        "obstacle_match_overlap": 0.1,
+        "obstacle_match_tolerance_px": 1,
+        "obstacle_min_previous_coverage": 0.9,
+        "object_tracking_enabled": false,
+        "object_min_area_px": 80,
+        "object_match_iou": 0.1,
+        "object_appearance_min": 0.2,
+        "object_area_ratio_min": 0.5,
+        "object_area_ratio_max": 2.0,
+        "object_max_gap_frames": 2,
+        "object_trend_frames": 3,
+        "object_growth_min": 1.1,
+        "object_lower_min_px": 2
+      }
+    },
+    {
+      "id": "fluid",
+      "profile_revision": 2,
+      "status": "experimental",
+      "parameters": {
+        "pixel_confidence": 0.7,
+        "min_region_fraction": 0.003,
+        "thin_span_fraction": 0.15,
+        "near_zone_fraction": 0.35,
+        "min_floor_fraction": 0.92,
+        "min_near_floor_fraction": 0.95,
+        "max_uncertain_fraction": 0.06,
+        "enter_frames": 3,
+        "enter_ms": 100,
+        "release_frames": 3,
+        "release_ms": 100,
+        "history_ms": 500,
+        "max_gap_ms": 300,
+        "max_uncertain_ms": 200,
+        "min_tracking_ratio": 0.5,
+        "slow_speed_factor": 0.6,
+        "obstacle_support_frames": 2,
+        "obstacle_window_frames": 3,
+        "obstacle_match_overlap": 0.1,
+        "obstacle_match_tolerance_px": 1,
+        "obstacle_min_previous_coverage": 0.9,
+        "object_tracking_enabled": false,
+        "object_min_area_px": 80,
+        "object_match_iou": 0.1,
+        "object_appearance_min": 0.2,
+        "object_area_ratio_min": 0.5,
+        "object_area_ratio_max": 2.0,
+        "object_max_gap_frames": 2,
+        "object_trend_frames": 3,
+        "object_growth_min": 1.1,
+        "object_lower_min_px": 2
+      }
+    },
+    {
+      "id": "room_fluid",
+      "profile_revision": 2,
+      "status": "experimental",
+      "parameters": {
+        "pixel_confidence": 0.7,
+        "min_region_fraction": 0.003,
+        "thin_span_fraction": 1.0,
+        "near_zone_fraction": 0.35,
+        "min_floor_fraction": 0.92,
+        "min_near_floor_fraction": 0.95,
+        "max_uncertain_fraction": 0.06,
+        "enter_frames": 3,
+        "enter_ms": 100,
+        "release_frames": 3,
+        "release_ms": 100,
+        "history_ms": 500,
+        "max_gap_ms": 300,
+        "max_uncertain_ms": 200,
+        "min_tracking_ratio": 0.5,
+        "slow_speed_factor": 0.6,
+        "obstacle_support_frames": 2,
+        "obstacle_window_frames": 3,
+        "obstacle_match_overlap": 0.1,
+        "obstacle_match_tolerance_px": 1,
+        "obstacle_min_previous_coverage": 0.9,
+        "object_tracking_enabled": true,
+        "object_min_area_px": 80,
+        "object_match_iou": 0.1,
+        "object_appearance_min": 0.2,
+        "object_area_ratio_min": 0.5,
+        "object_area_ratio_max": 2.0,
+        "object_max_gap_frames": 2,
+        "object_trend_frames": 3,
+        "object_growth_min": 1.1,
+        "object_lower_min_px": 2,
+        "object_policy_enabled": true
+      }
+    }
+  ]
+}

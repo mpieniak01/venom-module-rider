@@ -4,7 +4,7 @@ PYTHON ?= $(HOST)/.venv/bin/python
 RUFF ?= $(HOST)/.venv/bin/ruff
 WEB_BIN = $(HOST)/web-next/node_modules/.bin
 
-check: check-python check-web
+check: check-python check-web check-browser
 
 check-python:
 	$(RUFF) check venom_module_rider scripts tests
@@ -13,6 +13,7 @@ check-python:
 	PYTHONPATH=$(HOST):. $(PYTHON) -m pytest -q --cov=venom_module_rider --cov-fail-under=90 --cov-report=term-missing --cov-report=xml:test-results/coverage.xml
 
 check-web:
+	node --check scripts/check_browser_regressions.mjs
 	node --check tests/browser/video-analysis.js
 	node --check tests/browser/samples-layout.js
 	node --check tests/browser/session-archive.js
@@ -82,3 +83,7 @@ research-mapping:
 .PHONY: check-journey
 check-journey:
 	PYTHONPATH=$(HOST):. $(PYTHON) -m pytest -q tests/test_navigation_journey_api.py tests/test_journey_vision.py tests/test_navigation_trial_api.py tests/test_steering.py tests/test_operator_proxy.py
+
+.PHONY: check-browser
+check-browser:
+	RIDER_WEB_ROOT="$(abspath $(HOST)/web-next)" node scripts/check_browser_regressions.mjs $(BROWSER_ARGS)

@@ -1,7 +1,8 @@
 // Inert fixture only. Every API response and image is intercepted locally.
 async page=>{
  const check=(ok,message)=>{if(!ok)throw new Error(message);};
- check(new URL(page.url()).port==="18812","video fixture port required");
+ const fixtureUrl=new URL(page.url());
+ check(["127.0.0.1","localhost"].includes(fixtureUrl.hostname)&&(fixtureUrl.pathname.endsWith("/video-analysis.html")||fixtureUrl.port==="18812"),"isolated video fixture required");
  const sid="1".repeat(32),oldId="2".repeat(32),newId="3".repeat(32),sha="8e19a552b0916f795708653260f653036609c2aed64e165c5fc5f70002fd375f";
  const jpeg=Buffer.from("/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAAwAEADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwChRRRXoHCFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQB//2Q==","base64");
  const png=Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAEAAAAAwCAYAAAChS3wfAAAAbUlEQVR4nO3QUQmAUBBFQTXXy2Mo89hLKygoB3Hme1kOd5oAAADgd+arh8cY65shd837vj3xZ3niyZcZoA6oGaAOqBmgDqgZoA6oGaAOqBmgDqgZoA6oGaAOqBmgDqgZoA6oGaAOqBmgDgAAMifrYwQ0T1A1TAAAAABJRU5ErkJggg==","base64");
@@ -45,7 +46,7 @@ async page=>{
    }
    unexpected.push({path,method});return route.abort();
  });
- await page.goto("http://127.0.0.1:18812/");
+ await page.goto(fixtureUrl.href);
  const sessionOption=page.getByTestId("samples-session").locator("option").filter({hasText:"257"});
  await page.waitForFunction(()=>document.querySelector('[data-testid="samples-session"]')?.textContent?.includes("257"));
  check((await sessionOption.textContent()).includes("0 zdj."),"video session looks empty");
@@ -141,6 +142,20 @@ async page=>{
  await page.getByTestId("analysis-frame").fill("121");
  await page.waitForFunction(()=>document.querySelector('[data-testid="source-video-image"]')?.getAttribute("data-source-index")==="120");
  check(await page.getByTestId("analysis-frame-overlay").count()===0,"fabricated overlay for rejected frame");
+ // Playback must cross a frame without a saved mask and resume the next pair.
+ await page.getByTestId("analysis-frame").fill("120");
+ await page.waitForFunction(()=>document.querySelector('[data-testid="analysis-frame-overlay"]')?.getAttribute("data-source-index")==="119");
+ await page.evaluate(()=>{
+   const samples=[];let active=true;
+   const tick=()=>{if(!active)return;const raw=document.querySelector('[data-testid="source-video-image"]'),mask=document.querySelector('[data-testid="analysis-frame-overlay"]');if(raw)samples.push({raw:Number(raw.getAttribute("data-source-index")),mask:mask?Number(mask.getAttribute("data-source-index")):null});requestAnimationFrame(tick);};
+   window.__rejectedPlayback={stop:()=>{active=false;return samples;}};requestAnimationFrame(tick);
+ });
+ await page.getByTestId("source-video-play").click();
+ await page.waitForFunction(()=>document.querySelector('[data-testid="source-video-image"]')?.getAttribute("data-source-index")==="121");
+ await page.getByTestId("source-video-play").click();
+ const rejectedPlayback=await page.evaluate(()=>window.__rejectedPlayback.stop());
+ check(rejectedPlayback.some(x=>x.raw===120&&x.mask===null)&&rejectedPlayback.some(x=>x.raw===121&&x.mask===121),"playback stalled or reused a mask at the rejected frame");
+ check(rejectedPlayback.every(x=>x.raw===120?x.mask===null:x.raw===x.mask),"a neighbouring classification leaked into the displayed frame");
  const before=await page.getByTestId("analysis-result-snapshot").textContent();
  await page.getByTestId("analysis-settings").locator("summary").first().click();
  await page.getByTestId("analysis-load-rider").click();
@@ -195,5 +210,5 @@ async page=>{
  await page.getByTestId("analysis-panel").getByRole("alert").waitFor({state:"visible"});
  check(await page.getByTestId("analysis-settings").getAttribute("open")===null,"profile error forced the settings open");
  check(unexpected.length===0,"unexpected API or hardware request: "+JSON.stringify(unexpected));
- return {result:"PASS",videoFrames:count,photos:0,playbackWithoutModel:true,stableFrameGeometry:true,counterMatchesDecodedFrame:true,lateSeekIgnored:true,singleFetchPerFrame:true,wholeVideoPosts:posts.length,frameHistogram:true,sourceOverlayIdentity:true,sourceHashConflictBlocked:true,compactLayer:true,compositedPixelsVerified:true,compositeAlpha:pixels.after[3],pairedPlayer:true,previewFirst:true,compactReviewBoxes:true,noLoadingMessages:true,slowMaskSynchronized:true,historicalPhotos:true,errorsVisibleWhenCollapsed:true,layerSizeVerified:true,frozenRevision:true,mobile:true,robotContacted:false};
+ return {result:"PASS",videoFrames:count,photos:0,playbackWithoutModel:true,stableFrameGeometry:true,counterMatchesDecodedFrame:true,lateSeekIgnored:true,singleFetchPerFrame:true,wholeVideoPosts:posts.length,frameHistogram:true,sourceOverlayIdentity:true,sourceHashConflictBlocked:true,compactLayer:true,compositedPixelsVerified:true,compositeAlpha:pixels.after[3],pairedPlayer:true,previewFirst:true,compactReviewBoxes:true,noLoadingMessages:true,slowMaskSynchronized:true,historicalPhotos:true,rejectedFramePlayback:true,errorsVisibleWhenCollapsed:true,layerSizeVerified:true,frozenRevision:true,mobile:true,robotContacted:false};
 };

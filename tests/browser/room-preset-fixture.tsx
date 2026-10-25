@@ -1,11 +1,8 @@
 import styles from "../../web-next/rider.module.css";
 import React, {useState} from "react";
 import {createRoot} from "react-dom/client";
-import original from "../fixtures/policy-catalog-v2.json";
+import original from "../fixtures/room-policy-catalog.json";
 const definition=structuredClone(original);
-const fluid=definition.profiles.find(p=>p.id==="fluid")!;
-definition.profiles.push({...fluid,id:"room_fluid",parameters:{...fluid.parameters,object_tracking_enabled:true,object_policy_enabled:true,thin_span_fraction:1}} as typeof fluid);
-Object.assign(definition.parameter_schema,{object_policy_enabled:{kind:"bool",min:0,max:1,step:1,group:"objects"}});
 import {NavigationProfiles} from "../../web-next/components/navigation-profiles";
 import {translate,type RiderLanguage} from "../../web-next/lib/i18n";
 import {record,type JsonRecord} from "../../web-next/lib/model";

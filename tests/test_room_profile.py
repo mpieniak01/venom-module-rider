@@ -72,3 +72,11 @@ def test_operator_can_compare_without_object_policy_and_restore_preset():
     assert values["obstacle_support_frames"] == 3
     assert parameters(choice())["object_policy_enabled"] is True
     assert policy_digest(custom) != policy_digest(choice())
+
+
+def test_browser_room_catalog_matches_the_actual_server_contract():
+    import json
+    from pathlib import Path
+
+    fixture = Path(__file__).parent / "fixtures" / "room-policy-catalog.json"
+    assert json.loads(fixture.read_text()) == catalog(choice("fluid", 2))

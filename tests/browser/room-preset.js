@@ -2,7 +2,7 @@
 async page=>{
  const check=(value,message)=>{if(!value)throw new Error(message);};
  await page.route("**/api/**",route=>route.abort());
- await page.goto("http://127.0.0.1:3312/");
+ await page.goto(page.url());
  await page.getByTestId("behavior-profile").selectOption("room_fluid");
  await page.getByText("Szczegóły i własne ustawienia",{exact:true}).click();
  const policy=page.getByTestId("behavior-param-object_policy_enabled");

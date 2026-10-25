@@ -8,7 +8,7 @@ async page => {
   const profileId = parameters.get("profile")??"balanced";
   const modelId = parameters.get("model")??"depth-anything-v2-indoor-small";
   const engine = modelId==="depth-anything-v2-indoor-small"?"depth_plane":"segformer";
-  const allowedProfiles=["legacy","cautious","balanced","fluid"];
+  const allowedProfiles=["legacy","cautious","balanced","fluid","room_fluid"];
   const allowedModels=["depth-anything-v2-indoor-small","segformer-b0-ade20k","yolo26n-sem-ade20k"];
   const check = (value, message) => { if (!value) throw new Error(message); };
   check(["localhost", "127.0.0.1", "[::1]"].includes(new URL(base).hostname), "loopback UI required");
@@ -17,8 +17,8 @@ async page => {
   const sha="a".repeat(64), calls=[], saves=[], scenarios=[], violations=[];
   // Exactly the writable top-level keys from services.navigation_config.DEFAULT, minus protocol_version and revision (update_from_body allowlist).
   const writable = ["behavior","mode","speed","decision_budget_ms","max_motion_ms","corridor","perception","avoidance","verified","calibration_id","model_sha256"].sort();
-  const profiles = ["legacy","cautious","balanced","fluid"].map(id=>({id,profile_revision:1,status:id==="legacy"?"legacy":"experimental",parameters:{}}));
-  let policy={protocol_version:1,revision:134,behavior:{version:1,profile_id:profileId,profile_revision:1},
+  const profiles = allowedProfiles.map(id=>({id,profile_revision:id==="room_fluid"?2:1,status:id==="legacy"?"legacy":"experimental",parameters:{}}));
+  let policy={protocol_version:1,revision:134,behavior:{version:1,profile_id:profileId,profile_revision:profileId==="room_fluid"?2:1},
     mode:"observe",speed:.1,decision_budget_ms:300,max_motion_ms:150,corridor:[.35,.8,.65,.95],
     perception:{engine,model_id:modelId,artifact_sha256:sha,residual_limit:.06,outlier_limit:.005,slope_min:2},
     avoidance:{protocol_version:3,enabled:true,sweep_verified:false,mirrored:false,turn_speed:.05,turn_ms:100,max_turn_pulses:3,max_stalled_corrections:2,progress_min_delta:.03,
