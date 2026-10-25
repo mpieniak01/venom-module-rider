@@ -243,7 +243,12 @@ def render_depth(
             left, top, right, bottom = bounds
             mask = (x >= left * image.width) & (x < right * image.width)
             mask &= (y >= top * image.height) & (y < bottom * image.height)
-            colors[mask] = palette.get(sector.get("state"), (255, 185, 35))
+            state = (
+                sector.get("state")
+                if sector.get("coverage_complete") is True
+                else "unknown"
+            )
+            colors[mask] = palette.get(state, (255, 185, 35))
     colors[np.isfinite(errors) & (errors <= settings.residual_limit)] = (
         35,
         210,

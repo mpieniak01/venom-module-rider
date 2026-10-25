@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import ts from "typescript";
 import { test } from "node:test";
-import { calibrationAcceptance, calibrationMatches, completedTrial, executionHeadline, freshPolicyFrame, previewNotice, calibrationScope, decisionView, freshAnalysisFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, navigationPulseLimit, navigationSettingsDriveBlocked, motionPermission, stoppingZone, stoppingZoneValues, trialBlock, trialPreparation, trialPreparationTitle, trialPreparationErrorKey, trialDiagnostics, trialStopReasonKey, trialOutcomeTone, freshObservation } from "../../web-next/lib/loop-controls";
+import { calibrationAcceptance, calibrationMatches, completedTrial, executionHeadline, freshPolicyFrame, previewNotice, calibrationScope, decisionView, freshAnalysisFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, navigationPulseLimit, navigationSettingsDriveBlocked, navigationReadCurrent, refreshStartedNavigation, motionPermission, stoppingZone, stoppingZoneValues, trialBlock, trialPreparation, trialPreparationTitle, trialPreparationErrorKey, trialDiagnostics, trialStopReasonKey, trialOutcomeTone, freshObservation } from "../../web-next/lib/loop-controls";
 import { translate } from "../../web-next/lib/i18n";
 import { featureRows, frameRequested, type RiderStatus } from "../../web-next/lib/model";
 
@@ -656,4 +656,22 @@ test("pulse field range follows Pi capability and does not persist presentation 
  assert.equal(navigationPulseLimit({motion_limits:{version:2,max_motion_ms:250}},true),150);
  const policy={speed:.1,max_motion_ms:150,motion_limits:{version:1,max_motion_ms:250}};
  assert.equal("motion_limits" in loopSettingsValues(policy,{...policy,max_motion_ms:250}),false);
+});
+
+test("late navigation reads cannot roll back newer state or policy revisions",()=>{
+ assert.equal(navigationReadCurrent(1,2,10,10),false);
+ assert.equal(navigationReadCurrent(3,2,9,10),false);
+ assert.equal(navigationReadCurrent(3,2,10,10),true);
+ assert.equal(navigationReadCurrent(4,2,11,10),true);
+});
+test("successful Start remains successful when only the following state GET fails",async()=>{
+ const error=new Error("read_failed");
+ assert.equal(await refreshStartedNavigation(async()=>{throw error;},()=>true),error);
+ assert.equal(await refreshStartedNavigation(async()=>{},()=>true),null);
+});
+test("STOP or session changes during a successful or failed post-Start GET still cancel",async()=>{
+ for(const failed of [true,false]){
+  let current=true;
+  await assert.rejects(refreshStartedNavigation(async()=>{current=false;if(failed)throw new Error("read_failed");},()=>current),/navigation_trial_cancelled/);
+ }
 });

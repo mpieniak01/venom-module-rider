@@ -396,8 +396,16 @@ def test_depth_preview_tints_only_evaluated_zones(state, error):
         "state": state,
         "_errors": errors,
         "sectors": {
-            "left": {"state": "clear", "corridor": [0.05, 0.8, 0.35, 0.95]},
-            "right": {"state": "obstacle", "corridor": [0.65, 0.8, 0.95, 0.95]},
+            "left": {
+                "state": "clear",
+                "coverage_complete": True,
+                "corridor": [0.05, 0.8, 0.35, 0.95],
+            },
+            "right": {
+                "state": "obstacle",
+                "coverage_complete": True,
+                "corridor": [0.65, 0.8, 0.95, 0.95],
+            },
         },
     }
     encoded = render_depth(
@@ -421,3 +429,27 @@ def test_depth_preview_tints_only_evaluated_zones(state, error):
         assert center[0] > center[1] + 30
     else:
         assert center[0] > center[1] > center[2]
+
+
+@pytest.mark.parametrize("coverage", [None, False])
+def test_incomplete_side_coverage_is_uncertain_not_green(coverage):
+    """Incomplete coverage never paints a sector green."""
+    image = Image.new("RGB", (320, 240), (80, 80, 80))
+    sector = {"state": "clear", "corridor": [0.05, 0.8, 0.35, 0.95]}
+    if coverage is not None:
+        sector["coverage_complete"] = coverage
+    row = {
+        "state": "unknown",
+        "_errors": np.full((240, 320), np.nan),
+        "sectors": {"left": sector},
+    }
+    encoded = render_depth(
+        image,
+        np.ones((240, 320)),
+        row,
+        ROI,
+        PerceptionSettings(engine="depth_plane"),
+        draw_geometry=False,
+    )
+    r, g, b = Image.open(io.BytesIO(encoded)).getpixel((60, 210))
+    assert r > g > b

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Play, Square, RefreshCw } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 import { data, errorCode, formatNumber, formatTime, record, safetyOf, type JsonRecord } from "../lib/model";
-import { calibrationAcceptance, calibrationFrameBlock, calibrationMatches, calibrationScope, decisionView, executionHeadline, freshPolicyFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, navigationPulseLimit, navigationSettingsDriveBlocked, motionPermission, stoppingZone, stoppingZoneValues, trialBlock, trialPreparation, trialPreparationTitle, trialPreparationErrorKey, trialDiagnostics, trialStopReasonKey, trialOutcomeTone, freshObservation } from "../lib/loop-controls";
+import { calibrationAcceptance, calibrationFrameBlock, calibrationMatches, calibrationScope, decisionView, executionHeadline, freshPolicyFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, navigationPulseLimit, navigationSettingsDriveBlocked, navigationReadCurrent, refreshStartedNavigation, motionPermission, stoppingZone, stoppingZoneValues, trialBlock, trialPreparation, trialPreparationTitle, trialPreparationErrorKey, trialDiagnostics, trialStopReasonKey, trialOutcomeTone, freshObservation } from "../lib/loop-controls";
 import { journeyBlocks, journeyView } from "../lib/journey";
 import { operatorPrioritySupported } from "../lib/navigation";
 import { stopLoopResources } from "../lib/stop-loop";
@@ -26,6 +26,7 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
   const [editingZone,setEditingZone]=useState(false);
   const dirty=!!policy&&JSON.stringify(policy)!==JSON.stringify(draft);
   const policyRef=useRef(policy),dirtyRef=useRef(dirty),policySession=useRef("");
+  const stateReadSequence=useRef(0),stateAppliedSequence=useRef(0);
   policyRef.current=policy;dirtyRef.current=dirty;
   const {setPerceptionPolicy,currentSession}=client;
   const applyPolicy=useCallback((value:JsonRecord|null)=>{
@@ -78,10 +79,13 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
       reading=true;
       const first=initial||!configured;
       try {
+        const request=++stateReadSequence.current;
         const row=await apiFetch<JsonRecord>("/api/v1/rider/navigation/"+(first?"config":"state"),{signal:abort.signal});
         if(abort.signal.aborted)return;
-        apply(row);
         const incoming=record(row.config);
+        if(!navigationReadCurrent(request,stateAppliedSequence.current,incoming.revision,policySession.current===session?policyRef.current?.revision:undefined))return;
+        stateAppliedSequence.current=request;
+        apply(row);
         if(typeof incoming.revision==="number")setProfileSnapshot(previous=>previous.session===session&&Number(previous.policy?.revision??-1)>Number(incoming.revision)?previous:{policy:incoming,session:session??""});
         if((policySession.current!==session||Number(incoming.revision)>=Number(policyRef.current?.revision??-1))&&(first||!dirtyRef.current&&typeof incoming.revision==="number"&&(incoming.revision>Number(policyRef.current?.revision??-1)||incoming.revision===policyRef.current?.revision&&JSON.stringify(incoming)!==JSON.stringify(policyRef.current))))applyPolicy(incoming);
         if(first){setRuntime(record(row.runtime));configured=true;}
@@ -117,11 +121,12 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
   },[active,loopState.running,loopState.run_id,goals.drive,cameraStream,setCameraStream]);
 
   const readState=useCallback(async(refreshPolicy=false)=>{
-    const origin=currentSession();
+    const origin=currentSession(),request=++stateReadSequence.current;
     const row=await apiFetch<JsonRecord>("/api/v1/rider/navigation/state");
-    if(currentSession()!==origin)return;
+    if(currentSession()!==origin||!navigationReadCurrent(request,stateAppliedSequence.current,record(row.config).revision,policyRef.current?.revision))return;
+    stateAppliedSequence.current=request;
     setLoopState(record(row.status));setGoals(record(row.goals));setDetector(record(row.detector));
-    if(refreshPolicy&&typeof record(row.config).revision==="number")applyPolicy(record(row.config));
+    if(refreshPolicy&&!dirtyRef.current&&typeof record(row.config).revision==="number")applyPolicy(record(row.config));
   },[currentSession,applyPolicy]);
   const failure=useCallback((err:unknown)=>{
     setTrialFailure(err);
@@ -284,7 +289,8 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
       if(stopping.current||client.currentSession()!==origin||client.currentMotionEpoch()!==epoch)throw new Error("navigation_trial_cancelled");
       operationGeneration.current=client.currentGeneration();operationEpoch.current=client.currentMotionEpoch();
       // Start returns persisted policy only; the state endpoint adds current Pi capabilities.
-      await readState(true);
+      const refreshError=await refreshStartedNavigation(()=>readState(true),()=>!stopping.current&&client.currentSession()===origin&&client.currentMotionEpoch()===epoch);
+      if(refreshError){setReadError(t("loopStartedReadFailed")+" · "+errorCode(refreshError));setLoopState(previous=>({...previous,stale:true}));}
       setTrialResult("trialStarted");
     })();
     startTask.current=task;
@@ -308,7 +314,9 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
       }:undefined);
       if(stopping.current||client.currentSession()!==origin||client.currentMotionEpoch()!==epoch)throw new Error("navigation_trial_cancelled");
       // Never replace presented policy with the raw Start reply: it omits motion limits.
-      await readState(true);setJourneyRequested(true);
+      const refreshError=await refreshStartedNavigation(()=>readState(true),()=>!stopping.current&&client.currentSession()===origin&&client.currentMotionEpoch()===epoch);
+      if(refreshError){setReadError(t("loopStartedReadFailed")+" · "+errorCode(refreshError));setLoopState(previous=>({...previous,stale:true}));}
+      setJourneyRequested(true);
     })();startTask.current=task;
     try{await task;}catch(err){if(!stopping.current&&client.currentMotionEpoch()===epoch&&client.currentSession()===origin)setJourneyError(errorCode(err));}
     finally{startTask.current=null;if(!stopping.current)setOperation(null);}
@@ -389,6 +397,7 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
   let commandReason = "";
   if (view === "journey") {
     if (journeyError) commandReason = t("journeyRequestError") + " · " + journeyError;
+    else if (readError) commandReason=readError;
     else if (nonAcceptanceJourneyBlock||journeyUnavailable[0]) commandReason = journeyBlockLabel(nonAcceptanceJourneyBlock||journeyUnavailable[0]);
     else if (journey.reason&&["failed","blocked"].includes(journey.phase)) commandReason=t(["decision_timeout","decision_invalid_or_expired"].includes(journey.reason)?"workspace.journeyAnalysisExpired":trialStopReasonKey(journey.reason));
     else if (journey.active&&journey.reason) commandReason = t("state") + ": " + journey.reason;
@@ -455,7 +464,7 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
     </div>
     <div className={styles.driveWorkspace}>
       <div className={styles.workspaceContent} data-testid="workspace-content" role="region" aria-label={t("workspaceObservation")}>
-        <div className={styles.loopCamera}><CameraPanel client={client} t={t} language={language} compact showTools={false} editor={view !== "manual" && editingZone && draft && Array.isArray(draft.corridor) ? {value:draft.corridor as number[],disabled:goals.drive===true||!!operation,onChange:value=>setDraft({...draft,corridor:value})}:undefined}/></div>
+        <div className={styles.loopCamera}><CameraPanel client={client} t={t} language={language} compact showTools={false} editor={editingZone && draft && Array.isArray(draft.corridor) ? {value:draft.corridor as number[],disabled:settingsLocked,onChange:value=>setDraft({...draft,corridor:value})}:undefined}/></div>
       </div>
       <aside className={styles.operatorConsole} aria-label={t("manual")} data-testid="operator-console">{manual}</aside>
     </div>

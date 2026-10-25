@@ -58,7 +58,7 @@ async page => {
       return Promise.resolve(new Response(stream,{headers:{"Content-Type":"multipart/x-mixed-replace; boundary=startup"}}));
     };
   },{modelId,sha});
-  let preparedAt=0,prepareCalls=0;
+  let preparedAt=0,prepareCalls=0,rejectPostStartState=true;
   await page.route("**/api/v1/rider/**",async route=>{
     const req=route.request(),path=new URL(req.url()).pathname.slice("/api/v1/rider".length);
     const json=(body,status=200)=>route.fulfill({status,contentType:"application/json",body:JSON.stringify(body)});
@@ -198,11 +198,21 @@ async page => {
     await wait(()=>observe&&running&&!stale,"explicit observation did not recover after a rejected restart");
     await wait(async()=>!await start.isDisabled(),"fresh recovery did not permit another explicit Start");
     rejectSave=false;
+    await page.getByTestId("workspace-manual").click();
+    if(await page.getByTestId("workspace-settings-toggle").getAttribute("aria-expanded")!=="true")await page.getByTestId("workspace-settings-toggle").click();
+    await page.getByTestId("zone-edit").click();
+    await page.getByTestId("corridor-editor").waitFor({state:"visible"});
+    check(await page.getByTestId("corridor-editor").evaluate(el=>el.style.pointerEvents)==="auto","manual view exposes a nonfunctional zone editor");
+    await page.getByTestId("workspace-journey").click();
     const beforeConfirmStart=calls.length;
     await start.click();
     await wait(()=>policy.revision===135,"strict Pi writer rejected acceptance; echoed read-only metadata: "+JSON.stringify(violations));
     await wait(()=>journey?.active===true,"primary confirm-and-start click did not reach journey endpoint");
+    await new Promise(resolve=>setTimeout(resolve,650));
+    rejectPostStartState=false;
     await wait(async()=>(await page.getByTestId("command-reason").innerText()).includes("clear"),"raw Start response discarded the 250 ms capability and falsely blocked valid motion settings");
+    check(await page.getByTestId("journey-error").count()===0,"post-Start GET failure was reported as a failed Start");
+    await wait(async()=>await page.getByTestId("corridor-editor").evaluate(el=>el.style.pointerEvents)==="auto","active drive blocks zone draft editing");
     check(saves.length===1,"acceptance must save once");
     check(policy.verified&&policy.avoidance.sweep_verified&&policy.behavior.profile_id===profileId,"acceptance changed profile or omitted qualification");
     const transaction=calls.slice(beforeConfirmStart).map(call=>call.path);
