@@ -1,3 +1,4 @@
+import {inputBounds} from "./input-region";
 import { record, type JsonRecord } from "./model";
 import { behaviorSelection, type BehaviorSelection } from "./behavior";
 import { SEMANTIC_MODEL_IDS, TUNING_BOUNDS, TUNING_FIELDS } from "./model-tuning";
@@ -23,6 +24,7 @@ export function riderAnalysisSettings(value: unknown): RiderAnalysisSettings {
     if (typeof number !== "number" || !Number.isFinite(number) || number < low || number > high) throw new Error("analysis_rider_settings_invalid");
     perception[key] = number;
   }
+  if(source.input_region!==undefined){if(!inputBounds(source.input_region).length)throw new Error("analysis_rider_settings_invalid");perception.input_region=structuredClone(source.input_region);}
   if (source.semantic_models !== undefined) {
     const models = record(source.semantic_models), copied: JsonRecord = {};
     if (!source.semantic_models || Array.isArray(source.semantic_models) || typeof source.semantic_models !== "object") throw new Error("analysis_rider_settings_invalid");
@@ -54,5 +56,5 @@ export function analysisProfileSettings(
   const depth = Object.fromEntries(["residual_limit", "outlier_limit", "slope_min"].filter(key => key in perception).map(key => [key, perception[key]]));
   return semanticProfile(profile)
     ? { window: 1, geometry: { mode: "image", fx: null, fy: null, radius_ratio: null, lookahead_ratio: 2 }, perception: { engine: "segformer", ...models } }
-    : { window: windowSize, geometry: { ...geometry }, perception: { ...depth, ...models, engine: "depth_plane" } };
+    : { window: windowSize, geometry: { ...geometry }, perception: { ...depth, ...models, ...(profile?.id==="da2-default"&&perception.input_region!==undefined?{input_region:structuredClone(perception.input_region)}:{}), engine: "depth_plane" } };
 }

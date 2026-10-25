@@ -72,7 +72,13 @@ class VisionLoop:
             options["semantic"] = semantic_parameters(
                 perception, frame.behavior.model_dump()
             )
-        return self.detector.detect(payload, frame.corridor, **options)
+        from .overlay_geometry import source_geometry
+
+        return source_geometry(
+            self.detector.detect(payload, frame.corridor, **options),
+            payload,
+            frame.corridor,
+        )
 
     @model_operation
     def _detect_depth(self, payload, frame):
@@ -102,7 +108,11 @@ class VisionLoop:
     @model_operation
     def _detect_model(self, payload, frame):
         assert self.models is not None
-        return self.models.runtime.detect(payload, frame)
+        from .overlay_geometry import source_geometry
+
+        return source_geometry(
+            self.models.runtime.detect(payload, frame), payload, frame.corridor
+        )
 
     def status(self, perception=None):
         selected = (
@@ -121,6 +131,7 @@ class VisionLoop:
             "supported_protocol_versions": [1, 2, 3],
             "navigation_journey_version": 1,
             "temporal_navigation_v1": importlib.util.find_spec("cv2") is not None,
+            "input_region_version": 1,
             "semantic_model_policy_v1": importlib.util.find_spec("cv2") is not None,
             "ground_geometry_supported": callable(
                 getattr(self.depth_detector, "detect_ground", None)

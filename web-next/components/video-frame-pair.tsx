@@ -1,3 +1,4 @@
+import {GeometryOverlay} from "./geometry-overlay";
 /* eslint-disable @next/next/no-img-element -- Immutable stored RAW, reused directly to compose the matching result. */
 import {useCallback,useEffect,useMemo,useRef,useState} from "react";
 import {getApiBaseUrl} from "@/lib/env";
@@ -64,6 +65,7 @@ export function VideoFramePair({frame,session,active,requested,onReady,onFailure
       <p>{t("analysis.video.processed")}</p>
       <div className={styles.videoPairViewport} style={{aspectRatio:frame.width+" / "+frame.height}} data-testid={active?"analysis-frame-composite":undefined}>
         <canvas ref={canvas} data-testid={active&&painted&&!error?"analysis-frame-overlay":undefined} data-source-index={frame.index} className={styles.sourceVideoFrame} style={{visibility:painted&&!error?"inherit":"hidden"}} role="img" aria-label={t("analysis.video.processed")}/>
+        {painted&&!error&&record(row.classification_layer).version===2&&<GeometryOverlay value={row.overlay_geometry} size={[frame.width,frame.height]}/>}
         {(!painted||error)&&!!placeholder&&<p className={styles.videoPairPlaceholder} role={error?"alert":"status"} data-testid={active?"video-result-placeholder":undefined}>{t(placeholder)}</p>}
       </div>
       <p className={styles.small} data-testid={active?"video-frame-state":undefined}>{comparison?t("samples.value."+String(row.state??"unknown")):"\u00a0"}</p>

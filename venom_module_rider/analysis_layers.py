@@ -34,6 +34,7 @@ def classification_layer(
     source_sha256,
     *,
     semantic=False,
+    vector=False,
 ):
     """Consume private maps and draw frozen geometry into a tiny paletted PNG."""
     width, height = size
@@ -84,45 +85,50 @@ def classification_layer(
         [channel for color in PALETTE for channel in color]
         + [0] * (768 - len(PALETTE) * 3)
     )
-    draw = ImageDraw.Draw(layer)
-    outlines = assessment.pop("_path_overlay", None)
-    projected = assessment.get("geometry") == "ground_capsule"
-    draw_sectors(
-        draw,
-        (width, height),
-        assessment.get("sectors", {}),
-        outlines=outlines,
-        projected=projected,
-    )
-    x0, y0, x1, y1 = corridor
-    if semantic:
-        draw.rectangle(
-            (
-                int(x0 * (width - 1)),
-                int(y0 * (height - 1)),
-                int(x1 * (width - 1)),
-                int(y1 * (height - 1)),
-            ),
-            outline="white",
-            width=3,
+    if vector:
+        from .overlay_geometry import validate_geometry
+
+        validate_geometry(assessment.get("overlay_geometry"), size)
+    else:
+        draw = ImageDraw.Draw(layer)
+        outlines = assessment.pop("_path_overlay", None)
+        projected = assessment.get("geometry") == "ground_capsule"
+        draw_sectors(
+            draw,
+            (width, height),
+            assessment.get("sectors", {}),
+            outlines=outlines,
+            projected=projected,
         )
-    elif not projected:
-        reference_y0 = assessment.get("plane_reference_corridor", corridor)[1]
-        if reference_y0 < y0:
-            left, right = int(x0 * (width - 1)), int(x1 * (width - 1))
-            top, bottom = int(reference_y0 * (height - 1)), int(y0 * (height - 1))
-            for pos in range(left, right, 10):
-                draw.line(
-                    (pos, top, min(pos + 5, right), top), fill=PALETTE[7], width=2
-                )
-            for side in (left, right):
-                for pos in range(top, bottom, 10):
+        x0, y0, x1, y1 = corridor
+        if semantic:
+            draw.rectangle(
+                (
+                    int(x0 * (width - 1)),
+                    int(y0 * (height - 1)),
+                    int(x1 * (width - 1)),
+                    int(y1 * (height - 1)),
+                ),
+                outline="white",
+                width=3,
+            )
+        elif not projected:
+            reference_y0 = assessment.get("plane_reference_corridor", corridor)[1]
+            if reference_y0 < y0:
+                left, right = int(x0 * (width - 1)), int(x1 * (width - 1))
+                top, bottom = int(reference_y0 * (height - 1)), int(y0 * (height - 1))
+                for pos in range(left, right, 10):
                     draw.line(
-                        (side, pos, side, min(pos + 5, bottom)),
-                        fill=PALETTE[7],
-                        width=2,
+                        (pos, top, min(pos + 5, right), top), fill=PALETTE[7], width=2
                     )
-        draw_stop_border(draw, (height, width), corridor)
+                for side in (left, right):
+                    for pos in range(top, bottom, 10):
+                        draw.line(
+                            (side, pos, side, min(pos + 5, bottom)),
+                            fill=PALETTE[7],
+                            width=2,
+                        )
+            draw_stop_border(draw, (height, width), corridor)
     if any(layer.histogram()[len(PALETTE) :]):
         raise ValueError("analysis_layer_palette")
     stream = io.BytesIO()
@@ -134,7 +140,7 @@ def classification_layer(
         optimize=True,
     )
     return stream.getvalue(), {
-        "version": 1,
+        "version": 2 if vector else 1,
         "artifact": artifact_name,
         "width": width,
         "height": height,
@@ -157,7 +163,8 @@ def validate_video_layer(row, artifacts, index, raw_sha256):
     name = f"{index:04d}-mask.png"
     if (
         not isinstance(layer, dict)
-        or layer.get("version") != 1
+        or type(layer.get("version")) is not int
+        or layer.get("version") not in (1, 2)
         or layer.get("palette_version") != 1
         or layer.get("artifact") != name
         or layer.get("source_sha256") != raw_sha256
@@ -172,6 +179,12 @@ def validate_video_layer(row, artifacts, index, raw_sha256):
     ):
         raise RiderError("analysis_worker_protocol", 500)
     try:
+        if layer["version"] == 2:
+            from .overlay_geometry import validate_geometry
+
+            validate_geometry(
+                row.get("overlay_geometry"), (layer["width"], layer["height"])
+            )
         payload = base64.b64decode(artifacts[0]["data"], validate=True)
         with Image.open(io.BytesIO(payload)) as image:
             if (
@@ -183,7 +196,7 @@ def validate_video_layer(row, artifacts, index, raw_sha256):
             image.load()
             palette = image.getpalette()
             if (
-                any(image.histogram()[len(PALETTE) :])
+                any(image.histogram()[4 if layer["version"] == 2 else len(PALETTE) :])
                 or palette is None
                 or palette[: len(PALETTE) * 3]
                 != [channel for color in PALETTE for channel in color]

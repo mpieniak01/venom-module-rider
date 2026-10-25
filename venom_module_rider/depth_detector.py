@@ -7,9 +7,10 @@ import math
 import os
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer
 
 from .directional import assess_paths, assess_sectors, sector_regions
+from .model_input import InputRegion
 from .vision_overlay import draw_sectors
 
 
@@ -25,7 +26,15 @@ class PerceptionSettings(BaseModel):
     outlier_limit: float = Field(default=0.005, ge=0.0, le=0.02)
     slope_min: float = Field(default=2.0, ge=1.0, le=4.0)
 
+    input_region: InputRegion | None = None
     semantic_models: dict = Field(default_factory=dict)
+
+    @model_serializer(mode="wrap")
+    def serialize_input(self, handler):
+        value = handler(self)
+        if self.input_region is None:
+            value.pop("input_region", None)
+        return value
 
     @field_validator("semantic_models")
     @classmethod
@@ -35,7 +44,7 @@ class PerceptionSettings(BaseModel):
         return validate_semantic_models(value)
 
 
-def assess_depth(depth, corridor, settings, *, evidence=False):
+def assess_depth(depth, corridor, settings, *, evidence=False, input_bounds=None):
     """Fit with broad support; score the STOP zone. No physical distance."""
     import numpy as np
 
@@ -47,13 +56,25 @@ def assess_depth(depth, corridor, settings, *, evidence=False):
         raise ValueError("vision_corridor_invalid")
     y, x = np.mgrid[0:h, 0:w]
     mask = (x >= x0 * w) & (x < x1 * w) & (y >= y0 * h) & (y < y1 * h)
-    if mask.sum() < 64 or not np.isfinite(depth).all() or (depth <= 0).any():
+    observed = np.ones(depth.shape, dtype=bool)
+    if input_bounds is not None:
+        a, b, c, d = input_bounds
+        observed[:] = False
+        observed[b:d, a:c] = True
+    if (
+        mask.sum() < 64
+        or not np.isfinite(depth[observed]).all()
+        or (depth[observed] <= 0).any()
+        or (mask & ~observed).any()
+    ):
         raise ValueError("vision_model_output")
     # A shorter STOP horizon must not also shrink the plane-fitting support:
     # a flat obstacle could otherwise become the fitted ground. Keep at least
     # the original 30% image-height support, while scoring only the chosen zone.
     reference_y0 = min(y0, max(0.0, round(y1 - 0.30, 12)))
     reference = (x >= x0 * w) & (x < x1 * w) & (y >= reference_y0 * h) & (y < y1 * h)
+    if (reference & ~observed).any():
+        raise ValueError("navigation_input_region_excludes_reference")
     inverse_reference = 1.0 / depth[reference]
     scale = float(np.median(inverse_reference))
     design = np.column_stack(
@@ -169,6 +190,10 @@ def assess_depth(depth, corridor, settings, *, evidence=False):
                 valid=reference_valid and oriented,
             )
 
+    if input_bounds is not None:
+        for key in ("_navigation_maps", "_object_maps"):
+            if key in assessment:
+                assessment[key]["input_bounds"] = input_bounds
     return assessment
 
 
@@ -196,7 +221,9 @@ def decode_payload(payload):
     return image
 
 
-def render_depth(image, depth, assessment, corridor, settings, geometry=None):
+def render_depth(
+    image, depth, assessment, corridor, settings, geometry=None, *, draw_geometry=True
+):
     """Render the same geometry overlay in live and offline analysis."""
     import numpy as np
     from PIL import Image, ImageDraw
@@ -212,40 +239,41 @@ def render_depth(image, depth, assessment, corridor, settings, geometry=None):
     if assessment["state"] == "unknown":
         colors[np.isfinite(errors)] = (255, 185, 35)
     preview = Image.blend(image, Image.fromarray(colors), 0.4)
-    x0, y0, x1, y1 = corridor
-    draw = ImageDraw.Draw(preview)
-    overlays = assessment.pop("_path_overlay", None)
-    projected = assessment.get("geometry") == "ground_capsule"
-    draw_sectors(
-        draw,
-        image.size,
-        assessment.get("sectors", {}),
-        outlines=overlays,
-        projected=projected,
-    )
-    if not projected and (geometry is None or geometry.mode == "image"):
-        reference_y0 = assessment["plane_reference_corridor"][1]
-        if reference_y0 < y0:
-            # Dashed blue: fitting context, not an additional STOP zone.
-            left, right = int(x0 * (image.width - 1)), int(x1 * (image.width - 1))
-            top, bottom = (
-                int(reference_y0 * (image.height - 1)),
-                int(y0 * (image.height - 1)),
-            )
-            for pos in range(left, right, 10):
-                draw.line(
-                    (pos, top, min(pos + 5, right), top),
-                    fill=(80, 170, 255),
-                    width=2,
+    if draw_geometry:
+        x0, y0, x1, y1 = corridor
+        draw = ImageDraw.Draw(preview)
+        overlays = assessment.pop("_path_overlay", None)
+        projected = assessment.get("geometry") == "ground_capsule"
+        draw_sectors(
+            draw,
+            image.size,
+            assessment.get("sectors", {}),
+            outlines=overlays,
+            projected=projected,
+        )
+        if not projected and (geometry is None or geometry.mode == "image"):
+            reference_y0 = assessment["plane_reference_corridor"][1]
+            if reference_y0 < y0:
+                # Dashed blue: fitting context, not an additional STOP zone.
+                left, right = int(x0 * (image.width - 1)), int(x1 * (image.width - 1))
+                top, bottom = (
+                    int(reference_y0 * (image.height - 1)),
+                    int(y0 * (image.height - 1)),
                 )
-            for side in (left, right):
-                for pos in range(top, bottom, 10):
+                for pos in range(left, right, 10):
                     draw.line(
-                        (side, pos, side, min(pos + 5, bottom)),
+                        (pos, top, min(pos + 5, right), top),
                         fill=(80, 170, 255),
                         width=2,
                     )
-        draw_stop_border(draw, depth.shape, corridor)
+                for side in (left, right):
+                    for pos in range(top, bottom, 10):
+                        draw.line(
+                            (side, pos, side, min(pos + 5, bottom)),
+                            fill=(80, 170, 255),
+                            width=2,
+                        )
+            draw_stop_border(draw, depth.shape, corridor)
     stream = io.BytesIO()
     preview.save(stream, format="JPEG", quality=85)
     return stream.getvalue()
@@ -317,12 +345,23 @@ class DepthDetector:
         import numpy as np
         import torch
 
+        from .model_input import input_box, restore_depth
+
         image = decode_payload(payload)
-        rgb = np.asarray(image, dtype=np.float32) / 255
+        box = input_box(image, settings.input_region)
+        if settings.input_region is not None:
+            if not settings.input_region.covers(corridor):
+                raise ValueError("navigation_input_region_excludes_reference")
+            if (
+                geometry is not None
+                and geometry.mode == "ground"
+                and not settings.input_region.full
+            ):
+                raise ValueError("navigation_input_region_requires_image_geometry")
+        model_image = image.crop(box) if box != (0, 0, *image.size) else image
+        rgb = np.asarray(model_image, dtype=np.float32) / 255
         if rgb.mean() < 0.04 or rgb.std() < 0.01:
             # Publish the actual rejected capture, never retain a previous green mask.
-            from PIL import ImageDraw
-
             projected = geometry is not None and geometry.mode == "ground"
             sectors = (
                 {}
@@ -336,15 +375,19 @@ class DepthDetector:
                     for side, bounds in sector_regions(corridor).items()
                 }
             )
-            draw = ImageDraw.Draw(image)
-            draw_sectors(draw, image.size, sectors, projected=projected)
-            if not projected:
-                draw_stop_border(draw, (image.height, image.width), corridor)
+            from .overlay_geometry import analysis_geometry
+
             stream = io.BytesIO()
             image.save(stream, format="JPEG", quality=85)
             return {
                 "state": "unknown",
                 "reason": "vision_image_quality",
+                "overlay_geometry": analysis_geometry(
+                    image.size,
+                    {"geometry": "ground_capsule"} if projected else {},
+                    corridor,
+                    box,
+                ),
                 "sectors": sectors,
                 **({"geometry": "ground_capsule"} if projected else {}),
                 "drive_supported": True,
@@ -355,19 +398,26 @@ class DepthDetector:
         processor, model = self.processor, self.model
         if processor is None or model is None:
             raise ValueError("vision_model_unconfigured")
-        inputs = processor(images=image, return_tensors="pt").to(self.device)
+        inputs = processor(images=model_image, return_tensors="pt").to(self.device)
         with torch.inference_mode():
             result = model(**inputs)
         depth = (
             processor.post_process_depth_estimation(
-                result, target_sizes=[(image.height, image.width)]
+                result, target_sizes=[(model_image.height, model_image.width)]
             )[0]["predicted_depth"]
             .float()
             .cpu()
             .numpy()
         )
+        depth = restore_depth(depth, image.size, box)
         if geometry is None or geometry.mode == "image":
-            assessment = assess_depth(depth, corridor, settings, evidence=evidence)
+            assessment = assess_depth(
+                depth,
+                corridor,
+                settings,
+                evidence=evidence,
+                input_bounds=box if settings.input_region is not None else None,
+            )
         else:
             from .adaptive_ground import assess
 
@@ -380,7 +430,14 @@ class DepthDetector:
                 assessment["_object_maps"]["gray"] = assessment["_navigation_maps"][
                     "gray"
                 ]
-        preview = render_depth(image, depth, assessment, corridor, settings, geometry)
+        from .overlay_geometry import analysis_geometry
+
+        assessment["overlay_geometry"] = analysis_geometry(
+            image.size, assessment, corridor, box
+        )
+        preview = render_depth(
+            image, depth, assessment, corridor, settings, geometry, draw_geometry=False
+        )
         return {
             **assessment,
             "_preview": preview,

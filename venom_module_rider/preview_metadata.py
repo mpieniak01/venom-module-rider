@@ -31,6 +31,7 @@ _FIELDS = (
     "sector_space",
     "floor_fraction",
     "confidence_fraction",
+    "overlay_geometry",
 )
 _SOURCE_FIELDS = (
     "camera_session",
@@ -65,6 +66,13 @@ def analysis_header(result):
         encoded = json.dumps(data, separators=(",", ":"), allow_nan=False)
     except (TypeError, ValueError):
         raise RiderError("vision_preview_metadata_invalid", 503) from None
+    if len(encoded) > MAX_PREVIEW_ANALYSIS_CHARS and "overlay_geometry" in data:
+        # Drop only optional drawing detail. Identity and deadlines are immutable.
+        geometry = dict(data["overlay_geometry"])
+        for key in ("objects", "floor_boundary", "near", "guard_clear"):
+            geometry.pop(key, None)
+        data["overlay_geometry"] = geometry
+        encoded = json.dumps(data, separators=(",", ":"), allow_nan=False)
     if len(encoded) > MAX_PREVIEW_ANALYSIS_CHARS:
         raise RiderError("vision_preview_metadata_invalid", 503)
     return encoded

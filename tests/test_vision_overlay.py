@@ -209,7 +209,10 @@ def test_quality_rejection_still_labels_unknown_regions_without_loading_model(gr
     assert result["state"] == "unknown" and result["reason"] == "vision_image_quality"
     assert all(row["state"] == "unknown" for row in result["sectors"].values())
     preview = np.asarray(Image.open(io.BytesIO(result["_preview"])))
-    assert (preview.max(axis=2) > 100).sum() > 100  # Visible uncertainty badges.
+    assert preview.max() < 10  # Geometry no longer burns into the JPEG.
+    from venom_module_rider.overlay_geometry import validate_geometry
+
+    validate_geometry(result["overlay_geometry"], (320, 240))
 
 
 async def test_projected_metadata_remains_small_in_the_real_preview_response():

@@ -31,6 +31,7 @@ _ARRAYS = {
     "negative_support",
     "corridor",
     "valid",
+    "input_bounds",
     *_GEOMETRY,
 }
 
@@ -97,6 +98,14 @@ def _validated(maps: Mapping[str, Any]) -> dict[str, Any]:
             ):
                 raise ValueError("analysis_navigation_evidence_masks")
             result[key] = value
+    if "input_bounds" in maps:
+        value = np.asarray(maps["input_bounds"])
+        if value.shape != (4,) or value.dtype.kind not in "iu":
+            raise ValueError("analysis_navigation_evidence_input_bounds")
+        a, b, c, d = value.tolist()
+        if not 0 <= a < c <= shape[1] or not 0 <= b < d <= shape[0]:
+            raise ValueError("analysis_navigation_evidence_input_bounds")
+        result["input_bounds"] = value.astype(np.int16)
     for key in _GEOMETRY:
         if key in maps:
             result[key] = _boolean(maps[key])

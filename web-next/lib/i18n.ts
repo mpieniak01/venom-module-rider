@@ -1,5 +1,17 @@
 // Module-owned translations. Every key contains PL, EN and DE by construction.
 export const messages = {
+  "inputRegion.title": ["Obraz przekazywany do modelu", "Model input image", "Modelleingabebild"],
+  "inputRegion.preset": ["Zakres obrazu", "Image area", "Bildbereich"],
+  "inputRegion.recommended": ["Zalecany: dolne 60%, pełna szerokość", "Recommended: bottom 60%, full width", "Empfohlen: untere 60%, volle Breite"],
+  "inputRegion.full": ["Cała klatka", "Full frame", "Gesamtes Bild"],
+  "inputRegion.custom": ["Własny wycinek", "Custom crop", "Eigener Ausschnitt"],
+  "inputRegion.left": ["Lewa krawędź", "Left edge", "Linker Rand"],
+  "inputRegion.top": ["Górna krawędź", "Top edge", "Oberer Rand"],
+  "inputRegion.right": ["Prawa krawędź", "Right edge", "Rechter Rand"],
+  "inputRegion.bottom": ["Dolna krawędź", "Bottom edge", "Unterer Rand"],
+  "inputRegion.hint": ["Wycinek musi obejmować strefę oceny i odniesienie podłogi. Poza nim wynik pozostaje nieznany. Linie podglądu nie zmieniają analizy.", "The crop must include the assessment and floor reference areas. Outside it the result remains unknown. Display lines do not change analysis.", "Der Ausschnitt muss Bewertungs- und Bodenreferenzbereich umfassen. Außerhalb bleibt das Ergebnis unbekannt. Anzeigelinien ändern die Analyse nicht."],
+  "inputRegion.unsupported": ["Zmiana wycinka wymaga zgodnej wersji Venoma i Rider-Pi.", "Changing the crop requires compatible Venom and Rider-Pi versions.", "Der Ausschnitt erfordert kompatible Versionen von Venom und Rider-Pi."],
+
   "analysis.video.title": ["Odtwarzanie nagrania", "Recording playback", "Aufnahme abspielen"],
   "samples.reviewInfo": ["Wybrane nagranie i badanie", "Selected recording and study", "Ausgewählte Aufnahme und Untersuchung"],
   "samples.recordingInfo": ["Dane nagrania", "Recording information", "Aufnahmeinformationen"],

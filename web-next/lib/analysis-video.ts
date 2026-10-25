@@ -1,3 +1,4 @@
+import {readGeometry} from "./overlay-geometry";
 import { record, str, type JsonRecord } from "./model";
 import { SAMPLES_BASE } from "./samples";
 
@@ -100,7 +101,7 @@ function comparable(spec:JsonRecord):unknown {
     profile:spec.profile??"da2-default",window:spec.window??1,quality_mode:spec.quality_mode??"production",
     input_source:spec.input_source??"samples",corridor:spec.corridor??[.35,.8,.65,.95],
     behavior:{version:1,profile_id:"legacy",profile_revision:1,...record(spec.behavior)},
-    perception:{engine:semantic?"segformer":"depth_plane",model_id:"",artifact_sha256:"",residual_limit:.06,outlier_limit:.005,slope_min:2,semantic_models:{},...perception},
+    perception:{engine:semantic?"segformer":"depth_plane",model_id:"",artifact_sha256:"",residual_limit:.06,outlier_limit:.005,slope_min:2,semantic_models:{},...perception,input_region:semantic?undefined:perception.input_region??{version:1,bounds:[0,0,1,1]}},
     geometry:{mode:"image",fx:null,fy:null,cx:.5,cy:.5,radius_ratio:null,lookahead_ratio:2,max_heading_deg:45,...record(spec.geometry)},
   });
 }
@@ -128,7 +129,7 @@ export function analysisFrameAssets(report:unknown,runId:string,session:string,r
   const names=Array.isArray(row.artifact_names)?row.artifact_names:[];
   if(row.classification_layer!==undefined&&row.classification_layer!==null){
     const layer=record(row.classification_layer),name=String(expected).padStart(4,"0")+"-mask.png";
-    if(layer.version!==1||layer.palette_version!==1||layer.source_sha256!==row.raw_sha256||layer.artifact!==name
+    if(![1,2].includes(Number(layer.version))||layer.version===2&&!readGeometry(row.overlay_geometry,[Number(layer.width),Number(layer.height)])||layer.palette_version!==1||layer.source_sha256!==row.raw_sha256||layer.artifact!==name
       ||!integer(layer.width,1)||layer.width>1280||!integer(layer.height,1)||layer.height>720
       ||names.filter(value=>value===name).length!==1||names.some(value=>typeof value==="string"&&value.endsWith("-overlay.jpg")))
       throw new Error("analysis_frame_identity");

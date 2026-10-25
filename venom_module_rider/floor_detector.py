@@ -93,7 +93,11 @@ class FloorDetector:
             }
             if preview:
                 result["_preview"] = render_preview(
-                    rgb, np.zeros((1, 150, 4, 4)), corridor, semantic=semantic
+                    rgb,
+                    np.zeros((1, 150, 4, 4)),
+                    corridor,
+                    semantic=semantic,
+                    draw_geometry=False,
                 )
             return result
         self._load()
@@ -118,7 +122,12 @@ class FloorDetector:
             result["_navigation_maps"] = {**maps, "gray": gray}
         if preview:
             result["_preview"] = render_preview(
-                rgb, logits, corridor, semantic=semantic, source_maps=maps
+                rgb,
+                logits,
+                corridor,
+                semantic=semantic,
+                source_maps=maps,
+                draw_geometry=False,
             )
         return result
 
@@ -253,7 +262,9 @@ def _classify_configured(logits, corridor, semantic, source_maps):
     }
 
 
-def render_preview(rgb, logits, corridor, *, semantic=None, source_maps=None):
+def render_preview(
+    rgb, logits, corridor, *, semantic=None, source_maps=None, draw_geometry=True
+):
     """Diagnostic mask uses exactly the configured confidence and class mapping."""
     import numpy as np
     from PIL import Image, ImageDraw
@@ -278,17 +289,18 @@ def render_preview(rgb, logits, corridor, *, semantic=None, source_maps=None):
     height, width = rgb.shape[:2]
     overlay = Image.fromarray(colors).resize((width, height), Image.Resampling.NEAREST)
     image = Image.blend(Image.fromarray((rgb * 255).astype(np.uint8)), overlay, 0.4)
-    x0, y0, x1, y1 = corridor
-    ImageDraw.Draw(image).rectangle(
-        (
-            int(x0 * (width - 1)),
-            int(y0 * (height - 1)),
-            int(x1 * (width - 1)),
-            int(y1 * (height - 1)),
-        ),
-        outline="white",
-        width=3,
-    )
+    if draw_geometry:
+        x0, y0, x1, y1 = corridor
+        ImageDraw.Draw(image).rectangle(
+            (
+                int(x0 * (width - 1)),
+                int(y0 * (height - 1)),
+                int(x1 * (width - 1)),
+                int(y1 * (height - 1)),
+            ),
+            outline="white",
+            width=3,
+        )
     stream = io.BytesIO()
     image.save(stream, format="JPEG", quality=85)
     return stream.getvalue()

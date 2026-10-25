@@ -52,6 +52,7 @@ class ObjectDiagnostics:
             raise ValueError("navigation_object_maps")
         route = corridor_mask(maps.get("corridor", corridor), raw.shape)
         h, w = raw.shape
+        a, b, c, d = maps.get("input_bounds", (0, 0, w, h))
         labels = maps.get("labels")
         excluded = [0, 3, 5, 8, 14, 28]
         if params.get("object_policy_enabled"):
@@ -147,7 +148,9 @@ class ObjectDiagnostics:
                     "lower_px": lower,
                     "observations": len(history),
                     "approaching_candidate": bool(approaching),
-                    "clipped": box[0] == 0 or box[1] == 0 or box[2] == w or box[3] == h,
+                    "clipped": bool(
+                        box[0] <= a or box[1] <= b or box[2] >= c or box[3] >= d
+                    ),
                 }
             )
         if len(self.tracks) > 32:

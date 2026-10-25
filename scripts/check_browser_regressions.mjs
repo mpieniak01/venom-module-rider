@@ -18,6 +18,8 @@ if(args.some((value,index)=>value!=="--only"&&args[index-1]!=="--only"))throw ne
 const filter=args.includes("--only")?args[args.indexOf("--only")+1]:"";
 if(args.includes("--only")&&!filter)throw new Error("--only requires a regression name");
 const fixtures={
+  "input-region-operator":"input-region-operator-fixture.tsx",
+  "input-region":"input-region-fixture.tsx",
   "room-preset":"room-preset-fixture.tsx",
   "operator-parameters":"operator-parameters-fixture.tsx",
   "image-reference":"image-reference-fixture.tsx",
@@ -26,6 +28,8 @@ const fixtures={
   workspace:"global-study-fixture.tsx",
 };
 const cases=[
+  {name:"input-region-operator",fixture:"input-region-operator",file:"input-region-operator.js"},
+  {name:"input-region",fixture:"input-region",file:"input-region.js"},
   {name:"room-preset",fixture:"room-preset",file:"room-preset.js"},
   {name:"operator-parameters",fixture:"operator-parameters",file:"operator-parameters.js"},
   {name:"calibration-defaults",fixture:"image-reference",file:"image-reference-defaults.js"},

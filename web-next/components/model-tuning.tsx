@@ -1,3 +1,5 @@
+import {InputRegionControls} from "./input-region";
+import {inputCovers} from "../lib/input-region";
 import { useEffect, useRef, useState } from "react";
 import { data, record, type JsonRecord } from "../lib/model";
 import { behaviorError, behaviorSwitchBlock } from "../lib/behavior";
@@ -26,7 +28,7 @@ export function ModelTuning({ client, policy, goals, locked, t, onApplied, onRef
   const conflict = !!draft && (tuningDraftStale(draft, policy, session) || draft.pipelineRevision !== pipeline?.revision || draft.provider !== provider);
   const supported = host && (semantic ? policy?.model_tuning_supported === true : depth);
   const changed = !!visibleDraft && JSON.stringify(perception) !== JSON.stringify(record(policy?.perception));
-  const valid = !!visibleDraft && validTuning(visibleDraft);
+  const valid = !!visibleDraft && validTuning(visibleDraft) && (visibleDraft.perception.input_region === undefined || inputCovers(visibleDraft.perception.input_region,policy?.corridor) && !(record(policy?.avoidance).enabled === true && record(record(policy?.avoidance).geometry).mode === "ground" && JSON.stringify(record(visibleDraft.perception.input_region).bounds)!==JSON.stringify([0,0,1,1])));
   const block = local ? "tuning.local" : !host ? "tuning.providerUnknown" : !supported ? "tuning.unsupported" : conflict ? "behavior.conflict"
     : behaviorSwitchBlock(client.status, client.controlFresh, goals, locked || pending || !!client.busy);
   const edit = (change: (value: JsonRecord) => JsonRecord) => {
@@ -81,6 +83,7 @@ export function ModelTuning({ client, policy, goals, locked, t, onApplied, onRef
             value={Number.isFinite(perception[field]) ? Number(perception[field]) * (field === "outlier_limit" ? 100 : 1) : ""}
             onChange={event => edit(current => ({ ...current, [field]: event.target.value === "" ? Number.NaN : Number(event.target.value) / (field === "outlier_limit" ? 100 : 1) }))}/>
         </Field>)}
+        <InputRegionControls value={perception.input_region} onChange={value=>edit(current=>({...current,input_region:value}))} disabled={policy?.input_region_supported!==true} t={t}/>{policy?.input_region_supported!==true&&<p className={styles.hint}>{t("inputRegion.unsupported")}</p>}
         <p className={styles.hint}>{t("perceptionGeometryHint")}</p>
       </fieldset>}
       {host && !semantic && !depth && <p className={styles.hint}>{t("tuning.noModel")}</p>}
