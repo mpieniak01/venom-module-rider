@@ -1,5 +1,6 @@
 import {readGeometry,type Geometry} from "../lib/overlay-geometry";
 export const GEOMETRY_STROKE={strokeWidth:1.5,vectorEffect:"non-scaling-stroke" as const};
+/** Draw frozen source-space geometry using the shared non-scaling stroke style. */
 export function GeometryShapes({geometry:g}:{geometry:Geometry}){
  const box=(b:number[],color:string,dash?:string)=><rect x={b[0]} y={b[1]} width={b[2]-b[0]} height={b[3]-b[1]} stroke={color} strokeDasharray={dash} {...GEOMETRY_STROKE}/>;
  const path=(p:(number[]|null)[])=>p.map((v,i)=>v?`${i===0||p[i-1]===null?"M":"L"}${v[0]},${v[1]}`:"").join(" ");
@@ -9,6 +10,7 @@ export function GeometryShapes({geometry:g}:{geometry:Geometry}){
  {g.near&&<path d={path(g.near)} stroke={g.guard_clear?"#23d264":"#ffb923"} {...GEOMETRY_STROKE}/>}{g.floor_boundary&&<path d={path(g.floor_boundary)} stroke="#7edcff" {...GEOMETRY_STROKE}/>}
  {g.objects?.map(o=><g key={o.id}>{box(o.bounds,o.evidence==="approaching"?"#f03c41":"#ffb923","5 4")}</g>)}</g>;
 }
+/** Render a display-only SVG when its geometry matches the visible source. */
 export function GeometryOverlay({value,size}:{value:unknown;size?:[number,number]}){
  const g=readGeometry(value,size);if(!g)return null;
  return <svg data-testid="model-geometry-overlay" aria-hidden="true" viewBox={`0 0 ${g.width} ${g.height}`} preserveAspectRatio="xMidYMid meet" style={{position:"absolute",inset:0,width:"100%",height:"100%",pointerEvents:"none"}}><GeometryShapes geometry={g}/></svg>;

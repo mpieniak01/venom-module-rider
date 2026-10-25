@@ -1,5 +1,6 @@
 import {record} from "./model";
 export type Geometry={version:1;width:number;height:number;input_bounds:number[];score_bounds?:number[];reference_bounds?:number[];paths?:Record<string,(number[]|null)[]>;near?:(number[]|null)[];floor_boundary?:(number[]|null)[];guard_clear?:boolean;objects?:{id:number;bounds:number[];evidence:string}[]};
+/** Accept only bounded drawing instructions matching the decoded source dimensions. */
 export function readGeometry(value:unknown,size?:[number,number]):Geometry|null{
  const g=record(value),w=Number(g.width),h=Number(g.height),integer=(v:unknown)=>typeof v==="number"&&Number.isSafeInteger(v);
  if(g.version!==1||!integer(g.width)||!integer(g.height)||w<1||w>1280||h<1||h>720||size&&(w!==size[0]||h!==size[1]))return null;

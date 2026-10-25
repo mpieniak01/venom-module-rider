@@ -6,6 +6,7 @@ SIDES = {"left", "center", "right"}
 
 
 def bounds(corridor, size):
+    """Convert an assessed rectangle to its exact half-open source-pixel bounds."""
     w, h = size
     a, b, c, d = corridor
     return [
@@ -46,6 +47,7 @@ def outline(points, size, count=25):
 
 
 def analysis_geometry(size, assessment, corridor, input_bounds=None):
+    """Extract bounded display geometry in the decoded source coordinate system."""
     w, h = size
     result = {
         "version": 1,
@@ -105,6 +107,7 @@ def source_geometry(result, payload, corridor):
 
 
 def with_evidence(geometry, spatial, objects=None):
+    """Attach bounded visual diagnostics without altering perception evidence."""
     result = dict(geometry)
     w, h = result["width"], result["height"]
     boundary = spatial.get("boundary", [])

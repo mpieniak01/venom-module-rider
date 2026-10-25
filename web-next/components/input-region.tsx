@@ -4,6 +4,7 @@ import {record,type JsonRecord} from "../lib/model";
 import type {Translator} from "../lib/i18n";
 import {Field,Input,Select} from "./primitives";
 import styles from "../rider.module.css";
+/** Edit operator input bounds without replacing an explicit custom choice. */
 export function InputRegionControls({value,onChange,disabled,t}:{value:unknown;onChange:(v:JsonRecord)=>void;disabled?:boolean;t:Translator}){
  const raw=record(value).bounds;const bounds=Array.isArray(raw)&&raw.length===4?raw as number[]:inputBounds(value),same=(b:number[])=>JSON.stringify(bounds)===JSON.stringify(b);
  const [customAt,setCustomAt]=useState<string|null>(null);

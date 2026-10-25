@@ -781,6 +781,7 @@ async def test_real_pi_has_priority_over_same_engine_demo_admission():
 
 
 def test_rejected_dark_capture_replaces_previous_preview_without_model_load():
+    """Publish the actual rejected frame with separate geometry and no model load."""
     from venom_module_rider.depth_detector import DepthDetector, PerceptionSettings
 
     detector = DepthDetector()

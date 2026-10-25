@@ -47,6 +47,7 @@ def _boolean(value: Any) -> bool:
 
 
 def _validated(maps: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate bounded navigation evidence and optional original input bounds."""
     import numpy as np
 
     from .spatial_evidence import semantic_masks

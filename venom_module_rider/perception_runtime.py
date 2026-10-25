@@ -374,6 +374,7 @@ class YoloSemanticOnnx:
         }
 
     def detect(self, payload, corridor, *, evidence=False, semantic=None):
+        """Produce source-bound classification without rasterizing display geometry."""
         import numpy as np
 
         from .cuda_execution import require_cuda

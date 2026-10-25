@@ -13,6 +13,7 @@ class InputRegion(BaseModel):
 
     @model_validator(mode="after")
     def normalized(self):
+        """Require an ordered finite rectangle in normalized source coordinates."""
         if len(self.bounds) != 4:
             raise ValueError("navigation_input_region_invalid")
         a, b, c, d = self.bounds
@@ -22,15 +23,18 @@ class InputRegion(BaseModel):
 
     @property
     def full(self):
+        """Report whether the explicit input covers the complete source frame."""
         return self.bounds == [0.0, 0.0, 1.0, 1.0]
 
     def covers(self, corridor):
+        """Require the crop to include both scoring and floor-reference areas."""
         x0, y0, x1, y1 = corridor
         top = min(y0, max(0.0, round(y1 - 0.30, 12)))
         a, b, c, d = self.bounds
         return a <= x0 and b <= top and c >= x1 and d >= y1
 
     def pixels(self, size):
+        """Resolve edges to a sufficiently large half-open pixel rectangle."""
         w, h = size
         a, b, c, d = self.bounds
         box = math.floor(a * w), math.floor(b * h), math.ceil(c * w), math.ceil(d * h)
@@ -40,6 +44,7 @@ class InputRegion(BaseModel):
 
 
 def input_box(image, region):
+    """Resolve optional input bounds against the actual decoded source dimensions."""
     return region.pixels(image.size) if region is not None else (0, 0, *image.size)
 
 

@@ -54,6 +54,7 @@ class VisionLoop:
 
     @model_operation
     def _detect_floor(self, payload, frame):
+        """Run semantic detection with policy settings and source-bound metadata."""
         from .navigation_profiles import parameters
 
         options = (
@@ -107,6 +108,7 @@ class VisionLoop:
 
     @model_operation
     def _detect_model(self, payload, frame):
+        """Run the selected adapter and retain geometry in source-image coordinates."""
         assert self.models is not None
         from .overlay_geometry import source_geometry
 
@@ -115,6 +117,7 @@ class VisionLoop:
         )
 
     def status(self, perception=None):
+        """Advertise runtime state and supported versioned perception contracts."""
         selected = (
             self.depth_detector
             if perception and perception.get("engine") == "depth_plane"

@@ -11,6 +11,7 @@ import styles from "../rider.module.css";
 
 type ScopedDraft = ModelTuningDraft & { pipelineRevision: number; provider: string };
 type Props = { client: RiderClient; policy: JsonRecord | null; goals: JsonRecord; locked: boolean; t: Translator; onApplied: (config: JsonRecord) => void; onRefresh: () => void; onPendingChange?: (pending: boolean) => void };
+/** Apply operator perception edits with session, pipeline and policy revision guards. */
 export function ModelTuning({ client, policy, goals, locked, t, onApplied, onRefresh, onPendingChange }: Props) {
   const [draft, setDraft] = useState<ScopedDraft | null>(null), [pending, setPending] = useState(false);
   const [failure, setFailure] = useState(""), [saved, setSaved] = useState<number | null>(null);

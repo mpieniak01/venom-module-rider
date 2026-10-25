@@ -31,6 +31,7 @@ class PerceptionSettings(BaseModel):
 
     @model_serializer(mode="wrap")
     def serialize_input(self, handler):
+        """Omit absent input regions to preserve historical configuration identities."""
         value = handler(self)
         if self.input_region is None:
             value.pop("input_region", None)
@@ -342,6 +343,7 @@ class DepthDetector:
         return self._detect(payload, corridor, settings, geometry, evidence=evidence)
 
     def _detect(self, payload, corridor, settings, geometry=None, *, evidence=False):
+        """Restore crop depth to source coordinates before assessment."""
         import numpy as np
         import torch
 

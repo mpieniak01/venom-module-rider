@@ -15,6 +15,7 @@ def sector_regions(corridor):
 
 
 def assess_sectors(depth, corridor, coefficients, scale, settings, oriented):
+    """Assess only side regions with complete observed depth coverage."""
     import numpy as np
 
     h, w = depth.shape

@@ -58,6 +58,7 @@ class FloorDetector:
         self.session, self.digest = session, digest
 
     def detect(self, payload, corridor, *, preview=True, evidence=False, semantic=None):
+        """Produce source-bound classification without rasterizing display geometry."""
         import numpy as np
         from PIL import Image
 

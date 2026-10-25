@@ -9,6 +9,7 @@ import styles from "../rider.module.css";
 
 export type VideoComparison={report:JsonRecord;runId:string;rows:AnalysisRow[]};
 export type DisplayFrame={key:string;index:number;src:string;raw_sha256:string;width:number;height:number;comparison:VideoComparison|null};
+/** Promote decoded source and matching classification together before drawing geometry. */
 export function VideoFramePair({frame,session,active,requested,onReady,onFailure,t}:{frame:DisplayFrame;session:string;active:boolean;requested:boolean;onReady:(frame:DisplayFrame)=>void;onFailure:()=>void;t:Translator}){
   const raw=useRef<HTMLImageElement>(null),canvas=useRef<HTMLCanvasElement>(null),layer=useRef<HTMLImageElement|null>(null);
   const rawLoaded=useRef(false),layerState=useRef("loading");

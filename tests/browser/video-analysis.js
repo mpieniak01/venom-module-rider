@@ -185,6 +185,18 @@ async page=>{
  check(rejectedPlayback.every(x=>x.raw===120?x.mask===null:x.raw===x.mask),"a neighbouring classification leaked into the displayed frame");
  const before=await page.getByTestId("analysis-result-snapshot").textContent();
  await page.getByTestId("analysis-settings").locator("summary").first().click();
+ // Ground geometry must explain its full-frame requirement without rewriting the crop.
+ await page.getByTestId("analysis-settings").getByText("Parametry analizy",{exact:true}).click();
+ await page.getByLabel("Metoda geometrii",{exact:true}).selectOption("ground");
+ await page.getByTestId("analysis-input-region-message").waitFor({state:"visible"});
+ check((await page.getByTestId("analysis-input-region-message").textContent()).includes("Cała klatka"),"missing ground/full-frame explanation");
+ check(await page.getByTestId("analysis-start").isDisabled(),"ground accepted a cropped input");
+ check(await page.getByTestId("analysis-new-from-settings").isDisabled(),"alternate action bypasses the ground input check");
+ check(await page.getByTestId("input-region-preset").inputValue()==="recommended","ground silently replaced the operator crop");
+ await page.getByTestId("input-region-preset").selectOption("full");
+ check(await page.getByTestId("analysis-input-region-message").count()===0,"full-frame choice did not clear the explanation");
+ await page.getByLabel("Metoda geometrii",{exact:true}).selectOption("image");
+ await page.getByTestId("input-region-preset").selectOption("recommended");
  await page.getByTestId("analysis-load-rider").click();
  await page.getByTestId("analysis-rider-source").filter({hasText:"9"}).waitFor();
  check((await page.getByTestId("analysis-result-snapshot").textContent()).includes("wersja 1"),"old run relabelled as current room settings");

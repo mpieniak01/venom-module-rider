@@ -10,7 +10,8 @@ recommended bottom 60% of the source, at full width. Bounds are normalized
 left/top/right/bottom, with a half-open pixel rectangle (floor start, ceil end).
 An omitted field preserves the legacy whole-frame input and serialized contract.
 A newly selected DA2 identity receives the recommended region when image geometry
-is in use; an enabled ground calibration retains its full-frame input. Merely reading an
+is in use and it covers the existing floor reference. Otherwise the default input
+is full frame; an enabled ground calibration likewise retains full-frame input. Merely reading an
 existing configuration does not migrate it. The operator can choose the whole
 frame, the recommended region or edit all four edges in percent in model tuning.
 New DA2 offline forms start with the recommended region; importing Rider settings

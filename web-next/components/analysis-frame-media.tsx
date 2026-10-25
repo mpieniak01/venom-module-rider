@@ -7,6 +7,7 @@ import type {JsonRecord} from "../lib/model";
 import type {Translator} from "../lib/i18n";
 import styles from "../rider.module.css";
 
+/** Compose archived artifacts and geometry only with their hash-locked RAW source. */
 export function AnalysisFrameMedia({report,runId,session,row,index,t}:{report:JsonRecord;runId:string;session:string;row:JsonRecord;index:number;t:Translator}){
   let assets:FrameAsset[]=[];
   try{assets=analysisFrameAssets(report,runId,session,row,index);}catch{}

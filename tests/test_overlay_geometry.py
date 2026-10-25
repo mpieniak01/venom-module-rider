@@ -26,6 +26,7 @@ from venom_module_rider.preview_metadata import analysis_header
 
 
 def geometry():
+    """Return a minimal crop-bound drawing descriptor for a 320 by 240 source."""
     return {
         "version": 1,
         "width": 320,
@@ -35,6 +36,7 @@ def geometry():
 
 
 def test_mask_v2_contains_only_classification_and_matches_unchanged_assessment():
+    """Keep classification-only pixels and unchanged numeric results in mask v2."""
     y, _ = np.mgrid[:240, :320]
     depth = 1 / np.maximum(0.1, 4 * (y / 240 - 0.5))
     corridor = (0.35, 0.8, 0.65, 0.95)
@@ -85,11 +87,13 @@ def test_mask_v2_contains_only_classification_and_matches_unchanged_assessment()
     ],
 )
 def test_invalid_geometry_cannot_label_a_different_source(change):
+    """Reject drawing instructions that exceed or mismatch their source frame."""
     with pytest.raises(ValueError):
         validate_geometry({**geometry(), **change}, (320, 240))
 
 
 def test_ground_outlines_keep_gaps_and_are_bounded():
+    """Preserve projection gaps while bounding the number of vector points."""
     points = [[i / 100, 0.8] for i in range(100)]
     points[50] = None
     line = outline(points, (320, 240))
@@ -101,6 +105,7 @@ def test_ground_outlines_keep_gaps_and_are_bounded():
 
 
 def test_optional_evidence_is_bounded_and_preview_does_not_change_identity():
+    """Bound drawing diagnostics without mutating preview identities."""
     near = np.zeros((240, 320), bool)
     near[190:220, 100:200] = True
     g = with_evidence(

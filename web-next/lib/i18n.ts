@@ -1,5 +1,6 @@
 // Module-owned translations. Every key contains PL, EN and DE by construction.
 export const messages = {
+  "inputRegion.groundRequiresFull": ["Dla geometrii „Bieżące podłoże i obrys” wybierz „Cała klatka”, aby rozpocząć analizę.", "For ground geometry, select “Full frame” to start the analysis.", "Für die Bodengeometrie wählen Sie „Gesamtes Bild“, um die Analyse zu starten."],
   "inputRegion.title": ["Obraz przekazywany do modelu", "Model input image", "Modelleingabebild"],
   "inputRegion.preset": ["Zakres obrazu", "Image area", "Bildbereich"],
   "inputRegion.recommended": ["Zalecany: dolne 60%, pełna szerokość", "Recommended: bottom 60%, full width", "Empfohlen: untere 60%, volle Breite"],

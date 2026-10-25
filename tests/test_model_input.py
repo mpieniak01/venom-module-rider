@@ -12,11 +12,13 @@ from venom_module_rider.vision_contract import VisionFrame
 
 
 def plane():
+    """Create source-coordinate depth for an exact synthetic floor."""
     y, _ = np.mgrid[:240, :320]
     return 1.0 / np.maximum(0.1, 4 * (y / 240 - 0.5))
 
 
 def test_full_view_omission_preserves_old_serialized_policy():
+    """Keep legacy policy bytes and full-frame depth identity unchanged."""
     settings = PerceptionSettings(engine="depth_plane")
     assert "input_region" not in settings.model_dump()
     assert "input_region" not in settings.model_dump_json()
@@ -25,6 +27,7 @@ def test_full_view_omission_preserves_old_serialized_policy():
 
 
 def test_recommended_crop_retains_exact_source_plane_and_scored_pixels():
+    """Restore crop coordinates without moving the reference plane or scored pixels."""
     depth = plane()
     settings = PerceptionSettings(engine="depth_plane", input_region=InputRegion())
     box = input_box(Image.new("RGB", (320, 240)), settings.input_region)
@@ -48,6 +51,7 @@ def test_recommended_crop_retains_exact_source_plane_and_scored_pixels():
 
 
 def test_narrow_input_cannot_authorize_unseen_side_paths():
+    """Keep partially unobserved side paths unknown even when the centre is clear."""
     depth = plane()
     box = (64, 96, 256, 240)
     restored = restore_depth(depth[96:240, 64:256], (320, 240), box)
@@ -66,6 +70,7 @@ def test_narrow_input_cannot_authorize_unseen_side_paths():
 
 @pytest.mark.parametrize("bounds", [[0.0, 0.9, 1.0, 1.0], [0.4, 0.4, 0.6, 1.0]])
 def test_input_cannot_cut_off_floor_reference_or_scoring_region(bounds):
+    """Reject incomplete reference coverage in both saved and live frame contracts."""
     settings = PerceptionSettings(
         engine="depth_plane", input_region=InputRegion(bounds=bounds)
     )
@@ -96,11 +101,13 @@ def test_input_cannot_cut_off_floor_reference_or_scoring_region(bounds):
     ],
 )
 def test_malformed_regions_are_rejected(value):
+    """Reject unsupported versions and malformed or non-finite normalized bounds."""
     with pytest.raises(ValidationError):
         InputRegion.model_validate(value)
 
 
 def test_small_actual_crop_and_unsupported_offline_model_are_rejected():
+    """Prevent undersized input and accidental crop inheritance by other models."""
     region = InputRegion()
     with pytest.raises(ValueError, match="too_small"):
         region.pixels((32, 32))
@@ -110,6 +117,7 @@ def test_small_actual_crop_and_unsupported_offline_model_are_rejected():
 
 
 def test_saved_photo_worker_runs_crop_and_restores_full_source(tmp_path, monkeypatch):
+    """Exercise worker crop inference while preserving the original artifact size."""
     import base64
     import io
 

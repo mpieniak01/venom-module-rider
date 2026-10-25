@@ -68,6 +68,7 @@ export function ImageReferenceControls({reference,client,size,t}:{reference:Refe
   </span>;
 }
 
+/** Combine model geometry with compatible visual calibration in one source space. */
 export function ImageReferenceOverlay({reference,size,t,geometry}:{reference:ReferenceController;size:[number,number];t:Translator;geometry?:unknown}){
   const drag=useRef<string|null>(null),v=reference.values;
   const model=readGeometry(geometry,size);

@@ -26,6 +26,7 @@ function remembered(session:string):string {
   try {const value=record(JSON.parse(sessionStorage.getItem(PENDING)||"{}"));return value.session_id===session&&/^[a-f0-9]{32}$/.test(str(value.request_id))?str(value.request_id):"";}
   catch{return "";}
 }
+/** Keep frozen results separate from settings for a future offline study. */
 export function AnalysisPanel({session,t,language,sessionVideo,sessionPicker,sessionSummary}:{session:string;t:Translator;language:string;sessionVideo?:SessionVideo|null;sessionPicker?:ReactNode;sessionSummary?:ReactNode}) {
   const [profiles,setProfiles]=useState<Profile[]>([]);
   const [profile,setProfile]=useState("da2-default");
@@ -154,6 +155,7 @@ export function AnalysisPanel({session,t,language,sessionVideo,sessionPicker,ses
     setInputRegion(region(RECOMMENDED_INPUT));setBehavior({...LEGACY_ANALYSIS_BEHAVIOR});setSemanticModels({});setRoi([.35,.8,.65,.95]);setResidual(.06);setOutliers(.005);setSlope(2);
   };
   const settings=analysisProfileSettings(available,windowSize,{mode:geometry,fx:Number.isFinite(fx)?fx:null,fy:Number.isFinite(fy)?fy:null,radius_ratio:Number.isFinite(radius)?radius:null,lookahead_ratio:lookahead},{input_region:inputRegion,residual_limit:residual,outlier_limit:outliers,slope_min:slope,...(Object.keys(semanticModels).length?{semantic_models:semanticModels}:{})});
+  const groundRequiresFull=profile==="da2-default"&&geometry==="ground"&&JSON.stringify(inputBounds(inputRegion))!==JSON.stringify([0,0,1,1]);
   const validInput=profile!=="da2-default"||(inputCovers(inputRegion,roi)&&(geometry!=="ground"||JSON.stringify(inputBounds(inputRegion))===JSON.stringify([0,0,1,1])));
   const currentSpec:JsonRecord={profile,quality_mode:quality,...(inputSource==="samples"?{count,offset}:{}),input_source:inputSource,corridor:roi,behavior:{...behavior},...settings};
   const start=async()=>{
@@ -206,6 +208,7 @@ export function AnalysisPanel({session,t,language,sessionVideo,sessionPicker,ses
       <div className={styles.sampleReviewBox} data-testid="analysis-actions-box">
     <Field label={t("analysis.runs")}><Select aria-label={t("analysis.runs")} data-testid="analysis-run" value={selected} onChange={event=>{setSourcePlayback(previous=>({...previous,playing:false}));setSelected(event.target.value);}}><option value="">{t("analysis.chooseRun")}</option>{runs.map(item=><option key={item.id} value={item.id}>{formatTime(item.created,language)} · {t("analysis.state."+item.state)} · {item.id.slice(0,8)}</option>)}</Select></Field>
     {run&&<div data-testid="analysis-status" className={styles.sampleRunStatus}><span aria-live="polite">{t("analysis.state."+run.state)} · {run.done}/{run.total}</span>{!terminal(run)&&<progress max={run.total} value={run.done}/>}{run.error&&<p role="alert"><code>{run.error}</code></p>}{!terminal(run)&&<Button data-testid="analysis-cancel" disabled={run.cancel_requested===true} onClick={()=>void cancel()}>{t(run.cancel_requested?"analysis.cancelling":"analysis.cancel")}</Button>}</div>}
+    {groundRequiresFull&&<p role="status" data-testid="analysis-input-region-message" className={styles.hint}>{t("inputRegion.groundRequiresFull")}</p>}
     <div className={styles.sampleAnalysisActions}><Button data-testid="analysis-start" tone="primary" disabled={!validInput||busy||!!pending||!available?.installed||(inputSource==="video"&&!canVideo)} onClick={()=>void start()}>{t(inputSource==="video"?"analysis.startVideo":"analysis.start")}</Button><Button onClick={()=>void refresh().catch(err=>setError(errorCode(err)))}>{t("refresh")}</Button></div>
       </div>
     </section>

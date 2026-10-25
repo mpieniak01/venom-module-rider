@@ -7,6 +7,7 @@ from .navigation_profiles import parameters
 
 
 def evaluate(result, frame, observer, *, context, captured_s, source=None):
+    """Combine spatial and temporal evidence independently of preview drawing."""
     raw_state, raw_reason = result["state"], result["reason"]
     maps = result.pop("_navigation_maps", None)
     params = parameters(frame.behavior.model_dump(), frame.perception.model_dump())

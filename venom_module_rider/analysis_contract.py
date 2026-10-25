@@ -56,6 +56,7 @@ class AnalysisSpec(StrictModel):
 
     @model_validator(mode="after")
     def matching_engine(self):
+        """Check profile, crop, window and geometry compatibility."""
         from .perception_catalog import FAST, SEGFORMER, YOLO
 
         if self.input_source == "video" and self.capture_evidence:

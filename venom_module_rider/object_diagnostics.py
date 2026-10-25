@@ -22,6 +22,7 @@ class ObjectDiagnostics:
         self.captured_s = None
 
     def observe(self, maps, corridor, *, context, sequence, captured_s, params):
+        """Track source objects and mark proposals clipped by the input boundary."""
         import cv2
         import numpy as np
 

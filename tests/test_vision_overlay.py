@@ -190,6 +190,7 @@ async def test_preview_keeps_image_sides_when_the_command_planner_mirrors_them(
 
 @pytest.mark.parametrize("ground", [False, True])
 def test_quality_rejection_still_labels_unknown_regions_without_loading_model(ground):
+    """Keep rejected pixels unchanged and describe unknown geometry separately."""
     from venom_module_rider.depth_detector import DepthDetector
     from venom_module_rider.ground_config import GroundGeometry
 

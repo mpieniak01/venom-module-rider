@@ -89,6 +89,7 @@ class VisionFrame(BaseModel):
 
     @model_validator(mode="after")
     def valid_model_input(self):
+        """Reject crops incompatible with the active engine, corridor or ground mode."""
         region = self.perception.input_region
         if region is not None:
             if self.perception.engine != "depth_plane":
