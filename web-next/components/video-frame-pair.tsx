@@ -15,9 +15,9 @@ export function VideoFramePair({frame,session,active,onReady,onFailure,t}:{frame
   const comparison=frame.comparison,row=record(comparison?.rows[frame.index]);
   const result=useMemo(()=>{
     if(!comparison)return {asset:null,error:""};
-    try{return {asset:videoPlaybackAsset(comparison.report,comparison.runId,session,comparison.rows[frame.index],frame),error:""};}
+    try{return {asset:videoPlaybackAsset(comparison.report,comparison.runId,session,comparison.rows[frame.index],{index:frame.index,raw_sha256:frame.raw_sha256}),error:""};}
     catch{return {asset:null,error:"analysis.frameMismatch"};}
-  },[comparison,session,frame]);
+  },[comparison,session,frame.index,frame.raw_sha256]);
   const complete=useCallback(()=>{
     const source=raw.current;
     if(!rawLoaded.current||!source)return;
@@ -35,8 +35,8 @@ export function VideoFramePair({frame,session,active,onReady,onFailure,t}:{frame
     }
     // Loaded image events promote both sides together. No second RAW request
     // or previous frame's classification is used to compose the result.
-    onReady({...frame,...size});
-  },[frame,result.asset,onReady]);
+    onReady({key:frame.key,index:frame.index,src:frame.src,raw_sha256:frame.raw_sha256,comparison,...size});
+  },[frame.key,frame.index,frame.src,frame.raw_sha256,comparison,result.asset,onReady]);
   useEffect(()=>{
     if(!result.asset)return;
     let alive=true;const image=new Image();layer.current=image;

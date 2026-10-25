@@ -1,15 +1,17 @@
-import {useCallback,useEffect,useMemo,useState} from "react";
+import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState} from "react";
 import {apiFetch} from "@/lib/api-client";
 import {getApiBaseUrl} from "@/lib/env";
 import {errorCode} from "../lib/model";
 import {readVideoPage,VIDEO_PAGE_SIZE,videoClock,videoFramePath,type VideoFrame,type VideoPage} from "../lib/analysis-video";
 import type {SessionVideo} from "../lib/samples";
 import type {Translator} from "../lib/i18n";
-import {Button,Field,Input} from "./primitives";
+import {Button,Field,Input,Select} from "./primitives";
 import {VideoFramePair,type DisplayFrame,type VideoComparison} from "./video-frame-pair";
 import styles from "../rider.module.css";
 
-export function SourceVideoPlayer({session,video,position,onPositionChange,comparison=null,onDisplayed,t}:{session:string;video:SessionVideo;position:{index:number;playing:boolean};onPositionChange:(value:{index:number;playing:boolean})=>void;comparison?:VideoComparison|null;onDisplayed?:(index:number)=>void;t:Translator}){
+export type SourcePlaybackRate=1|2|5;
+
+export function SourceVideoPlayer({session,video,position,onPositionChange,rate,onRateChange,comparison=null,onDisplayed,t}:{session:string;video:SessionVideo;position:{index:number;playing:boolean};onPositionChange:(value:{index:number;playing:boolean})=>void;rate:SourcePlaybackRate;onRateChange:(rate:SourcePlaybackRate)=>void;comparison?:VideoComparison|null;onDisplayed?:(index:number)=>void;t:Translator}){
   const [frames,setFrames]=useState<Map<number,VideoFrame>>(new Map());
   const [meta,setMeta]=useState<VideoPage|null>(null);
   const {index,playing}=position;
@@ -34,18 +36,23 @@ export function SourceVideoPlayer({session,video,position,onPositionChange,compa
   },[session,wantedOffset,attempt,frames,video.frames,index,onPositionChange]);
 
   const imageKey=session+":"+index+":"+(current?.raw_sha256??"")+":"+(comparison?.runId??"raw");
+  const expectedKey=useRef(imageKey);
+  useLayoutEffect(()=>{expectedKey.current=imageKey;},[imageKey]);
   const ready=shown?.key===imageKey;
   const next=frames.get(index+1);
   useEffect(()=>{
     if(!playing||!current||!ready)return;
     if(index+1>=total)return;
     if(!next)return;
-    const timer=setTimeout(()=>onPositionChange({index:index+1,playing:index+2<total}),Math.max(10,(next.source_time_s-current.source_time_s)*1000));
+    const timer=setTimeout(()=>onPositionChange({index:index+1,playing:index+2<total}),Math.max(10,(next.source_time_s-current.source_time_s)*1000/rate));
     return()=>clearTimeout(timer);
-  },[playing,current,next,index,total,ready,onPositionChange]);
+  },[playing,current,next,index,total,ready,rate,onPositionChange]);
   const src=useMemo(()=>getApiBaseUrl()+videoFramePath(session,index)+"?sha256="+(current?.raw_sha256??""),[session,index,current?.raw_sha256]);
   const candidate=useMemo<DisplayFrame|null>(()=>current?{key:imageKey,index,src,width:4,height:3,raw_sha256:current.raw_sha256,comparison}:null,[current,imageKey,index,src,comparison]);
-  const promote=useCallback((frame:DisplayFrame)=>setShown(old=>old?.key===frame.key?old:frame),[]);
+  const promote=useCallback((frame:DisplayFrame)=>{
+    if(frame.key!==expectedKey.current)return;
+    setShown(old=>old?.key===frame.key?old:frame);
+  },[]);
   useEffect(()=>{if(shown)onDisplayed?.(shown.index);},[shown,onDisplayed]);
   // Keep the decoded element mounted while the next JPEG loads. Its key stays
   // in this same list, so promoting a pending image never fetches it twice.
@@ -64,6 +71,7 @@ export function SourceVideoPlayer({session,video,position,onPositionChange,compa
       <Button data-testid="source-video-previous" disabled={index===0} onClick={()=>move(index-1)}>{t("samples.previous")}</Button>
       <Button data-testid="source-video-next" disabled={index+1>=total} onClick={()=>move(index+1)}>{t("samples.next")}</Button>
       <span data-testid="source-video-position">{t("analysis.video.position",{frame:(shown?.index??index)+1,total,time:videoClock(visible?.source_time_s??NaN),duration:videoClock(meta?.duration_s??video.duration_s)})}</span>
+    <Field label={t("analysis.video.speed")}><Select data-testid="source-video-speed" value={rate} onChange={event=>{const value=Number(event.target.value);if(value===1||value===2||value===5)onRateChange(value);}}>{[1,2,5].map(value=><option key={value} value={value}>×{value}</option>)}</Select></Field>
     <Field label={t("analysis.video.frame")}><Input aria-label={t("analysis.video.frame")} data-testid="analysis-frame" type="number" min={1} max={total} value={index+1} onChange={event=>{const value=Number(event.target.value)-1;if(Number.isSafeInteger(value)&&value>=0&&value<total)move(value);}}/></Field>
     </div>
     <Field label={t("analysis.video.seek")}><Input data-testid="source-video-seek" type="range" min={0} max={Math.max(0,total-1)} step={1} value={index} onChange={event=>move(Number(event.target.value))}/></Field>

@@ -6,7 +6,7 @@ import { data, errorCode, formatTime, record, str, type JsonRecord } from "../li
 import type { SessionVideo } from "../lib/samples";
 import { reportChunks, readAnalysisChunk, sameAnalysisSettings, videoRun, type AnalysisRow } from "../lib/analysis-video";
 import {SampleFacts} from "./sample-facts";
-import { SourceVideoPlayer } from "./source-video-player";
+import { SourceVideoPlayer,type SourcePlaybackRate } from "./source-video-player";
 import { AnalysisTimeline } from "./analysis-timeline";
 import { AnalysisFrameMedia } from "./analysis-frame-media";
 import { analysisProfileSettings, LEGACY_ANALYSIS_BEHAVIOR, riderAnalysisSettings, semanticProfile, type AnalysisProfile } from "../lib/analysis-profile";
@@ -35,6 +35,7 @@ export function AnalysisPanel({session,t,language,sessionVideo,sessionPicker,ses
   const sourceChosen=useRef(false);
   const canVideo=!!sessionVideo&&sessionVideo.frames>0&&typeof sessionVideo.ended_at==="number";
   const [sourcePlayback,setSourcePlayback]=useState({index:0,playing:false});
+  const [playbackRate,setPlaybackRate]=useState<SourcePlaybackRate>(1);
   useEffect(()=>{if(canVideo&&!sourceChosen.current)setInputSource("video");},[canVideo]);
   const [roi,setRoi]=useState([0.35,0.8,0.65,0.95]);
   const [residual,setResidual]=useState(0.06);
@@ -184,7 +185,7 @@ export function AnalysisPanel({session,t,language,sessionVideo,sessionPicker,ses
   };
   const artifact=(name:string)=>getApiBaseUrl()+BASE+"/runs/"+selected+"/artifacts/"+name;
   return <section data-testid="analysis-panel">
-    {canVideo&&sessionVideo&&(!activeReport||videoRun(activeReport))&&<SourceVideoPlayer key={session+":"+selected} session={session} video={sessionVideo} position={sourcePlayback} onPositionChange={setSourcePlayback} comparison={videoComparison} onDisplayed={showVideoFrame} t={t}/>}
+    {canVideo&&sessionVideo&&(!activeReport||videoRun(activeReport))&&<SourceVideoPlayer key={session+":"+selected} session={session} video={sessionVideo} position={sourcePlayback} onPositionChange={setSourcePlayback} rate={playbackRate} onRateChange={setPlaybackRate} comparison={videoComparison} onDisplayed={showVideoFrame} t={t}/>}
     {activeReport&&!videoRun(activeReport)&&<>
       {!!rows.length&&<>
       <AnalysisFrameMedia key={selected+":"+frame} report={activeReport} runId={selected} session={session} row={row} index={frame} t={t}/>

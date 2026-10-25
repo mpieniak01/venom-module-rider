@@ -47,7 +47,9 @@ independent of interactive Codex browser tools.
   A photo keeps its source identity; downloads and ZIP export retain the selected
   session. The current-session tools remain below the archive preview.
 - RAW and saved classifications share one player and one position. Controls stay
-  stable during slow JPEG or mask loading. A rejected frame has no borrowed mask;
+  stable during slow JPEG or mask loading. Speeds ×1/×2/×5 can change during
+  playback without seeking, pausing or desynchronizing the pair. A controlled
+  browser clock verifies the actual frame deadlines at every speed. A rejected frame has no borrowed mask;
   playback continues afterwards. Stale study, hash and dimensions are rejected.
 - Previews precede controls and configuration. Recording information and analysis
   actions stay in compact adjacent boxes. Loading/help messages do not return.

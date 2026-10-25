@@ -15,6 +15,7 @@ check-python:
 check-web:
 	node --check scripts/check_browser_regressions.mjs
 	node --check tests/browser/video-analysis.js
+	node --check tests/browser/video-speed.js
 	node --check tests/browser/samples-layout.js
 	node --check tests/browser/session-archive.js
 	node --check tests/browser/room-preset.js

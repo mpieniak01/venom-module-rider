@@ -32,6 +32,7 @@ const cases=[
   {name:"calibration-recovery",fixture:"image-reference",file:"image-reference-recovery.js"},
   {name:"recording-sessions",fixture:"session-archive",file:"session-archive.js"},
   {name:"video-comparison",fixture:"video-analysis",file:"video-analysis.js"},
+  {name:"video-playback-speed",fixture:"video-analysis",file:"video-speed.js"},
   {name:"journey-lifecycle",fixture:"workspace",file:"journey.js"},
   ...[
     ["balanced","depth-anything-v2-indoor-small"],

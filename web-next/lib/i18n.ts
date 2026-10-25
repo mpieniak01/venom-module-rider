@@ -18,6 +18,7 @@ export const messages = {
   "analysis.video.play": ["Odtwórz", "Play", "Abspielen"],
   "analysis.video.pause": ["Wstrzymaj", "Pause", "Pause"],
   "analysis.video.position": ["Klatka {frame}/{total} · {time} / {duration}", "Frame {frame}/{total} · {time} / {duration}", "Bild {frame}/{total} · {time} / {duration}"],
+  "analysis.video.speed": ["Prędkość odtwarzania", "Playback speed", "Wiedergabegeschwindigkeit"],
   "analysis.video.seek": ["Przejdź do klatki filmu", "Seek video frame", "Zu einem Filmbild springen"],
   "analysis.source": ["Źródło nowego badania", "Source for the new study", "Quelle der neuen Untersuchung"],
   "analysis.source.samples": ["Zapisane zdjęcia", "Saved photos", "Gespeicherte Fotos"],

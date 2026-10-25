@@ -53,6 +53,8 @@ async page=>{
  await page.getByTestId("samples-session").selectOption(sid);
  await page.getByTestId("source-video-image").waitFor();
  check(posts.length===0,"playback started analysis");
+ check(await page.getByTestId("source-video-speed").inputValue()==="1","new recording did not start at normal speed");
+ check(JSON.stringify(await page.getByTestId("source-video-speed").locator("option").evaluateAll(options=>options.map(option=>option.value)))==='["1","2","5"]',"playback speed choices changed");
  check(await page.getByTestId("source-video-player").getByText(/Wczytywanie|O odtwarzaniu/).count()===0,"playback still contains loading/help messages");
  const review=await page.evaluate(()=>{
    const source=document.querySelector('[data-testid="recording-summary-box"]'),analysis=document.querySelector('[data-testid="analysis-actions-box"]'),start=document.querySelector('[data-testid="analysis-start"]');
@@ -68,6 +70,7 @@ async page=>{
  });
  check(layout.first==="source-video-player"&&layout.order.every((top,index,all)=>Number.isFinite(top)&&(index===0||top>all[index-1])),"preview, controls, information and configuration are out of order");
 
+ const beforeSlowFrameRequests=requests.filter(x=>x.path.endsWith("/video/frames/1")).length;
  // A slow next JPEG must retain the current pixels, matching counter and geometry.
  await page.evaluate(()=>{
    const samples=[];let running=true;
@@ -89,7 +92,7 @@ async page=>{
  const playbackSamples=await page.evaluate(()=>window.__videoPlaybackProbe.stop());
  check(playbackSamples.length>5&&playbackSamples.every(x=>x.height>0&&x.complete&&x.counter.includes("Klatka "+(x.index+1)+"/")),"displayed JPEG and counter diverged during playback");
  check(Math.max(...playbackSamples.map(x=>x.y))-Math.min(...playbackSamples.map(x=>x.y))<1,"playback controls changed position between frames");
- check(requests.filter(x=>x.path.endsWith("/video/frames/1")).length===1,"promoting a decoded frame fetched the JPEG twice");
+ check(requests.filter(x=>x.path.endsWith("/video/frames/1")).length===beforeSlowFrameRequests+1,"promoting a decoded frame fetched the JPEG twice");
  slowSourceIndex=5;
  await page.getByTestId("source-video-seek").focus();
  await page.getByTestId("source-video-seek").press("Home");
@@ -104,7 +107,9 @@ async page=>{
  await page.getByTestId("source-video-seek").press("End");
  await page.waitForFunction(()=>document.querySelector('[data-testid="source-video-image"]')?.getAttribute("data-source-index")==="256");
  check(posts.length===0,"source seek ran model");
+ await page.getByTestId("source-video-speed").selectOption("5");
  await page.getByTestId("analysis-run").selectOption(oldId);
+ check(await page.getByTestId("source-video-speed").inputValue()==="5","changing the study reset playback speed for the same recording");
  await page.getByTestId("analysis-histogram-obstacle").waitFor();
  check((await page.getByTestId("analysis-histogram-clear").textContent()).includes("100"),"wrong clear frame count");
  check((await page.getByTestId("analysis-histogram-clear").textContent()).includes("38,9"),"wrong clear percentage");
@@ -128,13 +133,32 @@ async page=>{
  check(JSON.stringify(pixels.source)==="[64,48]"&&JSON.stringify(pixels.layer)==="[64,48]","unexpected decoded image sizes");
  check(pixels.after[3]===255&&pixels.before.slice(0,3).some((value,index)=>value!==pixels.after[index]),"result did not compose the source and classification pixels");
 
+ // All speeds preserve the source/result pair and neither seek nor start a model.
+ for(const rate of ["2","5","1"]){
+   const before=await page.getByTestId("source-video-image").getAttribute("data-source-index");
+   await page.getByTestId("source-video-speed").selectOption(rate);
+   check(await page.getByTestId("source-video-image").getAttribute("data-source-index")===before,"changing speed sought to another frame");
+   await page.getByTestId("source-video-play").click();
+   await page.waitForFunction(index=>Number(document.querySelector('[data-testid="source-video-image"]')?.getAttribute("data-source-index"))>=Number(index)+2,before);
+   await page.getByTestId("source-video-speed").selectOption(rate==="1"?"2":"1");
+   check((await page.getByTestId("source-video-play").textContent()).includes("Wstrzymaj"),"changing speed paused playback");
+   await page.getByTestId("source-video-play").click();
+   await page.waitForFunction(()=>document.querySelector('[data-testid="source-video-image"]')?.getAttribute("data-source-index")===String(Number(document.querySelector('[data-testid="analysis-frame"]').value)-1));
+   check(await page.getByTestId("analysis-frame-overlay").getAttribute("data-source-index")===await page.getByTestId("source-video-image").getAttribute("data-source-index"),"playback speed desynchronized the result");
+ }
+ await page.getByTestId("source-video-speed").selectOption("1");
+ await page.getByTestId("analysis-frame").fill("151");
+ await page.waitForFunction(()=>document.querySelector('[data-testid="analysis-frame-overlay"]')?.getAttribute("data-source-index")==="150");
+ check(posts.length===0,"changing playback speed started inference");
  // A slow mask must not cause the two halves to show different frames.
+ const previousMaskRequests=requests.filter(x=>x.path.endsWith("/0150-mask.png")).length;
  slowLayerIndex=151;
  await page.getByTestId("source-video-play").click();
  await page.waitForFunction(()=>document.querySelector('[data-testid="source-video-pending-image"]')?.getAttribute("data-source-index")==="151");
  await page.waitForTimeout(200);
  check(await page.getByTestId("source-video-image").getAttribute("data-source-index")==="150","RAW advanced before its matching mask loaded");
  check(await page.getByTestId("analysis-frame-overlay").getAttribute("data-source-index")==="150","processed half drifted during buffering");
+ check(requests.filter(x=>x.path.endsWith("/0150-mask.png")).length===previousMaskRequests,"retaining the old pair reloaded its mask");
  await page.getByTestId("source-video-play").click();
  await page.waitForFunction(()=>document.querySelector('[data-testid="source-video-image"]')?.getAttribute("data-source-index")==="151");
  check(await page.getByTestId("analysis-frame-overlay").getAttribute("data-source-index")==="151","mask did not advance with RAW");
@@ -210,5 +234,5 @@ async page=>{
  await page.getByTestId("analysis-panel").getByRole("alert").waitFor({state:"visible"});
  check(await page.getByTestId("analysis-settings").getAttribute("open")===null,"profile error forced the settings open");
  check(unexpected.length===0,"unexpected API or hardware request: "+JSON.stringify(unexpected));
- return {result:"PASS",videoFrames:count,photos:0,playbackWithoutModel:true,stableFrameGeometry:true,counterMatchesDecodedFrame:true,lateSeekIgnored:true,singleFetchPerFrame:true,wholeVideoPosts:posts.length,frameHistogram:true,sourceOverlayIdentity:true,sourceHashConflictBlocked:true,compactLayer:true,compositedPixelsVerified:true,compositeAlpha:pixels.after[3],pairedPlayer:true,previewFirst:true,compactReviewBoxes:true,noLoadingMessages:true,slowMaskSynchronized:true,historicalPhotos:true,rejectedFramePlayback:true,errorsVisibleWhenCollapsed:true,layerSizeVerified:true,frozenRevision:true,mobile:true,robotContacted:false};
+ return {result:"PASS",videoFrames:count,photos:0,playbackWithoutModel:true,stableFrameGeometry:true,counterMatchesDecodedFrame:true,lateSeekIgnored:true,singleFetchPerFrame:true,wholeVideoPosts:posts.length,frameHistogram:true,sourceOverlayIdentity:true,sourceHashConflictBlocked:true,compactLayer:true,compositedPixelsVerified:true,compositeAlpha:pixels.after[3],pairedPlayer:true,playbackSpeeds:[1,2,5],speedChangesWhilePlaying:true,previewFirst:true,compactReviewBoxes:true,noLoadingMessages:true,slowMaskSynchronized:true,historicalPhotos:true,rejectedFramePlayback:true,errorsVisibleWhenCollapsed:true,layerSizeVerified:true,frozenRevision:true,mobile:true,robotContacted:false};
 };
