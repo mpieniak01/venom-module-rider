@@ -110,7 +110,7 @@ export default function RiderPage() {
         <Button size="large" tone="danger" className={styles.stop} onClick={stop} aria-label={t("emergencyStop")} title={t("stopHint")} data-testid="rider-stop"><CircleStop size={20} />{t("stop")}</Button>
         <Button aria-label={t(focused ? "workspaceRestore" : "workspaceExpand")} title={t(focused ? "workspaceRestore" : "workspaceExpand")} disabled={!!client.activeDirection} onClick={() => setFocused(!focused)} data-testid="workspace-expand">{focused ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</Button>
       </div>
-      {section!=="control"&&<StudyRecordingBar recording={recording} client={client} t={t} language={language}/>}
+      <StudyRecordingBar recording={recording} client={client} t={t} language={language}/>
     </header>
     {section !== "control" && <RiderMessages client={client} t={t} language={language} />}
     <nav className={styles.tabs} role="tablist" aria-label={t("title")}>{tabs.map(({ id, Icon }) => <button type="button" key={id} role="tab" aria-selected={section === id} aria-controls={`rider-panel-${id}`} id={`rider-tab-${id}`} className={`${styles.tab} ${section === id ? styles.tabActive : ""}`} onClick={() => changeSection(id)}><Icon size={16} />{t(id)}</button>)}</nav>
@@ -118,7 +118,6 @@ export default function RiderPage() {
       {client.loading && !client.status ? <Panel title={t("device")}><Empty>{t("loading")}</Empty>{section === "control" && <RiderMessages client={client} t={t} language={language}/>}</Panel> : !connection?.configured && section === "calibration" ? <Calibration recording={recording} client={client} t={t} language={language}/> : !connection?.configured ? <Panel title={t("device")}><Empty><Bot size={40} />{t("unconfigured")}</Empty>{section === "control" && <RiderMessages client={client} t={t} language={language}/>}</Panel> : <>
         {section === "control" && <NavigationLoop key={connection.session} client={client} t={t} language={language}
           manual={<OperatorConsole client={client} t={t} language={language} />}
-          recording={<StudyRecordingBar recording={recording} client={client} t={t} language={language}/>}
           operatorDetails={<OperatorDiagnostics client={client} t={t} language={language}/>}
         />}
         {section === "overview" && <Measurements status={client.status} t={t} language={language} />}

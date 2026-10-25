@@ -35,3 +35,5 @@ Istniejąca lista `GET /api/v1/rider/samples/sessions` i szczegóły sesji zwrac
 ## Sprawdzenie przed publikacją
 
 Automatyczne regresje korzystają z tymczasowego dysku i źródła fixture: dwie sesje, restart, odzyskanie indeksu, brak kamery, zmiana źródła, luka czasowa, cofnięty czas, limity, uszkodzenie, pełny eksport i jawny brak importu wideo. Osobny scenariusz przeglądarkowy sprawdza archiwum podczas nagrania, dwa niezależne identyfikatory i listę po odświeżeniu. Nie są to testy fizycznego nagrania robota. Przed publikacją operator wykonuje ręcznie dwa krótkie nagrania, kończy każde i sprawdza obrazy oraz dane obu pakietów.
+
+Przycisk **Nagraj sesję**, stan filmu i **Zakończ zapis** są stale widoczne w nagłówku modułu, również na ekranie Sterowanie. Bibliotekę sesji otwiera się ze szczegółów nagrania; nie wymaga przejścia do innego trybu jazdy.
