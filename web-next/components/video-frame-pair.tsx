@@ -46,6 +46,7 @@ export function VideoFramePair({frame,session,active,onReady,onFailure,t}:{frame
     return()=>{alive=false;image.onload=null;image.onerror=null;layer.current=null;};
   },[result.asset,complete]);
   const error=result.error||(failed?"analysis.artifactFailed":"");
+  const placeholder=error||(!comparison?"analysis.video.noResult":!result.asset?"analysis.noOverlay":"");
   return <div className={styles.videoPair} style={{visibility:active?"visible":"hidden"}} aria-hidden={!active} data-testid={active?"analysis-frame-media":undefined} data-run-id={comparison?.runId} data-source-index={frame.index}>
     <div className={styles.videoPairCell}>
       <p>{t("samples.original")}</p>
@@ -57,7 +58,7 @@ export function VideoFramePair({frame,session,active,onReady,onFailure,t}:{frame
       <p>{t("analysis.video.processed")}</p>
       <div className={styles.videoPairViewport} style={{aspectRatio:frame.width+" / "+frame.height}} data-testid={active?"analysis-frame-composite":undefined}>
         <canvas ref={canvas} data-testid={active&&painted&&!error?"analysis-frame-overlay":undefined} data-source-index={frame.index} className={styles.sourceVideoFrame} style={{visibility:painted&&!error?"inherit":"hidden"}} role="img" aria-label={t("analysis.video.processed")}/>
-        {(!painted||error)&&<p className={styles.videoPairPlaceholder} role={error?"alert":"status"} data-testid={active?"video-result-placeholder":undefined}>{t(error||(!comparison?"analysis.video.noResult":result.asset?"analysis.artifactLoading":"analysis.noOverlay"))}</p>}
+        {(!painted||error)&&!!placeholder&&<p className={styles.videoPairPlaceholder} role={error?"alert":"status"} data-testid={active?"video-result-placeholder":undefined}>{t(placeholder)}</p>}
       </div>
       <p className={styles.small} data-testid={active?"video-frame-state":undefined}>{comparison?t("samples.value."+String(row.state??"unknown")):"\u00a0"}</p>
     </div>

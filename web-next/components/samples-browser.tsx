@@ -7,7 +7,6 @@ import { SAMPLES_BASE, videoErrorKey, type Collection, type Sample, type SampleP
 import type { Translator } from "../lib/i18n";
 import { EvidenceSummary } from "./evidence-summary";
 import { MotionEvidencePanel } from "./motion-evidence-panel";
-import {SampleFacts} from "./sample-facts";
 import { AnalysisPanel } from "./analysis-panel";
 import { Button, Details, Empty, Field, Input, Select, Textarea } from "./primitives";
 import styles from "../rider.module.css";
@@ -73,13 +72,13 @@ function SampleLibrary({t,language,refreshKey}:{t:Translator;language:string;ref
   const videoOnly=!!page?.session.video?.frames&&page.total===0;
   const qualityText=(quality:JsonRecord)=>Array.isArray(quality.flags)&&quality.flags.length?quality.flags.map(flag=>t("samples.quality."+String(flag))).join(", "):t("samples.quality.unflagged");
   const picker=<div className={styles.sampleSessionPicker} data-testid="sample-session-picker"><Field label={t("samples.session")}><Select data-testid="samples-session" value={selected} onChange={event=>{inspectEpoch.current++;setSelected(event.target.value);setOffset(0);setPage(null);setSample(null);}}><option value="">{t("samples.choose")}</option>{sessions.map(row=><option key={row.session_id} value={row.session_id}>{formatTime(row.started_at,language)} · {row.source_device_id} · {t("samples.session."+row.state)} · {t("analysis.sessionCounts",{photos:row.counts.saved??0,frames:row.video?.frames??0})} · {row.session_id.slice(0,8)}</option>)}</Select></Field><Button data-testid="samples-refresh" onClick={()=>{void refresh();setUpdated(value=>value+1);}}>{t("refresh")}</Button></div>;
-  const sessionSummary=page?<section className={styles.sampleInfoCard} data-testid="archive-video-status" aria-label={t("samples.recordingInfo")}>
-    <SampleFacts items={[
-      {label:t("state"),value:t(page.session.video?"study.video."+page.session.video.state:"samples.session."+page.session.state)},
-      {label:t("analysis.metric.frames"),value:page.session.video?.frames??page.total},
-      {label:t("samples.duration"),value:page.session.video?page.session.video.duration_s.toFixed(1)+" s":"—"},
-      {label:t("samples.gaps"),value:page.session.video?.gaps??"—"},
-    ]}/>
+  const sessionSummary=page?<section className={styles.sampleRecordingSummary} data-testid="archive-video-status" aria-label={t("samples.recordingInfo")}>
+    <div className={styles.sampleRecordingFacts}>
+      <strong>{page.session.video?page.session.video.frames+" "+t("study.videoFrames"):t("samples.savedPhotos")+": "+page.total}</strong>
+      {page.session.video&&<span>{page.session.video.duration_s.toFixed(1)} s</span>}
+      {!!page.session.video?.gaps&&<span>{t("samples.gaps")}: {page.session.video.gaps}</span>}
+      {page.session.video&&page.session.video.state!=="complete"&&<span>{t("study.video."+page.session.video.state)}</span>}
+    </div>
     {page.session.video?.error&&<p role="alert">{t(videoErrorKey(page.session.video.error))}</p>}
     <div className={styles.flex}>
       {!!page.session.video?.frames&&page.session.video.ended_at!==null&&<a data-testid="archive-video-download" className={styles.button} href={getApiBaseUrl()+SAMPLES_BASE+"/sessions/"+page.session.session_id+"/video"} download>{t("study.downloadVideo")}</a>}

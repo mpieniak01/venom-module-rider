@@ -58,7 +58,7 @@ export function AnalysisPanel({session,t,language,sessionVideo,sessionPicker,ses
   const [run,setRun]=useState<Run|null>(null);
   const [report,setReport]=useState<JsonRecord|null>(null);
   const [videoRows,setVideoRows]=useState<AnalysisRow[]|null>(null);
-  const [rowsLoading,setRowsLoading]=useState(false),[rowsError,setRowsError]=useState("");
+  const [rowsError,setRowsError]=useState("");
   const [frame,setFrame]=useState(0);
   const [other,setOther]=useState("");
   const [comparison,setComparison]=useState<JsonRecord|null>(null);
@@ -108,9 +108,8 @@ export function AnalysisPanel({session,t,language,sessionVideo,sessionPicker,ses
   const activeReport=report?.run_id===selected?report:null;
   useEffect(()=>{
     const abort=new AbortController();
-    setVideoRows(null);setRowsError("");setRowsLoading(false);
+    setVideoRows(null);setRowsError("");
     if(!activeReport||!videoRun(activeReport))return;
-    setRowsLoading(true);
     void(async()=>{
       try{
         const names=reportChunks(activeReport,selected),rows:AnalysisRow[]=[];
@@ -127,7 +126,6 @@ export function AnalysisPanel({session,t,language,sessionVideo,sessionPicker,ses
         if(rows.length!==Number(record(activeReport.summary).frames))throw new Error("analysis_video_report_invalid");
         if(!abort.signal.aborted){setVideoRows(rows);}
       }catch(err){if(!abort.signal.aborted)setRowsError(errorCode(err));}
-      finally{if(!abort.signal.aborted)setRowsLoading(false);}
     })();
     return()=>abort.abort();
   },[activeReport,selected]);
@@ -196,15 +194,17 @@ export function AnalysisPanel({session,t,language,sessionVideo,sessionPicker,ses
       </Field>
       </>}
     </>}
-    <section className={styles.sampleInfoCard} data-testid="sample-review-info" aria-label={t("samples.reviewInfo")}>
-      <div className={styles.fieldRow}>{sessionPicker}    <Field label={t("analysis.runs")}><Select aria-label={t("analysis.runs")} data-testid="analysis-run" value={selected} onChange={event=>{setSourcePlayback(previous=>({...previous,playing:false}));setSelected(event.target.value);}}><option value="">{t("analysis.chooseRun")}</option>{runs.map(item=><option key={item.id} value={item.id}>{formatTime(item.created,language)} · {t("analysis.state."+item.state)} · {item.id.slice(0,8)}</option>)}</Select></Field>
-</div>
+    <section className={styles.sampleReviewGrid} data-testid="sample-review-info" aria-label={t("samples.reviewInfo")}>
+      <div className={styles.sampleReviewBox} data-testid="recording-summary-box">{sessionPicker}{sessionSummary}</div>
+      <div className={styles.sampleReviewBox} data-testid="analysis-actions-box">
+    <Field label={t("analysis.runs")}><Select aria-label={t("analysis.runs")} data-testid="analysis-run" value={selected} onChange={event=>{setSourcePlayback(previous=>({...previous,playing:false}));setSelected(event.target.value);}}><option value="">{t("analysis.chooseRun")}</option>{runs.map(item=><option key={item.id} value={item.id}>{formatTime(item.created,language)} · {t("analysis.state."+item.state)} · {item.id.slice(0,8)}</option>)}</Select></Field>
     {run&&<div data-testid="analysis-status" className={styles.sampleRunStatus}><span aria-live="polite">{t("analysis.state."+run.state)} · {run.done}/{run.total}</span>{!terminal(run)&&<progress max={run.total} value={run.done}/>}{run.error&&<p role="alert"><code>{run.error}</code></p>}{!terminal(run)&&<Button data-testid="analysis-cancel" disabled={run.cancel_requested===true} onClick={()=>void cancel()}>{t(run.cancel_requested?"analysis.cancelling":"analysis.cancel")}</Button>}</div>}
-      {sessionSummary}
+    <div className={styles.sampleAnalysisActions}><Button data-testid="analysis-start" tone="primary" disabled={busy||!!pending||!available?.installed||(inputSource==="video"&&!canVideo)} onClick={()=>void start()}>{t(inputSource==="video"?"analysis.startVideo":"analysis.start")}</Button><Button onClick={()=>void refresh().catch(err=>setError(errorCode(err)))}>{t("refresh")}</Button></div>
+      </div>
     </section>
     {activeReport&&<>
       <div data-testid="analysis-result-snapshot" className={styles.sampleInfoCard}><SampleFacts items={[{label:t("analysis.runs"),value:selected.slice(0,8)},{label:t("analysis.profile"),value:str(frozen.profile)||str(record(record(activeReport.context).profile).id)},{label:t("behavior.title"),value:t("analysis.savedPolicy",{profile:t("behavior.profile."+str(savedBehavior.profile_id)),revision:String(savedBehavior.profile_revision??"—")})}]}/><details className={styles.details}><summary>{t("analysis.resultScopeHelp")}</summary><p className={styles.hint} data-testid="analysis-result-scope">{t("analysis.resultScope")}</p></details>{settingsChanged&&<p role="status" data-testid="analysis-result-different">{t("analysis.resultDifferent")} <Button data-testid="analysis-new-from-settings" disabled={busy||!!pending||!available?.installed||(inputSource==="video"&&!canVideo)} onClick={()=>void start()}>{t("analysis.newRun")}</Button></p>}</div>
-      {rowsLoading&&<p role="status">{t("analysis.rowsLoading")}</p>}{rowsError&&<p role="alert">{t("analysis.rowsFailure")} · <code>{rowsError}</code></p>}
+      {rowsError&&<p role="alert">{t("analysis.rowsFailure")} · <code>{rowsError}</code></p>}
       {!!rows.length&&<AnalysisTimeline rows={rows} index={frame} onSelect={chooseFrame} t={t} language={language} controls={!videoRun(activeReport)}/>}
     </>}
     {error&&<p role="alert">{t("analysis.failure")} · <code>{error}</code></p>}
@@ -232,7 +232,7 @@ export function AnalysisPanel({session,t,language,sessionVideo,sessionPicker,ses
       <Field label={t("analysis.quality")}><Select aria-label={t("analysis.quality")} value={quality} onChange={event=>setQuality(event.target.value)}><option value="production">{t("analysis.production")}</option><option value="model_probe">{t("analysis.probe")}</option></Select></Field>
     </div><p className={styles.hint}>{t(semantic?"analysis.semanticHint":"analysis.windowHint")}</p></details>
     </details>
-    <div className={styles.sampleAnalysisActions}><Button data-testid="analysis-start" tone="primary" disabled={busy||!!pending||!available?.installed||(inputSource==="video"&&!canVideo)} onClick={()=>void start()}>{t(inputSource==="video"?"analysis.startVideo":"analysis.start")}</Button><Button onClick={()=>void refresh().catch(err=>setError(errorCode(err)))}>{t("refresh")}</Button></div>
+
     {activeReport&&<details className={styles.details} data-testid="analysis-statistics"><summary>{t("analysis.statistics")}</summary>
       <div className={styles.grid}>{["frames","approved_labels","unknown","rejected_inputs","false_go","false_stop","state_flips"].map(name=><p key={name}>{t("analysis.metric."+name)}: <strong>{metric(summary[name])}</strong></p>)}</div>
       <p className={styles.hint}>{t("analysis.naHint")}</p>

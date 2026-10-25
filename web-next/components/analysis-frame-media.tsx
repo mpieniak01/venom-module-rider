@@ -21,7 +21,6 @@ export function AnalysisFrameMedia({report,runId,session,row,index,t}:{report:Js
   const imageStyle={visibility:ready&&!failed?"visible"as const:"hidden"as const};
   if(!original)return <p role="alert" data-testid="analysis-frame-mismatch">{t("analysis.frameMismatch")}</p>;
   return <div data-testid="analysis-frame-media" data-run-id={runId} data-source-index={row.source_index??index}>
-    {!ready&&!failed&&<p role="status">{t("analysis.artifactLoading")}</p>}
     {failed&&<p role="alert">{t("analysis.artifactFailed")}</p>}
     <div className={styles.analysisMedia}>
       <div><p>{t("samples.original")}</p>

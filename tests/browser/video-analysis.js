@@ -52,6 +52,14 @@ async page=>{
  await page.getByTestId("samples-session").selectOption(sid);
  await page.getByTestId("source-video-image").waitFor();
  check(posts.length===0,"playback started analysis");
+ check(await page.getByTestId("source-video-player").getByText(/Wczytywanie|O odtwarzaniu/).count()===0,"playback still contains loading/help messages");
+ const review=await page.evaluate(()=>{
+   const source=document.querySelector('[data-testid="recording-summary-box"]'),analysis=document.querySelector('[data-testid="analysis-actions-box"]'),start=document.querySelector('[data-testid="analysis-start"]');
+   const a=source.getBoundingClientRect(),b=analysis.getBoundingClientRect();
+   return {sameRow:Math.abs(a.top-b.top)<1,sideBySide:b.left>a.right-1,buttonInAnalysis:analysis.contains(start),compactFacts:!source.textContent.includes("Stan")&&!source.textContent.includes("Przerwy w zapisie")};
+ });
+ check(review.sameRow&&review.sideBySide&&review.buttonInAnalysis&&review.compactFacts,"recording and analysis are not compact adjacent boxes");
+
  const layout=await page.evaluate(()=>{
    const root=document.querySelector('[data-testid="analysis-panel"]');
    const order=["source-video-viewport","source-video-controls","sample-review-info","analysis-settings"].map(id=>document.querySelector('[data-testid="'+id+'"]')?.getBoundingClientRect().top);
@@ -72,6 +80,7 @@ async page=>{
  await page.getByTestId("source-video-play").click();
  await page.waitForFunction(()=>document.querySelector('[data-testid="source-video-pending-image"]')?.getAttribute("data-source-index")==="1");
  await page.waitForTimeout(250);
+ check(await page.getByTestId("source-video-player").getByText(/Wczytywanie/).count()===0,"buffering rendered a loading message");
  check(await page.getByTestId("source-video-image").getAttribute("data-source-index")==="0","loading next JPEG discarded the displayed frame");
  check((await page.getByTestId("source-video-position").textContent()).includes("Klatka 1/"),"counter advanced before pixels were ready");
  await page.waitForFunction(()=>Number(document.querySelector('[data-testid="source-video-image"]')?.getAttribute("data-source-index"))>0);
@@ -186,5 +195,5 @@ async page=>{
  await page.getByTestId("analysis-panel").getByRole("alert").waitFor({state:"visible"});
  check(await page.getByTestId("analysis-settings").getAttribute("open")===null,"profile error forced the settings open");
  check(unexpected.length===0,"unexpected API or hardware request: "+JSON.stringify(unexpected));
- return {result:"PASS",videoFrames:count,photos:0,playbackWithoutModel:true,stableFrameGeometry:true,counterMatchesDecodedFrame:true,lateSeekIgnored:true,singleFetchPerFrame:true,wholeVideoPosts:posts.length,frameHistogram:true,sourceOverlayIdentity:true,sourceHashConflictBlocked:true,compactLayer:true,compositedPixelsVerified:true,compositeAlpha:pixels.after[3],pairedPlayer:true,previewFirst:true,slowMaskSynchronized:true,historicalPhotos:true,errorsVisibleWhenCollapsed:true,layerSizeVerified:true,frozenRevision:true,mobile:true,robotContacted:false};
+ return {result:"PASS",videoFrames:count,photos:0,playbackWithoutModel:true,stableFrameGeometry:true,counterMatchesDecodedFrame:true,lateSeekIgnored:true,singleFetchPerFrame:true,wholeVideoPosts:posts.length,frameHistogram:true,sourceOverlayIdentity:true,sourceHashConflictBlocked:true,compactLayer:true,compositedPixelsVerified:true,compositeAlpha:pixels.after[3],pairedPlayer:true,previewFirst:true,compactReviewBoxes:true,noLoadingMessages:true,slowMaskSynchronized:true,historicalPhotos:true,errorsVisibleWhenCollapsed:true,layerSizeVerified:true,frozenRevision:true,mobile:true,robotContacted:false};
 };

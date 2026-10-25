@@ -19,7 +19,6 @@ export function SourceVideoPlayer({session,video,position,onPositionChange,compa
   const offset=Math.floor(index/VIDEO_PAGE_SIZE)*VIDEO_PAGE_SIZE;
   const wantedOffset=playing&&index%VIDEO_PAGE_SIZE===VIDEO_PAGE_SIZE-1&&index+1<total?offset+VIDEO_PAGE_SIZE:offset;
   const error=failure&&(failure.offset===offset||failure.offset===wantedOffset)?failure.code:"";
-  const loading=!frames.has(wantedOffset)&&!error;
 
   useEffect(()=>{
     if(frames.has(wantedOffset))return;
@@ -58,7 +57,6 @@ export function SourceVideoPlayer({session,video,position,onPositionChange,compa
     <div data-testid="source-video-viewport" className={styles.videoPairStack} aria-busy={!ready}>
       {!images.length&&<div className={styles.videoPair} aria-hidden="true">{["samples.original","analysis.video.processed"].map(label=><div className={styles.videoPairCell} key={label}><p>{t(label)}</p><div className={styles.videoPairViewport} style={{aspectRatio:"4 / 3"}}/>{label==="analysis.video.processed"&&<p className={styles.small}>&nbsp;</p>}</div>)}</div>}
       {images.map(image=><VideoFramePair key={image.key} frame={image} session={session} active={image.key===shown?.key} onReady={promote} onFailure={()=>{setFailure({offset,code:"analysis_video_frame_unavailable"});onPositionChange({index,playing:false});}} t={t}/>)}
-      {(!current||!ready||loading)&&!error&&<span className={styles.sourceVideoLoading} role="status">{t("analysis.artifactLoading")}</span>}
     </div>
     <div className={styles.samplePlaybackControls} data-testid="source-video-controls">
     <div className={styles.fieldRow}>
@@ -70,6 +68,5 @@ export function SourceVideoPlayer({session,video,position,onPositionChange,compa
     </div>
     <Field label={t("analysis.video.seek")}><Input data-testid="source-video-seek" type="range" min={0} max={Math.max(0,total-1)} step={1} value={index} onChange={event=>move(Number(event.target.value))}/></Field>
     </div>
-    <details className={styles.details}><summary>{t("analysis.playbackHelp")}</summary><p className={styles.hint}>{t("analysis.video.readOnly",{fps:video.target_fps})}</p></details>
   </section>;
 }
