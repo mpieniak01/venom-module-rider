@@ -483,6 +483,31 @@ ARM and is independent of the motor intent/STOP lane. Browse and label sessions
 with Pi disconnected. See [Sample sessions v1](docs/SAMPLES_V1.md) for operator
 flow, limits, source clocks, local import, API and rollback.
 
+## Source recordings and offline replay
+
+In **Samples**, **Record session** retains one RAW MJPEG source, its indexed
+frame timestamps/hashes and telemetry. The current recorder targets 5 received
+frames/s; gaps and interrupted recordings remain visible. Each session is kept
+separately. Recording does not start a camera, load a model or enable movement.
+It no longer saves a second automatic series of photos. The camera button saves
+one additional photo only on request.
+
+Play or seek a finalized recording without a model or Pi connection. Video frames
+are read directly from source byte ranges; browsing does not extract another set
+of JPEG files. Start **Analyze entire video as a new study** explicitly to process
+all indexed frames with a frozen model/profile/configuration. Changing settings
+requires a new run and cannot overwrite or relabel an earlier result.
+
+The green/yellow/red histogram reports the count and share of clear/uncertain/
+obstacle frames from the selected saved run. Select a colour or frame to compare
+the original with that run's overlay. Rejected images remain visible. These are
+image classifications, not a measure of accuracy or authorization to drive.
+Video studies keep chunked result rows and compact transparent classification
+layers, without copying RAW frames, saving a second full-image video, or retaining
+a depth-array/PNG pair for every frame. The browser composites each saved layer
+with the hash-matched source only while inspecting it. Storage and execution limits
+produce an explicit incomplete/failed run, never silent truncation.
+
 ## Stored session analysis
 
 The sample library can explicitly analyse stored originals with retained DA2 or DA3 Small profiles, compare immutable runs and export reports while the Pi is disconnected. See [the analysis contract](docs/ANALYSIS_V1.md). Collection and analysis are separate steps; offline results never grant movement permission.

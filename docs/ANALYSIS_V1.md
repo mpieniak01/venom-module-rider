@@ -8,15 +8,29 @@ operations. Analysis never selects a device, starts a camera, arms, or moves it.
 ## Inputs and models
 
 The sample registry remains the only source of original bytes and labels.
-Each run freezes the selected offset/count (at most 200 frames), source hashes,
+Legacy sample runs freeze the selected offset/count (at most 200 frames), source hashes,
 order/provenance, current label revisions, parameters, model hashes, SDK revision
 and Python source digest. Parameters and labels changed later cannot overwrite
 an existing result. At most 50 runs are retained; there is no automatic deletion.
 
+Video runs select `spec.input_source="video"` and process the entire finalized
+session source directly; offset/count do not truncate video inputs. A compact
+immutable source descriptor pins video/index hashes and frame count. RAW source
+bytes are not copied into the analysis directory. New runs can judge the same
+recording differently; the UI keeps saved model/configuration distinct from the
+current settings draft. Replay and source-frame GET endpoints never invoke a
+model. Whole-video results are chunked. Per frame, a compact transparent classification
+PNG retains only the model mask and frozen geometry outlines. No RAW texture,
+full RGB overlay JPEG or depth.npy/depth.png copy is stored. The layer identifies
+its source SHA256 and dimensions; the browser composites it with that exact
+original frame only during inspection. A green/yellow/red histogram
+counts frame classifications and is not ground-truth accuracy or a robot driving
+verdict. Rejected inputs are counted separately and cannot appear as clear.
+
 Profiles come from `config/vision-research.json`:
 
-- `da2-default`: production DA2 weights and preprocessing, evaluated offline on CPU.
-- `da3-small-280`: retained experimental DA3 Small at resolution 280, CPU only,
+- `da2-default`: production DA2 weights and preprocessing, evaluated offline on CUDA.
+- `da3-small-280`: retained experimental DA3 Small at resolution 280, CUDA required,
   using its existing research interpreter and qualified SDK.
 
 No weights, SDK or dependencies are downloaded. Installed means files/runtime are
@@ -50,7 +64,7 @@ The existing host task manager/queue and StateManager track jobs independently
 of chat. In llm_off the same queue classes and host state are used without
 starting a chat model; analysis API cancellation remains available.
 
-One owned low-priority CPU child executes at a time; at most four analyses can
+One owned low-priority analysis child executes at a time; at most four analyses can
 be queued/in progress. It has at most two CPU threads/cores. Existing live vision
 preempts this child's compute; new compute waits for two quiet seconds. The
 worker never owns a database transaction: original captures and derived outputs
@@ -59,7 +73,10 @@ collection can continue. No live model is unloaded and no control deadline is
 relaxed. The child cannot open IP connections.
 
 The manager polls its child's RSS (2.5 GiB limit) and available host memory
-(512 MiB reserve), with a 15-minute total timeout. These are monitored process
+(512 MiB reserve), with a 15-minute total timeout for legacy sample windows. Whole-video runs use
+`RIDER_VIDEO_ANALYSIS_TIMEOUT_S` (default 21600 seconds, accepted 60..86400).
+Video analysis accepts at most 10000 indexed frames within the existing 128 MiB
+source-session budget; exceeding a limit produces an explicit error. These are monitored process
 limits, not a performance or real-time guarantee. A parent-death signal kills
 the owned child even if it is paused. No unrelated process is signalled.
 

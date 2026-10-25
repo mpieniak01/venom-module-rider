@@ -3,6 +3,7 @@
 import asyncio
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 
 from .errors import RiderError
 
@@ -26,12 +27,16 @@ class OriginalReader:
         self.closed = False
 
     async def get(self, sample_id):
+        return await self.call(self.store.original, sample_id)
+
+    async def call(self, method, *args, **kwargs):
+        """Share bounded immutable media reads without using the capture writer."""
         if self.closed:
             raise RiderError("samples_closed", 503)
         if not self.slots.acquire(blocking=False):
             raise RiderError("samples_read_queue_full", 429)
         try:
-            future = self.pool.submit(self.store.original, sample_id)
+            future = self.pool.submit(partial(method, *args, **kwargs))
         except Exception:
             self.slots.release()
             raise

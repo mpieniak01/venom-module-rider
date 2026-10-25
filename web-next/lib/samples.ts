@@ -41,6 +41,6 @@ export function readSessions(value:unknown):Collection[] {
 
 /** Keep storage diagnostics understandable without exposing raw server errors in the UI. */
 export function videoErrorKey(error:string):string {
-  const errors=["samples_video_invalid","samples_video_camera_off","samples_video_source_invalid","samples_video_source_stale","samples_video_source_changed","samples_video_source_time","samples_video_size_limit","samples_video_write_failed","samples_video_no_frames","samples_video_recovery_incomplete","samples_quota_reached","samples_disk_full"];
+  const errors=["samples_video_index_limit","samples_video_invalid","samples_video_camera_off","samples_video_source_invalid","samples_video_source_stale","samples_video_source_changed","samples_video_source_time","samples_video_size_limit","samples_video_write_failed","samples_video_no_frames","samples_video_recovery_incomplete","samples_quota_reached","samples_disk_full"];
   return "study.videoError."+(errors.includes(error)?error:"unknown");
 }

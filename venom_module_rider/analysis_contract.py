@@ -21,6 +21,7 @@ from .vision_contract import BehaviorSettings
 class AnalysisSpec(StrictModel):
     """One explicit input window and immutable model/geometry configuration."""
 
+    input_source: Literal["samples", "video"] = "samples"
     profile: RequestID = "da2-default"
     corridor: tuple[StrictFloat, StrictFloat, StrictFloat, StrictFloat] = (
         0.35,
@@ -57,6 +58,8 @@ class AnalysisSpec(StrictModel):
     def matching_engine(self):
         from .perception_catalog import FAST, SEGFORMER, YOLO
 
+        if self.input_source == "video" and self.capture_evidence:
+            raise ValueError("analysis_video_evidence_unsupported")
         semantic = self.profile in {SEGFORMER, YOLO, FAST}
         if semantic and "perception" not in self.model_fields_set:
             self.perception = self.perception.model_copy(update={"engine": "segformer"})

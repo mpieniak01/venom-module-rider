@@ -18,6 +18,7 @@ from .sample_originals import OriginalReader
 from .samples_contract import CollectionPolicy
 from .samples_frame import FrameBuffer
 from .samples_store import SampleStore, encode, identifier
+from .session_video_reader import SessionVideoReader
 
 
 def default_root():
@@ -40,6 +41,7 @@ class SamplesRegistry:
         self.store = store or SampleStore(root)
         self.frames = frames or FrameBuffer()
         self.originals = OriginalReader(self.store)
+        self.video_reader = SessionVideoReader(self.store)
         self.io = ThreadPoolExecutor(max_workers=1, thread_name_prefix="rider-samples")
         self.slots = threading.BoundedSemaphore(queue_slots)
         self.queue_slots = queue_slots

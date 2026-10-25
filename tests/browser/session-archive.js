@@ -1,6 +1,8 @@
 // Isolated session UI; all data/video endpoints are fixtures with no device connection.
 async page=>{
  const check=(value,message)=>{if(!value)throw new Error(message);};
+ const jpeg=Buffer.from("/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAAwAEADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwChRRRXoHCFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQB//2Q==","base64");
+ const sha="8e19a552b0916f795708653260f653036609c2aed64e165c5fc5f70002fd375f";
  const sessions=[],writes=[],photos=[];
  const video=state=>({state,frames:state==="waiting_camera"?0:5,bytes:5000,duration_s:1,target_fps:5,gaps:0,error:null,ended_at:state==="complete"?1002:null});
  const base="/api/v1/rider/samples";
@@ -12,7 +14,7 @@ async page=>{
   if(path===base+"/automatic")return reply({state:"off"});
   if(path===base+"/sessions"&&method==="POST"){
    const body=request.postDataJSON();
-   check(body.policy.record_video===true&&body.policy.record_images===true,"record omitted video opt-in");
+   check(body.policy.record_video===true&&body.policy.record_images===false,"record omitted video opt-in");
    const session={session_id:String(sessions.length+1).repeat(32),source_device_id:"fixture-robot",started_at:1000+sessions.length,state:"collecting",counts:{},policy:body.policy,video:video("waiting_camera")};
    sessions.unshift(session);return reply(session);
   }
@@ -20,6 +22,8 @@ async page=>{
   if(path.startsWith(base+"/sessions/")){
    const id=path.split("/")[6],session=sessions.find(row=>row.session_id===id);
    check(!!session,"unknown fixture session");
+   if(path.endsWith("/video/frames"))return reply({session_id:id,total:5,duration_s:1,frames:Array.from({length:5},(_,index)=>({index,source_time_s:index*.25,frame_id:"frame"+index,sequence:index,raw_sha256:sha})),next_offset:null});
+   if(/\/video\/frames\/\d+$/.test(path))return route.fulfill({status:200,contentType:"image/jpeg",body:jpeg});
    if(path.endsWith("/end")){session.state="closed";session.video=video("complete");return reply(session);}
    if(session.state==="collecting")session.video=video("recording");
    return reply({session,samples:[],offset:0,limit:12,total:0});
