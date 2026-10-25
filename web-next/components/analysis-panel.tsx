@@ -1,10 +1,11 @@
 import { createBrowserUuid } from "@/lib/optional-modules/transport";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { apiFetch } from "@/lib/api-client";
 import { getApiBaseUrl } from "@/lib/env";
 import { data, errorCode, formatTime, record, str, type JsonRecord } from "../lib/model";
 import type { SessionVideo } from "../lib/samples";
 import { reportChunks, readAnalysisChunk, sameAnalysisSettings, videoRun, type AnalysisRow } from "../lib/analysis-video";
+import {SampleFacts} from "./sample-facts";
 import { SourceVideoPlayer } from "./source-video-player";
 import { AnalysisTimeline } from "./analysis-timeline";
 import { AnalysisFrameMedia } from "./analysis-frame-media";
@@ -23,7 +24,7 @@ function remembered(session:string):string {
   try {const value=record(JSON.parse(sessionStorage.getItem(PENDING)||"{}"));return value.session_id===session&&/^[a-f0-9]{32}$/.test(str(value.request_id))?str(value.request_id):"";}
   catch{return "";}
 }
-export function AnalysisPanel({session,t,language,sessionVideo}:{session:string;t:Translator;language:string;sessionVideo?:SessionVideo|null}) {
+export function AnalysisPanel({session,t,language,sessionVideo,sessionPicker,sessionSummary}:{session:string;t:Translator;language:string;sessionVideo?:SessionVideo|null;sessionPicker?:ReactNode;sessionSummary?:ReactNode}) {
   const [profiles,setProfiles]=useState<Profile[]>([]);
   const [profile,setProfile]=useState("da2-default");
   const [windowSize,setWindowSize]=useState(1);
@@ -185,27 +186,30 @@ export function AnalysisPanel({session,t,language,sessionVideo}:{session:string;
   };
   const artifact=(name:string)=>getApiBaseUrl()+BASE+"/runs/"+selected+"/artifacts/"+name;
   return <section data-testid="analysis-panel">
-    <h3>{t("analysis.title")}</h3><p className={styles.hint}>{t("analysis.hint")}</p>
-    <Field label={t("analysis.runs")}><Select aria-label={t("analysis.runs")} data-testid="analysis-run" value={selected} onChange={event=>{setSourcePlayback(previous=>({...previous,playing:false}));setSelected(event.target.value);}}><option value="">{t("analysis.chooseRun")}</option>{runs.map(item=><option key={item.id} value={item.id}>{formatTime(item.created,language)} · {t("analysis.state."+item.state)} · {item.id.slice(0,8)}</option>)}</Select></Field>
-    {run&&<div data-testid="analysis-status"><p aria-live="polite">{t("analysis.state."+run.state)} · {t("analysis.phase."+run.phase)} · {run.done}/{run.total}</p><progress max={run.total} value={run.done}/>{run.error&&<p role="alert"><code>{run.error}</code></p>}{!terminal(run)&&<Button data-testid="analysis-cancel" disabled={run.cancel_requested===true} onClick={()=>void cancel()}>{t(run.cancel_requested?"analysis.cancelling":"analysis.cancel")}</Button>}</div>}
     {canVideo&&sessionVideo&&(!activeReport||videoRun(activeReport))&&<SourceVideoPlayer key={session+":"+selected} session={session} video={sessionVideo} position={sourcePlayback} onPositionChange={setSourcePlayback} comparison={videoComparison} onDisplayed={showVideoFrame} t={t}/>}
     {activeReport&&!videoRun(activeReport)&&<>
       {!!rows.length&&<>
+      <AnalysisFrameMedia key={selected+":"+frame} report={activeReport} runId={selected} session={session} row={row} index={frame} t={t}/>
       <Field label={t("analysis.frame")}>
         {videoRun(activeReport)?<Input aria-label={t("analysis.frame")} data-testid="analysis-frame" type="number" min={1} max={rows.length} value={frame+1} onChange={event=>{const next=Number(event.target.value)-1;if(Number.isSafeInteger(next)&&next>=0&&next<rows.length)chooseFrame(next);}}/>
           :<Select aria-label={t("analysis.frame")} data-testid="analysis-frame" value={frame} onChange={event=>chooseFrame(Number(event.target.value))}>{rows.map((item,index)=><option key={str(item.sample_id)} value={index}>#{index+1} · {t("samples.value."+str(item.state))} · {str(item.sample_id).slice(0,8)}</option>)}</Select>}
       </Field>
-      <AnalysisFrameMedia key={selected+":"+frame} report={activeReport} runId={selected} session={session} row={row} index={frame} t={t}/>
       </>}
     </>}
+    <section className={styles.sampleInfoCard} data-testid="sample-review-info" aria-label={t("samples.reviewInfo")}>
+      <div className={styles.fieldRow}>{sessionPicker}    <Field label={t("analysis.runs")}><Select aria-label={t("analysis.runs")} data-testid="analysis-run" value={selected} onChange={event=>{setSourcePlayback(previous=>({...previous,playing:false}));setSelected(event.target.value);}}><option value="">{t("analysis.chooseRun")}</option>{runs.map(item=><option key={item.id} value={item.id}>{formatTime(item.created,language)} · {t("analysis.state."+item.state)} · {item.id.slice(0,8)}</option>)}</Select></Field>
+</div>
+    {run&&<div data-testid="analysis-status" className={styles.sampleRunStatus}><span aria-live="polite">{t("analysis.state."+run.state)} · {run.done}/{run.total}</span>{!terminal(run)&&<progress max={run.total} value={run.done}/>}{run.error&&<p role="alert"><code>{run.error}</code></p>}{!terminal(run)&&<Button data-testid="analysis-cancel" disabled={run.cancel_requested===true} onClick={()=>void cancel()}>{t(run.cancel_requested?"analysis.cancelling":"analysis.cancel")}</Button>}</div>}
+      {sessionSummary}
+    </section>
     {activeReport&&<>
-      <div data-testid="analysis-result-snapshot"><p>{t("analysis.resultSnapshot",{run:selected.slice(0,8),model:str(frozen.profile)||str(record(record(activeReport.context).profile).id),profile:t("behavior.profile."+str(savedBehavior.profile_id)),revision:String(savedBehavior.profile_revision??"—")})}</p><p className={styles.hint} data-testid="analysis-result-scope">{t("analysis.resultScope")}</p>{settingsChanged&&<p role="status" data-testid="analysis-result-different">{t("analysis.resultDifferent")} <Button data-testid="analysis-new-from-settings" disabled={busy||!!pending||!available?.installed||(inputSource==="video"&&!canVideo)} onClick={()=>void start()}>{t("analysis.newRun")}</Button></p>}</div>
+      <div data-testid="analysis-result-snapshot" className={styles.sampleInfoCard}><SampleFacts items={[{label:t("analysis.runs"),value:selected.slice(0,8)},{label:t("analysis.profile"),value:str(frozen.profile)||str(record(record(activeReport.context).profile).id)},{label:t("behavior.title"),value:t("analysis.savedPolicy",{profile:t("behavior.profile."+str(savedBehavior.profile_id)),revision:String(savedBehavior.profile_revision??"—")})}]}/><details className={styles.details}><summary>{t("analysis.resultScopeHelp")}</summary><p className={styles.hint} data-testid="analysis-result-scope">{t("analysis.resultScope")}</p></details>{settingsChanged&&<p role="status" data-testid="analysis-result-different">{t("analysis.resultDifferent")} <Button data-testid="analysis-new-from-settings" disabled={busy||!!pending||!available?.installed||(inputSource==="video"&&!canVideo)} onClick={()=>void start()}>{t("analysis.newRun")}</Button></p>}</div>
       {rowsLoading&&<p role="status">{t("analysis.rowsLoading")}</p>}{rowsError&&<p role="alert">{t("analysis.rowsFailure")} · <code>{rowsError}</code></p>}
       {!!rows.length&&<AnalysisTimeline rows={rows} index={frame} onSelect={chooseFrame} t={t} language={language} controls={!videoRun(activeReport)}/>}
     </>}
     {error&&<p role="alert">{t("analysis.failure")} · <code>{error}</code></p>}
     {pending&&<p>{t("analysis.unknownStart")} <Button data-testid="analysis-recover" onClick={()=>void recover(pending)}>{t("analysis.recover")}</Button><Button onClick={()=>{setPending("");sessionStorage.removeItem(PENDING);setError("");}}>{t("analysis.newIntent")}</Button></p>}
-    <details className={styles.details} data-testid="analysis-settings"><summary>{t("analysis.newStudy")}</summary>
+    <details className={`${styles.details} ${styles.sampleInfoCard}`} data-testid="analysis-settings"><summary>{t("analysis.newStudy")}</summary>
     <Field label={t("analysis.source")}><Select data-testid="analysis-input-source" value={inputSource} onChange={event=>{sourceChosen.current=true;setInputSource(event.target.value as "samples"|"video");}}><option value="samples">{t("analysis.source.samples")}</option><option value="video" disabled={!canVideo}>{t("analysis.source.video")}</option></Select></Field>
     {inputSource==="video"&&<p className={styles.hint}>{t("analysis.wholeVideoHint")}</p>}
     <div className={styles.grid}>
@@ -228,7 +232,7 @@ export function AnalysisPanel({session,t,language,sessionVideo}:{session:string;
       <Field label={t("analysis.quality")}><Select aria-label={t("analysis.quality")} value={quality} onChange={event=>setQuality(event.target.value)}><option value="production">{t("analysis.production")}</option><option value="model_probe">{t("analysis.probe")}</option></Select></Field>
     </div><p className={styles.hint}>{t(semantic?"analysis.semanticHint":"analysis.windowHint")}</p></details>
     </details>
-    <div className={styles.flex}><Button data-testid="analysis-start" tone="primary" disabled={busy||!!pending||!available?.installed||(inputSource==="video"&&!canVideo)} onClick={()=>void start()}>{t(inputSource==="video"?"analysis.startVideo":"analysis.start")}</Button><Button onClick={()=>void refresh().catch(err=>setError(errorCode(err)))}>{t("refresh")}</Button></div>
+    <div className={styles.sampleAnalysisActions}><Button data-testid="analysis-start" tone="primary" disabled={busy||!!pending||!available?.installed||(inputSource==="video"&&!canVideo)} onClick={()=>void start()}>{t(inputSource==="video"?"analysis.startVideo":"analysis.start")}</Button><Button onClick={()=>void refresh().catch(err=>setError(errorCode(err)))}>{t("refresh")}</Button></div>
     {activeReport&&<details className={styles.details} data-testid="analysis-statistics"><summary>{t("analysis.statistics")}</summary>
       <div className={styles.grid}>{["frames","approved_labels","unknown","rejected_inputs","false_go","false_stop","state_flips"].map(name=><p key={name}>{t("analysis.metric."+name)}: <strong>{metric(summary[name])}</strong></p>)}</div>
       <p className={styles.hint}>{t("analysis.naHint")}</p>

@@ -52,6 +52,13 @@ async page=>{
  await page.getByTestId("samples-session").selectOption(sid);
  await page.getByTestId("source-video-image").waitFor();
  check(posts.length===0,"playback started analysis");
+ const layout=await page.evaluate(()=>{
+   const root=document.querySelector('[data-testid="analysis-panel"]');
+   const order=["source-video-viewport","source-video-controls","sample-review-info","analysis-settings"].map(id=>document.querySelector('[data-testid="'+id+'"]')?.getBoundingClientRect().top);
+   return {first:root.firstElementChild?.getAttribute("data-testid"),order};
+ });
+ check(layout.first==="source-video-player"&&layout.order.every((top,index,all)=>Number.isFinite(top)&&(index===0||top>all[index-1])),"preview, controls, information and configuration are out of order");
+
  // A slow next JPEG must retain the current pixels, matching counter and geometry.
  await page.evaluate(()=>{
    const samples=[];let running=true;
@@ -179,5 +186,5 @@ async page=>{
  await page.getByTestId("analysis-panel").getByRole("alert").waitFor({state:"visible"});
  check(await page.getByTestId("analysis-settings").getAttribute("open")===null,"profile error forced the settings open");
  check(unexpected.length===0,"unexpected API or hardware request: "+JSON.stringify(unexpected));
- return {result:"PASS",videoFrames:count,photos:0,playbackWithoutModel:true,stableFrameGeometry:true,counterMatchesDecodedFrame:true,lateSeekIgnored:true,singleFetchPerFrame:true,wholeVideoPosts:posts.length,frameHistogram:true,sourceOverlayIdentity:true,sourceHashConflictBlocked:true,compactLayer:true,compositedPixelsVerified:true,compositeAlpha:pixels.after[3],pairedPlayer:true,slowMaskSynchronized:true,historicalPhotos:true,errorsVisibleWhenCollapsed:true,layerSizeVerified:true,frozenRevision:true,mobile:true,robotContacted:false};
+ return {result:"PASS",videoFrames:count,photos:0,playbackWithoutModel:true,stableFrameGeometry:true,counterMatchesDecodedFrame:true,lateSeekIgnored:true,singleFetchPerFrame:true,wholeVideoPosts:posts.length,frameHistogram:true,sourceOverlayIdentity:true,sourceHashConflictBlocked:true,compactLayer:true,compositedPixelsVerified:true,compositeAlpha:pixels.after[3],pairedPlayer:true,previewFirst:true,slowMaskSynchronized:true,historicalPhotos:true,errorsVisibleWhenCollapsed:true,layerSizeVerified:true,frozenRevision:true,mobile:true,robotContacted:false};
 };

@@ -10,8 +10,8 @@ export function AnalysisTimeline({rows,index,onSelect,t,language,controls=true}:
   const paths=useMemo(()=>timelinePaths(rows),[rows]);
   const percentage=(count:number)=>new Intl.NumberFormat(language,{maximumFractionDigits:1}).format(rows.length?count/rows.length*100:0);
   const states=["clear","unknown","obstacle"] as const;
-  return <section data-testid="analysis-timeline" aria-label={t("analysis.histogram.title")}>
-    <h4>{t("analysis.histogram.title")}</h4><p className={styles.hint}>{t("analysis.histogram.hint")}</p>
+  return <section className={styles.sampleInfoCard} data-testid="analysis-timeline" aria-label={t("analysis.histogram.title")}>
+    <h4>{t("analysis.histogram.title")}</h4><details className={styles.details}><summary>{t("analysis.resultScopeHelp")}</summary><p className={styles.hint}>{t("analysis.histogram.hint")}</p></details>
     <div className={styles.flex} style={{flexWrap:"wrap"}}>{states.map(state=><Button key={state} data-testid={"analysis-histogram-"+state} disabled={!histogram[state]} style={{borderColor:colors[state]}} onClick={()=>{const next=nextStateFrame(rows,state,index);if(next!==null)onSelect(next);}}>
       <span aria-hidden="true" style={{background:colors[state],display:"inline-block",width:10,height:10,borderRadius:2}}/> {t("analysis.histogram.entry",{state:t("samples.value."+state),count:histogram[state],percent:percentage(histogram[state])})}
     </Button>)}</div>

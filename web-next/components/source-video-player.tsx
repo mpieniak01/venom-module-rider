@@ -54,21 +54,22 @@ export function SourceVideoPlayer({session,video,position,onPositionChange,compa
   const visible=shown?frames.get(shown.index):undefined;
   const move=(value:number)=>onPositionChange({index:Math.max(0,Math.min(total-1,value)),playing:false});
   return <section data-testid="source-video-player" aria-label={t("analysis.video.title")}>
-    <h4>{t("analysis.video.title")}</h4>
-    <p className={styles.hint}>{t("analysis.video.readOnly",{fps:video.target_fps})}</p>
     {error&&<p role="alert" data-testid="source-video-error">{t("analysis.video.failure")} · <code>{error}</code> <Button onClick={()=>{setFrames(new Map());setFailure(null);setAttempt(value=>value+1);}}>{t("refresh")}</Button></p>}
     <div data-testid="source-video-viewport" className={styles.videoPairStack} aria-busy={!ready}>
       {!images.length&&<div className={styles.videoPair} aria-hidden="true">{["samples.original","analysis.video.processed"].map(label=><div className={styles.videoPairCell} key={label}><p>{t(label)}</p><div className={styles.videoPairViewport} style={{aspectRatio:"4 / 3"}}/>{label==="analysis.video.processed"&&<p className={styles.small}>&nbsp;</p>}</div>)}</div>}
       {images.map(image=><VideoFramePair key={image.key} frame={image} session={session} active={image.key===shown?.key} onReady={promote} onFailure={()=>{setFailure({offset,code:"analysis_video_frame_unavailable"});onPositionChange({index,playing:false});}} t={t}/>)}
       {(!current||!ready||loading)&&!error&&<span className={styles.sourceVideoLoading} role="status">{t("analysis.artifactLoading")}</span>}
     </div>
-    <div className={styles.flex}>
+    <div className={styles.samplePlaybackControls} data-testid="source-video-controls">
+    <div className={styles.fieldRow}>
       <Button data-testid="source-video-play" disabled={!!error||!current} onClick={()=>onPositionChange({index:index+1>=total?0:index,playing:!playing})}>{t(playing?"analysis.video.pause":"analysis.video.play")}</Button>
       <Button data-testid="source-video-previous" disabled={index===0} onClick={()=>move(index-1)}>{t("samples.previous")}</Button>
       <Button data-testid="source-video-next" disabled={index+1>=total} onClick={()=>move(index+1)}>{t("samples.next")}</Button>
       <span data-testid="source-video-position">{t("analysis.video.position",{frame:(shown?.index??index)+1,total,time:videoClock(visible?.source_time_s??NaN),duration:videoClock(meta?.duration_s??video.duration_s)})}</span>
-    </div>
     <Field label={t("analysis.video.frame")}><Input aria-label={t("analysis.video.frame")} data-testid="analysis-frame" type="number" min={1} max={total} value={index+1} onChange={event=>{const value=Number(event.target.value)-1;if(Number.isSafeInteger(value)&&value>=0&&value<total)move(value);}}/></Field>
+    </div>
     <Field label={t("analysis.video.seek")}><Input data-testid="source-video-seek" type="range" min={0} max={Math.max(0,total-1)} step={1} value={index} onChange={event=>move(Number(event.target.value))}/></Field>
+    </div>
+    <details className={styles.details}><summary>{t("analysis.playbackHelp")}</summary><p className={styles.hint}>{t("analysis.video.readOnly",{fps:video.target_fps})}</p></details>
   </section>;
 }

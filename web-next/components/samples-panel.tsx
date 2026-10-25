@@ -8,6 +8,7 @@ import type {RiderClient} from "../lib/use-rider";
 import type {StudyRecording} from "../lib/use-study-recording";
 import {Button,Panel} from "./primitives";
 import {AutomaticCapture} from "./automatic-capture";
+import {SampleFacts} from "./sample-facts";
 import {SamplesBrowser} from "./samples-browser";
 import styles from "../rider.module.css";
 
@@ -18,11 +19,14 @@ export function SamplesPanel({recording,client,t,language}:{recording:StudyRecor
   const imageError=record(record(client.status?.loop_timing).study_sampling).image_error;
   const refreshKey=capture.session?capture.session.session_id+":"+capture.session.state:"";
   return <div className={styles.stack} data-testid="samples-panel">
+    <SamplesBrowser t={t} language={language} refreshKey={refreshKey} standalone/>
+
     <Panel title={t("samples.currentSession")} hint={t("study.globalHint")}>
-      <p>{capture.session?capture.session.session_id:t("study.idleShort")}</p>
+      <SampleFacts items={[{label:t("state"),value:active?t("study.activeShort"):t("study.idleShort")},{label:t("samples.session"),value:capture.session?.session_id.slice(0,8)??"—"},{label:t("samples.savedPhotos"),value:capture.session?.counts.saved??0}]}/>
+      {capture.session&&<details className={styles.details}><summary>{t("details")}</summary><code className={styles.analysisHash}>{capture.session.session_id}</code></details>}
       {video&&<section data-testid="study-video-details" role="status">
-        <strong>{t("study.video")}: {t("study.video."+video.state)}</strong>
-        <p>{t("study.videoStats",{frames:video.frames,seconds:video.duration_s.toFixed(1),mib:(video.bytes/1024/1024).toFixed(1),fps:video.target_fps,gaps:video.gaps})}</p>
+        <SampleFacts items={[{label:t("study.video"),value:t("study.video."+video.state)},{label:t("analysis.metric.frames"),value:video.frames},{label:t("samples.duration"),value:video.duration_s.toFixed(1)+" s"}]}/>
+        <details className={styles.details}><summary>{t("details")}</summary><p className={styles.hint}>{t("study.videoStats",{frames:video.frames,seconds:video.duration_s.toFixed(1),mib:(video.bytes/1024/1024).toFixed(1),fps:video.target_fps,gaps:video.gaps})}</p></details>
         {video.error&&<p role="alert">{t(videoErrorKey(video.error))}</p>}
         {!!video.frames&&video.ended_at!==null&&<a className={styles.button} href={getApiBaseUrl()+SAMPLES_BASE+"/sessions/"+capture.session!.session_id+"/video"} download>{t("study.downloadVideo")}</a>}
       </section>}
@@ -39,6 +43,5 @@ export function SamplesPanel({recording,client,t,language}:{recording:StudyRecor
       {capture.outcome?.state==="unknown"&&<><Button onClick={()=>void capture.check()}>{t("samples.check")}</Button><Button onClick={capture.dismiss}>{t("samples.dismiss")}</Button></>}
       <details className={styles.details}><summary>{t("samples.captureSettings")}</summary><AutomaticCapture collection={active?capture.session:null} sourceSession={client.config?.session??null} t={t}/></details>
     </Panel>
-    <SamplesBrowser t={t} language={language} refreshKey={refreshKey} standalone/>
   </div>;
 }

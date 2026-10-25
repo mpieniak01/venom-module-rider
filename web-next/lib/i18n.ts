@@ -1,6 +1,13 @@
 // Module-owned translations. Every key contains PL, EN and DE by construction.
 export const messages = {
   "analysis.video.title": ["Odtwarzanie nagrania", "Recording playback", "Aufnahme abspielen"],
+  "samples.reviewInfo": ["Wybrane nagranie i badanie", "Selected recording and study", "Ausgewählte Aufnahme und Untersuchung"],
+  "samples.recordingInfo": ["Dane nagrania", "Recording information", "Aufnahmeinformationen"],
+  "samples.duration": ["Czas nagrania", "Recording duration", "Aufnahmedauer"],
+  "samples.gaps": ["Przerwy w zapisie", "Recording gaps", "Aufnahmelücken"],
+  "analysis.savedPolicy": ["{profile} · wersja {revision}", "{profile} · revision {revision}", "{profile} · Version {revision}"],
+  "analysis.resultScopeHelp": ["Jak czytać wynik", "Reading the result", "Ergebnis lesen"],
+  "analysis.playbackHelp": ["O odtwarzaniu", "About playback", "Über die Wiedergabe"],
   "analysis.video.frame": ["Klatka filmu", "Video frame", "Filmbild"],
   "analysis.chooseRun": ["Wybierz zapisane badanie", "Choose a saved study", "Gespeicherte Untersuchung wählen"],
   "analysis.video.processed": ["Po analizie", "After analysis", "Nach der Analyse"],
