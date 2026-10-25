@@ -480,3 +480,7 @@
 
 .samplePhoto { display:flex; flex-wrap:wrap; align-items:center; gap:16px; margin:12px 0; }
 .samplePhotoPreview { width:min(320px,100%); max-height:240px; object-fit:contain; background:#030b14; }
+
+.sourceVideoViewport { position: relative; width: 100%; max-width: 640px; overflow: hidden; border-radius: 8px; background: #050e17; }
+.sourceVideoFrame { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: contain; }
+.sourceVideoLoading { position: absolute; left: 8px; bottom: 8px; padding: 4px 8px; border-radius: 6px; background: #050e17dd; color: var(--r-muted); font-size: 12px; }

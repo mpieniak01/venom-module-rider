@@ -6,7 +6,7 @@ async page=>{
  const jpeg=Buffer.from("/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAAwAEADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwChRRRXoHCFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQB//2Q==","base64");
  const png=Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAEAAAAAwCAYAAAChS3wfAAAAbUlEQVR4nO3QUQmAUBBFQTXXy2Mo89hLKygoB3Hme1kOd5oAAADgd+arh8cY65shd837vj3xZ3niyZcZoA6oGaAOqBmgDqgZoA6oGaAOqBmgDqgZoA6oGaAOqBmgDqgZoA6oGaAOqBmgDgAAMifrYwQ0T1A1TAAAAABJRU5ErkJggg==","base64");
  const count=257,requests=[],posts=[],unexpected=[];
- let tamper=false,badSize=false,newSpec;
+ let tamper=false,badSize=false,newSpec,slowSourceIndex=-1;
  const session={session_id:sid,source_device_id:"fixture",state:"closed",started_at:1234,policy:{},counts:{saved:0,failed:0},video:{state:"complete",frames:count,bytes:jpeg.length*count,duration_s:51.2,target_fps:5,gaps:0,error:null,ended_at:1300}};
  const defaults={profile:"da2-default",window:1,quality_mode:"production",input_source:"video",corridor:[.35,.8,.65,.95],perception:{engine:"depth_plane",residual_limit:.06,outlier_limit:.005,slope_min:2,model_id:"",artifact_sha256:"",semantic_models:{}},geometry:{mode:"image",fx:null,fy:null,cx:.5,cy:.5,radius_ratio:null,lookahead_ratio:2,max_heading_deg:45}};
  const spec={...defaults,behavior:{version:1,profile_id:"fluid",profile_revision:1}};
@@ -27,6 +27,7 @@ async page=>{
    }
    if(/\/video\/frames\/\d+$/.test(path)){
      if(url.searchParams.get("sha256")!==sha)return fulfill(route,{detail:{code:"samples_video_source_changed"}},409);
+     if(Number(path.split("/").at(-1))===slowSourceIndex)await new Promise(resolve=>setTimeout(resolve,650));
      return route.fulfill({status:200,contentType:"image/jpeg",body:jpeg});
    }
    if(path.endsWith("/navigation/config"))return fulfill(route,{config:{revision:9,corridor:[.35,.8,.65,.95],behavior:{version:1,profile_id:"room_fluid",profile_revision:2},perception:{engine:"depth_plane",residual_limit:.06,outlier_limit:.005,slope_min:2}}});
@@ -50,9 +51,37 @@ async page=>{
  await page.getByTestId("samples-session").selectOption(sid);
  await page.getByTestId("source-video-image").waitFor();
  check(posts.length===0,"playback started analysis");
+ // A slow next JPEG must retain the current pixels, matching counter and geometry.
+ await page.evaluate(()=>{
+   const samples=[];let running=true;
+   const tick=()=>{if(!running)return;const image=document.querySelector('[data-testid="source-video-image"]'),play=document.querySelector('[data-testid="source-video-play"]'),counter=document.querySelector('[data-testid="source-video-position"]');
+     if(image&&play)samples.push({index:Number(image.getAttribute("data-source-index")),height:image.getBoundingClientRect().height,y:play.getBoundingClientRect().y+scrollY,complete:image.complete&&image.naturalWidth>0,counter:counter?.textContent});
+     requestAnimationFrame(tick);
+   };
+   window.__videoPlaybackProbe={stop:()=>{running=false;return samples;}};requestAnimationFrame(tick);
+ });
+ slowSourceIndex=1;
  await page.getByTestId("source-video-play").click();
+ await page.waitForFunction(()=>document.querySelector('[data-testid="source-video-pending-image"]')?.getAttribute("data-source-index")==="1");
+ await page.waitForTimeout(250);
+ check(await page.getByTestId("source-video-image").getAttribute("data-source-index")==="0","loading next JPEG discarded the displayed frame");
+ check((await page.getByTestId("source-video-position").textContent()).includes("Klatka 1/"),"counter advanced before pixels were ready");
  await page.waitForFunction(()=>Number(document.querySelector('[data-testid="source-video-image"]')?.getAttribute("data-source-index"))>0);
  await page.getByTestId("source-video-play").click();
+ const playbackSamples=await page.evaluate(()=>window.__videoPlaybackProbe.stop());
+ check(playbackSamples.length>5&&playbackSamples.every(x=>x.height>0&&x.complete&&x.counter.includes("Klatka "+(x.index+1)+"/")),"displayed JPEG and counter diverged during playback");
+ check(Math.max(...playbackSamples.map(x=>x.y))-Math.min(...playbackSamples.map(x=>x.y))<1,"playback controls changed position between frames");
+ check(requests.filter(x=>x.path.endsWith("/video/frames/1")).length===1,"promoting a decoded frame fetched the JPEG twice");
+ slowSourceIndex=5;
+ await page.getByTestId("source-video-seek").focus();
+ await page.getByTestId("source-video-seek").press("Home");
+ for(let step=0;step<5;step++)await page.getByTestId("source-video-seek").press("ArrowRight");
+ await page.waitForFunction(()=>document.querySelector('[data-testid="source-video-pending-image"]')?.getAttribute("data-source-index")==="5");
+ await page.getByTestId("source-video-seek").press("End");
+ await page.waitForFunction(()=>document.querySelector('[data-testid="source-video-image"]')?.getAttribute("data-source-index")==="256");
+ await page.waitForTimeout(750);
+ check(await page.getByTestId("source-video-image").getAttribute("data-source-index")==="256","late JPEG replaced the newer seek target");
+ slowSourceIndex=-1;
  await page.getByTestId("source-video-seek").focus();
  await page.getByTestId("source-video-seek").press("End");
  await page.waitForFunction(()=>document.querySelector('[data-testid="source-video-image"]')?.getAttribute("data-source-index")==="256");
@@ -120,5 +149,5 @@ async page=>{
  await page.setViewportSize({width:390,height:844});
  check(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),"mobile horizontal overflow");
  check(unexpected.length===0,"unexpected API or hardware request: "+JSON.stringify(unexpected));
- return {result:"PASS",videoFrames:count,photos:0,playbackWithoutModel:true,wholeVideoPosts:posts.length,frameHistogram:true,sourceOverlayIdentity:true,sourceHashConflictBlocked:true,compactLayer:true,compositedPixelsVerified:true,layerAlpha:pixels.alpha,layerSizeVerified:true,frozenRevision:true,mobile:true,robotContacted:false};
+ return {result:"PASS",videoFrames:count,photos:0,playbackWithoutModel:true,stableFrameGeometry:true,counterMatchesDecodedFrame:true,lateSeekIgnored:true,singleFetchPerFrame:true,wholeVideoPosts:posts.length,frameHistogram:true,sourceOverlayIdentity:true,sourceHashConflictBlocked:true,compactLayer:true,compositedPixelsVerified:true,layerAlpha:pixels.alpha,layerSizeVerified:true,frozenRevision:true,mobile:true,robotContacted:false};
 };
