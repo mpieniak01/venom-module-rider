@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import BinaryIO
 
 from .errors import RiderError
+from .sample_originals import OriginalReader
 from .samples_contract import CollectionPolicy
 from .samples_frame import FrameBuffer
 from .samples_store import SampleStore, encode, identifier
@@ -38,6 +39,7 @@ class SamplesRegistry:
             raise ValueError("invalid writer queue")
         self.store = store or SampleStore(root)
         self.frames = frames or FrameBuffer()
+        self.originals = OriginalReader(self.store)
         self.io = ThreadPoolExecutor(max_workers=1, thread_name_prefix="rider-samples")
         self.slots = threading.BoundedSemaphore(queue_slots)
         self.queue_slots = queue_slots
@@ -125,6 +127,10 @@ class SamplesRegistry:
 
     async def read(self, method, *args, **kwargs):
         return await asyncio.wrap_future(self._submit(partial(method, *args, **kwargs)))
+
+    async def original(self, sample_id):
+        self._open()
+        return await self.originals.get(sample_id)
 
     async def start(self, request_id, device_id, policy=None):
         values = CollectionPolicy.model_validate(policy or {}).model_dump()
@@ -461,6 +467,7 @@ class SamplesRegistry:
             if self.closed:
                 return
             self.closed = True
+            await self.originals.close()
             self.evidence.retire("registry_closed")
             for row in self.sequences.values():
                 row["timer"].cancel()

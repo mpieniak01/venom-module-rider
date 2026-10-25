@@ -87,7 +87,7 @@ async def sample(request: Request, sample_id: str):
 @router.get("/items/{sample_id}/original")
 async def original(request: Request, sample_id: str):
     domain = registry(request)
-    payload, mime = await domain.read(domain.store.original, sample_id)
+    payload, mime = await domain.original(sample_id)
     return Response(payload, media_type=mime, headers={"cache-control": "no-store"})
 
 
