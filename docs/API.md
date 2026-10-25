@@ -80,3 +80,5 @@ GET/POST /navigation/image-reference proxies the Pi-owned visual reference. CAS 
 ### Operator vision policy corrections
 
 Revision 2 presets accept bounded `behavior.overrides` through the existing device-owned navigation configuration transaction. `behavior_catalog.parameter_schema` and `active_parameters` expose the editable and effective values. Revision 1 definitions remain pinned. See [Vision policy parameters](VISION_PARAMETERS.md) for defaults, units, precedence, reset semantics and diagnostic-only object tracking.
+
+When no saved image reference is available, the panel displays the initial lowest-pose measurements: track 16 cm, robot 11.5 cm, camera height 14 cm, and markers 18/20/40/60 cm in the recorded 320×240 image. These defaults are labelled and do not create a stored configuration or a draft on viewing. Inputs and saving remain disabled until the Pi reference revision is known. Saved measurements, including a hidden overlay, take precedence. The normalized overlay also supports scaled 4:3 images; a changed aspect ratio is not silently stretched.

@@ -16,7 +16,16 @@ export function validReference(v:ImageReference|null):v is ImageReference{
     &&Array.isArray(v.markers)&&v.markers.length>=2&&v.markers.length<=8&&v.markers.every(p=>Array.isArray(p)&&p.length===2&&numeric(p[0],.1,1000)&&numeric(p[1],0,1))
     &&v.markers.every((p,i)=>!i||(p[0]>v.markers[i-1][0]&&p[1]<v.markers[i-1][1]));
 }
-export function emptyReference(size:[number,number]):ImageReference{return {visible:true,frame_size:size,track_width_cm:0,robot_width_cm:0,camera_height_cm:0,reference_pose:"lowest",left_edge:[[.4,.65],[.3,1]],right_edge:[[.6,.65],[.7,1]],markers:[[0,.95],[0,.7]]};}
+// Starting visual references from the measured lowest pose; saved Pi values take precedence.
+export function initialReference():ImageReference {
+  return {visible:true,frame_size:[320,240],track_width_cm:16,robot_width_cm:11.5,camera_height_cm:14,reference_pose:"lowest",
+    left_edge:[[120/320,166/240],[87/320,239/240]],right_edge:[[190/320,166/240],[233/320,239/240]],
+    markers:[[18,1],[20,227/240],[40,181/240],[60,160/240]]};
+}
+export function referenceFitsFrame(reference:ImageReference,size:[number,number]):boolean {
+  return size.every(value=>Number.isInteger(value)&&value>0)
+    && reference.frame_size[0]*size[1]===reference.frame_size[1]*size[0];
+}
 export function bodyEdges(v:ImageReference):[ReferencePoint[],ReferencePoint[]]{
   const ratio=v.robot_width_cm/v.track_width_cm;
   return [v.left_edge.map((p,i)=>[(p[0]+v.right_edge[i][0])/2-(v.right_edge[i][0]-p[0])*ratio/2,p[1]]),v.right_edge.map((p,i)=>[(p[0]+v.left_edge[i][0])/2+(p[0]-v.left_edge[i][0])*ratio/2,p[1]])];
