@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {bodyEdges,moveReference,readReference,validReference,type ImageReference} from "../../web-next/lib/image-reference";
+import {bodyEdges,moveReference,readReference,validReference,initialReference,referenceFitsFrame,type ImageReference} from "../../web-next/lib/image-reference";
 import {imagePoint} from "../../web-next/lib/corridor-editor";
 const fixture=():ImageReference=>({visible:true,frame_size:[320,240],track_width_cm:16,robot_width_cm:11.5,camera_height_cm:14,reference_pose:"lowest",left_edge:[[.39,.65],[.29,1]],right_edge:[[.58,.65],[.74,1]],markers:[[18,1],[20,227/240],[40,181/240],[60,160/240]]});
 test("measured body width occupies the same proportion of the reference track at both rows",()=>{
@@ -32,4 +32,21 @@ test("navigation authority or malformed replies cannot become reference configur
   assert.equal(readReference({version:1,revision:-1,purpose:"visual_reference_only",values:fixture()}),null);
   assert.equal(readReference({}),null);
   assert.equal(readReference({version:1,revision:2,purpose:"visual_reference_only",values:fixture()})?.revision,2);
+});
+test("initial measurements are complete and independent between edit sessions",()=>{
+  const first=initialReference(),second=initialReference();
+  assert.ok(validReference(first));
+  assert.deepEqual([first.track_width_cm,first.robot_width_cm,first.camera_height_cm],[16,11.5,14]);
+  assert.deepEqual(first.markers.map(point=>point[0]),[18,20,40,60]);
+  assert.equal(first.visible,true);
+  first.left_edge[0][0]=0;
+  first.markers[0][0]=1;
+  assert.notEqual(first.left_edge[0][0],second.left_edge[0][0]);
+  assert.equal(second.markers[0][0],18);
+});
+test("reference scaling preserves image proportions and rejects a changed crop",()=>{
+  const value=initialReference();
+  for(const size of [[320,240],[640,480],[960,720]] as [number,number][])assert.equal(referenceFitsFrame(value,size),true);
+  for(const size of [[640,360],[0,0],[640,0]] as [number,number][])assert.equal(referenceFitsFrame(value,size),false);
+  assert.deepEqual(value.frame_size,[320,240]);
 });

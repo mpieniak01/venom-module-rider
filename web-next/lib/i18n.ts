@@ -1,5 +1,10 @@
 // Module-owned translations. Every key contains PL, EN and DE by construction.
 export const messages = {
+  "reference.defaults": ["Wartości początkowe z naszych pomiarów. Zapisz je na robocie, aby zachować własne ustawienia.", "Starting values from our measurements. Save them on the robot to retain your settings.", "Anfangswerte aus unseren Messungen. Zum Beibehalten auf dem Roboter speichern."],
+  "reference.saved": ["Odczytano pomiary zapisane na robocie.", "Measurements saved on the robot have been loaded.", "Die auf dem Roboter gespeicherten Messwerte wurden geladen."],
+  "reference.pending": ["Te wartości czekają na zapis na robocie.", "These values are waiting to be saved on the robot.", "Diese Werte warten auf das Speichern auf dem Roboter."],
+  "reference.defaultOverlay": ["Domyślne pomiary ≈", "Default measurements ≈", "Standardmesswerte ≈"],
+  "reference.frameMismatch": ["Obraz ma inne proporcje niż obraz pomiarowy. Nakładka pojawi się, gdy proporcje będą zgodne.", "The image proportions differ from the measurement image. The overlay appears when they match.", "Die Bildproportionen unterscheiden sich vom Messbild. Die Einblendung erscheint bei gleichen Proportionen."],
   "reference.retry": ["Ponów odczyt", "Retry reading", "Erneut lesen"],
   "behavior.evidenceHint": ["Udziały dotyczą ocenianego obszaru: 0,5 oznacza 50%. Większa wymagana część podłogi oznacza ostrożniejszą ocenę.", "Fractions refer to the assessed region: 0.5 means 50%. Requiring more visible floor makes the assessment more cautious.", "Anteile beziehen sich auf den bewerteten Bereich: 0,5 bedeutet 50 %. Ein höherer erforderlicher Bodenanteil macht die Bewertung vorsichtiger."],
   "behavior.temporalHint": ["Ustal liczbę klatek i czas potrzebny do zmiany oceny. Historia określa, jak długo wcześniejsze wyniki są brane pod uwagę.", "Set the frame count and time needed to change the assessment. History sets how long earlier results are considered.", "Bildanzahl und Zeit für einen Bewertungswechsel festlegen. Der Verlauf bestimmt, wie lange frühere Ergebnisse berücksichtigt werden."],

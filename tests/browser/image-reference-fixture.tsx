@@ -18,6 +18,7 @@ window.fetch=(input,options)=>{
 };
 function Fixture(){
  const reference=useImageReference("reference-fixture");
+ const size:[number,number]=location.hash==="#scaled"?[640,480]:[320,240];
  const client={canMutate:true,currentSession:()=>"reference-fixture",mutate:async(path:string,body:JsonRecord)=>{
   if(path!=="/navigation/image-reference")throw new Error("outside_reference_fixture");
   window.referenceFixtureSaves.push(body);
@@ -25,10 +26,11 @@ function Fixture(){
  }}as unknown as RiderClient;
  const t=(key:string,values?:Record<string,string|number>)=>translate("pl",key,values);
  return <main className={styles.page+" fixture"} style={{padding:20}}>
-  <ImageReferenceControls reference={reference} client={client} size={[320,240]} t={t}/>
+  <ImageReferenceControls reference={reference} client={client} size={size} t={t}/>
+  <output data-testid="reference-revision">{reference.state?.revision??"unavailable"}</output>
   <output data-testid="reference-read-error">{reference.error}</output>
   <output data-testid="reference-has-draft">{String(!!reference.draft)}</output>
-  <div style={{position:"relative",width:640,height:480}}><ImageReferenceOverlay reference={reference} size={[320,240]} t={t}/></div>
+  <div style={{position:"relative",width:640,height:480}}><ImageReferenceOverlay reference={reference} size={size} t={t}/></div>
  </main>;
 }
 createRoot(document.getElementById("root")!).render(<Fixture/>);
