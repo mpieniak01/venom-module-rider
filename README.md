@@ -14,6 +14,8 @@ An optional Venom module for manual operation of Rider-Pi. Venom supplies the UI
 
 Manual operation does not require chat, voice recognition, an LLM or Rider-PC.
 
+Automatic motion settings are available under **Settings and diagnostics → Zone and motion parameters** in Manual, Automatic and Automat2 views. Editing prepares a local draft and never changes an active drive; stop driving before saving to Pi. Switching views preserves the draft. Model tuning controls image analysis separately. Automat2 keeps the 0.10 speed limit. The pulse field uses the ceiling reported by Pi (up to 250 ms on compatible versions; older versions retain 150 ms). The pulse is also bounded by the remaining image/decision validity, whose independent ceiling remains 200 ms.
+
 ## R2 — compute and perception
 
 Pi submits versioned, bounded binary jobs to Venom's shared active LLM and

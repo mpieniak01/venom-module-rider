@@ -230,7 +230,20 @@ def render_depth(
     from PIL import Image, ImageDraw
 
     errors = assessment.pop("_errors")
-    colors = np.full((*depth.shape, 3), (255, 185, 35), dtype=np.uint8)
+    # Unscored pixels stay identical to the camera image, not unknown/yellow.
+    colors = np.asarray(image, dtype=np.uint8).copy()
+    if assessment.get("geometry") != "ground_capsule":
+        y, x = np.mgrid[: depth.shape[0], : depth.shape[1]]
+        palette = {"clear": (35, 210, 100), "obstacle": (240, 60, 65)}
+        for side_name in ("left", "right"):
+            sector = assessment.get("sectors", {}).get(side_name, {})
+            bounds = sector.get("corridor")
+            if bounds is None:
+                continue
+            left, top, right, bottom = bounds
+            mask = (x >= left * image.width) & (x < right * image.width)
+            mask &= (y >= top * image.height) & (y < bottom * image.height)
+            colors[mask] = palette.get(sector.get("state"), (255, 185, 35))
     colors[np.isfinite(errors) & (errors <= settings.residual_limit)] = (
         35,
         210,

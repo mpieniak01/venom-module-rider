@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import ts from "typescript";
 import { test } from "node:test";
-import { calibrationAcceptance, calibrationMatches, completedTrial, executionHeadline, freshPolicyFrame, previewNotice, calibrationScope, decisionView, freshAnalysisFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, motionPermission, stoppingZone, stoppingZoneValues, trialBlock, trialPreparation, trialPreparationTitle, trialPreparationErrorKey, trialDiagnostics, trialStopReasonKey, trialOutcomeTone, freshObservation } from "../../web-next/lib/loop-controls";
+import { calibrationAcceptance, calibrationMatches, completedTrial, executionHeadline, freshPolicyFrame, previewNotice, calibrationScope, decisionView, freshAnalysisFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, navigationPulseLimit, navigationSettingsDriveBlocked, motionPermission, stoppingZone, stoppingZoneValues, trialBlock, trialPreparation, trialPreparationTitle, trialPreparationErrorKey, trialDiagnostics, trialStopReasonKey, trialOutcomeTone, freshObservation } from "../../web-next/lib/loop-controls";
 import { translate } from "../../web-next/lib/i18n";
 import { featureRows, frameRequested, type RiderStatus } from "../../web-next/lib/model";
 
@@ -633,4 +633,27 @@ test("Pi presentation metadata is never submitted by save, zone change or accept
  const accepted=calibrationAcceptance(policy,{sha256:"a".repeat(64)},"operator-test",true);
  assert.equal(accepted.verified,true);
  assert.equal((accepted.avoidance as {sweep_verified:boolean}).sweep_verified,true);
+});
+
+test("warm drive service after disarm does not lock saving, but motion and unknown state do",()=>{
+ const status={connection:{status:"online"},errors:{},control:{safety:{state:"DISARMED",moving:false,operator_control:{state:"idle"}}}} as unknown as RiderStatus;
+ assert.equal(navigationSettingsDriveBlocked(status,true,{drive:true}),false);
+ assert.equal(navigationSettingsDriveBlocked(status,false,{drive:true}),true);
+ assert.equal(navigationSettingsDriveBlocked(null,true,{drive:true}),true);
+ for(const change of [{state:"ARMED"},{moving:true},{stale:true},{operator_control:{state:"qualifying"}}]){
+  const next={...status,control:{...status.control,safety:{...(status.control!.safety as object),...change}}} as RiderStatus;
+  assert.equal(navigationSettingsDriveBlocked(next,true,{drive:true}),true);
+ }
+ assert.equal(navigationSettingsDriveBlocked(status,true,{drive:true,preparation:{active:true}}),true);
+});
+
+test("pulse field range follows Pi capability and does not persist presentation metadata",()=>{
+ assert.equal(navigationPulseLimit(null,true),150);
+ assert.equal(navigationPulseLimit({avoidance:{enabled:true}}),150);
+ assert.equal(navigationPulseLimit({}),200);
+ assert.equal(navigationPulseLimit({motion_limits:{version:1,max_motion_ms:250}},true),250);
+ assert.equal(navigationPulseLimit({motion_limits:{version:1,max_motion_ms:999}},true),250);
+ assert.equal(navigationPulseLimit({motion_limits:{version:2,max_motion_ms:250}},true),150);
+ const policy={speed:.1,max_motion_ms:150,motion_limits:{version:1,max_motion_ms:250}};
+ assert.equal("motion_limits" in loopSettingsValues(policy,{...policy,max_motion_ms:250}),false);
 });

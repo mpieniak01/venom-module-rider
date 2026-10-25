@@ -63,7 +63,7 @@ export function ModelTuning({ client, policy, goals, locked, t, onApplied, onRef
     <div className={styles.perceptionBody}>
       <p className={styles.hint}>{t("tuning.hint")}</p>
       <p className={styles.small} data-testid="tuning-current">{t("tuning.current", { model: displayId || "—", revision: String(policy?.revision ?? "—") })}</p>
-      {semantic && <fieldset className={styles.stack} disabled={!supported || locked || pending} onFocusCapture={captureBase}>
+      {semantic && <fieldset className={styles.stack} disabled={!supported || pending} onFocusCapture={captureBase}>
         <legend>{t("tuning.semantic")}</legend>
         <Field label={t("tuning.surface")}><Select data-testid="tuning-surface" value={row.surface} onChange={event => semanticEdit("surface", event.target.value)}>
           <option value="floor_only">{t("tuning.floorOnly")}</option><option value="floor_rug">{t("tuning.floorRug")}</option>
@@ -78,7 +78,7 @@ export function ModelTuning({ client, policy, goals, locked, t, onApplied, onRef
             onChange={event => semanticEdit(field, event.target.value === "" ? Number.NaN : Number(event.target.value))}/></Field>
         </div>)}
       </fieldset>}
-      {depth && <fieldset className={styles.stack} disabled={locked || pending} onFocusCapture={captureBase}><legend>{t("tuning.depth")}</legend>
+      {depth && <fieldset className={styles.stack} disabled={pending} onFocusCapture={captureBase}><legend>{t("tuning.depth")}</legend>
         {(["residual_limit", "outlier_limit", "slope_min"] as const).map(field => <Field label={t(field === "residual_limit" ? "perceptionResidual" : field === "outlier_limit" ? "perceptionOutliers" : "perceptionSlope")} key={field}>
           <Input data-testid={"tuning-" + field} type="number" min={field === "residual_limit" ? .01 : field === "slope_min" ? 1 : 0} max={field === "residual_limit" ? .15 : field === "slope_min" ? 4 : 2} step={field === "residual_limit" ? .005 : .1}
             value={Number.isFinite(perception[field]) ? Number(perception[field]) * (field === "outlier_limit" ? 100 : 1) : ""}

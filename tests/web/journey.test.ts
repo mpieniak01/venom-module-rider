@@ -87,3 +87,12 @@ test("confirm-and-start readiness omits only persisted acceptance and still bloc
   assert.ok(journeyBlocks(unaccepted,{...runtime,drive:false},detector,true,false,status,false).includes("loopRuntimeMissing"));
   assert.ok(journeyBlocks(unaccepted,runtime,{...detector,navigation_journey_version:undefined},true,false,status,false).includes("journeyUpdateRequired"));
 });
+
+test("extended pulses require the Pi capability and preserve the speed limit",()=>{
+ const {policy,detector,status,runtime}=scenario();
+ for(const duration of [190,250]){
+  assert.ok(journeyBlocks({...policy,max_motion_ms:duration},runtime,detector,true,false,status).includes("journeyMotionLimits"));
+  assert.ok(!journeyBlocks({...policy,max_motion_ms:duration,motion_limits:{version:1,max_motion_ms:250}},runtime,detector,true,false,status).includes("journeyMotionLimits"));
+ }
+ assert.ok(journeyBlocks({...policy,max_motion_ms:251,motion_limits:{version:1,max_motion_ms:250}},runtime,detector,true,false,status).includes("journeyMotionLimits"));
+});

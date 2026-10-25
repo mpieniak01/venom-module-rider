@@ -382,3 +382,42 @@ def test_native_preview_delivers_identical_annotated_pixels_and_source_sectors(
         assert analysis["source"] == current
         assert len(calls) == 1 and pi.opened == 1 and pi.snapshot_requests == 0
         assert all(method == "GET" for method, _path, _body in pi.calls)
+
+
+@pytest.mark.parametrize(
+    "state,error", [("clear", 0.0), ("obstacle", 0.2), ("unknown", 0.0)]
+)
+def test_depth_preview_tints_only_evaluated_zones(state, error):
+    image = Image.new("RGB", (320, 240), (80, 80, 80))
+    depth = np.ones((240, 320))
+    errors = np.full(depth.shape, np.nan)
+    errors[192:228, 112:208] = error
+    assessment = {
+        "state": state,
+        "_errors": errors,
+        "sectors": {
+            "left": {"state": "clear", "corridor": [0.05, 0.8, 0.35, 0.95]},
+            "right": {"state": "obstacle", "corridor": [0.65, 0.8, 0.95, 0.95]},
+        },
+    }
+    encoded = render_depth(
+        image,
+        depth,
+        assessment,
+        ROI,
+        PerceptionSettings(engine="depth_plane"),
+        draw_geometry=False,
+    )
+    pixels = np.asarray(Image.open(io.BytesIO(encoded))).astype(int)
+    # Both the fitting support and the rest of the frame retain the original image.
+    assert abs(pixels[20:150, 20:300] - 80).max() <= 3
+    assert abs(pixels[170:180, 130:190] - 80).max() <= 3
+    left, center, right = pixels[210, 60], pixels[210, 160], pixels[210, 260]
+    assert left[1] > left[0] + 30
+    assert right[0] > right[1] + 30
+    if state == "clear":
+        assert center[1] > center[0] + 30
+    elif state == "obstacle":
+        assert center[0] > center[1] + 30
+    else:
+        assert center[0] > center[1] > center[2]

@@ -49,6 +49,22 @@ export function calibrationMatches(policy: JsonRecord | null, detector: JsonReco
 export function calibrationScope(policy: JsonRecord | null, detector: JsonRecord): string {
   return JSON.stringify([policy?.speed, policy?.max_motion_ms, policy?.decision_budget_ms, policy?.corridor, policy?.perception, policy?.avoidance, detector.sha256]);
 }
+/** A warm navigation service can remain requested after STOP/disarm without motion authority. */
+export function navigationSettingsDriveBlocked(status: RiderStatus | null, controlFresh: boolean, goals: JsonRecord): boolean {
+  if (goals.drive !== true) return false;
+  const safety = safetyOf(status);
+  return !status || !controlFresh || !!status.errors.control || safety.stale === true
+    || safety.state !== "DISARMED" || safety.moving !== false
+    || record(goals.preparation).active === true
+    || ["active", "qualifying"].includes(str(record(safety.operator_control).state));
+}
+/** Old Pi versions retain their limits; only a device capability can raise the field range. */
+export function navigationPulseLimit(policy: JsonRecord | null, journey = false): number {
+  const limits = record(policy?.motion_limits);
+  if (limits.version === 1 && Number.isInteger(limits.max_motion_ms) && Number(limits.max_motion_ms) >= 50)
+    return Math.min(250, Number(limits.max_motion_ms));
+  return journey || record(policy?.avoidance).enabled === true ? 150 : 200;
+}
 export function loopSettingsValues(policy: JsonRecord, draft: JsonRecord): JsonRecord {
   // Pi presentation metadata is read-only; only persisted policy fields are writable.
   const fields = ["mode", "speed", "max_motion_ms", "decision_budget_ms", "corridor", "perception", "avoidance", "behavior", "verified", "calibration_id", "model_sha256"];

@@ -19,12 +19,12 @@ async page => {
   const writable = ["behavior","mode","speed","decision_budget_ms","max_motion_ms","corridor","perception","avoidance","verified","calibration_id","model_sha256"].sort();
   const profiles = allowedProfiles.map(id=>({id,profile_revision:id==="room_fluid"?2:1,status:id==="legacy"?"legacy":"experimental",parameters:{}}));
   let policy={protocol_version:1,revision:134,behavior:{version:1,profile_id:profileId,profile_revision:profileId==="room_fluid"?2:1},
-    mode:"observe",speed:.1,decision_budget_ms:300,max_motion_ms:150,corridor:[.35,.8,.65,.95],
+    mode:"observe",speed:.1,decision_budget_ms:300,max_motion_ms:250,corridor:[.35,.8,.65,.95],
     perception:{engine,model_id:modelId,artifact_sha256:sha,residual_limit:.06,outlier_limit:.005,slope_min:2},
     avoidance:{protocol_version:3,enabled:true,sweep_verified:false,mirrored:false,turn_speed:.05,turn_ms:100,max_turn_pulses:3,max_stalled_corrections:2,progress_min_delta:.03,
       geometry:{mode:"image",fx:null,fy:null,cx:.5,cy:.5,radius_ratio:null,lookahead_ratio:2,max_heading_deg:45}},
     verified:false,calibration_id:"",model_sha256:""};
-  const configView=()=>({...structuredClone(policy),
+  const configView=()=>({...structuredClone(policy),motion_limits:{version:1,max_motion_ms:250},
     behavior_catalog:{version:1,supported:true,active:policy.behavior,profiles,effective_policy_sha256:"c".repeat(64)},
     ...(continuous?{approval_without_restart_version:1}:{}),model_tuning_supported:true,perception_tuning:{version:1,active_model_id:modelId,effective:{}}});
   let observe=false,drive=false,running=false,stale=true,cameraState="stopped",journey=null,rejectSave=true,rejectedWrites=0,delaySave=false,savePending=false,rejectObservation=false;
@@ -108,7 +108,7 @@ async page => {
         state="ARMED";owner="navigation";holder=body.panel_id;generation="prod-"+(++serial);drive=true;observe=true;running=true;stale=false;
         await page.evaluate(()=>{window.__journeyStartProd.producerActive=true;});
         journey={version:1,id:"journey-"+serial,active:true,state:"forward",reason:"clear",elapsed_s:0,maneuver_epoch:0};
-        return json({ok:true,meta:{},data:{ok:true,config:configView()}});
+        return json({ok:true,meta:{},data:{ok:true,config:structuredClone(policy)}});
       }
       if(path==="/control"){
         check(body.action==="stop","unexpected control actuation "+body.action);
@@ -129,14 +129,14 @@ async page => {
     return json({});
   });
   try{
-    policy.max_motion_ms=200;
+    policy.max_motion_ms=251;
     await page.goto(base+"/rider",{waitUntil:"domcontentloaded"});
     await page.getByTestId("workspace-journey").click();
-    await wait(async()=>(await page.getByTestId("command-reason").innerText()).includes("150 ms"),"acceptance guidance hides the actual motion-limit block");
+    await wait(async()=>(await page.getByTestId("command-reason").innerText()).includes("Podróż wymaga"),"acceptance guidance hides the actual motion-limit block");
     check(await page.getByTestId("journey-start").isDisabled(),"invalid motion limits enabled Start");
     check(calls.length===0,"displaying a hard block changed device state");
     scenarios.push("motion-limit block takes precedence over acceptance guidance");
-    policy.max_motion_ms=150;
+    policy.max_motion_ms=250;
     await page.reload({waitUntil:"domcontentloaded"});await page.getByTestId("workspace-journey").click();
     const start=page.getByTestId("journey-start"),accept=page.getByTestId("trial-accept");
     await wait(async()=>await page.getByTestId("prepare-navigation").isVisible(),"cold Prod does not expose preparation");
@@ -202,6 +202,7 @@ async page => {
     await start.click();
     await wait(()=>policy.revision===135,"strict Pi writer rejected acceptance; echoed read-only metadata: "+JSON.stringify(violations));
     await wait(()=>journey?.active===true,"primary confirm-and-start click did not reach journey endpoint");
+    await wait(async()=>(await page.getByTestId("command-reason").innerText()).includes("clear"),"raw Start response discarded the 250 ms capability and falsely blocked valid motion settings");
     check(saves.length===1,"acceptance must save once");
     check(policy.verified&&policy.avoidance.sweep_verified&&policy.behavior.profile_id===profileId,"acceptance changed profile or omitted qualification");
     const transaction=calls.slice(beforeConfirmStart).map(call=>call.path);
