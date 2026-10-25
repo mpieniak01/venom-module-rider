@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Play, Square, RefreshCw } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 import { data, errorCode, formatNumber, formatTime, record, safetyOf, type JsonRecord } from "../lib/model";
-import { calibrationAcceptance, calibrationFrameBlock, calibrationMatches, calibrationScope, decisionView, executionHeadline, freshPolicyFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, motionPermission, stoppingZone, stoppingZoneValues, trialBlock, trialPreparation, trialPreparationTitle, trialPreparationErrorKey, trialDiagnostics, trialStopReasonKey, trialOutcomeTone, freshObservation } from "../lib/loop-controls";
+import { calibrationAcceptance, calibrationFrameBlock, calibrationMatches, calibrationScope, decisionView, executionHeadline, freshPolicyFrame, loopBlock, loopFailure, loopPhase, loopSettingsValues, navigationPulseLimit, navigationSettingsDriveBlocked, navigationReadCurrent, refreshStartedNavigation, motionPermission, stoppingZone, stoppingZoneValues, trialBlock, trialPreparation, trialPreparationTitle, trialPreparationErrorKey, trialDiagnostics, trialStopReasonKey, trialOutcomeTone, freshObservation } from "../lib/loop-controls";
 import { journeyBlocks, journeyView } from "../lib/journey";
 import { operatorPrioritySupported } from "../lib/navigation";
 import { stopLoopResources } from "../lib/stop-loop";
@@ -26,6 +26,7 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
   const [editingZone,setEditingZone]=useState(false);
   const dirty=!!policy&&JSON.stringify(policy)!==JSON.stringify(draft);
   const policyRef=useRef(policy),dirtyRef=useRef(dirty),policySession=useRef("");
+  const stateReadSequence=useRef(0),stateAppliedSequence=useRef(0);
   policyRef.current=policy;dirtyRef.current=dirty;
   const {setPerceptionPolicy,currentSession}=client;
   const applyPolicy=useCallback((value:JsonRecord|null)=>{
@@ -78,12 +79,15 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
       reading=true;
       const first=initial||!configured;
       try {
+        const request=++stateReadSequence.current;
         const row=await apiFetch<JsonRecord>("/api/v1/rider/navigation/"+(first?"config":"state"),{signal:abort.signal});
         if(abort.signal.aborted)return;
-        apply(row);
         const incoming=record(row.config);
+        if(!navigationReadCurrent(request,stateAppliedSequence.current,incoming.revision,policySession.current===session?policyRef.current?.revision:undefined))return;
+        stateAppliedSequence.current=request;
+        apply(row);
         if(typeof incoming.revision==="number")setProfileSnapshot(previous=>previous.session===session&&Number(previous.policy?.revision??-1)>Number(incoming.revision)?previous:{policy:incoming,session:session??""});
-        if((policySession.current!==session||Number(incoming.revision)>=Number(policyRef.current?.revision??-1))&&(first||!dirtyRef.current&&typeof incoming.revision==="number"&&incoming.revision>Number(policyRef.current?.revision??-1)))applyPolicy(incoming);
+        if((policySession.current!==session||Number(incoming.revision)>=Number(policyRef.current?.revision??-1))&&(first||!dirtyRef.current&&typeof incoming.revision==="number"&&(incoming.revision>Number(policyRef.current?.revision??-1)||incoming.revision===policyRef.current?.revision&&JSON.stringify(incoming)!==JSON.stringify(policyRef.current))))applyPolicy(incoming);
         if(first){setRuntime(record(row.runtime));configured=true;}
         setReadError("");
       } catch(err) {
@@ -103,7 +107,8 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
   },[connected,session,refresh,t,applyPolicy]);
   const phase=loopPhase(connected,loopState,goals);
   const active=goals.observe===true||goals.drive===true;
-  const settingsLocked=goals.drive===true||!!operation;
+  const settingsLocked=!!operation||loading;
+  const settingsDriveBlocked=navigationSettingsDriveBlocked(client.status,client.controlFresh,goals);
   const groundDraft=record(draft?.avoidance).enabled===true&&record(record(draft?.avoidance).geometry).mode==="ground";
   const groundActive=record(policy?.avoidance).enabled===true&&record(record(policy?.avoidance).geometry).mode==="ground";
   const {cameraStream,setCameraStream}=client;
@@ -115,10 +120,14 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
     if(!cameraStream)setCameraStream("venom");
   },[active,loopState.running,loopState.run_id,goals.drive,cameraStream,setCameraStream]);
 
-  const readState=async()=>{
+  const readState=useCallback(async(refreshPolicy=false)=>{
+    const origin=currentSession(),request=++stateReadSequence.current;
     const row=await apiFetch<JsonRecord>("/api/v1/rider/navigation/state");
+    if(currentSession()!==origin||!navigationReadCurrent(request,stateAppliedSequence.current,record(row.config).revision,policyRef.current?.revision))return;
+    stateAppliedSequence.current=request;
     setLoopState(record(row.status));setGoals(record(row.goals));setDetector(record(row.detector));
-  };
+    if(refreshPolicy&&!dirtyRef.current&&typeof record(row.config).revision==="number")applyPolicy(record(row.config));
+  },[currentSession,applyPolicy]);
   const failure=useCallback((err:unknown)=>{
     setTrialFailure(err);
     const diagnostic=record(record(record(record(err).data).detail).details).navigation;
@@ -162,12 +171,12 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
     const saved=record(data(result).config);applyPolicy(saved);return saved;
   };
   const save=async()=>{
-    if(!draft||!policy||goals.drive===true||operation)return;
+    if(!draft||!policy||settingsDriveBlocked||operation)return;
     setOperation("save");setError("");setSettingsError("");setSavedRevision(null);
     const origin=client.currentSession();operationEpoch.current=client.currentMotionEpoch();operationGeneration.current=client.currentGeneration();
     const task=(async()=>{
       const loaded=await apiFetch<JsonRecord>("/api/v1/rider/navigation/config");ensureOperation(origin);
-      if(record(loaded.config).revision!==policy.revision||record(loaded.goals).drive===true)throw new Error("navigation_configuration_changed");
+      if(record(loaded.config).revision!==policy.revision||navigationSettingsDriveBlocked(client.status,client.controlFresh,record(loaded.goals)))throw new Error("navigation_configuration_changed");
       const resume=record(loaded.goals).observe===true;
       await stopGoals(origin);ensureOperation(origin);
       const saved=await persist(loopSettingsValues(policy,draft));
@@ -275,13 +284,13 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
       trialArmed.current=true;
       const warm = operatorPrioritySupported(client.status) && loopState.operator_control_version === 1 && loopState.running === true && loopState.stale !== true && safetyOf(client.status).state === "ARMED";
       const epoch = client.currentMotionEpoch();
-      const result = warm
-        ? record(await client.command({action:"navigation_resume"},true,true))
-        : await client.startNavigationTrial(plan,Number(policy.revision));
+      if(warm)await client.command({action:"navigation_resume"},true,true);
+      else await client.startNavigationTrial(plan,Number(policy.revision));
       if(stopping.current||client.currentSession()!==origin||client.currentMotionEpoch()!==epoch)throw new Error("navigation_trial_cancelled");
-      const saved=record(result.config);if(Object.keys(saved).length)applyPolicy(saved);
       operationGeneration.current=client.currentGeneration();operationEpoch.current=client.currentMotionEpoch();
-      await readState();
+      // Start returns persisted policy only; the state endpoint adds current Pi capabilities.
+      const refreshError=await refreshStartedNavigation(()=>readState(true),()=>!stopping.current&&client.currentSession()===origin&&client.currentMotionEpoch()===epoch);
+      if(refreshError){setReadError(t("loopStartedReadFailed")+" · "+errorCode(refreshError));setLoopState(previous=>({...previous,stale:true}));}
       setTrialResult("trialStarted");
     })();
     startTask.current=task;
@@ -299,13 +308,15 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
       const plan=t("journeyPlan")+" · "+String(policy.speed)+" SDK · ≤ "+String(policy.max_motion_ms)+" ms";
       // This click explicitly confirms the visible image and starts the journey.
       // Save before admission; a rejected save/STOP must never enqueue motion.
-      const result=await client.startNavigationJourney(plan,Number(policy.revision),confirmJourney?async()=>{
+      await client.startNavigationJourney(plan,Number(policy.revision),confirmJourney?async()=>{
         const accepted=await saveImageAcceptance(origin,true,false);ensureOperation(origin);
         return Number(accepted.revision);
       }:undefined);
       if(stopping.current||client.currentSession()!==origin||client.currentMotionEpoch()!==epoch)throw new Error("navigation_trial_cancelled");
-      const saved=record(result.config);if(Object.keys(saved).length)applyPolicy(saved);
-      await readState();setJourneyRequested(true);
+      // Never replace presented policy with the raw Start reply: it omits motion limits.
+      const refreshError=await refreshStartedNavigation(()=>readState(true),()=>!stopping.current&&client.currentSession()===origin&&client.currentMotionEpoch()===epoch);
+      if(refreshError){setReadError(t("loopStartedReadFailed")+" · "+errorCode(refreshError));setLoopState(previous=>({...previous,stale:true}));}
+      setJourneyRequested(true);
     })();startTask.current=task;
     try{await task;}catch(err){if(!stopping.current&&client.currentMotionEpoch()===epoch&&client.currentSession()===origin)setJourneyError(errorCode(err));}
     finally{startTask.current=null;if(!stopping.current)setOperation(null);}
@@ -345,7 +356,7 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
       if(startTask.current===task)startTask.current=null;
       if(mounted.current){setCameraTransition(false);if(!stopping.current)setOperation(null);}
     });
-  },[client,connected,failure,loopState,operation,setCameraTransition]);
+  },[client,connected,failure,loopState,operation,setCameraTransition,readState]);
   useEffect(()=>{
     if(freshObservation(loopState,goals))setRecoveryFailure(null);
   },[loopState,goals]);
@@ -381,10 +392,13 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
   const operator = record(safety.operator_control);
   const priority = operatorPrioritySupported(client.status);
   const automaticActive = priority ? operator.state === "active" || operator.state === "qualifying" : phase === "running" && goals.drive === true;
+  const journeyBlockLabel=(block:string)=>block==="journeyMotionLimits"
+    ?t(block,{speed:String(policy?.speed??"—"),pulse:String(policy?.max_motion_ms??"—"),limit:String(navigationPulseLimit(policy,true))}):t(block);
   let commandReason = "";
   if (view === "journey") {
     if (journeyError) commandReason = t("journeyRequestError") + " · " + journeyError;
-    else if (nonAcceptanceJourneyBlock||journeyUnavailable[0]) commandReason = t(nonAcceptanceJourneyBlock||journeyUnavailable[0]);
+    else if (readError) commandReason=readError;
+    else if (nonAcceptanceJourneyBlock||journeyUnavailable[0]) commandReason = journeyBlockLabel(nonAcceptanceJourneyBlock||journeyUnavailable[0]);
     else if (journey.reason&&["failed","blocked"].includes(journey.phase)) commandReason=t(["decision_timeout","decision_invalid_or_expired"].includes(journey.reason)?"workspace.journeyAnalysisExpired":trialStopReasonKey(journey.reason));
     else if (journey.active&&journey.reason) commandReason = t("state") + ": " + journey.reason;
   } else if (view === "automatic") {
@@ -450,7 +464,7 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
     </div>
     <div className={styles.driveWorkspace}>
       <div className={styles.workspaceContent} data-testid="workspace-content" role="region" aria-label={t("workspaceObservation")}>
-        <div className={styles.loopCamera}><CameraPanel client={client} t={t} language={language} compact showTools={false} editor={view !== "manual" && editingZone && draft && Array.isArray(draft.corridor) ? {value:draft.corridor as number[],disabled:goals.drive===true||!!operation,onChange:value=>setDraft({...draft,corridor:value})}:undefined}/></div>
+        <div className={styles.loopCamera}><CameraPanel client={client} t={t} language={language} compact showTools={false} editor={editingZone && draft && Array.isArray(draft.corridor) ? {value:draft.corridor as number[],disabled:settingsLocked,onChange:value=>setDraft({...draft,corridor:value})}:undefined}/></div>
       </div>
       <aside className={styles.operatorConsole} aria-label={t("manual")} data-testid="operator-console">{manual}</aside>
     </div>
@@ -486,12 +500,12 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
           <summary>{t("cockpitDetails")}</summary>
           <div className={styles.workspaceDetailsBody}>
             <div hidden={view !== "journey"}>
-            {journeyUnavailable.length>0&&<div data-testid="journey-blocks" className={styles.loopError} role="status"><ul>{journeyUnavailable.map(block=><li key={block}>{t(block)}</li>)}</ul><Button onClick={prepareAction?showPreparation:showJourneySettings}>{t(prepareAction?"workspace.prepare":"journeySettings")}</Button></div>}
+            {journeyUnavailable.length>0&&<div data-testid="journey-blocks" className={styles.loopError} role="status"><ul>{journeyUnavailable.map(block=><li key={block}>{journeyBlockLabel(block)}</li>)}</ul><Button onClick={prepareAction?showPreparation:showJourneySettings}>{t(prepareAction?"workspace.prepare":"journeySettings")}</Button></div>}
             {journey.reason&&<p className={styles.hint} data-testid="journey-reason">{t("state")}: <code>{journey.reason}</code></p>}
             {journeyRequested&&journey.active&&<p className={styles.hint}>{t("journeyStarted")}</p>}
             {journeyError&&<p className={styles.loopError} role="alert" data-testid="journey-error">{t("journeyRequestError")} · {journeyError}</p>}
             </div>
-        <div hidden={view === "manual"} data-testid="automatic-panel">
+        <div data-testid="automatic-panel">
           <Panel title={t("loopSettings")}>
     {policy&&!groundActive&&<div className={styles.loopModeRow} data-testid="stopping-zone">
       <Field label={t("stopZone")}><Select aria-label={t("stopZone")} data-testid="loop-zone" value={stoppingZone(policy)} disabled={!connected||loading||!!operation||!!client.busy||dirty||goals.drive===true} onChange={e=>{if(e.target.value==="near"||e.target.value==="far")void changeStoppingZone(e.target.value);}}>
@@ -519,23 +533,25 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
     </div>
     {(visibleError||readError)&&<p className={styles.loopError} role="alert" data-testid="navigation-request-error">{t("trialRequestError")} · {visibleError||readError}</p>}
     <div className={styles.loopModeRow}>
-      {!groundActive&&<Button data-testid="zone-edit" disabled={!draft||goals.drive===true||!!operation} onClick={()=>setEditingZone(!editingZone)}>{t(editingZone?"zoneFinish":"zoneEdit")}</Button>}
-      {editingZone&&!groundActive&&<><Button data-testid="zone-save" disabled={!dirty||!!operation||goals.drive===true} onClick={()=>void save()}>{t("loopSave")}</Button><Button onClick={()=>{setDraft(policy);setEditingZone(false);}}>{t("loopDiscard")}</Button><Button disabled={!!operation} onClick={()=>draft&&setDraft({...draft,corridor:[.35,.80,.65,.95]})}>{t("zoneReset")}</Button></>}
+      {!groundActive&&<Button data-testid="zone-edit" disabled={!draft||!!operation} onClick={()=>setEditingZone(!editingZone)}>{t(editingZone?"zoneFinish":"zoneEdit")}</Button>}
+      {editingZone&&!groundActive&&<><Button data-testid="zone-save" disabled={!dirty||!!operation||settingsDriveBlocked} onClick={()=>void save()}>{t("loopSave")}</Button><Button onClick={()=>{setDraft(policy);setEditingZone(false);}}>{t("loopDiscard")}</Button><Button disabled={!!operation} onClick={()=>draft&&setDraft({...draft,corridor:[.35,.80,.65,.95]})}>{t("zoneReset")}</Button></>}
     </div>
     {editingZone&&!groundActive&&<div className={styles.flex}><p className={styles.hint}>{t("zoneDraftHelp")}</p><Button onClick={showModelTuning}>{t("tuning.title")}</Button></div>}
     {groundActive&&<p className={styles.hint} data-testid="ground-geometry-help">{t("geometryPreviewHelp")}</p>}
-    <details ref={settingsRef} className={styles.details}><summary>{t("loopSettings")}{dirty?" · "+t("unsaved"):""}</summary>
+    <details ref={settingsRef} className={styles.details} data-testid="automatic-motion-settings"><summary>{t("loopSettings")}{dirty?" · "+t("unsaved"):""}</summary>
       <div className={styles.metrics}>
       <div className={styles.metric}><div className={styles.metricLabel}>{t("loopDecision")}</div><strong>{decision.state?t("vision."+String(decision.state)):"—"}</strong><p className={styles.small}>{String(decision.reason??loopState.reason??loopState.stop_reason??"")}</p></div>
       <div className={styles.metric}><div className={styles.metricLabel}>{t("loopLastFrame")}</div><strong>{formatTime(loopState.observed_at,language)}</strong><p className={styles.small}>{String(decision.inference_ms??"—")} ms · {t("loopLoaded")}: {t(detector.loaded===true?"yes":"no")}</p></div>
     </div>
       <p className={styles.hint}>{t("loopHint")}</p>
+      <p className={styles.hint} data-testid="automatic-settings-scope">{t("loopSettingsScope")}</p>
+      <p className={styles.hint} data-testid="automatic-pulse-limit">{t("loopPulseDeadline",{limit:String(navigationPulseLimit(policy,view==="journey"))})}</p>
       {draft?<div className={styles.stack}>
 
         <div className={styles.grid}>
-          <Field label={t("loopSpeed")}><Input disabled={settingsLocked} type="number" min="0.01" max="0.15" step="0.01" value={Number(draft.speed)} onChange={e=>setDraft({...draft,speed:Number(e.target.value)})}/></Field>
+          <Field label={t(view==="journey"?"loopJourneySpeed":"loopSpeed")}><Input data-testid="automatic-speed" disabled={settingsLocked} type="number" min="0.01" max={view==="journey"?"0.1":"0.15"} step="0.01" value={Number(draft.speed)} onChange={e=>setDraft({...draft,speed:Number(e.target.value)})}/></Field>
           <Field label={t("loopBudget")}><Input disabled={settingsLocked} type="number" min="100" max="500" step="10" value={Number(draft.decision_budget_ms)} onChange={e=>setDraft({...draft,decision_budget_ms:Number(e.target.value)})}/></Field>
-          <Field label={t("loopPulse")}><Input disabled={settingsLocked} type="number" min="50" max="200" step="10" value={Number(draft.max_motion_ms)} onChange={e=>setDraft({...draft,max_motion_ms:Number(e.target.value)})}/></Field>
+          <Field label={t("loopPulseLimit",{limit:String(navigationPulseLimit(policy,view==="journey"))})}><Input data-testid="automatic-pulse" disabled={settingsLocked} type="number" min="50" max={navigationPulseLimit(policy,view==="journey")} step="10" value={Number(draft.max_motion_ms)} onChange={e=>setDraft({...draft,max_motion_ms:Number(e.target.value)})}/></Field>
           {!groundDraft&&<Field label={t("loopCorridor")}><Input disabled={settingsLocked} value={Array.isArray(draft.corridor)?draft.corridor.join(","):""} onChange={e=>setDraft({...draft,corridor:e.target.value.split(",").map(Number)})}/></Field>}
         </div>
         {"perception" in draft?<div className={styles.grid} data-testid="perception-settings">
@@ -559,10 +575,10 @@ export function NavigationLoop({client,t,language,manual,recording,operatorDetai
           <Field label={t("avoidanceMaxTurns")}><Input type="number" min="1" max="5" step="1" value={Number(record(draft?.avoidance).max_turn_pulses)} onChange={e=>draft&&setDraft({...draft,avoidance:{...record(draft.avoidance),max_turn_pulses:Number(e.target.value),sweep_verified:false}})}/></Field><p className={styles.hint}>{t(view==="journey"?"journeyAvoidanceHelp":"avoidanceHelp")}</p>
         </fieldset>}
         <p className={styles.hint}>{t("loopCalibrationSettingsHelp")}</p>
-        <p className={styles.hint} data-testid="settings-save-help">{t(goals.drive===true?"loopSettingsDriveActive":dirty?"loopSettingsSaveHelp":"loopSettingsNoChanges")}</p>
+        <p className={styles.hint} data-testid="settings-save-help">{t(settingsDriveBlocked?"loopSettingsDriveActive":dirty?"loopSettingsSaveHelp":"loopSettingsNoChanges")}</p>
         {settingsError&&<p className={styles.loopError} role="alert" data-testid="settings-save-error">{t(savedRevision!==null?"loopSettingsResumeFailed":"loopSaveFailed")} · {settingsError}</p>}
         {savedRevision!==null&&policy?.revision===savedRevision&&!dirty&&<p className={styles.hint} role="status" data-testid="settings-save-success">{t("loopSettingsSaved",{revision:String(savedRevision)})}</p>}
-        <div className={styles.loopModeRow}><Button data-testid="settings-save" disabled={!connected||!!operation||goals.drive===true||!dirty} onClick={()=>void save()}>{t("loopSave")}</Button>{dirty&&<Button disabled={!!operation} onClick={()=>setDraft(policy)}>{t("loopDiscard")}</Button>}</div>
+        <div className={styles.loopModeRow}><Button data-testid="settings-save" disabled={!connected||!!operation||settingsDriveBlocked||!dirty} onClick={()=>void save()}>{t("loopSave")}</Button>{dirty&&<Button disabled={!!operation} onClick={()=>setDraft(policy)}>{t("loopDiscard")}</Button>}</div>
 
         <p className={styles.hint}>{t("loopModel")}: {t(detector.configured===true?"yes":"no")} · {t("computeRevision")}: {String(policy?.revision??"—")}</p>
       </div>:<p>{t(loading?"loading":"loopLoadFailed")}</p>}
