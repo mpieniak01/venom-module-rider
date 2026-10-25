@@ -142,3 +142,11 @@ export function analysisFrameAssets(report:unknown,runId:string,session:string,r
   return result;
 }
 
+
+/** A saved classification can only be composed with this exact displayed RAW. */
+export function videoPlaybackAsset(report:unknown,runId:string,session:string,rowValue:unknown,source:{index:number;raw_sha256:string}):FrameAsset|null {
+  const row=record(rowValue);
+  if(!videoRun(report)||row.source_index!==source.index||row.raw_sha256!==source.raw_sha256)throw new Error("analysis_frame_identity");
+  const assets=analysisFrameAssets(report,runId,session,row,source.index);
+  return assets.find(asset=>asset.kind==="mask")??assets.find(asset=>asset.kind==="overlay")??assets.find(asset=>asset.kind==="depth")??null;
+}

@@ -6,7 +6,7 @@ async page=>{
  const jpeg=Buffer.from("/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAAwAEADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwChRRRXoHCFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQB//2Q==","base64");
  const png=Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAEAAAAAwCAYAAAChS3wfAAAAbUlEQVR4nO3QUQmAUBBFQTXXy2Mo89hLKygoB3Hme1kOd5oAAADgd+arh8cY65shd837vj3xZ3niyZcZoA6oGaAOqBmgDqgZoA6oGaAOqBmgDqgZoA6oGaAOqBmgDqgZoA6oGaAOqBmgDgAAMifrYwQ0T1A1TAAAAABJRU5ErkJggg==","base64");
  const count=257,requests=[],posts=[],unexpected=[];
- let tamper=false,badSize=false,newSpec,slowSourceIndex=-1;
+ let tamper=false,badSize=false,newSpec,slowSourceIndex=-1,slowLayerIndex=-1,photosOnly=false,failProfiles=false;
  const session={session_id:sid,source_device_id:"fixture",state:"closed",started_at:1234,policy:{},counts:{saved:0,failed:0},video:{state:"complete",frames:count,bytes:jpeg.length*count,duration_s:51.2,target_fps:5,gaps:0,error:null,ended_at:1300}};
  const defaults={profile:"da2-default",window:1,quality_mode:"production",input_source:"video",corridor:[.35,.8,.65,.95],perception:{engine:"depth_plane",residual_limit:.06,outlier_limit:.005,slope_min:2,model_id:"",artifact_sha256:"",semantic_models:{}},geometry:{mode:"image",fx:null,fy:null,cx:.5,cy:.5,radius_ratio:null,lookahead_ratio:2,max_heading_deg:45}};
  const spec={...defaults,behavior:{version:1,profile_id:"fluid",profile_revision:1}};
@@ -17,9 +17,9 @@ async page=>{
  await page.route("**/api/v1/rider/**",async route=>{
    const request=route.request(),url=new URL(request.url()),path=url.pathname,method=request.method();
    requests.push({path,method,query:url.search});
-   if(path.endsWith("/analysis/profiles"))return fulfill(route,{profiles:[{id:"da2-default",installed:true,windows:[1]}]});
-   if(path.endsWith("/samples/sessions")&&method==="GET")return fulfill(route,{sessions:[session]});
-   if(path==="/api/v1/rider/samples/sessions/"+sid)return fulfill(route,{session,samples:[],offset:0,limit:12,total:0});
+   if(path.endsWith("/analysis/profiles"))return failProfiles?fulfill(route,{detail:{code:"fixture_profiles_failed"}},503):fulfill(route,{profiles:[{id:"da2-default",installed:true,windows:[1]}]});
+   if(path.endsWith("/samples/sessions")&&method==="GET")return fulfill(route,{sessions:[photosOnly?{...session,video:null,counts:{saved:2}}:session]});
+   if(path==="/api/v1/rider/samples/sessions/"+sid)return fulfill(route,{session:photosOnly?{...session,video:null,counts:{saved:2}}:session,samples:[],offset:0,limit:12,total:0});
    if(path.endsWith("/video/frames")){
      const offset=Number(url.searchParams.get("offset")||0),limit=Number(url.searchParams.get("limit")||500);
      const frames=Array.from({length:Math.min(limit,count-offset)},(_,n)=>({index:offset+n,source_time_s:(offset+n)*.2,frame_id:"frame"+(offset+n),sequence:(offset+n)*4,raw_sha256:sha}));
@@ -30,15 +30,16 @@ async page=>{
      if(Number(path.split("/").at(-1))===slowSourceIndex)await new Promise(resolve=>setTimeout(resolve,650));
      return route.fulfill({status:200,contentType:"image/jpeg",body:jpeg});
    }
+   if(/\/samples\/items\/[a-f0-9]{32}\/original$/.test(path))return route.fulfill({status:200,contentType:"image/jpeg",body:jpeg});
    if(path.endsWith("/navigation/config"))return fulfill(route,{config:{revision:9,corridor:[.35,.8,.65,.95],behavior:{version:1,profile_id:"room_fluid",profile_revision:2},perception:{engine:"depth_plane",residual_limit:.06,outlier_limit:.005,slope_min:2}}});
    if(path.endsWith("/analysis/runs")&&method==="GET")return fulfill(route,{runs:newSpec?[run(oldId),run(newId)]:[run(oldId)]});
    if(path.endsWith("/analysis/runs")&&method==="POST"){const body=request.postDataJSON();posts.push(body);newSpec=body.spec;return fulfill(route,run(newId));}
    if(path.includes("/analysis/runs/")){
      const id=path.split("/runs/")[1].split("/")[0];
-     if(path.endsWith("/report.json"))return fulfill(route,report(id));
+     if(path.endsWith("/report.json"))return fulfill(route,photosOnly?{...report(id),input_kind:"samples",rows:[0,1].map(index=>({sample_id:String(index+1).padStart(32,"0"),raw_sha256:sha,state:"clear",artifact_names:[String(index).padStart(4,"0")+"-depth.png",String(index).padStart(4,"0")+"-overlay.jpg"]}))}:report(id));
      const chunk=path.match(/rows-(\d{5})\.json$/);
      if(chunk)return fulfill(route,rows(id).slice(Number(chunk[1])*128,Number(chunk[1])*128+128));
-     if(path.endsWith("-mask.png"))return route.fulfill({status:200,contentType:"image/png",body:png});
+     if(path.endsWith("-mask.png")){if(Number(path.split("/").at(-1).split("-")[0])===slowLayerIndex)await new Promise(resolve=>setTimeout(resolve,650));return route.fulfill({status:200,contentType:"image/png",body:png});}
      if(path.endsWith("-overlay.jpg"))return route.fulfill({status:200,contentType:"image/jpeg",body:jpeg});
      if(path.endsWith("/"+id))return fulfill(route,run(id));
    }
@@ -94,27 +95,38 @@ async page=>{
  await page.getByTestId("analysis-histogram-obstacle").click();
  await page.waitForFunction(()=>document.querySelector('[data-testid="analysis-frame-media"]')?.getAttribute("data-source-index")==="150");
  await page.getByTestId("analysis-frame-overlay").waitFor({state:"visible"});
- check((await page.getByTestId("analysis-frame-original").getAttribute("src")).includes("/video/frames/150?sha256="+sha),"wrong video RAW identity");
- check((await page.getByTestId("analysis-frame-overlay").getAttribute("src")).includes(oldId+"/artifacts/0150-mask.png"),"wrong old run overlay");
+ check((await page.getByTestId("source-video-image").getAttribute("src")).includes("/video/frames/150?sha256="+sha),"wrong video RAW identity");
+ check(requests.some(request=>request.path.includes(oldId+"/artifacts/0150-mask.png")),"wrong old run overlay");
+ check(await page.getByTestId("analysis-frame-original").count()===0,"duplicated lower RAW player remains");
+ check(await page.getByTestId("analysis-state-seek").count()===0,"second independent video seek remains");
  await page.waitForFunction(()=>document.querySelector('[data-testid="source-video-image"]')?.getAttribute("data-source-index")==="150");
  const pixels=await page.evaluate(async()=>{
-   const raw=document.querySelector('[data-testid="analysis-frame-overlay-source"]');
-   const layer=document.querySelector('[data-testid="analysis-frame-overlay"]');
-   await Promise.all([raw.decode(),layer.decode()]);
+   const raw=document.querySelector('[data-testid="source-video-image"]');
+   const result=document.querySelector('[data-testid="analysis-frame-overlay"]');
+   await raw.decode();
    const canvas=document.createElement("canvas");canvas.width=raw.naturalWidth;canvas.height=raw.naturalHeight;
-   const ctx=canvas.getContext("2d");
-   ctx.drawImage(raw,0,0);const before=Array.from(ctx.getImageData(20,20,1,1).data);
-   ctx.drawImage(layer,0,0);const after=Array.from(ctx.getImageData(20,20,1,1).data);
-   ctx.clearRect(0,0,canvas.width,canvas.height);ctx.drawImage(layer,0,0);const alpha=ctx.getImageData(20,20,1,1).data[3];
-   return{source:[raw.naturalWidth,raw.naturalHeight],layer:[layer.naturalWidth,layer.naturalHeight],before,after,alpha};
+   const ctx=canvas.getContext("2d");ctx.drawImage(raw,0,0);
+   return{source:[raw.naturalWidth,raw.naturalHeight],layer:[result.width,result.height],before:Array.from(ctx.getImageData(20,20,1,1).data),after:Array.from(result.getContext("2d").getImageData(20,20,1,1).data)};
  });
  check(JSON.stringify(pixels.source)==="[64,48]"&&JSON.stringify(pixels.layer)==="[64,48]","unexpected decoded image sizes");
- check(pixels.alpha===102&&pixels.before.slice(0,3).some((value,index)=>value!==pixels.after[index]),"transparent classification layer did not change real composed pixels");
+ check(pixels.after[3]===255&&pixels.before.slice(0,3).some((value,index)=>value!==pixels.after[index]),"result did not compose the source and classification pixels");
 
+ // A slow mask must not cause the two halves to show different frames.
+ slowLayerIndex=151;
+ await page.getByTestId("source-video-play").click();
+ await page.waitForFunction(()=>document.querySelector('[data-testid="source-video-pending-image"]')?.getAttribute("data-source-index")==="151");
+ await page.waitForTimeout(200);
+ check(await page.getByTestId("source-video-image").getAttribute("data-source-index")==="150","RAW advanced before its matching mask loaded");
+ check(await page.getByTestId("analysis-frame-overlay").getAttribute("data-source-index")==="150","processed half drifted during buffering");
+ await page.getByTestId("source-video-play").click();
+ await page.waitForFunction(()=>document.querySelector('[data-testid="source-video-image"]')?.getAttribute("data-source-index")==="151");
+ check(await page.getByTestId("analysis-frame-overlay").getAttribute("data-source-index")==="151","mask did not advance with RAW");
+ slowLayerIndex=-1;
  await page.getByTestId("analysis-frame").fill("121");
- await page.getByTestId("analysis-frame-original").waitFor({state:"visible"});
+ await page.waitForFunction(()=>document.querySelector('[data-testid="source-video-image"]')?.getAttribute("data-source-index")==="120");
  check(await page.getByTestId("analysis-frame-overlay").count()===0,"fabricated overlay for rejected frame");
  const before=await page.getByTestId("analysis-result-snapshot").textContent();
+ await page.getByTestId("analysis-settings").locator("summary").first().click();
  await page.getByTestId("analysis-load-rider").click();
  await page.getByTestId("analysis-rider-source").filter({hasText:"9"}).waitFor();
  check((await page.getByTestId("analysis-result-snapshot").textContent()).includes("wersja 1"),"old run relabelled as current room settings");
@@ -128,6 +140,8 @@ async page=>{
  check(!("count"in posts[0].spec)&&!("offset"in posts[0].spec),"whole film silently limited");
  check(posts[0].spec.behavior.profile_id==="room_fluid","new study did not freeze chosen settings");
  check(await page.getByTestId("analysis-result-different").count()===0,"unchanged expanded defaults falsely differ");
+ await page.getByTestId("analysis-frame").fill("1");
+ await page.waitForFunction(()=>document.querySelector('[data-testid="source-video-image"]')?.getAttribute("data-source-index")==="0");
  tamper=true;
  await page.getByTestId("analysis-run").selectOption(oldId);
  await page.getByTestId("analysis-histogram-obstacle").waitFor();
@@ -145,9 +159,25 @@ async page=>{
  await page.getByTestId("analysis-histogram-obstacle").waitFor();
  await page.getByTestId("analysis-run").selectOption(newId);
  await page.getByTestId("analysis-frame-overlay").waitFor({state:"visible"});
- check(await page.getByTestId("analysis-frame-overlay-source").getAttribute("src")===await page.getByTestId("analysis-frame-original").getAttribute("src"),"composite did not reuse exact RAW");
+ check(await page.getByTestId("analysis-frame-overlay").getAttribute("data-source-index")===await page.getByTestId("source-video-image").getAttribute("data-source-index"),"composite does not match displayed source index");
  await page.setViewportSize({width:390,height:844});
  check(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),"mobile horizontal overflow");
+ // Historical photo studies keep a two-pane comparison without a video player.
+ photosOnly=true;
+ await page.reload();
+ await page.getByTestId("samples-session").selectOption(sid);
+ await page.getByTestId("analysis-run").selectOption(oldId);
+ await page.getByTestId("analysis-frame-original").waitFor({state:"visible"});
+ check(await page.getByTestId("source-video-player").count()===0,"video player duplicated a photo study");
+ check(await page.getByTestId("analysis-frame-depth").count()===0,"third photo preview remains");
+ await page.getByTestId("analysis-frame").selectOption("1");
+ await page.getByTestId("analysis-frame-overlay").waitFor({state:"visible"});
+ // Errors remain actionable without expanding settings.
+ failProfiles=true;
+ await page.reload();
+ await page.getByTestId("samples-session").selectOption(sid);
+ await page.getByTestId("analysis-panel").getByRole("alert").waitFor({state:"visible"});
+ check(await page.getByTestId("analysis-settings").getAttribute("open")===null,"profile error forced the settings open");
  check(unexpected.length===0,"unexpected API or hardware request: "+JSON.stringify(unexpected));
- return {result:"PASS",videoFrames:count,photos:0,playbackWithoutModel:true,stableFrameGeometry:true,counterMatchesDecodedFrame:true,lateSeekIgnored:true,singleFetchPerFrame:true,wholeVideoPosts:posts.length,frameHistogram:true,sourceOverlayIdentity:true,sourceHashConflictBlocked:true,compactLayer:true,compositedPixelsVerified:true,layerAlpha:pixels.alpha,layerSizeVerified:true,frozenRevision:true,mobile:true,robotContacted:false};
+ return {result:"PASS",videoFrames:count,photos:0,playbackWithoutModel:true,stableFrameGeometry:true,counterMatchesDecodedFrame:true,lateSeekIgnored:true,singleFetchPerFrame:true,wholeVideoPosts:posts.length,frameHistogram:true,sourceOverlayIdentity:true,sourceHashConflictBlocked:true,compactLayer:true,compositedPixelsVerified:true,compositeAlpha:pixels.after[3],pairedPlayer:true,slowMaskSynchronized:true,historicalPhotos:true,errorsVisibleWhenCollapsed:true,layerSizeVerified:true,frozenRevision:true,mobile:true,robotContacted:false};
 };

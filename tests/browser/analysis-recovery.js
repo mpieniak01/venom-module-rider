@@ -12,6 +12,7 @@ async page => {
   if(await page.getByTestId("samples-browser").locator(":scope > summary").count())await page.getByTestId("samples-browser").locator(":scope > summary").click();
   await page.getByTestId("samples-session").selectOption(session.session_id);
   const panel=page.getByTestId("analysis-panel");
+  await page.getByTestId("analysis-settings").locator("summary").first().click();
   await panel.locator("summary").filter({hasText:"Parametry analizy"}).click();
   await panel.getByLabel("Maksymalna liczba klatek",{exact:true}).fill("1");
   let intent,posts=0;

@@ -1,6 +1,12 @@
 // Module-owned translations. Every key contains PL, EN and DE by construction.
 export const messages = {
-  "analysis.video.title": ["Zapisany film — odtwarzanie źródła", "Recorded video — source playback", "Gespeicherter Film — Quelle abspielen"],
+  "analysis.video.title": ["Odtwarzanie nagrania", "Recording playback", "Aufnahme abspielen"],
+  "analysis.video.frame": ["Klatka filmu", "Video frame", "Filmbild"],
+  "analysis.chooseRun": ["Wybierz zapisane badanie", "Choose a saved study", "Gespeicherte Untersuchung wählen"],
+  "analysis.video.processed": ["Po analizie", "After analysis", "Nach der Analyse"],
+  "analysis.video.noResult": ["Wybierz zapisane badanie lub uruchom analizę filmu.", "Choose a saved study or analyse the video.", "Gespeicherte Untersuchung wählen oder den Film analysieren."],
+  "analysis.newStudy": ["Ustawienia nowego badania", "New study settings", "Einstellungen einer neuen Untersuchung"],
+  "analysis.statistics": ["Szczegóły i porównanie wyników", "Result details and comparison", "Ergebnisdetails und Vergleich"],
   "analysis.video.readOnly": ["Odtwarzanie nie uruchamia modelu. Nagranie zbiera do {fps} klatek/s odebranych przez Venoma; nie jest to natywna liczba klatek kamery.", "Playback does not run a model. Recording collects up to {fps} frames/s received by Venom; this is not the camera's native frame rate.", "Die Wiedergabe startet kein Modell. Die Aufnahme sammelt bis zu {fps} von Venom empfangene Bilder/s; dies ist nicht die native Bildrate der Kamera."],
   "analysis.video.failure": ["Nie można odczytać filmu. Odśwież odczyt lub wybierz inną sesję.", "The video could not be read. Refresh or choose another session.", "Der Film konnte nicht gelesen werden. Aktualisieren oder eine andere Sitzung wählen."],
   "analysis.video.loading": ["Wczytywanie źródłowej klatki…", "Loading source frame…", "Quellbild wird geladen…"],

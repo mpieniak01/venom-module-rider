@@ -194,7 +194,7 @@
 /* Offline reports keep RAW/depth/overlay comparable at the same readable size. */
 .analysisTable { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 12px; }
 .analysisTable th, .analysisTable td { text-align: left; vertical-align: top; padding: 7px 9px; border-bottom: 1px solid rgba(148,163,184,.18); overflow-wrap: anywhere; }
-.analysisMedia { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 14px 0; }
+.analysisMedia { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 14px 0; }
 .analysisImage { display: block; width: 100%; height: auto; object-fit: contain; border-radius: 8px; }
 .analysisHash { display: block; overflow-wrap: anywhere; font-size: 11px; margin: 8px 0; }
 @media (max-width: 900px) { .analysisMedia { grid-template-columns: 1fr; } .analysisTable th, .analysisTable td { padding: 6px 4px; } }
@@ -481,6 +481,14 @@
 .samplePhoto { display:flex; flex-wrap:wrap; align-items:center; gap:16px; margin:12px 0; }
 .samplePhotoPreview { width:min(320px,100%); max-height:240px; object-fit:contain; background:#030b14; }
 
-.sourceVideoViewport { position: relative; width: 100%; max-width: 640px; overflow: hidden; border-radius: 8px; background: #050e17; }
 .sourceVideoFrame { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: contain; }
 .sourceVideoLoading { position: absolute; left: 8px; bottom: 8px; padding: 4px 8px; border-radius: 6px; background: #050e17dd; color: var(--r-muted); font-size: 12px; }
+
+.videoPairStack { position: relative; display: grid; min-width: 0; }
+.videoPair { grid-area: 1 / 1; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; min-width: 0; align-items: start; }
+.videoPairCell { min-width: 0; }
+.videoPairCell > p { margin: 8px 0; }
+.videoPairViewport { position: relative; overflow: hidden; border-radius: 8px; background: #050e17; }
+.videoPairPlaceholder { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 16px; margin: 0; color: var(--r-muted); text-align: center; font-size: 12px; }
+@container rider (max-width: 560px) { .videoPair { grid-template-columns: minmax(0,1fr); } }
+@media (max-width: 560px) { .videoPair { grid-template-columns: minmax(0,1fr); } }

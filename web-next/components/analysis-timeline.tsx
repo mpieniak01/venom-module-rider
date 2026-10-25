@@ -5,7 +5,7 @@ import {Button,Field,Input} from "./primitives";
 import styles from "../rider.module.css";
 
 const colors:Record<AnalysisState,string>={clear:"#16a34a",unknown:"#eab308",obstacle:"#dc2626"};
-export function AnalysisTimeline({rows,index,onSelect,t,language}:{rows:AnalysisRow[];index:number;onSelect:(index:number)=>void;t:Translator;language:string}){
+export function AnalysisTimeline({rows,index,onSelect,t,language,controls=true}:{rows:AnalysisRow[];index:number;onSelect:(index:number)=>void;t:Translator;language:string;controls?:boolean}){
   const histogram=useMemo(()=>stateHistogram(rows),[rows]);
   const paths=useMemo(()=>timelinePaths(rows),[rows]);
   const percentage=(count:number)=>new Intl.NumberFormat(language,{maximumFractionDigits:1}).format(rows.length?count/rows.length*100:0);
@@ -19,8 +19,8 @@ export function AnalysisTimeline({rows,index,onSelect,t,language}:{rows:Analysis
       <svg data-testid="analysis-state-axis" viewBox={"0 0 "+rows.length+" 1"} preserveAspectRatio="none" style={{display:"block",width:"100%",height:28,cursor:"pointer",marginTop:10}} aria-hidden="true" onClick={event=>{const bounds=event.currentTarget.getBoundingClientRect();onSelect(Math.max(0,Math.min(rows.length-1,Math.floor((event.clientX-bounds.left)/bounds.width*rows.length))));}}>
         {states.map(state=><path key={state} d={paths[state]} fill={colors[state]}/>)}
       </svg>
-      <Field label={t("analysis.histogram.seek")}><Input data-testid="analysis-state-seek" type="range" min={0} max={rows.length-1} step={1} value={index} onChange={event=>onSelect(Number(event.target.value))}/></Field>
-      <p data-testid="analysis-timeline-position">{t("analysis.histogram.position",{frame:index+1,total:rows.length,state:t("samples.value."+analysisState(rows[index]))})}</p>
+      {controls&&<><Field label={t("analysis.histogram.seek")}><Input data-testid="analysis-state-seek" type="range" min={0} max={rows.length-1} step={1} value={index} onChange={event=>onSelect(Number(event.target.value))}/></Field>
+      <p data-testid="analysis-timeline-position">{t("analysis.histogram.position",{frame:index+1,total:rows.length,state:t("samples.value."+analysisState(rows[index]))})}</p></>}
     </>}
   </section>;
 }

@@ -11,7 +11,8 @@ export function AnalysisFrameMedia({report,runId,session,row,index,t}:{report:Js
   try{assets=analysisFrameAssets(report,runId,session,row,index);}catch{}
   const [loaded,setLoaded]=useState<string[]>([]),[failed,setFailed]=useState(false);
   const mask=assets.find(asset=>asset.kind==="mask"),original=assets[0];
-  const keys=mask?["original","mask-source","mask"]:assets.map(asset=>asset.kind);
+  const processed=assets.find(asset=>asset.kind==="overlay")??assets.find(asset=>asset.kind==="depth");
+  const keys=mask?["original","mask-source","mask"]:["original",...(processed?[processed.kind]:[])];
   const ready=!!assets.length&&keys.every(key=>loaded.includes(key));
   const load=(key:string,matchSize=false)=>(event:SyntheticEvent<HTMLImageElement>)=>{
     if(mask&&matchSize&&(event.currentTarget.naturalWidth!==mask.width||event.currentTarget.naturalHeight!==mask.height)){setFailed(true);return;}
@@ -31,7 +32,7 @@ export function AnalysisFrameMedia({report,runId,session,row,index,t}:{report:Js
           <img data-testid="analysis-frame-overlay-source" className={styles.analysisImage} src={getApiBaseUrl()+original.path} alt={t("samples.original")} onLoad={load("mask-source",true)} onError={()=>setFailed(true)}/>
           <img data-testid="analysis-frame-overlay" src={getApiBaseUrl()+mask.path} alt={t("analysis.overlay")} style={{position:"absolute",inset:0,width:"100%",height:"100%",objectFit:"contain"}} onLoad={load("mask",true)} onError={()=>setFailed(true)}/>
         </div>
-      </div>:assets.filter(asset=>asset.kind!=="original").map(asset=><div key={asset.kind}>
+      </div>:(processed?[processed]:[]).map(asset=><div key={asset.kind}>
         <p>{t(asset.kind==="depth"?"analysis.depth":"analysis.overlay")}</p>
         <img data-testid={"analysis-frame-"+asset.kind} className={styles.analysisImage} style={imageStyle} src={getApiBaseUrl()+asset.path} alt={t(asset.kind==="depth"?"analysis.depth":"analysis.overlay")} onLoad={load(asset.kind)} onError={()=>setFailed(true)}/>
       </div>)}
