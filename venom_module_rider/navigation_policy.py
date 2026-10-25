@@ -14,6 +14,7 @@ def evaluate(result, frame, observer, *, context, captured_s, source=None):
     gray = None
     persistence = None
     objects = None
+    object_policy = params.get("object_policy_enabled", False)
     try:
         if maps is not None:
             options = {
@@ -26,16 +27,30 @@ def evaluate(result, frame, observer, *, context, captured_s, source=None):
             }
             if params.get("object_tracking_enabled", False):
                 diagnostic_maps = result.pop("_object_maps", maps)
+                object_options = dict(options)
+                if object_policy:
+                    diagnostic_maps = resolve_semantic_evidence(diagnostic_maps, params)
+                    object_options["frame_id"] = (
+                        source["frame_id"] if source is not None else frame.frame_id
+                    )
                 try:
+                    object_corridor = (
+                        maps.get("corridor", frame.corridor)
+                        if object_policy
+                        else frame.corridor
+                    )
                     objects = observer.observe_objects(
-                        diagnostic_maps, frame.corridor, **options
+                        diagnostic_maps, object_corridor, **object_options
                     )
                 except (ImportError, ValueError, KeyError, TypeError):
                     objects = {
-                        "diagnostic_only": True,
+                        "diagnostic_only": not object_policy,
                         "state": "unavailable",
                         "objects": [],
                     }
+            original_maps = (
+                resolve_semantic_evidence(maps, params) if object_policy else maps
+            )
             if params.get("obstacle_support_frames", 1) > 1:
                 maps = resolve_semantic_evidence(maps, params)
                 maps, persistence = observer.prepare_maps(
@@ -51,9 +66,19 @@ def evaluate(result, frame, observer, *, context, captured_s, source=None):
                     for key, value in maps.items()
                     if key not in {"labels", "confidence"}
                 }
+            if object_policy:
+                from .object_policy import apply_object_evidence
+
+                maps = apply_object_evidence(original_maps, maps, objects or {})
             spatial = assess_evidence(
                 maps, frame.corridor, params, raw_reason=raw_reason
             )
+            if object_policy:
+                from .object_policy import assess_objects
+
+                spatial = assess_objects(
+                    spatial, maps, frame.corridor, objects or {}, params
+                )
             gray = maps.get("gray")
         temporal = observer.update(
             spatial,
@@ -64,7 +89,7 @@ def evaluate(result, frame, observer, *, context, captured_s, source=None):
             captured_s=captured_s,
             params=params,
         )
-    except (ImportError, ValueError, KeyError):
+    except (ImportError, ValueError, KeyError, TypeError):
         observer.reset()
         temporal = {
             "state": "unknown",
@@ -89,6 +114,10 @@ def evaluate(result, frame, observer, *, context, captured_s, source=None):
     if persistence is not None:
         temporal["persistence"] = persistence
     if objects is not None:
+        if object_policy:
+            from .object_policy import public_objects
+
+            objects = public_objects(objects)
         temporal["objects"] = objects
     result.pop("_object_maps", None)
     visible_state = temporal["state"]

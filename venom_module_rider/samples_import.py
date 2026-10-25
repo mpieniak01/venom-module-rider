@@ -101,6 +101,8 @@ class SampleImporter:
         return self.preflight(catalog)
 
     def preflight(self, catalog):
+        if (catalog.get("manifest") or {}).get("video") is not None:
+            raise RiderError("samples_video_import_unsupported", 409)
         evidence_bytes = sum(
             len(evidence_canonical(row).encode())
             for row in (catalog["manifest"] or {})

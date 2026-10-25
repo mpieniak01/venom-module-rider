@@ -30,7 +30,7 @@ export function useCameraPipeline(section: Section, session: string | undefined,
   }, []);
   useEffect(() => {
     readEpoch.current++; statusRef.current = null; setStatus(null); setSupported(null); setError(null); setBusy(false);
-    if (!session || !["control", "vision"].includes(section)) return;
+    if (!session || !["control", "vision", "samples"].includes(section)) return;
     let active = true, timer: ReturnType<typeof setTimeout>;
     const controller = new AbortController();
     const tick = async () => {

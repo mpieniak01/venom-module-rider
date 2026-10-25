@@ -160,6 +160,7 @@ export function useRider(section: Section) {
     const controller = fast ? controlAbortRef : abortRef;
     while (pending.current) { await pending.current; if (!target || fast) return; }
     const requestedSection = target ?? sectionRef.current;
+    const statusSection = requestedSection === "samples" ? "overview" : requestedSection;
     const abort = new AbortController(); controller.current = abort;
     const timeout = fast ? setTimeout(() => abort.abort(), readHoldTiming(settingsOf(statusRef.current).control_modes)?.request_ttl_ms ?? 500) : null;
     const task = async () => {
@@ -169,7 +170,7 @@ export function useRider(section: Section) {
           configRef.current = nextConfig; sessionRef.current = nextConfig.session; setConfig(nextConfig);
         }
         const started = Date.now();
-        let next = await apiFetch<RiderStatus>(`${BASE}/status?section=${fast ? "navigation" : requestedSection}`, { signal: abort.signal, cache: "no-store" });
+        let next = await apiFetch<RiderStatus>(`${BASE}/status?section=${fast ? "navigation" : statusSection}`, { signal: abort.signal, cache: "no-store" });
         const received = Date.now();
         if (abort.signal.aborted) return;
         const nextConfig = await configForConnection(configRef.current!, next.connection, () => apiFetch<DeviceConfig>(`${BASE}/config`, { signal: abort.signal }));
@@ -439,6 +440,10 @@ export function useRider(section: Section) {
       // STOP must take this path before any journey HTTP request exists.
       const acceptedRevision = prepare ? await prepare() : revision;
       if (sessionRef.current !== origin || motionEpoch.current !== epoch || document.hidden) throw new Error("navigation_trial_cancelled");
+      // Loading/warming the selected model is part of this explicit Start,
+      // before creating the short-lived Pi ARM intent or enabling motion.
+      await mutation("/perception/prepare", {}, "POST", true);
+      if (sessionRef.current !== origin || motionEpoch.current !== epoch || document.hidden) throw new Error("navigation_trial_cancelled");
       await poll("control", true);
       if (sessionRef.current !== origin || motionEpoch.current !== epoch || document.hidden) throw new Error("navigation_trial_cancelled");
       if (safetyOf(statusRef.current).navigation_journey_version !== 1) throw new Error("navigation_journey_update_required");
@@ -544,7 +549,7 @@ export function useRider(section: Section) {
   useEffect(() => { hold.release(); }, [hold, section]);
   useEffect(() => {
     sectionRef.current = section; mediaRef.current = { camera: cameraStream, face: showRuntimeFrame };
-    if (!["control", "vision"].includes(section) || !cameraStream) replaceFrame("camera", null);
+    if (!["control", "vision", "samples"].includes(section) || !cameraStream) replaceFrame("camera", null);
     if (section !== "face" || !showRuntimeFrame) replaceFrame("face", null);
     let alive = true; let timer: ReturnType<typeof setTimeout> | null = null;
     const tick = async () => {
@@ -626,7 +631,7 @@ export function useRider(section: Section) {
     } catch (error) { URL.revokeObjectURL(url); throw error; }
   }, [replaceFrame]);
   useEffect(() => {
-    if (!cameraStream || !["control", "vision"].includes(section) || processedTransition || nativeStreaming || pipelineBusy || pipelineStopped) return;
+    if (!cameraStream || !["control", "vision", "samples"].includes(section) || processedTransition || nativeStreaming || pipelineBusy || pipelineStopped) return;
     let alive = true, cycle = 0, timer: ReturnType<typeof setTimeout> | undefined, abort: AbortController | undefined;
     const tick = async () => {
       if (!alive || document.hidden) return;
@@ -640,7 +645,7 @@ export function useRider(section: Section) {
     return () => { alive=false; cycle++; clearTimeout(timer); abort?.abort(); document.removeEventListener("visibilitychange", visibility); };
   }, [cameraStream, section, mediaSession, fetchFrame, replaceFrame, processedTransition, nativeStreaming, pipelineBusy, pipelineStopped, pipelineIdentity, perceptionEpoch, keepCameraOnFailure]);
   useEffect(() => {
-    if (!nativeStreaming || !cameraStream || !["control", "vision"].includes(section) || processedTransition || pipelineBusy || pipelineStopped) return;
+    if (!nativeStreaming || !cameraStream || !["control", "vision", "samples"].includes(section) || processedTransition || pipelineBusy || pipelineStopped) return;
     let alive = true, cycle = 0, retry: ReturnType<typeof setTimeout> | undefined, controller: AbortController | undefined;
     const connect = async () => {
       if (!alive || document.hidden) return;

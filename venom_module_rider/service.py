@@ -87,6 +87,8 @@ class RiderService:
         self.connection_observation: tuple[float, float, str] | None = None
         self.closed = False
         self.epoch = 0
+        self.native_admission_epoch = 0
+        self.native_admission_mutating = 0
         self.sequences: dict[str, int] = {}
         self._selection_lock = asyncio.Lock()
         self.selection_file = selection_file
@@ -122,11 +124,12 @@ class RiderService:
         selected = restored_device(self.selection_file, self.devices, default)
         await self.select(selected, self.session, persist=False)
 
-    def stop_sample_events(self, reason):
+    def stop_sample_events(self, reason, *, retire_recording=True):
         from .evidence_observer import retire_received
 
-        self.study_sampler.cancel()
-        retire_received(self, reason)
+        if retire_recording:
+            self.study_sampler.cancel()
+            retire_received(self, reason)
         if self.samples is not None:
             try:
                 self.samples.automatic.invalidate(reason)
@@ -532,7 +535,7 @@ class RiderService:
         if not stop:
             self.check_session(session)
         if stop:
-            self.stop_sample_events("auto_global_stop")
+            self.stop_sample_events("auto_global_stop", retire_recording=False)
         if scoped_release:
             # A cancelled press bypasses the pending operator ACK. Only its own
             # request is retired: an old release cannot revoke a newer gesture.
@@ -616,8 +619,26 @@ class RiderService:
                 }
             )
         ):
-            self.stop_sample_events("auto_source_stopped")
+            camera_source = path == "/api/resource/camera" or path.startswith(
+                "/svc/camera-"
+            )
+            self.stop_sample_events(
+                "auto_source_stopped", retire_recording=camera_source
+            )
         client = self.transport()
+        native_write = path in {
+            "/api/navigation/config",
+            "/api/camera/pipeline",
+            "/api/resource/camera/pipeline",
+            "/api/resource/camera",
+        } or path.startswith("/svc/camera-")
+        if native_write:
+            # No version-bound admission may survive or be born during a write.
+            self.native_admission_epoch += 1
+            self.native_admission_mutating += 1
+            self.cache.pop("/api/navigation/config", None)
+            self.cache.pop("/api/resource/camera/pipeline", None)
+
         task = asyncio.create_task(client.json(path, method=method, body=body))
         self.operations.add(task)
         try:
@@ -633,6 +654,9 @@ class RiderService:
             raise RiderError("stale_device_session") from exc
         finally:
             self.operations.discard(task)
+            if native_write:
+                self.native_admission_mutating -= 1
+                self.native_admission_epoch += 1
             # A timed-out operation may have completed on Pi; never reuse its old state.
             if session == self.session:
                 catalog = self.cache.get("/api/logic/catalog")

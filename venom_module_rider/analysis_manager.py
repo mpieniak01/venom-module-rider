@@ -11,6 +11,9 @@ import time
 from contextlib import suppress
 from pathlib import Path
 
+from .analysis_contract import AnalysisSpec
+from .analysis_inputs import inputs_for
+from .analysis_layers import validate_video_layer
 from .analysis_priority import AnalysisPriority
 from .analysis_profiles import ProfileCatalog, code_fingerprint
 from .analysis_store import MAX_ARTIFACT_BYTES, AnalysisStore
@@ -114,10 +117,11 @@ class AnalysisManager:
                     raise
             else:
                 previous = await self.io(self.store.get, old["id"])
-                if (
-                    previous["session_id"] != session_id
-                    or previous["context"]["spec"] != spec
-                ):
+                if previous["session_id"] != session_id or AnalysisSpec.model_validate(
+                    previous["context"]["spec"]
+                ).model_dump(mode="json") != AnalysisSpec.model_validate(
+                    spec
+                ).model_dump(mode="json"):
                     raise RiderError("analysis_request_conflict", 409)
                 return old
             if len(self.tasks) >= 4:
@@ -184,7 +188,19 @@ class AnalysisManager:
         started = time.monotonic()
         registered = False
         try:
-            async with asyncio.timeout(900):
+            video = row["context"].get("input_kind") == "video"
+            if video:
+                try:
+                    timeout_s = int(
+                        os.getenv("RIDER_VIDEO_ANALYSIS_TIMEOUT_S", "21600")
+                    )
+                except ValueError as exc:
+                    raise RiderError("analysis_video_timeout_invalid", 503) from exc
+                if not 60 <= timeout_s <= 86400:
+                    raise RiderError("analysis_video_timeout_invalid", 503)
+            else:
+                timeout_s = 900
+            async with asyncio.timeout(timeout_s):
                 async with self.slot:
                     while True:
                         if self.host_tasks.abandoned(task_id):
@@ -337,6 +353,10 @@ class AnalysisManager:
 
     async def _protocol(self, process, row, started):
         count = 0
+        inputs = await self.io(inputs_for, self.registry.store.root, row["context"])
+        video = row["context"].get("input_kind") == "video"
+        chunk_count = 0
+        chunk_frames = 0
         while True:
             raw = await process.stdout.readline()
             if not raw or len(raw) > MAX_MESSAGE:
@@ -362,22 +382,67 @@ class AnalysisManager:
             if kind == "frame":
                 if message.get("done") != count + 1 or count >= row["total"]:
                     raise RiderError("analysis_worker_protocol", 500)
-                sample = row["context"]["inputs"][count]
+                sample = await self.io(inputs.__getitem__, count)
                 result = message["row"]
                 if (
                     result["sample_id"] != sample["sample_id"]
                     or result["raw_sha256"] != sample["raw"]["sha256"]
                 ):
                     raise RiderError("analysis_worker_protocol", 500)
+                if video:
+                    await self.io(
+                        validate_video_layer,
+                        result,
+                        message.get("artifacts", []),
+                        count,
+                        sample["raw"]["sha256"],
+                    )
                 await self.io(self.store.progress, row["id"], count, "saving")
                 timing = await self.io(self._save_frame, row["id"], message)
                 count += 1
                 await self.io(self.store.progress, row["id"], count, "saving")
                 await self._send(process, {"timings_ms": timing})
+            elif kind == "rows":
+                if not video or message.get("done") != count:
+                    raise RiderError("analysis_worker_protocol", 500)
+                values = message.get("rows")
+                if (
+                    not isinstance(values, list)
+                    or len(values) != min(128, row["total"] - chunk_frames)
+                    or chunk_frames + len(values) > count
+                ):
+                    raise RiderError("analysis_worker_protocol", 500)
+                for offset, value in enumerate(values):
+                    sample = await self.io(inputs.__getitem__, chunk_frames + offset)
+                    if (
+                        not isinstance(value, dict)
+                        or value.get("sample_id") != sample["sample_id"]
+                        or value.get("raw_sha256") != sample["raw"]["sha256"]
+                        or value.get("source_index") != sample["source_index"]
+                    ):
+                        raise RiderError("analysis_worker_protocol", 500)
+                name = f"rows-{chunk_count:05d}.json"
+                await self.io(
+                    self.store.write,
+                    row["id"],
+                    name,
+                    await self.io(canonical, values),
+                    "application/json",
+                )
+                chunk_frames += len(values)
+                chunk_count += 1
+                await self._send(process, {"saved": name})
             elif kind == "complete":
                 if count != row["total"]:
                     raise RiderError("analysis_report_incomplete", 409)
                 report = message["report"]
+                if video and (
+                    chunk_frames != count
+                    or report.get("row_chunks")
+                    != [f"rows-{value:05d}.json" for value in range(chunk_count)]
+                    or report.get("rows") != []
+                ):
+                    raise RiderError("analysis_report_incomplete", 409)
                 report["admission_to_report_ms"] = (time.monotonic() - started) * 1000
                 report["queue_ms"] = row["queue_ms"]
                 await self.io(

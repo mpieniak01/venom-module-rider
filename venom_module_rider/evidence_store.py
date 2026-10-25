@@ -116,7 +116,8 @@ class EvidenceStore:
                 if (
                     count >= MAX_EVIDENCE_SESSION_RECORDS
                     or used + extra > MAX_EVIDENCE_SESSION_BYTES
-                    or images + used + extra > self.store.limits.session_bytes
+                    or images + used + self.store.video.size(session_id) + extra
+                    > self.store.limits.session_bytes
                 ):
                     raise RiderError("samples_evidence_quota_reached", 507)
                 self.store._space(extra * 2)

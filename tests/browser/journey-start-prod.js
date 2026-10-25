@@ -8,7 +8,7 @@ async page => {
   const profileId = parameters.get("profile")??"balanced";
   const modelId = parameters.get("model")??"depth-anything-v2-indoor-small";
   const engine = modelId==="depth-anything-v2-indoor-small"?"depth_plane":"segformer";
-  const allowedProfiles=["legacy","cautious","balanced","fluid"];
+  const allowedProfiles=["legacy","cautious","balanced","fluid","room_fluid"];
   const allowedModels=["depth-anything-v2-indoor-small","segformer-b0-ade20k","yolo26n-sem-ade20k"];
   const check = (value, message) => { if (!value) throw new Error(message); };
   check(["localhost", "127.0.0.1", "[::1]"].includes(new URL(base).hostname), "loopback UI required");
@@ -17,8 +17,8 @@ async page => {
   const sha="a".repeat(64), calls=[], saves=[], scenarios=[], violations=[];
   // Exactly the writable top-level keys from services.navigation_config.DEFAULT, minus protocol_version and revision (update_from_body allowlist).
   const writable = ["behavior","mode","speed","decision_budget_ms","max_motion_ms","corridor","perception","avoidance","verified","calibration_id","model_sha256"].sort();
-  const profiles = ["legacy","cautious","balanced","fluid"].map(id=>({id,profile_revision:1,status:id==="legacy"?"legacy":"experimental",parameters:{}}));
-  let policy={protocol_version:1,revision:134,behavior:{version:1,profile_id:profileId,profile_revision:1},
+  const profiles = allowedProfiles.map(id=>({id,profile_revision:id==="room_fluid"?2:1,status:id==="legacy"?"legacy":"experimental",parameters:{}}));
+  let policy={protocol_version:1,revision:134,behavior:{version:1,profile_id:profileId,profile_revision:profileId==="room_fluid"?2:1},
     mode:"observe",speed:.1,decision_budget_ms:300,max_motion_ms:150,corridor:[.35,.8,.65,.95],
     perception:{engine,model_id:modelId,artifact_sha256:sha,residual_limit:.06,outlier_limit:.005,slope_min:2},
     avoidance:{protocol_version:3,enabled:true,sweep_verified:false,mirrored:false,turn_speed:.05,turn_ms:100,max_turn_pulses:3,max_stalled_corrections:2,progress_min_delta:.03,
@@ -58,10 +58,18 @@ async page => {
       return Promise.resolve(new Response(stream,{headers:{"Content-Type":"multipart/x-mixed-replace; boundary=startup"}}));
     };
   },{modelId,sha});
+  let preparedAt=0,prepareCalls=0;
   await page.route("**/api/v1/rider/**",async route=>{
     const req=route.request(),path=new URL(req.url()).pathname.slice("/api/v1/rider".length);
     const json=(body,status=200)=>route.fulfill({status,contentType:"application/json",body:JSON.stringify(body)});
     if(req.method()!=="GET"){
+      if(path==="/perception/prepare"){
+        // The model may need longer than the later ARM intent's short TTL.
+        check(!(journey?.active),"model preparation overlapped an active journey");
+        await new Promise(resolve=>setTimeout(resolve,600));
+        preparedAt=Date.now()/1000;prepareCalls++;
+        return json({ok:true});
+      }
       const body=req.postDataJSON();calls.push({path,body});
       if(path==="/goal/s15_venom_perception"){
         check(typeof body.enabled==="boolean","observation intent invalid");
@@ -88,6 +96,8 @@ async page => {
         return json({ok:true,meta:{},data:{ok:true,persisted:true,config:configView()}});
       }
       if(path==="/navigation/journey"){
+        check(prepareCalls>0&&preparedAt>0,"Start bypassed explicit model preparation");
+        check(typeof body.ts==="number"&&body.ts>=preparedAt-.05,"ARM intent was created before model preparation completed");
         check(body.operator_consent===true&&body.operator_control_version===1&&body.journey_version===1,"explicit journey consent contract missing");
         check(body.config_revision===policy.revision&&body.generation===generation&&!!body.panel_id&&!!body.request_id&&!!body.operator_plan,"journey identity contract invalid");
         check(!("action" in body)&&!("seq" in body),"journey request contains control-only keys");
@@ -111,6 +121,7 @@ async page => {
     if(path==="/config")return json({devices:[{id:"fixture-prod",label:"Prod fixture",mode:fixtureMode}],device_id:"fixture-prod",session:"journey-start-prod"});
     if(path==="/status")return json({connection:{configured:true,status:"online",session:"journey-start-prod",device_id:"fixture-prod",mode:fixtureMode},polling:{control_ms:100},settings,errors:{},control:{server_time:Date.now()/1000,safety:safety()},health:{},telemetry:{},resources:{},catalog:{features:[]},logic:{},face:{}});
     if(path==="/navigation/config"||path==="/navigation/state")return json(navigation());
+    if(path==="/navigation/image-reference")return json({supported:false});
     // No broad /navigation/* response: a misspelt endpoint is a real fixture failure.
     if(path.startsWith("/navigation/")){violations.push("GET "+path);return json({detail:{code:"unexpected_fixture_navigation_endpoint"}},404);}
     if(path==="/camera/pipeline")return json({contract_id:"rider.camera_pipeline",contract_version:1,revision:34,profile,active_profile:cameraState==="active"?profile:null,state:cameraState,transport_epoch:6,camera_session:"prod-camera",capabilities:{analysis_locations:["venom","local"],local_engines:["canny"],remote_transports:["snapshots","mjpeg"]},effective_stages:{capture:cameraState==="active",hardware_mjpeg:cameraState==="active"},error:null,latest_frame:cameraState==="active"?{camera_session:"prod-camera",transport_epoch:6,pipeline_revision:34,captured_monotonic_ns:Date.now()*1e6,frame_age_ms:20}:null});

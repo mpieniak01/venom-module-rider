@@ -118,6 +118,9 @@ class AnalysisStore:
         identifier(request_id)
         identifier(session_id)
         spec = AnalysisSpec.model_validate(spec).model_dump(mode="json")
+        if spec["input_source"] == "samples":
+            # Keep fingerprints of stored pre-video sample requests unchanged.
+            spec.pop("input_source")
         fingerprint = hashlib.sha256(canonical([session_id, spec])).hexdigest()
         with self.samples.db() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -128,11 +131,27 @@ class AnalysisStore:
                 if old["fingerprint"] != fingerprint:
                     raise RiderError("analysis_request_conflict", 409)
                 return self._decode(dict(old))
-        snapshot, dataset_revision = SampleArchive(self.samples).snapshot(session_id)
-        total = len(snapshot["samples"])
-        selected = snapshot["samples"][spec["offset"] : spec["offset"] + spec["count"]]
-        if not selected:
-            raise RiderError("analysis_empty_window", 409)
+        video = spec.get("input_source") == "video"
+        if video:
+            from .analysis_inputs import freeze_video
+
+            session, source, inputs = freeze_video(self.samples, session_id)
+            total = selected_count = len(inputs)
+            dataset_revision = input_digest = source["sha256"]
+            selected = None
+        else:
+            snapshot, dataset_revision = SampleArchive(self.samples).snapshot(
+                session_id
+            )
+            session = snapshot["session"]
+            total = len(snapshot["samples"])
+            selected = snapshot["samples"][
+                spec["offset"] : spec["offset"] + spec["count"]
+            ]
+            selected_count = len(selected)
+            if not selected:
+                raise RiderError("analysis_empty_window", 409)
+            input_digest = hashlib.sha256(canonical(selected)).hexdigest()
         context = {
             "schema_version": 1,
             "kind": "rider-offline-analysis",
@@ -142,12 +161,15 @@ class AnalysisStore:
             "spec": spec,
             "profile": profile,
             "code": code,
-            "input_digest": hashlib.sha256(canonical(selected)).hexdigest(),
-            "session": snapshot["session"],
-            "inputs": selected,
+            "input_digest": input_digest,
+            "session": session,
             "drive_supported": False,
             "distance_measurement": False,
         }
+        if video:
+            context.update(input_source=source, input_kind="video")
+        else:
+            context["inputs"] = selected
         encoded = canonical(context)
         if len(encoded) > MAX_SNAPSHOT:
             raise RiderError("analysis_snapshot_size", 413)
@@ -181,7 +203,7 @@ class AnalysisStore:
                     session_id,
                     "queued",
                     self.samples.wall(),
-                    len(selected),
+                    selected_count,
                     "queued",
                     encoded.decode(),
                 ),

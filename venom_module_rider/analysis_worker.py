@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 import contextlib
 import ctypes
-import hashlib
 import io
 import json
 import os
@@ -80,7 +79,9 @@ def run(job, output, *, candidate_factory=None, semantic_factory=None):
     import numpy as np
     from PIL import Image
 
-    from .analysis_metrics import adjacent, summarize
+    from .analysis_inputs import VideoInputs, inputs_for, payload_for
+    from .analysis_layers import classification_layer
+    from .analysis_metrics import StreamingMetrics, adjacent, summarize
     from .depth_candidates import Candidate, file_hash
     from .depth_detector import (
         PerceptionSettings,
@@ -88,11 +89,13 @@ def run(job, output, *, candidate_factory=None, semantic_factory=None):
         decode_payload,
         render_depth,
     )
+    from .errors import RiderError
     from .ground_config import GroundGeometry
-    from .samples_archive import SampleArchive
 
     context, profile = job["context"], job["profile"]
-    spec, inputs = context["spec"], context["inputs"]
+    spec = context["spec"]
+    inputs = inputs_for(job["root"], context)
+    video = isinstance(inputs, VideoInputs)
     settings = PerceptionSettings.model_validate(spec["perception"])
     geometry = GroundGeometry.model_validate(spec["geometry"])
     from .navigation_profiles import DEFAULT_BEHAVIOR, validate_behavior
@@ -103,6 +106,8 @@ def run(job, output, *, candidate_factory=None, semantic_factory=None):
     capture_evidence = spec.get("capture_evidence", False)
     if type(capture_evidence) is not bool:
         raise ValueError("analysis_navigation_evidence_opt_in")
+    if video and capture_evidence:
+        raise ValueError("analysis_video_evidence_unsupported")
     if semantic:
         if (
             settings.engine != "segformer"
@@ -117,10 +122,15 @@ def run(job, output, *, candidate_factory=None, semantic_factory=None):
             and settings.artifact_sha256 != context["profile"]["model_sha256"]
         ):
             raise ValueError("analysis_model_identity_mismatch")
-    if spec["window"] > 1 and (
-        profile["backend"] == "da2"
-        or any(
-            not adjacent(inputs[i - 1], inputs[i], order) for i in range(1, len(inputs))
+    if (
+        not video
+        and spec["window"] > 1
+        and (
+            profile["backend"] == "da2"
+            or any(
+                not adjacent(inputs[i - 1], inputs[i], order)
+                for i in range(1, len(inputs))
+            )
         )
     ):
         raise ValueError("analysis_window_unverified")
@@ -129,6 +139,10 @@ def run(job, output, *, candidate_factory=None, semantic_factory=None):
             raise ValueError("analysis_model_hash_mismatch")
     model = None
     rows = []
+    row_chunks: list[str] = []
+    chunk = []
+    metrics = StreamingMetrics("manifest")
+    previous_input = None
     images: list = []
     model_load_ms = None
     model_metadata = None
@@ -137,21 +151,24 @@ def run(job, output, *, candidate_factory=None, semantic_factory=None):
         timings = {}
         start = time.perf_counter()
         raw = sample["raw"]
-        path = SampleArchive.safe_file(
-            Path(job["root"]) / "blobs", raw["sha256"] + ".bin"
-        )
-        payload = path.read_bytes()
+        try:
+            payload = payload_for(job["root"], sample)
+        except RiderError as exc:
+            raise ValueError(exc.code) from exc
         if (
-            len(payload) != raw["bytes"]
-            or hashlib.sha256(payload).hexdigest() != raw["sha256"]
+            video
+            and previous_input is not None
+            and not adjacent(previous_input, sample, "manifest")
         ):
-            raise ValueError("samples_source_corrupt")
+            images.clear()
+        previous_input = sample
         image = decode_payload(payload)
         rgb = np.asarray(image, dtype=np.float32) / 255
         mean, std = float(rgb.mean()), float(rgb.std())
         quality = mean >= 0.04 and std >= 0.01
         timings["decode"] = (time.perf_counter() - start) * 1000
         artifacts = []
+        layer_metadata = None
         used_window = 0
         if not quality and spec["quality_mode"] == "production":
             assessment = {"state": "unknown", "reason": "vision_image_quality"}
@@ -202,12 +219,25 @@ def run(job, output, *, candidate_factory=None, semantic_factory=None):
                     payload,
                     tuple(spec["corridor"]),
                     **semantic_options,
-                    **({"evidence": True} if capture_evidence else {}),
+                    **({"evidence": True} if capture_evidence or video else {}),
                 )
                 timings["perception_total"] = (time.perf_counter() - start) * 1000
-                artifacts.append(
-                    artifact(f"{index:04d}-overlay.jpg", overlay, "image/jpeg")
-                )
+                if video:
+                    name = f"{index:04d}-mask.png"
+                    layer, layer_metadata = classification_layer(
+                        image.size,
+                        assessment,
+                        spec["corridor"],
+                        settings,
+                        name,
+                        raw["sha256"],
+                        semantic=True,
+                    )
+                    artifacts.append(artifact(name, layer, "image/png"))
+                else:
+                    artifacts.append(
+                        artifact(f"{index:04d}-overlay.jpg", overlay, "image/jpeg")
+                    )
             else:
                 depth = (
                     cast(Candidate, model).infer(image)
@@ -222,7 +252,7 @@ def run(job, output, *, candidate_factory=None, semantic_factory=None):
                         depth,
                         tuple(spec["corridor"]),
                         settings,
-                        **({"evidence": True} if capture_evidence else {}),
+                        **({"evidence": True} if capture_evidence or video else {}),
                     )
                 else:
                     from .adaptive_ground import assess
@@ -248,28 +278,43 @@ def run(job, output, *, candidate_factory=None, semantic_factory=None):
                     )
                 timings["geometry"] = (time.perf_counter() - start) * 1000
                 start = time.perf_counter()
-                overlay = render_depth(
-                    image, depth, assessment, spec["corridor"], settings
-                )
-                stream = io.BytesIO()
-                np.save(stream, depth.astype(np.float32), allow_pickle=False)
-                artifacts.append(
-                    artifact(
-                        f"{index:04d}-depth.npy",
-                        stream.getvalue(),
-                        "application/octet-stream",
+                if not video:
+                    overlay = render_depth(
+                        image, depth, assessment, spec["corridor"], settings
                     )
-                )
-                low, high = np.quantile(depth, [0.01, 0.99])
-                grey = (
-                    (np.clip((depth - low) / max(float(high - low), 1e-8), 0, 1)) * 255
-                ).astype(np.uint8)
-                stream = io.BytesIO()
-                Image.fromarray(grey).save(stream, format="PNG")
-                artifacts += [
-                    artifact(f"{index:04d}-depth.png", stream.getvalue(), "image/png"),
-                    artifact(f"{index:04d}-overlay.jpg", overlay, "image/jpeg"),
-                ]
+                    stream = io.BytesIO()
+                    np.save(stream, depth.astype(np.float32), allow_pickle=False)
+                    artifacts.append(
+                        artifact(
+                            f"{index:04d}-depth.npy",
+                            stream.getvalue(),
+                            "application/octet-stream",
+                        )
+                    )
+                    low, high = np.quantile(depth, [0.01, 0.99])
+                    grey = (
+                        (np.clip((depth - low) / max(float(high - low), 1e-8), 0, 1))
+                        * 255
+                    ).astype(np.uint8)
+                    stream = io.BytesIO()
+                    Image.fromarray(grey).save(stream, format="PNG")
+                    artifacts += [
+                        artifact(
+                            f"{index:04d}-depth.png", stream.getvalue(), "image/png"
+                        ),
+                        artifact(f"{index:04d}-overlay.jpg", overlay, "image/jpeg"),
+                    ]
+                else:
+                    name = f"{index:04d}-mask.png"
+                    layer, layer_metadata = classification_layer(
+                        image.size,
+                        assessment,
+                        spec["corridor"],
+                        settings,
+                        name,
+                        raw["sha256"],
+                    )
+                    artifacts.append(artifact(name, layer, "image/png"))
                 timings["render"] = (time.perf_counter() - start) * 1000
         maps = assessment.pop("_navigation_maps", None)
         navigation_evidence = None
@@ -286,6 +331,13 @@ def run(job, output, *, candidate_factory=None, semantic_factory=None):
                 artifact(name, evidence_payload, "application/octet-stream")
             )
             timings["navigation_evidence"] = (time.perf_counter() - start) * 1000
+        if video:
+            # Private map arrays (including gray/confidence) never enter JSON.
+            assessment = {
+                key: value
+                for key, value in assessment.items()
+                if not key.startswith("_")
+            }
         row = {
             "sample_id": sample["sample_id"],
             "raw_sha256": raw["sha256"],
@@ -306,15 +358,46 @@ def run(job, output, *, candidate_factory=None, semantic_factory=None):
             "timings_ms": timings,
             "artifact_names": [a["name"] for a in artifacts],
         }
+        if video:
+            row["classification_layer"] = layer_metadata
+            row.update(
+                {
+                    key: sample[key]
+                    for key in (
+                        "source_index",
+                        "source_time_s",
+                        "source_received_monotonic_s",
+                        "source_received_at",
+                        "source_sequence",
+                    )
+                }
+            )
         ack = emit(
             output,
             {"type": "frame", "done": index + 1, "row": row, "artifacts": artifacts},
         )
         row["timings_ms"].update(ack.get("timings_ms", {}))
-        rows.append(row)
+        if video:
+            metrics.add(sample, row)
+            chunk.append(row)
+            if len(chunk) == 128 or index + 1 == len(inputs):
+                name = f"rows-{len(row_chunks):05d}.json"
+                result = emit(
+                    output, {"type": "rows", "done": index + 1, "rows": chunk}
+                )
+                if result.get("saved") != name:
+                    raise ValueError("analysis_worker_protocol")
+                row_chunks.append(name)
+                chunk = []
+        else:
+            rows.append(row)
     import torch
 
-    summary = summarize(inputs, rows, order)
+    if video:
+        inputs.verify()
+        summary = metrics.finish()
+    else:
+        summary = summarize(inputs, rows, order)
     report = {
         "schema_version": 1,
         "kind": "rider-offline-analysis",
@@ -335,6 +418,15 @@ def run(job, output, *, candidate_factory=None, semantic_factory=None):
         "drive_supported": False,
         "distance_measurement": False,
     }
+    if video:
+        report.update(
+            input_kind="video",
+            source=context["input_source"],
+            row_chunks=row_chunks,
+            classification_scope=(
+                "per-frame model classification, not closed-loop robot verdict"
+            ),
+        )
     emit(output, {"type": "complete", "report": report})
 
 

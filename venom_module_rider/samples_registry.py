@@ -14,9 +14,11 @@ from pathlib import Path
 from typing import BinaryIO
 
 from .errors import RiderError
+from .sample_originals import OriginalReader
 from .samples_contract import CollectionPolicy
 from .samples_frame import FrameBuffer
 from .samples_store import SampleStore, encode, identifier
+from .session_video_reader import SessionVideoReader
 
 
 def default_root():
@@ -38,6 +40,8 @@ class SamplesRegistry:
             raise ValueError("invalid writer queue")
         self.store = store or SampleStore(root)
         self.frames = frames or FrameBuffer()
+        self.originals = OriginalReader(self.store)
+        self.video_reader = SessionVideoReader(self.store)
         self.io = ThreadPoolExecutor(max_workers=1, thread_name_prefix="rider-samples")
         self.slots = threading.BoundedSemaphore(queue_slots)
         self.queue_slots = queue_slots
@@ -52,6 +56,7 @@ class SamplesRegistry:
         self.sequences: dict[str, dict] = {}
         self.deadlines: dict[str, asyncio.TimerHandle] = {}
         self.study_images: dict[str, dict] = {}
+        self.study_videos: dict[str, dict] = {}
         self.lease: BinaryIO | None = None
         self.failures = 0
         from .automatic_capture import AutomaticCapture
@@ -81,9 +86,11 @@ class SamplesRegistry:
             stream.close()
             raise RiderError("samples_registry_busy", 409) from exc
         self.lease = stream
+        self.store.quota.ownership(True)
 
     def _release(self):
         if self.lease is not None:
+            self.store.quota.ownership(False)
             fcntl.flock(self.lease, fcntl.LOCK_UN)
             self.lease.close()
             self.lease = None
@@ -110,12 +117,16 @@ class SamplesRegistry:
             if not self.active and not self.writer_owners:
                 self._release()
 
+    def _run_io(self, call):
+        with self.store.quota.job():
+            return call()
+
     def _submit(self, call):
         self._open()
         if not self.slots.acquire(blocking=False):
             raise RiderError("samples_queue_full", 429)
         try:
-            future = self.io.submit(call)
+            future = self.io.submit(self._run_io, call)
         except Exception:
             self.slots.release()
             raise
@@ -124,6 +135,10 @@ class SamplesRegistry:
 
     async def read(self, method, *args, **kwargs):
         return await asyncio.wrap_future(self._submit(partial(method, *args, **kwargs)))
+
+    async def original(self, sample_id):
+        self._open()
+        return await self.originals.get(sample_id)
 
     async def start(self, request_id, device_id, policy=None):
         values = CollectionPolicy.model_validate(policy or {}).model_dump()
@@ -141,6 +156,19 @@ class SamplesRegistry:
                     self.store.start, request_id, device_id, values
                 )
                 if session["state"] == "collecting":
+                    if values["record_video"]:
+                        try:
+                            session["video"] = await self.read(
+                                self.store.video.start, session["session_id"]
+                            )
+                        except Exception:
+                            await self.read(
+                                self.store.end, session["session_id"], incomplete=True
+                            )
+                            raise
+                        self.study_videos.setdefault(
+                            session["session_id"], {"device": device_id}
+                        )
                     self.active.add(session["session_id"])
                     self.evidence.start(session)
                     if (
@@ -236,6 +264,12 @@ class SamplesRegistry:
             self._open()
             self.closing.add(session_id)
             self.study_images.pop(session_id, None)
+            self.study_videos.pop(session_id, None)
+            with self.evidence.lock:
+                retired = self.evidence.sessions.get(session_id, {}).get(
+                    "retired", False
+                )
+            incomplete = incomplete or retired
             self.evidence.retire("collection_ended", session_id)
             deadline = self.deadlines.pop(session_id, None)
             if deadline is not None:
@@ -248,10 +282,11 @@ class SamplesRegistry:
             # One serialized close marker follows admitted writes even when all
             # capture slots are occupied. It is not another source-data job.
             def finish():
+                self.store.video.finish(session_id, interrupted=incomplete)
                 self._finish_evidence(session_id)
                 return self.store.end(session_id, incomplete=incomplete)
 
-            result = await asyncio.wrap_future(self.io.submit(finish))
+            result = await asyncio.wrap_future(self.io.submit(self._run_io, finish))
             self.active.discard(session_id)
             self.closing.discard(session_id)
             if not self.active and not self.writer_owners:
@@ -440,11 +475,13 @@ class SamplesRegistry:
             if self.closed:
                 return
             self.closed = True
+            await self.originals.close()
             self.evidence.retire("registry_closed")
             for row in self.sequences.values():
                 row["timer"].cancel()
             self.sequences.clear()
             self.study_images.clear()
+            self.study_videos.clear()
             for timer in self.deadlines.values():
                 timer.cancel()
             self.deadlines.clear()
@@ -453,6 +490,7 @@ class SamplesRegistry:
                 try:
                     if self.lease is not None:
                         for session_id in tuple(self.evidence.sessions):
+                            self.store.video.finish(session_id, interrupted=True)
                             self._finish_evidence(session_id)
                         self.store.recover_interrupted()
                 finally:
@@ -461,7 +499,7 @@ class SamplesRegistry:
 
             # One final cleanup behind at most queue_slots admitted operations.
             try:
-                await asyncio.wrap_future(self.io.submit(finish))
+                await asyncio.wrap_future(self.io.submit(self._run_io, finish))
             except Exception:
                 self.failures += 1
             finally:

@@ -162,3 +162,63 @@ def test_rejected_policy_cancels_other_metadata_read_without_inference(monkeypat
         assert response.json()["detail"]["code"] == "model_selection_conflict"
         assert cancelled == [True] and detector.calls == 0
         assert all(method == "GET" for method, _, _ in pi.calls)
+
+
+def test_ticket_preparation_counts_before_model_admission(monkeypatch):
+    from venom_module_rider import sample_sources
+
+    app, _service, pi = fixture(monkeypatch)
+    with TestClient(app) as client:
+        detector = Detector()
+        app.state.rider_vision.detector = detector
+        current = warmup(client)
+        hub = app.state.rider_stream
+        clock = hub.clock
+        elapsed = [0.0]
+        monkeypatch.setattr(hub, "clock", lambda: clock() + elapsed[0])
+
+        def slow_ticket(*_args):
+            elapsed[0] += 0.31
+            return None
+
+        monkeypatch.setattr(sample_sources, "native_ticket", slow_ticket)
+        response = client.post(
+            "/api/v1/rider/compute/vision/decision-reference",
+            headers=AUTH,
+            json=descriptor(current, age_ms=5.0),
+        )
+        assert response.status_code == 409
+        details = response.json()["detail"]
+        assert details["code"] == "vision_frame_expired"
+        timing = details["details"]["source_timing_ms"]
+        assert timing["ticket_ms"] >= 310
+        assert timing["deadline_age"] >= 300
+        assert timing["failed_stage"] == "source_ticket"
+        assert timing["host_total_ms"] >= 310
+        assert detector.calls == 0
+
+
+def test_reference_timeout_keeps_inflight_phase_evidence(monkeypatch):
+    app, _service, _pi = fixture(monkeypatch)
+    with TestClient(app) as client:
+        detector = Detector()
+        app.state.rider_vision.detector = detector
+        current = warmup(client)
+        hub = app.state.rider_stream
+
+        async def blocked_decode(*_args):
+            await asyncio.Future()
+
+        monkeypatch.setattr(hub, "canonical_frame", blocked_decode)
+        response = client.post(
+            "/api/v1/rider/compute/vision/decision-reference",
+            headers=AUTH,
+            json=descriptor(current, age_ms=280.0),
+        )
+        assert response.status_code == 409
+        timing = response.json()["detail"]["details"]["source_timing_ms"]
+        assert timing["failed_stage"] == "canonical"
+        assert timing["canonical_ms"] > 0
+        assert timing["remaining_ms"] == 0
+        assert "runtime_state" in timing and "model_busy" in timing
+        assert detector.calls == 0

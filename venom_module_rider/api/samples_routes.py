@@ -87,7 +87,7 @@ async def sample(request: Request, sample_id: str):
 @router.get("/items/{sample_id}/original")
 async def original(request: Request, sample_id: str):
     domain = registry(request)
-    payload, mime = await domain.read(domain.store.original, sample_id)
+    payload, mime = await domain.original(sample_id)
     return Response(payload, media_type=mime, headers={"cache-control": "no-store"})
 
 
@@ -118,4 +118,53 @@ async def export(request: Request, session_id: str):
         filename=f"rider-session-{session_id}.zip",
         headers={"X-Rider-Dataset-Revision": revision},
         background=BackgroundTask(path.unlink, missing_ok=True),
+    )
+
+
+@router.get("/sessions/{session_id}/video")
+async def video(request: Request, session_id: str):
+    """Download a finalized session video without contacting the robot."""
+    from starlette.responses import FileResponse
+
+    domain = registry(request)
+    path = await domain.read(domain.store.video.download, session_id)
+    return FileResponse(
+        path,
+        media_type="video/x-motion-jpeg",
+        filename=f"rider-session-{session_id}.mjpeg",
+        headers={"cache-control": "no-store"},
+    )
+
+
+@router.get("/sessions/{session_id}/video/frames")
+async def video_frames(
+    request: Request,
+    session_id: str,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(500, ge=1, le=500),
+):
+    """Read the source timeline offline, without loading a model or contacting Pi."""
+    domain = registry(request)
+    return await domain.originals.call(
+        domain.video_reader.page, session_id, offset=offset, limit=limit
+    )
+
+
+@router.get("/sessions/{session_id}/video/frames/{index}")
+async def video_frame(
+    request: Request,
+    session_id: str,
+    index: int,
+    sha256: str | None = Query(None, pattern=r"^[a-f0-9]{64}$"),
+):
+    domain = registry(request)
+    payload, digest = await domain.originals.call(
+        domain.video_reader.frame, session_id, index
+    )
+    if sha256 is not None and digest != sha256:
+        raise RiderError("samples_video_source_changed", 409)
+    return Response(
+        payload,
+        media_type="image/jpeg",
+        headers={"cache-control": "no-store", "X-Rider-RAW-SHA256": digest},
     )

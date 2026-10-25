@@ -58,6 +58,7 @@ _OVERRIDES = {
         "slow_speed_factor": 0.6,
     },
 }
+_OVERRIDES["room_fluid"] = dict(_OVERRIDES["fluid"])
 
 
 def validate_behavior(value):
@@ -74,12 +75,16 @@ def validate_behavior(value):
         or value["profile_id"] not in {"legacy", *_OVERRIDES}
         or value["profile_id"] == "legacy"
         and value["profile_revision"] != 1
+        or value["profile_id"] == "room_fluid"
+        and value["profile_revision"] != 2
     ):
         raise ValueError("navigation_behavior_invalid")
     corrections = validate_overrides(value.get("overrides", {}))
     if corrections and (
         value["profile_id"] == "legacy" or value["profile_revision"] != 2
     ):
+        raise ValueError("navigation_behavior_overrides_invalid")
+    if "object_policy_enabled" in corrections and value["profile_id"] != "room_fluid":
         raise ValueError("navigation_behavior_overrides_invalid")
     result = dict(value)
     if corrections:
@@ -97,8 +102,14 @@ def _preset(behavior):
     values = {**_BASE, **_OVERRIDES[profile]}
     if behavior["profile_revision"] == 2:
         values.update(NEW_DEFAULTS)
-        if profile == "fluid":
+        if profile in {"fluid", "room_fluid"}:
             values["obstacle_support_frames"] = 2
+        if profile == "room_fluid":
+            values.update(
+                object_policy_enabled=True,
+                object_tracking_enabled=True,
+                thin_span_fraction=1.0,
+            )
     return values
 
 

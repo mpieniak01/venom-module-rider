@@ -8,9 +8,11 @@ async page => {
   const list=await(await page.request.get(base+"/samples/sessions")).json();
   const session=list.sessions.find(item=>item.policy?.scene_group==="inputs-floor");
   await page.reload();
-  await page.getByTestId("samples-browser").locator("summary").first().click();
+  if(await page.getByRole("tab",{name:"Próbki",exact:true}).count())await page.getByRole("tab",{name:"Próbki",exact:true}).click();
+  if(await page.getByTestId("samples-browser").locator(":scope > summary").count())await page.getByTestId("samples-browser").locator(":scope > summary").click();
   await page.getByTestId("samples-session").selectOption(session.session_id);
   const panel=page.getByTestId("analysis-panel");
+  await page.getByTestId("analysis-settings").locator("summary").first().click();
   await panel.locator("summary").filter({hasText:"Parametry analizy"}).click();
   await panel.getByLabel("Maksymalna liczba klatek",{exact:true}).fill("1");
   let intent,posts=0;
@@ -22,7 +24,8 @@ async page => {
   await page.getByTestId("analysis-start").click();
   await page.waitForFunction(()=>document.querySelector('[data-testid="analysis-run"]')?.value);
   await page.reload();
-  await page.getByTestId("samples-browser").locator("summary").first().click();
+  if(await page.getByRole("tab",{name:"Próbki",exact:true}).count())await page.getByRole("tab",{name:"Próbki",exact:true}).click();
+  if(await page.getByTestId("samples-browser").locator(":scope > summary").count())await page.getByTestId("samples-browser").locator(":scope > summary").click();
   await page.getByTestId("samples-session").selectOption(session.session_id);
   await page.getByTestId("analysis-run").selectOption((await(await page.request.get(base+"/analysis/requests/"+intent.request_id)).json()).id);
   await page.waitForFunction(()=>document.querySelector('[data-testid="analysis-status"]')?.textContent?.includes("Ukończono"));

@@ -404,3 +404,14 @@ def test_real_peers_share_corrected_v2_policy_and_defaults(pi, profile):
     assert pi.profiles.parameters(value) == parameters(value)
     assert pi.profiles.policy_digest(value) == policy_digest(value)
     assert pi.profiles.validate_behavior(value) == value
+
+
+@pytest.mark.parametrize("profile", ["cautious", "balanced", "fluid", "room_fluid"])
+@pytest.mark.parametrize("custom", [False, True])
+def test_revision_two_peer_parameters_and_custom_corrections_match(pi, profile, custom):
+    value = {"version": 1, "profile_id": profile, "profile_revision": 2}
+    if custom:
+        value["overrides"] = {"obstacle_support_frames": 3}
+    assert pi.profiles.parameters(value) == parameters(value)
+    assert pi.profiles.policy_digest(value) == policy_digest(value)
+    assert pi.profiles.validate_behavior(value) == value

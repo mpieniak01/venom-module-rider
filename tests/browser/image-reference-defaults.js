@@ -10,7 +10,9 @@ async page=>{
   await new Promise(resolve=>{releaseRead=resolve;readReady();});
   return route.fulfill({status:200,contentType:"application/json",body:JSON.stringify({meta:{envelope_version:1},ok:true,data:{version:1,revision:0,purpose:"visual_reference_only",values:null}})});
  });
- await page.goto("http://127.0.0.1:3311/#scaled");
+ const target=new URL("#scaled",page.url()).href;
+ await page.goto("about:blank");
+ await page.goto(target);
  let timeout;
  try{await Promise.race([started,new Promise((_,reject)=>{timeout=setTimeout(()=>reject(new Error("initial read missing")),8000);})]);}finally{clearTimeout(timeout);}
  const overlay=page.getByTestId("image-reference-overlay");

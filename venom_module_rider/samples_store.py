@@ -18,6 +18,7 @@ from pathlib import Path
 from PIL import Image, ImageStat
 
 from .errors import RiderError
+from .sample_usage import tree_bytes
 from .samples_frame import MAX_CONTEXT_BYTES, CapturedFrame
 
 
@@ -104,6 +105,12 @@ class SampleStore:
         from .evidence_store import EvidenceStore
 
         self.evidence = EvidenceStore(self)
+        from .session_video import SessionVideoStore
+
+        self.video = SessionVideoStore(self)
+        from .sample_quota import QuotaLedger
+
+        self.quota = QuotaLedger(self)
         # A previous crash may have left an uncommitted blob. Count it against
         # quota; never silently remove a source to create more free space.
         self.total_bytes = sum(p.stat().st_size for p in self.blobs.glob("*.bin"))
@@ -115,7 +122,9 @@ class SampleStore:
 
     def recover_interrupted(self):
         """The collection service calls this while holding its process lease."""
+        self.quota.invalidate()
         self.refresh_usage()
+        self.video.recover()
         with self.db() as db:
             # Interrupted work never becomes saved on a restart.
             db.execute(
@@ -156,32 +165,12 @@ class SampleStore:
             for path in (self.root / "exports").glob("*.zip")
             if not path.is_symlink()
         )
-        derived = self.root / "analysis"
-        if derived.is_symlink():
-            raise RiderError("samples_root_invalid", 400)
-        artifact_bytes = 0
-        seen = set()
-        if derived.is_dir():
-            for path in derived.rglob("*"):
-                if path.is_symlink():
-                    raise RiderError("samples_root_invalid", 400)
-                try:
-                    if path.is_file():
-                        info = path.stat()
-                        inode = (info.st_dev, info.st_ino)
-                        if inode not in seen:
-                            artifact_bytes += info.st_size
-                            seen.add(inode)
-                except FileNotFoundError:
-                    # Atomic writers may unlink their private temporary name.
-                    continue
-        return self.total_bytes + metadata + exports + artifact_bytes
+        artifact_bytes = tree_bytes(self.root / "analysis", deduplicate=True)
+        video_bytes = tree_bytes(self.video.root)
+        return self.total_bytes + metadata + exports + artifact_bytes + video_bytes
 
     def _space(self, extra=0):
-        if self.usage() + extra > self.limits.total_bytes:
-            raise RiderError("samples_quota_reached", 507)
-        if shutil.disk_usage(self.root).free < self.limits.min_free_bytes + extra:
-            raise RiderError("samples_disk_full", 507)
+        return self.quota.admit(extra)
 
     def start(self, request_id, device_id, policy=None):
         identifier(request_id)
@@ -237,6 +226,7 @@ class SampleStore:
             "policy": json.loads(row["policy"]),
             "counts": counts,
             "evidence": self.evidence.summary(db, session_id),
+            "video": self.video.summary(session_id),
         }
 
     def session(self, session_id):
@@ -408,7 +398,10 @@ class SampleStore:
                 evidence_bytes = self.evidence.size(db, session_id)
             if (
                 count >= self.limits.session_samples
-                or size + evidence_bytes + len(frame.payload)
+                or size
+                + evidence_bytes
+                + self.video.size(session_id)
+                + len(frame.payload)
                 > self.limits.session_bytes
             ):
                 raise RiderError("samples_quota_reached", 507)

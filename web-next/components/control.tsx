@@ -11,7 +11,7 @@ import { perceptionFrameCurrent } from "../lib/perception";
 /* eslint-disable @next/next/no-img-element -- Pi binary frames use revocable object URLs. */
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { displayedPreview, previewLifetime } from "../lib/preview-media";
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Camera, CirclePause, CircleStop } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Camera, Eye, EyeOff, CirclePause, CircleStop } from "lucide-react";
 import { actuatorState, displayValue, finite, formatTime, record, safetyOf, settingsOf, type Direction, type NumericDescriptor } from "../lib/model";
 import type { Translator } from "../lib/i18n";
 import type { Frame, RiderClient } from "../lib/use-rider";
@@ -213,7 +213,7 @@ export function CameraPanel({ client, t, language, compact = false, showTools = 
       {compact&&<span className={styles.cameraModel} title={modelDetails}>{selected==="venom"?modelLabel:""}</span>}
       <ImageReferenceControls reference={imageReference} client={client} size={imageSize} t={t}/>
       <span data-testid="camera-power-state"><Pill tone={power?.state === "active" ? "good" : "warning"}>{t(power ? "pipeline.state." + power.state : "unknown")}</Pill></span><Button aria-label={cameraButtonName} data-testid="camera-power-toggle" tone={cameraOn ? "caution" : undefined} title={t(!power ? client.pipeline.supported === false ? "pipeline.legacy" : client.pipeline.error ? "pipeline.readFailed" : "pipeline.loading" : "cameraHint")} onClick={() => void changePower()} disabled={!power||!client.canMutate||client.pipeline.busy||power.state === "stopping"}>{cameraButtonLabel}</Button>
-      <Button aria-label={t(client.cameraStream ? "hidePreview" : "showPreview")} data-testid="camera-preview-toggle" onClick={() => void chooseStream(client.cameraStream ? null : "raw")} disabled={!client.canMutate||previewBusy}><Camera size={15} />{!compact && t(client.cameraStream ? "hidePreview" : "showPreview")}</Button>
+      <Button aria-label={t(client.cameraStream ? "hidePreview" : "showPreview")} data-testid="camera-preview-toggle" title={t(client.cameraStream ? "hidePreview" : "showPreview")} onClick={() => void chooseStream(client.cameraStream ? null : "raw")} disabled={!client.canMutate||previewBusy}>{client.cameraStream ? <EyeOff size={15}/> : <Eye size={15}/>} {!compact && t(client.cameraStream ? "hidePreview" : "showPreview")}</Button>
     </div>}>
     {!compact&&<div hidden={selected!=="venom"} className={styles.perceptionPreviewMeta} data-testid="perception-preview-result" aria-live="polite">
       <strong>{visible?.analysis ? String(visible.analysis.model_id || (visible.analysis.perception_engine === "depth_plane" ? "Depth Anything V2" : "SegFormer-B0")) : t("perception.previewWaiting")}</strong>

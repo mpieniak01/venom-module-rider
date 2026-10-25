@@ -14,7 +14,7 @@ async page=>{
   await new Promise(resolve=>{releaseRead=resolve;readReady();});
   return route.fulfill({status:200,contentType:"application/json",body:JSON.stringify({meta:{envelope_version:1},ok:true,data:reference})});
  });
- await page.goto("http://127.0.0.1:3311/");
+ await page.goto(page.url());
  await page.getByTestId("reference-read-error").filter({hasText:"reference.unavailable"}).waitFor();
  await page.getByTestId("image-reference-toggle").click();
  await bounded(secondResponse,"second read did not complete");
