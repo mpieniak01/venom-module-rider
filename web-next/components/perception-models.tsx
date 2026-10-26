@@ -1,22 +1,28 @@
+import { useOperatorTuning } from "../lib/operator-tuning";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Download, RefreshCw, Square } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 import { data, record, str, type JsonRecord } from "../lib/model";
-import { perceptionCatalog, perceptionMetric, perceptionReason, perceptionRuntime, perceptionSwitchBlock, perceptionSelectionKey, perceptionError, perceptionApplyNeeded, perceptionInstallAction, type PerceptionCatalog } from "../lib/perception";
+import { perceptionCatalog, perceptionMetric, perceptionReason, perceptionRuntime, perceptionSwitchBlock, perceptionSelectionKey, perceptionSelectionIdentityKey, selectionMatchesPrepared, perceptionError, perceptionApplyNeeded, perceptionInstallAction, type PerceptionCatalog } from "../lib/perception";
 import type { RiderClient } from "../lib/use-rider";
 import type { Translator } from "../lib/i18n";
 import { Button, Field, Pill, Select } from "./primitives";
 import styles from "../rider.module.css";
 
 type Props = {
-  client: RiderClient; t: Translator; language: string; policy: JsonRecord | null; goals: JsonRecord;
+  beforeApply?:()=>Promise<{policy:JsonRecord;token:{session:string;epoch:number;generation:string};wasObserving:boolean}>; embedded?:boolean; client: RiderClient; t: Translator; language: string; policy: JsonRecord | null; goals: JsonRecord;
   locked: boolean; onApplied: (config: JsonRecord) => void; onRefresh: () => void;
 };
 
-export function PerceptionModelsPanel({ client, t, language, policy, goals, locked, onApplied, onRefresh }: Props) {
+export function PerceptionModelsPanel({ client, t, language, policy, goals, locked, onApplied, onRefresh, embedded, beforeApply }: Props) {
   const [catalog, setCatalog] = useState<PerceptionCatalog | null>(null);
-  const [draft, setDraft] = useState("");
-  const [draftProvider, setDraftProvider] = useState("");
+  const workspace=useOperatorTuning();
+  const setWorkspaceState=workspace.setState,modelApplyRef=workspace.modelApply;
+  const { invalidatePerceptionPreview, currentSession } = client;
+  const storedChoice=workspace.state.modelChoice;
+  const draft=storedChoice?.id??"",draftProvider=storedChoice?.provider??"";
+  const setDraft=useCallback((id:string)=>setWorkspaceState(previous=>({...previous,modelChoice:{id,provider:previous.modelChoice?.provider??"",session:currentSession()}})),[setWorkspaceState,currentSession]);
+  const setDraftProvider=useCallback((provider:string)=>setWorkspaceState(previous=>({...previous,modelChoice:{id:previous.modelChoice?.id??"",provider,session:currentSession()}})),[setWorkspaceState,currentSession]);
   const [readError, setReadError] = useState("");
   const [failure, setFailure] = useState("");
   const [conflict, setConflict] = useState(false);
@@ -26,13 +32,12 @@ export function PerceptionModelsPanel({ client, t, language, policy, goals, lock
   const selectionRef = useRef(""), catalogRef = useRef<PerceptionCatalog | null>(null), draftRef = useRef({ id: "", provider: "" });
   draftRef.current = { id: draft, provider: draftProvider };
   const session = client.config?.session ?? client.status?.connection.session ?? "";
-  const { invalidatePerceptionPreview, currentSession } = client;
   const read = useCallback(async (signal: AbortSignal) => {
     const epoch = ++request.current;
     const row = await apiFetch<JsonRecord>("/api/v1/rider/perception/models", { signal, cache: "no-store" });
     if (signal.aborted || !mounted.current || epoch !== request.current || applying.current) return;
     const next = perceptionCatalog(data(row));
-    const key = perceptionSelectionKey(next), old = catalogRef.current;
+    const key = perceptionSelectionIdentityKey(next), old = catalogRef.current;
     const oldModel = old?.provider === "local" ? old.local_models.find(model => model.engine === old.local_engine)?.id ?? old.local_engine : old?.selection?.model_id ?? "";
     const changedElsewhere = !!selectionRef.current && key !== selectionRef.current;
     const dirtyDraft = !!old && (draftRef.current.provider !== old.provider || draftRef.current.id !== oldModel);
@@ -47,11 +52,12 @@ export function PerceptionModelsPanel({ client, t, language, policy, goals, lock
     if (next.switching && !old?.switching) invalidatePerceptionPreview?.();
     if (old?.switching && !next.switching) onRefresh();
     setCatalog(next); catalogRef.current = next; selectionRef.current = key; setReadError("");
-  }, [invalidatePerceptionPreview, onRefresh]);
+  }, [invalidatePerceptionPreview, onRefresh,setDraft,setDraftProvider]);
   useEffect(() => {
+    if(storedChoice?.session===session)return;
     setCatalog(null); catalogRef.current = null; setDraft(""); setDraftProvider("");
     setReadError(""); setFailure(""); setConflict(false); selectionRef.current = "";
-  }, [session]);
+  }, [session,storedChoice?.session,setDraft,setDraftProvider]);
   useEffect(() => {
     mounted.current = true;
     const abort = new AbortController(); let timer: ReturnType<typeof setTimeout> | undefined, reading = false;
@@ -74,15 +80,18 @@ export function PerceptionModelsPanel({ client, t, language, policy, goals, lock
   const runtime = catalog?.provider === "local"
     ? selected?.installation === "unavailable" ? "unavailable" : selected?.loaded === true && client.pipeline.status?.state === "active" && client.pipeline.status.active_profile?.analysis_location === "local" && client.pipeline.status.active_profile.local_engine === selected?.engine ? "active" : client.pipeline.busy ? "loading" : "unloaded"
     : catalog?.provider === "venom" ? perceptionRuntime(catalog) : "unavailable";
-  const changed = perceptionApplyNeeded(catalog, draftProvider, draft, selected?.id);
-  const block = conflict ? "perception.reason.conflict" : readError ? "perception.block.catalog" : perceptionSwitchBlock(client.status, client.controlFresh, goals, policy, locked || !!client.busy || !!pending || !!catalog?.switching || client.pipeline.busy);
+  const changed = embedded ? !!catalog&&!!draftProvider&&(draftProvider!==catalog.provider||draft!==selected?.id) : perceptionApplyNeeded(catalog, draftProvider, draft, selected?.id);
+  const legacyBlock = conflict ? "perception.reason.conflict" : readError ? "perception.block.catalog" : perceptionSwitchBlock(client.status, client.controlFresh, goals, policy, locked || !!client.busy || !!pending || !!catalog?.switching || client.pipeline.busy);
   const modelBlock = !candidate ? "perception.block.policy" : !candidate.selectable ? draftProvider === "local" && candidate.installation === "unavailable" ? "perception.reason.localUnavailable" : perceptionReason(candidate.reason || "model_not_installed") : "";
-  const run = async (kind: "apply" | "install" | "cancel") => {
-    if (!candidate || applying.current || pending || (kind === "apply" ? !client.canMutate : !currentSession())) return;
-    if (kind === "apply" && (block || modelBlock || !policy || !changed)) return;
+  const block=beforeApply?(conflict?"perception.reason.conflict":readError?"perception.block.catalog":!client.canMutate?"loopOffline":pending||catalog?.switching?"behavior.block.busy":""):legacyBlock;
+  useEffect(()=>{if(embedded)setWorkspaceState(previous=>previous.modelPending===changed&&previous.modelReady===(!modelBlock&&!conflict&&!readError)?previous:{...previous,modelPending:changed,modelReady:!modelBlock&&!conflict&&!readError});},[embedded,changed,modelBlock,conflict,readError,setWorkspaceState]);
+  const run = async (kind: "apply" | "install" | "cancel",resumeObservation=true):Promise<{policy:JsonRecord;token:{session:string;epoch:number;generation:string}}|null> => {
+    if (!candidate || applying.current || pending || (kind === "apply" ? !client.canMutate : !currentSession())) return null;
+    if (kind === "apply" && (block || modelBlock || !policy || !changed)) return null;
     const origin = currentSession(), id = candidate.id, provider = draftProvider;
+    let prepared:Awaited<ReturnType<NonNullable<Props["beforeApply"]>>>|null=null,appliedConfig:JsonRecord|null=null;
     const assertCurrent = () => {
-      if (!mounted.current || currentSession() !== origin || document.hidden) throw new Error("session_changed");
+      if (!mounted.current || currentSession() !== origin || document.hidden || prepared&&(client.currentMotionEpoch()!==prepared.token.epoch||client.currentGeneration()!==prepared.token.generation)) throw new Error("session_changed");
     };
     applying.current = true; request.current++; setPending(kind); setFailure("");
     if (kind === "apply") invalidatePerceptionPreview?.();
@@ -90,19 +99,20 @@ export function PerceptionModelsPanel({ client, t, language, policy, goals, lock
       if (kind !== "apply") {
         await apiFetch<JsonRecord>("/api/v1/rider/perception/models/" + encodeURIComponent(id) + "/install" + (kind === "cancel" ? "/cancel" : ""), { method: "POST", headers: { "X-Rider-Session": origin }, body: "{}" });
       } else {
+        if(beforeApply){prepared=await beforeApply();assertCurrent();workspace.claimed.current=true;workspace.setState(previous=>({...previous,busy:true}));}
         const fresh = perceptionCatalog(data(await apiFetch<JsonRecord>("/api/v1/rider/perception/models", { cache: "no-store" })));
         assertCurrent();
-        if (perceptionSelectionKey(fresh) !== perceptionSelectionKey(catalog) || fresh.switching) throw new Error("model_selection_conflict");
+        if ((prepared?!selectionMatchesPrepared(catalog,fresh,Number(prepared.policy.revision)):perceptionSelectionKey(fresh)!==perceptionSelectionKey(catalog)) || fresh.switching) throw new Error("model_selection_conflict");
         const current = data(await apiFetch<JsonRecord>("/api/v1/rider/navigation/config", { cache: "no-store" }));
         assertCurrent();
-        if (record(current.config).revision !== policy?.revision) throw new Error("model_selection_conflict");
+        if (record(current.config).revision !== (prepared?.policy??policy)?.revision) throw new Error("model_selection_conflict");
         const pipeline = client.pipeline.status;
         if (!pipeline || pipeline.revision !== catalog?.pipeline_revision) throw new Error("model_selection_conflict");
         if (provider === "local") {
           await client.pipeline.change("configure", { ...pipeline.profile, analysis_location: "local", local_engine: candidate.engine as typeof pipeline.profile.local_engine }, pipeline.revision);
           assertCurrent();
           const updated = data(await apiFetch<JsonRecord>("/api/v1/rider/navigation/config", { cache: "no-store" }));
-          assertCurrent(); onApplied(record(updated.config));
+          assertCurrent(); appliedConfig=record(updated.config);onApplied(appliedConfig);
         } else {
           let config = record(current.config);
           if (pipeline.profile.analysis_location !== "venom") {
@@ -115,21 +125,28 @@ export function PerceptionModelsPanel({ client, t, language, policy, goals, lock
           assertCurrent();
           const saved = record(result.config);
           if (!Number.isSafeInteger(saved.revision)) throw new Error("perception_selection_unconfirmed");
-          onApplied(saved);
+          appliedConfig=saved;onApplied(saved);
         }
         await client.pipeline.refresh(); assertCurrent(); onRefresh();
+        if(prepared?.wasObserving&&resumeObservation){await client.mutate("/goal/s15_venom_perception",{enabled:true},"POST",true);assertCurrent();}
+        workspace.setState(previous=>({...previous,modelPending:false}));
       }
     } catch (error) {
       if (mounted.current && currentSession() === origin) {
         setFailure(perceptionError(error));
         if (kind === "apply") { setConflict(perceptionError(error).includes("conflict")); onRefresh(); }
       }
+      if(beforeApply&&kind==="apply")throw error;
     } finally {
       if (kind === "apply") selectionRef.current = "";
       applying.current = false;
+      if(beforeApply&&kind==="apply"){workspace.claimed.current=false;workspace.setState(previous=>({...previous,busy:false}));}
       if (mounted.current && currentSession() === origin) { setPending(""); setRefresh(value => value + 1); }
     }
+    return appliedConfig?{policy:appliedConfig,token:prepared?.token??{session:origin,epoch:client.currentMotionEpoch(),generation:client.currentGeneration()}}:null;
   };
+  const runRef=useRef(run);runRef.current=run;
+  useEffect(()=>{if(!embedded)return;const handler=(resume=true)=>runRef.current("apply",resume);modelApplyRef.current=handler;return()=>{if(modelApplyRef.current===handler)modelApplyRef.current=null;};},[embedded,modelApplyRef]);
   const job = record(candidate?.job);
   const installAction = draftProvider === "venom" ? perceptionInstallAction(candidate) : null;
   const installing = installAction === "cancel";
@@ -139,15 +156,16 @@ export function PerceptionModelsPanel({ client, t, language, policy, goals, lock
     ? runtime === "active" ? selected?.label : null
     : selected?.loaded === true && (!details.active_model_id || details.active_model_id === selected.id) ? selected.label : null;
   const clearDraft = () => { setConflict(false); setFailure(""); setDraft(""); setDraftProvider(""); setRefresh(value => value + 1); };
-  return <details className={styles.perceptionModels} data-testid="perception-models">
-    <summary>{t("perception.title")} <span>{catalog ? t("perception.location." + catalog.provider) + " · " + (selected?.label ?? "—") : t("loading")}</span></summary>
+  const Container=embedded?"section":"details";
+  return <Container className={styles.perceptionModels} data-testid="perception-models">
+    {embedded?<h3>{t("perception.choose")}</h3>:<summary>{t("perception.title")} <span>{catalog ? t("perception.location." + catalog.provider) + " · " + (selected?.label ?? "—") : t("loading")}</span></summary>}
     <div className={styles.perceptionBody}>
     <div className={styles.perceptionSummary}>
       <div><strong>{t("perception.title")}</strong><p className={styles.small} data-testid="perception-active-model">{t("perception.applied")}: <strong>{catalog ? t("perception.location." + catalog.provider) : "—"} · {selected?.label ?? "—"}</strong> · r{catalog?.pipeline_revision ?? "—"} / {catalog?.selection?.revision ?? "—"}</p></div>
       <Button aria-label={t("perception.refresh")} disabled={!!pending} onClick={clearDraft}><RefreshCw size={14}/>{t("refresh")}</Button>
     </div>
     <div className={styles.perceptionSelection}>
-      <Field label={t("perception.location")}><Select data-testid="perception-provider-choice" value={draftProvider} disabled={!catalog || !!pending || catalog.switching} onChange={event => {
+      <Field label={t("perception.location")}><Select data-testid="perception-provider-choice" value={draftProvider} disabled={!catalog || !!pending || locked || catalog.switching} onChange={event => {
         const provider = event.target.value; setDraftProvider(provider); setFailure(""); setConflict(false);
         setDraft(provider === "local" ? catalog?.local_models.find(model => model.engine === catalog.local_engine)?.id ?? catalog?.local_models[0]?.id ?? "" : catalog?.selection?.model_id ?? catalog?.models[0]?.id ?? "");
       }}>
@@ -155,19 +173,19 @@ export function PerceptionModelsPanel({ client, t, language, policy, goals, lock
         {draftProvider === "unknown" && <option value="unknown" disabled>{t("perception.location.unknown")}</option>}
         {catalog?.providers.map(provider => <option key={provider.id} value={provider.id} disabled={!provider.available}>{t("perception.location." + provider.id)}</option>)}
       </Select></Field>
-      <Field label={t("perception.choose")}><Select data-testid="perception-model-choice" value={draft} disabled={!catalog || !!pending || catalog.switching} onChange={event => { setDraft(event.target.value); setFailure(""); setConflict(false); }}>
+      <Field label={t("perception.choose")}><Select data-testid="perception-model-choice" value={draft} disabled={!catalog || !!pending || locked || catalog.switching} onChange={event => { setDraft(event.target.value); setFailure(""); setConflict(false); }}>
         {!draft && <option value="">{t("perception.noSelection")}</option>}
         {models.map(model => <option key={model.id} value={model.id}>{model.label} · {t("perception.install." + model.installation)}</option>)}
       </Select></Field>
-      <Button tone="primary" data-testid="perception-model-apply" disabled={!candidate || !changed || !!block || !!modelBlock} title={t(block || modelBlock || "perception.applyHint")} onClick={() => void run("apply")}>{t(pending === "apply" ? "perception.applying" : "perception.apply")}</Button>
+      {!embedded&&<Button tone="primary" data-testid="perception-model-apply" disabled={!candidate || !changed || !!block || !!modelBlock} title={t(block || modelBlock || "perception.applyHint")} onClick={() => void run("apply").catch(()=>undefined)}>{t(pending === "apply" ? "perception.applying" : "perception.apply")}</Button>}
     </div>
-    <p className={styles.hint}>{t(draftProvider === "local" ? "perception.localOwned" : "perception.hostOwned")}</p>
+    {!embedded&&<p className={styles.hint}>{t(draftProvider === "local" ? "perception.localOwned" : "perception.hostOwned")}</p>}
     <div className={styles.perceptionStatus} aria-live="polite" data-testid="perception-runtime">
       <Pill tone={runtime === "active" ? "good" : "warning"}>{t("perception.runtime." + runtime)}</Pill>
-      <span>{t("perception.loaded")}: {active ?? "—"}</span>
+      {!embedded&&<><span>{t("perception.loaded")}: {active ?? "—"}</span>
       {catalog?.provider === "venom" && <span>{t("perception.effectiveProvider")}: {str(details.execution_provider) || "N/A"}</span>}
       {String(details.error ?? "").startsWith("vision_cuda_") && <span role="status">{t("perception.cudaRequired")}</span>}
-      <Pill>{t(selected?.drive_supported === false ? "perception.observeOnly" : "perception.noMotionGrant")}</Pill>
+      <Pill>{t(selected?.drive_supported === false ? "perception.observeOnly" : "perception.noMotionGrant")}</Pill></>}
     </div>
     {block && <p className={styles.hint} role="status" data-testid="perception-switch-block">{t(block)}</p>}
     {candidate && modelBlock && <p className={styles.hint} role="status" data-testid="perception-model-block">{t(modelBlock)}{candidate.reason && <> · <code>{candidate.reason}</code></>}</p>}
@@ -195,5 +213,5 @@ export function PerceptionModelsPanel({ client, t, language, policy, goals, lock
       <p className={styles.hint}>{t("perception.metricsHint")}</p>
     </details>
     </div>
-  </details>;
+  </Container>;
 }

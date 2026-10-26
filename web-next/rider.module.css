@@ -515,3 +515,36 @@
 .sampleReviewBox .sampleAnalysisActions { padding: 10px 0 0; }
 @container rider (max-width: 680px) { .sampleReviewGrid { grid-template-columns: minmax(0,1fr); } }
 @media (max-width: 680px) { .sampleReviewGrid { grid-template-columns: minmax(0,1fr); } }
+
+/* Daily tuning shares the camera surface; only this rail scrolls. */
+.drivingSurface, .pageFocused .drivingSurface { min-height:0; }
+.driveWorkspace { grid-template-columns:minmax(0,1fr) minmax(360px,410px); height:clamp(460px,calc(100dvh - 300px),720px); }
+.tuningRail { min-width:0; min-height:0; height:100%; display:flex; flex-direction:column; overflow:hidden; border:1px solid var(--r-border); border-radius:16px; background:var(--bg-panel); }
+.tuningTabs { display:flex; flex-shrink:0; gap:8px; padding:10px; border-bottom:1px solid var(--r-border); }
+.tuningTabs .button { flex:1; }
+.tuningBody { flex:1; min-height:0; overflow:auto; padding:12px; overscroll-behavior:contain; }
+.tuningBody h3 { margin:8px 0 12px; font-size:13px; }
+.tuningBody .perceptionModels, .tuningBody .navigationProfiles { padding:0; margin:0 0 16px; border:0; border-radius:0; }
+.tuningBody .perceptionBody { padding:0; }
+.tuningBody .perceptionSummary, .tuningBody [data-testid="behavior-current"], .tuningBody [data-testid="tuning-current"], .tuningBody [data-testid="behavior-description"] { display:none; }
+.tuningBody .parameterGroup { margin:12px 0; padding:8px 0; border:0; }
+.tuningBody .parameterGroup .grid3 { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.tuningBody .manualPad { margin-bottom:12px; }
+.tuningFooter { flex-shrink:0; display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:10px; border-top:1px solid var(--r-border); }
+.tuningFooter .button:first-child { flex:1; }
+.tuningFooter .loopError { width:100%; margin:0; }
+.workspaceFrame:has(.drivingSurface[data-view="automatic"],.drivingSurface[data-view="journey"]) [data-testid="rider-arm"] { display:none; }
+@media(max-width:760px){
+ .driveWorkspace { grid-template-columns:1fr; height:auto; }
+ .workspaceContent .loopCamera .cameraEmbedded .camera { height:clamp(180px,30dvh,300px); }
+ .tuningRail { height:min(620px,70dvh); }
+}
+
+.drivingSurface, .pageFocused .drivingSurface { display:flex; flex-direction:column; }
+.drivingSurface > .operatorMessages { height:auto; min-height:0; padding:0; }
+.tuningBody .manualPad { display:grid; grid-template-rows:36px 144px auto; gap:6px; }
+.tuningBody .pad { grid-template-columns:repeat(3,60px); grid-template-rows:repeat(3,44px); gap:6px; margin:0; }
+.tuningBody .pad .small { font-size:10px; }
+.tuningBody .padStop svg { width:20px; height:20px; }
+.tuningBody .padStop span { font-size:10px; }
+.tuningBody [data-testid="operator-status"] { margin-top:16px; }

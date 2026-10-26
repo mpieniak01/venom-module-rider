@@ -20,7 +20,7 @@ export function validOperatorNavigation(base:JsonRecord,draft:JsonRecord):boolea
   const tuning=tuningDraft({...base,perception:draft.perception},'validation');
   if(!tuning||!validTuning(tuning))return false;
   const input=record(draft.perception).input_region;
-  if(input!==undefined&&!inputCovers(input,roi))return false;
+  if(input!==undefined&&(!inputCovers(input,roi)||avoidance.enabled===true&&record(avoidance.geometry).mode==='ground'&&JSON.stringify(record(input).bounds)!==JSON.stringify([0,0,1,1])))return false;
  }
  if(JSON.stringify(base.behavior)!==JSON.stringify(draft.behavior)){
   const selection=record(draft.behavior),candidate=behaviorDraft(base,String(selection.profile_id),'validation');
@@ -34,8 +34,8 @@ export function useOperatorApply(workspace:ReturnType<typeof useOperatorTuning>,
  const manualDirty=!!state.manual&&(JSON.stringify(state.manual.directions)!==JSON.stringify(settings.directions)||JSON.stringify(state.manual.values)!==JSON.stringify(settings.values));
  const dirty=navigationDirty||manualDirty;
  const valid=(!navigationDirty||validOperatorNavigation(state.base!,state.draft!))&&(!manualDirty||validCalibration(state.manual!,settings));
- const apply=async(resumeObservation=true)=>{
-  if(claimed.current||!dirty||!valid)throw new Error('operator_settings_invalid');
+ const apply=async(resumeObservation=true,prepareOnly=false)=>{
+  if(claimed.current||!dirty&&!prepareOnly||!valid)throw new Error('operator_settings_invalid');
   claimed.current=true;setState(previous=>({...previous,busy:true}));
   try{
    const result=await applyOperatorSettings({
@@ -48,11 +48,12 @@ export function useOperatorApply(workspace:ReturnType<typeof useOperatorTuning>,
     session:client.currentSession,epoch:client.currentMotionEpoch,generation:client.currentGeneration,
     current:()=>alive.current&&!document.hidden,
     onManual:()=>setState(previous=>({...previous,manual:null})),
-    onNavigation:policy=>{const full={...state.base,...policy};setState(previous=>({...previous,base:full,draft:full}));client.setPerceptionPolicy?.(full);client.invalidatePerceptionPreview?.();},
+    onNavigation:policy=>{const full={...state.base,...policy};setState(previous=>({...previous,base:full,draft:full}));client.setPerceptionPolicy?.(full);},
    },resumeObservation);
    await client.poll();
+   if(!alive.current||document.hidden||client.currentSession()!==result.token.session||client.currentMotionEpoch()!==result.token.epoch||client.currentGeneration()!==result.token.generation)throw new Error('navigation_trial_cancelled');
    if(result.observationError)throw Object.assign(new Error('loopStartedReadFailed'),{data:{error:'loopStartedReadFailed'}});
-   return result.policy;
+   return result;
   }finally{claimed.current=false;if(alive.current)setState(previous=>({...previous,busy:false}));}
  };
  return {dirty,navigationDirty,manualDirty,valid,busy:state.busy,apply};

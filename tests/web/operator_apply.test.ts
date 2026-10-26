@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { applyOperatorSettings } from "../../web-next/lib/apply-operator-settings";
+import { perceptionCatalog, selectionMatchesPrepared } from "../../web-next/lib/perception";
 import type { JsonRecord } from "../../web-next/lib/model";
 
 function fixture(goals:JsonRecord={observe:true,drive:false},armed=false){
  let epoch=0,generation='a',session='one',stopped=!armed;
  const writes:{path:string;body:JsonRecord}[]=[],acks:string[]=[];
  const dependencies={
-  read:async(path:string)=>path==='/navigation/config'?{config:{revision:5,speed:.1},goals}:{connection:{session},settings:{revision:8},errors:{},control:{safety:{state:stopped?'DISARMED':'ARMED',moving:!stopped,stale:false}}},
+  read:async(path:string)=>path==='/navigation/config'?{config:{revision:5,speed:.1},goals}:{connection:{session},settings:{revision:8},errors:{},control:{safety:{state:stopped?'DISARMED':'ARMED',generation,moving:!stopped,stale:false}}},
   mutate:async(path:string,body:JsonRecord)=>{writes.push({path,body});return {data:{config:{revision:6,...(body.values as JsonRecord)}}};},
   stop:async()=>{writes.push({path:'/control',body:{action:'stop'}});epoch++;generation='b';stopped=true;},
   session:()=>session,epoch:()=>epoch,generation:()=>generation,current:()=>true,
@@ -61,4 +62,18 @@ test('failed observation recovery reports the saved policy without repeating the
  f.dependencies.mutate=async(path,body)=>{if(body.enabled===true)throw new Error('unavailable');return mutate(path,body);};
  const result=await applyOperatorSettings(request,f.dependencies);
  assert.equal(result.policy.revision,6);assert.ok(result.observationError);assert.deepEqual(f.acks,['navigation']);
+});
+
+test('a prepared settings revision does not masquerade as a different model selection',()=>{
+ const catalog=(revision:number,id='a')=>perceptionCatalog({models:[],provider:'venom',pipeline_revision:1,selection:{model_id:id,artifact_sha256:'a'.repeat(64),revision}});
+ assert.ok(selectionMatchesPrepared(catalog(55),catalog(56),56));
+ assert.ok(!selectionMatchesPrepared(catalog(55),catalog(56,'b'),56));
+ assert.ok(!selectionMatchesPrepared(catalog(55),catalog(57),56));
+});
+
+test('a different remotely observed generation prevents writes despite a delayed client poll',async()=>{
+ const f=fixture();const read=f.dependencies.read;
+ f.dependencies.read=async path=>{const row=await read(path);if(path.includes('status'))(row.control!.safety as JsonRecord).generation='other';return row;};
+ await assert.rejects(applyOperatorSettings(request,f.dependencies),/stale_control/);
+ assert.deepEqual(f.writes,[]);
 });

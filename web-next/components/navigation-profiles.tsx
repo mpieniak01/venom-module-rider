@@ -56,6 +56,7 @@ export function NavigationProfiles({ client, policy, goals, locked, t, onApplied
     } catch (error) { if (client.currentSession() === origin) setFailure(behaviorError(error)); }
     finally { applying.current = false; setPending(false); onPendingChange?.(false); }
   };
+  const Parameters=editor?"div":"details";
   return <section className={styles.navigationProfiles} aria-label={t("behavior.title")} data-testid="navigation-profiles">
     <div className={styles.perceptionSummary} data-testid="behavior-summary"><strong>{t("behavior.title")}</strong><Pill tone={catalog.active.profile_id === "legacy" ? undefined : "warning"}>{profileName(catalog.active)} · r{catalog.active.profile_revision}</Pill></div>
     <div className={styles.perceptionBody}>
@@ -81,7 +82,7 @@ export function NavigationProfiles({ client, policy, goals, locked, t, onApplied
     {!editor && !!(failure || block) && <p className={failure || conflict ? styles.loopError : styles.hint} role={failure || conflict ? "alert" : "status"} data-testid="behavior-message">{t(failure || block, { model: localModel })}</p>}
     {saved !== null && policy?.revision === saved && <p className={styles.hint} role="status" data-testid="behavior-saved">{t("behavior.saved", { revision: String(saved) })}</p>}
     {local && !(failure || block === "behavior.localOnly") && <p className={styles.hint} data-testid="behavior-provider-hint">{t("behavior.localOnly", { model: localModel })}</p>}
-    <div className={styles.details}>
+    <Parameters className={styles.details}>{!editor&&<summary>{t("behavior.parameters")}</summary>}
     {!editor&&<p className={styles.hint}>{t("behavior.hint")}</p>}
     {catalog.editable && selected !== "legacy" && <>
       {!editor&&<p className={styles.hint}>{t("behavior.customHint")}</p>}
@@ -96,7 +97,7 @@ export function NavigationProfiles({ client, policy, goals, locked, t, onApplied
           {group === "temporal" && <p className={styles.hint}>{t("behavior.temporalHint")}</p>}
           {group === "persistence" && <p className={styles.hint}>{t("behavior.persistenceHint", { required: String(values.obstacle_support_frames), window: String(values.obstacle_window_frames) })}</p>}
           {group === "objects" && <p className={styles.hint}>{t(selected === "room_fluid" ? "behavior.roomObjectsHint" : "behavior.objectsHint")}</p>}
-          <div className={styles.grid3}>{Object.entries(catalog.parameterSchema ?? {}).filter(([key, spec]) => spec.group === group && Object.hasOwn(values,key) && (key !== "pixel_confidence" || (policy?.perception as JsonRecord)?.engine === "segformer")).map(([key, spec]) => <Field key={key} label={t(key === "object_tracking_enabled" && selected === "room_fluid" ? "behavior.param.roomTrackingEnabled" : "behavior.param." + key)}>
+          <div className={styles.grid3}>{Object.entries(catalog.parameterSchema ?? {}).filter(([key, spec]) => spec.group === group && Object.hasOwn(values,key) && (key !== "pixel_confidence" || (policy?.perception as JsonRecord)?.engine === "segformer")).map(([key, spec]) => <Field key={key} label={t(key === "object_tracking_enabled" && selected === "room_fluid" ? "behavior.param.roomTrackingEnabled" : "behavior.param." + key).replace(spec.kind==="bool"?/$^/:/\s*\([^)]*\)$/, "")+(spec.kind==="bool"?"":` (${spec.min}–${spec.max}${key.endsWith("_ms")?" ms":""})`)}>
             {spec.kind === "bool" ? <input data-testid={"behavior-param-" + key} type="checkbox" checked={values[key] === true} onChange={e => editParameter(key, e.target.checked)}/>
               : <Input data-testid={"behavior-param-" + key} type="number" min={spec.min} max={spec.max} step={spec.step} value={typeof values[key] === "number" && Number.isFinite(values[key]) ? Number(values[key]) : ""} onChange={e => editParameter(key, e.target.value === "" ? Number.NaN : Number(e.target.value))}/>}
           </Field>)}</div>
@@ -110,7 +111,7 @@ export function NavigationProfiles({ client, policy, goals, locked, t, onApplied
       <p className={styles.small}>{t("behavior.effectiveHash")}: <code>{catalog.effective_policy_sha256}</code></p>
       <pre className={styles.pre} data-testid="behavior-parameters">{JSON.stringify(catalog.activeParameters ?? candidate?.parameters ?? {}, null, 2)}</pre>
     </details>}
-    </div>
+    </Parameters>
     </div>
   </section>;
 }

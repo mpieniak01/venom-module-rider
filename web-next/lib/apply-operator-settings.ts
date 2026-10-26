@@ -19,7 +19,7 @@ export async function applyOperatorSettings(request:Request,d:Dependencies,resum
  if(request.navigation&&policy.revision!==request.navigation.revision)fail("navigation_configuration_conflict");
  if(request.manual&&settingsOf(observed as RiderStatus).revision!==request.manual.revision)fail("manual_settings_conflict");
  let safety=safetyOf(observed as RiderStatus);
- if(safety.stale!==false||!['ARMED','DISARMED'].includes(String(safety.state))||record(observed.errors).control)fail("stale_control");
+ if(safety.generation!==generation||typeof safety.moving!=="boolean"||safety.stale!==false||!['ARMED','DISARMED'].includes(String(safety.state))||record(observed.errors).control)fail("stale_control");
  const stopping=safety.state==='ARMED'||safety.moving===true||goals.drive===true;
  if(stopping){
   const nextEpoch=epoch+1;await d.stop();
@@ -32,22 +32,28 @@ export async function applyOperatorSettings(request:Request,d:Dependencies,resum
  if(stopping){
   for(let attempt=0;attempt<20;attempt++){
    observed=await d.read('/status?section=control');check();safety=safetyOf(observed as RiderStatus);
+   if(safety.generation!==generation)fail("navigation_trial_cancelled");
    if(safety.state==='DISARMED'&&safety.moving===false&&safety.stale===false)break;
    if(attempt===19)fail('manual_settings_requires_idle');
    await (d.sleep??(ms=>new Promise(resolve=>setTimeout(resolve,ms))))(50);check();
   }
  }
+ const verifyIdle=async()=>{
+  const fresh=await d.read('/status?section=control');check();const now=safetyOf(fresh as RiderStatus);
+  if(now.generation!==generation||now.state!=='DISARMED'||now.moving!==false||now.stale!==false||record(fresh.errors).control)fail('navigation_trial_cancelled');
+ };
+ await verifyIdle();
  if(request.manual){check();await d.mutate('/settings',request.manual);check();d.onManual();}
  let saved=policy;
  if(request.navigation){
-  check();const response=record(await d.mutate('/navigation/config',request.navigation));check();
+  await verifyIdle();check();const response=record(await d.mutate('/navigation/config',request.navigation));check();
   saved=record(record(response.data??response).config);
   if(!Number.isSafeInteger(saved.revision))fail('navigation_configuration_unconfirmed');
   d.onNavigation(saved);
  }
  let observationError:unknown=null;
  if(resumeObservation&&(goals.observe===true||goals.drive===true)){
-  check();try{await d.mutate('/goal/s15_venom_perception',{enabled:true});check();}catch(error){check();observationError=error;}
+  await verifyIdle();check();try{await d.mutate('/goal/s15_venom_perception',{enabled:true});check();}catch(error){check();observationError=error;}
  }
- return {policy:saved,observationError};
+ return {policy:saved,observationError,token:{session:origin,epoch,generation},wasObserving:goals.observe===true||goals.drive===true};
 }

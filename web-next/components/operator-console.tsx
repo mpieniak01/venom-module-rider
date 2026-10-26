@@ -23,20 +23,27 @@ export function RiderMessages({ client, t, language }: { client: RiderClient; t:
   </div>;
 }
 
-export function OperatorConsole({ client, t, language }: { client: RiderClient; t: Translator; language: string }) {
+export function OperatorMessages({client,t,authority=true}:{client:RiderClient;t:Translator;authority?:boolean}) {
   const safety = safetyOf(client.status);
   const journey = journeyOwnsMotion(client.status);
   const ownsManual = safety.state === "ARMED" && safety.owner === "manual";
   const direct = manualInterventionSupported(client.status);
   const reason = !client.canMutate ? "workspace.connectionLost" : client.status?.errors.control || safety.stale===true ? "workspacePermissionUnknown" : client.canNavigate ? null : journey && !direct ? "manualGestureUnsupported" : ownsManual ? "workspaceTakeoverNeeded" : safety.state === "ARMED" ? "workspaceAutomaticOwner" : safety.state === "DISARMED" ? null : "workspacePermissionUnknown";
   const notice=client.canMutate&&!client.status?.errors.control&&safety.stale!==true&&client.notice?.tone==="error"?client.notice:null;
+  if(!notice&&(!authority||!reason))return null;
+  return <div className={styles.operatorMessages+" "+(notice?.tone==="error"?styles.operatorMessageError:"")} data-testid="operator-messages" role={notice?.tone==="error"?"alert":"status"}>
+        <span>{notice ? <>{t(notice.code==="panel_owner_mismatch"?"workspace.panelChanged":notice.key)}{notice.code && notice.code!=="panel_owner_mismatch" && <> · {notice.code}</>}</> : authority&&reason ? t(reason) : null}</span>
+        {notice&&<Button aria-label={t("close")} onClick={()=>client.setNotice(null)}><X size={14}/></Button>}
+      </div>;
+}
+
+export function OperatorConsole({ client, t, language }: { client: RiderClient; t: Translator; language: string }) {
+  const safety = safetyOf(client.status);
+  const journey = journeyOwnsMotion(client.status);
   return <Panel className={styles.operatorPanel} title={t("manual")} extra={<Button size="large" data-testid="takeover-manual" tone="primary" title={t(journey ? "journeyManualTakeover" : operatorPrioritySupported(client.status) && safety.state === "ARMED" ? "operatorTakeoverHint" : "takeManualHint")} disabled={!client.canArm || !!client.busy && !(operatorPrioritySupported(client.status) && safety.state === "ARMED")} onClick={() => void client.takeManual(t("manual"))}>{t("takeManual")}</Button>}>
     <ManualPad client={client} t={t} language={language} compact minimal>
       <OperatorStatus client={client} t={t} language={language}/>
-      <div className={styles.operatorMessages+" "+(notice?.tone==="error"?styles.operatorMessageError:"")} data-testid="operator-messages" role={notice?.tone==="error"?"alert":"status"}>
-        <span>{notice ? <>{t(notice.code==="panel_owner_mismatch"?"workspace.panelChanged":notice.key)}{notice.code && notice.code!=="panel_owner_mismatch" && <> · {notice.code}</>}</> : reason ? t(reason) : null}</span>
-        {notice&&<Button aria-label={t("close")} onClick={()=>client.setNotice(null)}><X size={14}/></Button>}
-      </div>
+      <OperatorMessages client={client} t={t}/>
     </ManualPad>
   </Panel>;
 }

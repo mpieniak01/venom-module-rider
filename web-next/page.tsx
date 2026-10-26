@@ -18,7 +18,7 @@ import { Resources } from "./components/resources";
 import { NavigationLoop } from "./components/navigation-loop";
 import { Compute } from "./components/compute";
 import {SamplesPanel} from "./components/samples-panel";
-import { OperatorConsole, OperatorDiagnostics, RiderMessages } from "./components/operator-console";
+import { OperatorDiagnostics, RiderMessages } from "./components/operator-console";
 import styles from "./rider.module.css";
 
 const tabs = [{ id: "control", Icon: Bot }, { id: "overview", Icon: Activity }, { id: "calibration", Icon: SlidersHorizontal }, { id: "resources", Icon: Boxes }, { id: "face", Icon: Smile }, { id: "compute", Icon: BrainCircuit }, { id: "samples", Icon: Camera }] as const;
@@ -118,7 +118,6 @@ export default function RiderPage() {
     <OperatorTuningProvider key={connection?.device_id??"unconfigured"}><div className={section === "control" ? styles.controlPanel : undefined} id={`rider-panel-${section}`} role="tabpanel" aria-labelledby={`rider-tab-${section}`}>
       {section === "samples" ? <SamplesPanel recording={recording} client={client} t={t} language={language}/> : client.loading && !client.status ? <Panel title={t("device")}><Empty>{t("loading")}</Empty>{section === "control" && <RiderMessages client={client} t={t} language={language}/>}</Panel> : !connection?.configured && section === "calibration" ? <Calibration recording={recording} client={client} t={t} language={language}/> : !connection?.configured ? <Panel title={t("device")}><Empty><Bot size={40} />{t("unconfigured")}</Empty>{section === "control" && <RiderMessages client={client} t={t} language={language}/>}</Panel> : <>
         {section === "control" && <NavigationLoop key={connection.session} client={client} t={t} language={language}
-          manual={<OperatorConsole client={client} t={t} language={language} />}
           operatorDetails={<OperatorDiagnostics client={client} t={t} language={language}/>}
         />}
         {section === "overview" && <Measurements status={client.status} t={t} language={language} />}

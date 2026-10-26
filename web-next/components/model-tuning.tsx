@@ -80,8 +80,8 @@ export function ModelTuning({ client, policy, goals, locked, t, onApplied, onRef
             onChange={event => semanticEdit(field, event.target.value === "" ? Number.NaN : Number(event.target.value))}/></Field>
         </div>)}
       </fieldset>}
-      {depth && <fieldset className={styles.stack} disabled={pending} onFocusCapture={captureBase}><legend>{t("tuning.depth")}</legend>
-        {(["residual_limit", "outlier_limit", "slope_min"] as const).map(field => <Field label={t(field === "residual_limit" ? "perceptionResidual" : field === "outlier_limit" ? "perceptionOutliers" : "perceptionSlope")} key={field}>
+      {depth && <fieldset className={styles.stack} disabled={pending||!!editor&&locked} onFocusCapture={captureBase}><legend>{t("tuning.depth")}</legend>
+        {(["residual_limit", "outlier_limit", "slope_min"] as const).map(field => <Field label={t(field === "residual_limit" ? "perceptionResidual" : field === "outlier_limit" ? "perceptionOutliers" : "perceptionSlope")+` (${field==="residual_limit"?"0.01–0.15":field==="outlier_limit"?"0–2":"1–4"})`} key={field}>
           <Input data-testid={"tuning-" + field} type="number" min={field === "residual_limit" ? .01 : field === "slope_min" ? 1 : 0} max={field === "residual_limit" ? .15 : field === "slope_min" ? 4 : 2} step={field === "residual_limit" ? .005 : .1}
             value={Number.isFinite(perception[field]) ? Number(perception[field]) * (field === "outlier_limit" ? 100 : 1) : ""}
             onChange={event => edit(current => ({ ...current, [field]: event.target.value === "" ? Number.NaN : Number(event.target.value) / (field === "outlier_limit" ? 100 : 1) }))}/>
