@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from .ground_config import GroundGeometry
+from .motion_limits import MAX_MOTION_MS, MAX_SPEED
 
 
 class AvoidanceSettings(BaseModel):
@@ -13,8 +14,8 @@ class AvoidanceSettings(BaseModel):
     enabled: bool = False
     sweep_verified: bool = False
     mirrored: bool = False
-    turn_speed: float = Field(default=0.05, ge=0.01, le=0.1)
-    turn_ms: int = Field(default=100, ge=50, le=150)
+    turn_speed: float = Field(default=0.05, ge=0.01, le=MAX_SPEED)
+    turn_ms: int = Field(default=100, ge=50, le=MAX_MOTION_MS)
     max_turn_pulses: int = Field(default=3, ge=1, le=5)
     max_stalled_corrections: int = Field(default=2, ge=1, le=5)
     progress_min_delta: float = Field(default=0.03, ge=0.0, le=0.3)

@@ -122,6 +122,14 @@ export function perceptionSelectionKey(catalog: PerceptionCatalog | null): strin
   return JSON.stringify([catalog?.provider, catalog?.pipeline_revision, catalog?.local_engine, catalog?.selection?.model_id, catalog?.selection?.artifact_sha256, catalog?.selection?.revision]);
 }
 
+/** Configuration-only revision changes do not mean a different selected model. */
+export function perceptionSelectionIdentityKey(catalog:PerceptionCatalog|null):string {
+ return JSON.stringify([catalog?.provider,catalog?.pipeline_revision,catalog?.local_engine,catalog?.selection?.model_id,catalog?.selection?.artifact_sha256]);
+}
+export function selectionMatchesPrepared(catalog:PerceptionCatalog|null,fresh:PerceptionCatalog,revision:number):boolean {
+ return perceptionSelectionIdentityKey(catalog)===perceptionSelectionIdentityKey(fresh)
+  && (perceptionSelectionKey(catalog)===perceptionSelectionKey(fresh)||fresh.selection?.revision===revision);
+}
 export function perceptionError(error: unknown): string {
   const code = errorCode(error);
   return code === "request_failed" && error instanceof Error && /^(perception_|model_selection_|camera_pipeline_|session_changed)/.test(error.message) ? error.message : code;

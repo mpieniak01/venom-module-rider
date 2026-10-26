@@ -22,4 +22,9 @@ export function validCalibration(draft: CalibrationDraft, settings: JsonRecord):
 export function calibrationValues(draft: CalibrationDraft, settings: JsonRecord): JsonRecord {
   return Object.fromEntries([...Object.keys(record(record(settings.parameter_schema).value_fields)), "ramp_mode"].map(key => [key, draft.values[key]]));
 }
-export function directionDescriptor(settings: JsonRecord, field: string): NumericDescriptor { return record(record(record(settings.parameter_schema).direction_fields)[field]) as NumericDescriptor; }
+export function directionDescriptor(settings: JsonRecord, field: string, row?: JsonRecord): NumericDescriptor {
+  const descriptor = { ...record(record(record(settings.parameter_schema).direction_fields)[field]) } as NumericDescriptor;
+  if (row && (field === "speed" || field === "minimum") && finite(row.maximum)) descriptor.maximum = row.maximum;
+  if (row && field === "maximum" && finite(row.minimum)) descriptor.minimum = row.minimum;
+  return descriptor;
+}

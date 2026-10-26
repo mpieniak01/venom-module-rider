@@ -14,7 +14,11 @@ An optional Venom module for manual operation of Rider-Pi. Venom supplies the UI
 
 Manual operation does not require chat, voice recognition, an LLM or Rider-PC.
 
-Automatic motion settings are available under **Settings and diagnostics → Zone and motion parameters** in Manual, Automatic and Automat2 views. Editing prepares a local draft and never changes an active drive; stop driving before saving to Pi. Switching views preserves the draft. Model tuning controls image analysis separately. Automat2 keeps the 0.10 speed limit. The pulse field uses the ceiling reported by Pi (up to 250 ms on compatible versions; older versions retain 150 ms). The pulse is also bounded by the remaining image/decision validity, whose independent ceiling remains 200 ms.
+The driving screen keeps the camera next to a **Motion / Model** tuning panel. Motion exposes the current manual direction values, automatic speed and pulse, turn values and shared ramps. Model exposes sensitivity, navigation behavior and installed-model selection without nested tuning disclosures. Advanced geometry and diagnostics remain below the main workspace. Switching page tabs preserves the device's unsaved draft; switching devices clears it.
+
+**Apply** uses one settings flow: stop active movement, pause requested observation, write the changed manual/navigation settings and model selection, then restore observation only. It never resumes driving. Failed writes retain the remaining draft. **Apply and Start** first applies the visible draft and uses the resulting Pi revision; a cold Start prepares analysis and waits for a fresh image for that revision before requesting motion. STOP supersedes a pending preparation or write and prevents subsequent admission or observation restart. Pi still enforces explicit consent, generation and capture/decision deadlines.
+
+Compatible Pi versions expose the same maximum command magnitude (1.0) and pulse duration (500 ms) for manual, automatic and Automat2 control, including avoidance turns. Numeric labels show their allowed ranges. Existing saved values remain the initial form values, and a manual direction preset can retain a lower maximum. Older Pi versions retain their advertised or legacy bounds. Navigation uses its own policy limits rather than the manual direction preset; ramps remain shared. Pulses and reply validity are still shortened by the remaining capture/decision budget (at most 500 ms), and expired decisions cannot continue motion.
 
 ## R2 — compute and perception
 
@@ -643,3 +647,14 @@ The camera and host inference can continue displaying a separate passive preview
 while preparation is fresh and the executor is disarmed or qualifying. A healthy
 Pi producer then takes over the preview; diagnostic results never qualify motion,
 carry journey authority or renew a movement deadline. STOP still cancels Start.
+
+
+## Manual pulse trials A/B/C
+
+The Motion panel offers three Pi-owned recipes: A is one 500 ms pulse, B is two 250 ms pulses with 100 ms zero gaps, C is five 100 ms pulses with 100 ms zero gaps. Selecting a recipe prepares the visible forward-duration draft. Existing direction strength and ramps remain the common settings; other directions and navigation/model configuration are preserved. Editing the duration away from the recipe shows custom settings.
+
+Start trial applies the manual settings, opens a motion-only recording and submits one fresh, explicitly consented Start. It does not enable camera/video. Pi schedules the series in its existing executor, confirms zero output before each gap and ends the trial's permission. Global STOP, manual intervention, lost authority and the fixed 1500 ms series deadline retire all remaining pulses. A late HTTP reply or reopening the panel cannot repeat a Start. Saved manual presets are not overwritten. The form retains the last applied values after the trial.
+
+Calibration's existing A/B comparison can select a whole series, show completed pulse counts and actual times, and compare common settings. Pi-relative events are anchored to host reception; this is not proof of synchronized IMU timing or physical stopping/distance. Sparse IMU data is not converted into invented smoothness or distance.
+
+The module exposes GET /api/v1/rider/motion/trials/profiles, POST /api/v1/rider/motion/trials and GET /api/v1/rider/motion/trials/{request_id}. Pi recipes/status use rider.pulse_trials version 1. Start uses the existing manual safety/consent channel and settings revision. Older Pi without this capability keeps ordinary manual control and does not expose trial Start.

@@ -1,8 +1,9 @@
+import {seriesFor,type PulseRun} from "./pulse-trials";
 import {finite,record,str,type JsonRecord} from "./model";
 export type MotionPoint={id:string;t:number;segment:number;valid:boolean;instance_id:string|null;source_time:number|null;values:Record<string,number|null>;units:Record<string,string>;quality:JsonRecord;angle_semantics?:Record<string,{unit:"deg"|"rad";basis:string}>;angle_rates_deg_s?:Record<string,number>};
 export type MotionEvent={id:string;t:number;operation_id:string;phase:"requested"|"result";intent:JsonRecord;profile_ref:string|null;outcome:string;reason:string|null;ack_status:string|null};
 export type MotionOutput={id:string;t:number;instance_id:string|null;source_time:number|null;target:Record<string,number|null>;output:Record<string,number|null>;state:string|null;quality:JsonRecord};
-export type MotionStream={id:string;device_id:string;source_session:string;clock:string;origin:string;range:[number,number];points:MotionPoint[];events:MotionEvent[];outputs:MotionOutput[];profiles:Record<string,JsonRecord>;sampling_diagnostics?:JsonRecord};
+export type MotionStream={id:string;device_id:string;source_session:string;clock:string;origin:string;range:[number,number];points:MotionPoint[];events:MotionEvent[];outputs:MotionOutput[];profiles:Record<string,JsonRecord>;sampling_diagnostics?:JsonRecord;trials?:PulseRun[]};
 export type MotionTimeline={schema_version:1;dataset_revision:string;session_id:string;context:string|null;streams:MotionStream[];collection_status:JsonRecord;counts:JsonRecord;sampling:JsonRecord;source_gaps_s:JsonRecord};
 export function readTimeline(value:unknown):MotionTimeline {
   const r=record(value);
@@ -13,11 +14,12 @@ export function readTimeline(value:unknown):MotionTimeline {
     if(!str(s.id)||!Array.isArray(s.points)||!Array.isArray(s.events)||!Array.isArray(s.outputs)||!Array.isArray(s.range)||s.range.length!==2||!s.range.every(finite)||s.range[1]<s.range[0]||!finite(s.range[1]-s.range[0]))throw new Error("motion_timeline_invalid");
     total+=s.points.length+s.events.length+s.outputs.length;
     if(total>2048)throw new Error("motion_timeline_invalid");
+    if(s.trials!==undefined&&(!Array.isArray(s.trials)||s.trials.length>2048||s.trials.some(run=>!finite(record(run).t)||!Array.isArray(record(run).events)||Number((record(run).events as unknown[]).length)>32)))throw new Error("motion_timeline_invalid");
     for(const item of [...s.points,...s.events,...s.outputs])if(!finite(record(item).t))throw new Error("motion_timeline_invalid");
   }
   return r as unknown as MotionTimeline;
 }
-export const streamTimes=(a:MotionStream|null,b:MotionStream|null)=>[...new Set([a,b].flatMap(s=>s?[...s.points,...s.events,...s.outputs].map(p=>p.t):[]))].sort((x,y)=>x-y);
+export const streamTimes=(a:MotionStream|null,b:MotionStream|null)=>[...new Set([a,b].flatMap(s=>s?[...s.points.map(p=>p.t),...s.events.map(e=>e.t),...s.outputs.map(o=>o.t),...(s.trials??[]).flatMap(run=>run.events.map(e=>run.t+e.elapsed_ms/1000))]:[]))].sort((x,y)=>x-y);
 export function pointAt(stream:MotionStream|null,time:number):MotionPoint|null {
   const matches=stream?.points.filter(p=>Math.abs(p.t-time)<1e-9)??[];
   return matches.length===1?matches[0]:null;
@@ -45,11 +47,11 @@ export function seriesSegments(points:MotionPoint[],channel:string,unit:string):
 export const trialRequests=(stream:MotionStream|null)=>stream?.events.filter(e=>e.phase==="requested"&&e.intent.action==="move")??[];
 export function alignTrial(stream:MotionStream|null,id:string):MotionStream|null {
   if(!stream)return null;
-  const anchor=trialRequests(stream).find(e=>e.operation_id===id);
+  const anchor=seriesFor(stream,id)??trialRequests(stream).find(e=>e.operation_id===id);
   if(!anchor)return stream;
   const offset=anchor.t;
   return {...stream,origin:"selected_move_request",range:[stream.range[0]-offset,stream.range[1]-offset],
-    points:stream.points.map(p=>({...p,t:p.t-offset})),events:stream.events.map(e=>({...e,t:e.t-offset})),outputs:stream.outputs.map(o=>({...o,t:o.t-offset}))};
+    points:stream.points.map(p=>({...p,t:p.t-offset})),events:stream.events.map(e=>({...e,t:e.t-offset})),outputs:stream.outputs.map(o=>({...o,t:o.t-offset})),trials:stream.trials?.map(run=>({...run,t:run.t-offset}))};
 }
 export function pulseEvidence(stream:MotionStream|null){
   const event=trialRequests(stream).find(e=>Math.abs(e.t)<1e-9);

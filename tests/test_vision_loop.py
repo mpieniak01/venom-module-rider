@@ -898,3 +898,22 @@ async def test_trace_storage_failure_cannot_change_go_stop(monkeypatch):
     assert "depth_trace_id" not in result
     assert "_trace_depth" not in result
     await loop.close()
+
+
+async def test_reply_can_exceed_old_200ms_ceiling_but_keeps_frame_budget():
+    loop = VisionLoop(Detector())
+    try:
+        for seq in range(1, 4):
+            result = await loop.decide(
+                "pi", frame(seq).model_copy(update={"deadline_ms": 500}), b"x"
+            )
+        assert result["action"] == "go"
+        assert 200 < result["valid_for_ms"] <= 500
+        result = await loop.decide(
+            "pi",
+            frame(4).model_copy(update={"deadline_ms": 500, "age_ms": 350.0}),
+            b"x",
+        )
+        assert 0 < result["valid_for_ms"] <= 150
+    finally:
+        await loop.close()

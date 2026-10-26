@@ -1,4 +1,4 @@
-import { calibrationMatches, navigationPulseLimit, trialBlock } from "./loop-controls";
+import { calibrationMatches, navigationPulseLimit, navigationSpeedLimit, trialBlock } from "./loop-controls";
 import { record, safetyOf, str, type JsonRecord, type RiderStatus } from "./model";
 
 /** Guidance only: Pi validates the saved policy before granting motion.
@@ -16,7 +16,7 @@ export function journeyBlocks(policy: JsonRecord | null, runtime: JsonRecord, de
   if (geometry.mode === "ground" && (!["fx", "fy", "radius_ratio", "lookahead_ratio", "max_heading_deg"].every(key => typeof geometry[key] === "number" && Number.isFinite(geometry[key]) && Number(geometry[key]) > 0)
     || !["cx", "cy"].every(key => typeof geometry[key] === "number" && Number.isFinite(geometry[key]) && Number(geometry[key]) >= 0 && Number(geometry[key]) <= 1))) blocks.push("geometryCalibrationMissing");
   if (requireAcceptance && str(detector.sha256) && !calibrationMatches(policy, detector)) blocks.push("loopUnverified");
-  if (typeof policy.speed !== "number" || !Number.isFinite(policy.speed) || policy.speed <= 0 || policy.speed > .1
+  if (typeof policy.speed !== "number" || !Number.isFinite(policy.speed) || policy.speed <= 0 || policy.speed > navigationSpeedLimit(policy,true)
     || typeof policy.max_motion_ms !== "number" || !Number.isFinite(policy.max_motion_ms) || policy.max_motion_ms <= 0 || policy.max_motion_ms > navigationPulseLimit(policy,true)) blocks.push("journeyMotionLimits");
   return [...new Set(blocks)];
 }

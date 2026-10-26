@@ -9,6 +9,7 @@ import { safetyOf, type Section } from "./lib/model";
 import { useRider } from "./lib/use-rider";
 import {useStudyRecording} from "./lib/use-study-recording";
 import {StudyRecordingBar} from "./components/study-recording";
+import { OperatorTuningProvider } from "./lib/operator-tuning";
 import { Calibration } from "./components/calibration";
 import { FaceStudio } from "./components/face";
 import { Measurements } from "./components/measurements";
@@ -17,7 +18,7 @@ import { Resources } from "./components/resources";
 import { NavigationLoop } from "./components/navigation-loop";
 import { Compute } from "./components/compute";
 import {SamplesPanel} from "./components/samples-panel";
-import { OperatorConsole, OperatorDiagnostics, RiderMessages } from "./components/operator-console";
+import { OperatorDiagnostics, RiderMessages } from "./components/operator-console";
 import styles from "./rider.module.css";
 
 const tabs = [{ id: "control", Icon: Bot }, { id: "overview", Icon: Activity }, { id: "calibration", Icon: SlidersHorizontal }, { id: "resources", Icon: Boxes }, { id: "face", Icon: Smile }, { id: "compute", Icon: BrainCircuit }, { id: "samples", Icon: Camera }] as const;
@@ -114,10 +115,9 @@ export default function RiderPage() {
     </header>
     {section !== "control" && <RiderMessages client={client} t={t} language={language} />}
     <nav className={styles.tabs} role="tablist" aria-label={t("title")}>{tabs.map(({ id, Icon }) => <button type="button" key={id} role="tab" aria-selected={section === id} aria-controls={`rider-panel-${id}`} id={`rider-tab-${id}`} className={`${styles.tab} ${section === id ? styles.tabActive : ""}`} onClick={() => changeSection(id)}><Icon size={16} />{t(id)}</button>)}</nav>
-    <div className={section === "control" ? styles.controlPanel : undefined} id={`rider-panel-${section}`} role="tabpanel" aria-labelledby={`rider-tab-${section}`}>
+    <OperatorTuningProvider key={connection?.device_id??"unconfigured"}><div className={section === "control" ? styles.controlPanel : undefined} id={`rider-panel-${section}`} role="tabpanel" aria-labelledby={`rider-tab-${section}`}>
       {section === "samples" ? <SamplesPanel recording={recording} client={client} t={t} language={language}/> : client.loading && !client.status ? <Panel title={t("device")}><Empty>{t("loading")}</Empty>{section === "control" && <RiderMessages client={client} t={t} language={language}/>}</Panel> : !connection?.configured && section === "calibration" ? <Calibration recording={recording} client={client} t={t} language={language}/> : !connection?.configured ? <Panel title={t("device")}><Empty><Bot size={40} />{t("unconfigured")}</Empty>{section === "control" && <RiderMessages client={client} t={t} language={language}/>}</Panel> : <>
-        {section === "control" && <NavigationLoop key={connection.session} client={client} t={t} language={language}
-          manual={<OperatorConsole client={client} t={t} language={language} />}
+        {section === "control" && <NavigationLoop key={connection.session} client={client} t={t} language={language} studyRecording={recording}
           operatorDetails={<OperatorDiagnostics client={client} t={t} language={language}/>}
         />}
         {section === "overview" && <Measurements status={client.status} t={t} language={language} />}
@@ -126,6 +126,6 @@ export default function RiderPage() {
         {section === "face" && <FaceStudio key={connection.session} client={client} t={t} language={language} />}
         {section === "compute" && <Compute key={connection.session} client={client} t={t} language={language} />}
       </>}
-    </div>
+    </div></OperatorTuningProvider>
   </main></div>;
 }

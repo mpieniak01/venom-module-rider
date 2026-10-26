@@ -155,6 +155,12 @@ def observations(path, payload, device, source_session, mono, wall):
             "operator_control",
         )
         executor = {key: source[key] for key in names if key in source}
+        trial = source.get("pulse_trials", {}).get("current")
+        if trial is not None:
+            from .pulse_trials import trial_evidence
+
+            executor["pulse_trial"] = trial_evidence(trial)
+
         values, units = {}, {}
         details = {
             "ready": source.get("ready", "unknown"),
@@ -214,6 +220,7 @@ class SampleEvidenceCollector:
                     "source_session": None,
                     "retired": False,
                     "seen": set(),
+                    "retained": set(),
                     "admitted_bytes": 0,
                     "started_mono": self.registry.frames.clock(),
                     "saved": 0,
@@ -271,7 +278,17 @@ class SampleEvidenceCollector:
         if state is not None:
             self.registry.store.evidence.status(session_id, self.session_status(state))
 
-    def observe(self, path, payload, device, source_session, mono=None, wall=None):
+    def observe(
+        self,
+        path,
+        payload,
+        device,
+        source_session,
+        mono=None,
+        wall=None,
+        *,
+        retain=False,
+    ):
         with self.lock:
             if (
                 self.registry.closed
@@ -322,9 +339,12 @@ class SampleEvidenceCollector:
                 size = len(canonical(record).encode())
                 targets = []
                 for sid, state in eligible:
-                    if record["record_id"] in state["seen"]:
+                    seen = record["record_id"] in state["seen"]
+                    if seen and (
+                        not retain or record["record_id"] in state["retained"]
+                    ):
                         continue
-                    if (
+                    if not seen and (
                         len(state["seen"]) >= MAX_EVIDENCE_SESSION_RECORDS
                         or state["admitted_bytes"] + size > MAX_EVIDENCE_SESSION_BYTES
                     ):
@@ -333,14 +353,20 @@ class SampleEvidenceCollector:
                         state["retired_reason"] = "evidence_limit"
                         continue
                     state["seen"].add(record["record_id"])
-                    state["admitted_bytes"] += size
+                    if not seen:
+                        state["admitted_bytes"] += size
+                    if retain:
+                        state["retained"].add(record["record_id"])
                     targets.append((sid, state))
                 if not targets:
                     continue
                 jobs.append((record, targets))
             if not jobs:
                 return
-            if not self.slot.acquire(blocking=False):
+            acquired = self.slot.acquire(blocking=False)
+            # An explicit terminal receipt must survive a busy sampling slot.
+            # The existing registry queue still bounds admission and serialises IO.
+            if not acquired and not retain:
                 for _, targets in jobs:
                     for _, state in targets:
                         state["dropped"] += 1
@@ -375,14 +401,17 @@ class SampleEvidenceCollector:
                                     with self.lock:
                                         state["failed"] += 1
                 finally:
-                    self.slot.release()
+                    if acquired:
+                        self.slot.release()
 
             try:
                 self.registry._submit(persist)
             except Exception:
-                self.slot.release()
-                for _, targets in jobs:
+                if acquired:
+                    self.slot.release()
+                for record, targets in jobs:
                     for _, state in targets:
+                        state["retained"].discard(record["record_id"])
                         state["dropped"] += 1
 
     def _remember(self, record):

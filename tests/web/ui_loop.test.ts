@@ -652,7 +652,7 @@ test("pulse field range follows Pi capability and does not persist presentation 
  assert.equal(navigationPulseLimit({avoidance:{enabled:true}}),150);
  assert.equal(navigationPulseLimit({}),200);
  assert.equal(navigationPulseLimit({motion_limits:{version:1,max_motion_ms:250}},true),250);
- assert.equal(navigationPulseLimit({motion_limits:{version:1,max_motion_ms:999}},true),250);
+ assert.equal(navigationPulseLimit({motion_limits:{version:1,max_motion_ms:999}},true),500);
  assert.equal(navigationPulseLimit({motion_limits:{version:2,max_motion_ms:250}},true),150);
  const policy={speed:.1,max_motion_ms:150,motion_limits:{version:1,max_motion_ms:250}};
  assert.equal("motion_limits" in loopSettingsValues(policy,{...policy,max_motion_ms:250}),false);

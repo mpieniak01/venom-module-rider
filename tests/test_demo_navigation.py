@@ -87,7 +87,7 @@ async def test_replay_configuration_revision_bounds_and_active_guard(replay):
     for body in [
         {"revision": 2},
         {"revision": 0, "values": {"unknown": 1}},
-        {"revision": 0, "values": {"speed": 1}},
+        {"revision": 0, "values": {"speed": 1.01}},
     ]:
         with pytest.raises(ValueError):
             nav.configure(body)

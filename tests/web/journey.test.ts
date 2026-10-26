@@ -96,3 +96,10 @@ test("extended pulses require the Pi capability and preserve the speed limit",()
  }
  assert.ok(journeyBlocks({...policy,max_motion_ms:251,motion_limits:{version:1,max_motion_ms:250}},runtime,detector,true,false,status).includes("journeyMotionLimits"));
 });
+
+ test("new Pi accepts full-scale 500 ms journey; values above either bound block",()=>{
+ const {policy,runtime,detector,status}=scenario();
+ const expanded={...policy,speed:1,max_motion_ms:500,motion_limits:{version:1,max_speed:1,max_motion_ms:500}};
+ assert.ok(!journeyBlocks(expanded,runtime,detector,true,false,status).includes("journeyMotionLimits"));
+ for(const change of [{speed:1.001},{max_motion_ms:501}])assert.ok(journeyBlocks({...expanded,...change},runtime,detector,true,false,status).includes("journeyMotionLimits"));
+ });

@@ -14,6 +14,7 @@ from .errors import RiderError
 from .floor_detector import FloorDetector
 from .journey import planner_history, record_result
 from .model_resources import model_operation
+from .motion_limits import MAX_DECISION_MS
 from .sector_trend import update as sector_trend
 from .steering import plan as steering_plan
 from .vision_overlay import preview_sectors
@@ -621,7 +622,8 @@ class VisionLoop:
                         "perception_engine": frame.perception.engine,
                         "inference_ms": round(elapsed, 2),
                         "valid_for_ms": min(
-                            200, max(0, int(frame.deadline_ms - frame.age_ms - elapsed))
+                            MAX_DECISION_MS,
+                            max(0, int(frame.deadline_ms - frame.age_ms - elapsed)),
                         ),
                         "diagnostic": with_preview,
                     },
@@ -700,7 +702,7 @@ class VisionLoop:
             "sequence": frame.sequence,
             "config_revision": frame.config_revision,
             "valid_for_ms": min(
-                200, max(0, int(frame.deadline_ms - frame.age_ms - elapsed))
+                MAX_DECISION_MS, max(0, int(frame.deadline_ms - frame.age_ms - elapsed))
             ),
             "model_sha256": model,
             "inference_ms": round(elapsed, 2),
@@ -716,7 +718,7 @@ class VisionLoop:
         complete_ms = max(0.0, (self.clock() - now) * 1000)
         response["decision_elapsed_ms"] = round(complete_ms, 2)
         response["valid_for_ms"] = min(
-            200, max(0, int(frame.deadline_ms - frame.age_ms - complete_ms))
+            MAX_DECISION_MS, max(0, int(frame.deadline_ms - frame.age_ms - complete_ms))
         )
         if response["valid_for_ms"] == 0:
             if identity in self.temporal_runs:

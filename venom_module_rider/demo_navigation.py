@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 import httpx
 from fastapi.responses import Response
 
+from .motion_limits import MAX_MOTION_MS, MAX_SPEED
 from .vision_contract import VisionFrame
 
 LOOP_GOALS = {"s14_venom_navigation": "drive", "s15_venom_perception": "observe"}
@@ -25,6 +26,14 @@ DEFAULT_POLICY: dict[str, Any] = {
     "speed": 0.1,
     "decision_budget_ms": 300,
     "max_motion_ms": 150,
+    "motion_limits": {
+        "version": 1,
+        "max_speed": MAX_SPEED,
+        "max_motion_ms": MAX_MOTION_MS,
+        "max_turn_speed": MAX_SPEED,
+        "max_turn_ms": MAX_MOTION_MS,
+        "max_decision_ms": MAX_MOTION_MS,
+    },
     "corridor": [0.35, 0.80, 0.65, 0.95],
     "calibration_id": "",
     "model_sha256": "",
@@ -223,9 +232,9 @@ class ReplayNavigation:
         )
         if not (
             type(candidate["speed"]) in {int, float}
-            and 0.01 <= candidate["speed"] <= 0.15
+            and 0.01 <= candidate["speed"] <= MAX_SPEED
             and type(candidate["max_motion_ms"]) is int
-            and 50 <= candidate["max_motion_ms"] <= 200
+            and 50 <= candidate["max_motion_ms"] <= MAX_MOTION_MS
         ):
             raise ValueError("navigation_invalid_configuration")
         self.policy = {**candidate, "revision": self.policy["revision"] + 1}

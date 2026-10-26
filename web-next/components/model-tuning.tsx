@@ -10,9 +10,9 @@ import { Button, Field, Input, Pill, Select } from "./primitives";
 import styles from "../rider.module.css";
 
 type ScopedDraft = ModelTuningDraft & { pipelineRevision: number; provider: string };
-type Props = { client: RiderClient; policy: JsonRecord | null; goals: JsonRecord; locked: boolean; t: Translator; onApplied: (config: JsonRecord) => void; onRefresh: () => void; onPendingChange?: (pending: boolean) => void };
+type Props = { editor?:{draft:JsonRecord|null;onChange:(value:JsonRecord)=>void}; client: RiderClient; policy: JsonRecord | null; goals: JsonRecord; locked: boolean; t: Translator; onApplied: (config: JsonRecord) => void; onRefresh: () => void; onPendingChange?: (pending: boolean) => void };
 /** Apply operator perception edits with session, pipeline and policy revision guards. */
-export function ModelTuning({ client, policy, goals, locked, t, onApplied, onRefresh, onPendingChange }: Props) {
+export function ModelTuning({ client, policy, goals, locked, t, onApplied, onRefresh, onPendingChange, editor }: Props) {
   const [draft, setDraft] = useState<ScopedDraft | null>(null), [pending, setPending] = useState(false);
   const [failure, setFailure] = useState(""), [saved, setSaved] = useState<number | null>(null);
   const applying = useRef(false), mounted = useRef(true), editBase = useRef<ScopedDraft | null>(null);
@@ -24,15 +24,16 @@ export function ModelTuning({ client, policy, goals, locked, t, onApplied, onRef
   const id = tuningModelId(policy), semantic = host && semanticModel(id), depth = host && record(policy?.perception).engine === "depth_plane";
   const baseDraft = (): ScopedDraft | null => { const base = tuningDraft(policy, session); return base && pipeline ? { ...base, pipelineRevision: pipeline.revision, provider } : null; };
   const visibleDraft = draft?.session === session && draft.modelId === id ? draft : null;
-  const perception = visibleDraft?.perception ?? record(policy?.perception), row = semanticTuning(perception, id);
+  const perception = editor ? record(editor.draft?.perception) : visibleDraft?.perception ?? record(policy?.perception), row = semanticTuning(perception, id);
   const effective = effectiveTuning(policy);
   const conflict = !!draft && (tuningDraftStale(draft, policy, session) || draft.pipelineRevision !== pipeline?.revision || draft.provider !== provider);
   const supported = host && (semantic ? policy?.model_tuning_supported === true : depth);
-  const changed = !!visibleDraft && JSON.stringify(perception) !== JSON.stringify(record(policy?.perception));
+  const changed = (!!editor || !!visibleDraft) && JSON.stringify(perception) !== JSON.stringify(record(policy?.perception));
   const valid = !!visibleDraft && validTuning(visibleDraft) && (visibleDraft.perception.input_region === undefined || inputCovers(visibleDraft.perception.input_region,policy?.corridor) && !(record(policy?.avoidance).enabled === true && record(record(policy?.avoidance).geometry).mode === "ground" && JSON.stringify(record(visibleDraft.perception.input_region).bounds)!==JSON.stringify([0,0,1,1])));
   const block = local ? "tuning.local" : !host ? "tuning.providerUnknown" : !supported ? "tuning.unsupported" : conflict ? "behavior.conflict"
     : behaviorSwitchBlock(client.status, client.controlFresh, goals, locked || pending || !!client.busy);
   const edit = (change: (value: JsonRecord) => JsonRecord) => {
+    if(editor?.draft){editor.onChange({...editor.draft,perception:change(record(editor.draft.perception))});return;}
     const base = visibleDraft ?? editBase.current ?? baseDraft();
     if (!base || base.modelId !== id) return;
     setDraft({ ...base, perception: change(base.perception) }); setFailure(""); setSaved(null);
@@ -58,10 +59,11 @@ export function ModelTuning({ client, policy, goals, locked, t, onApplied, onRef
     } catch (error) { if (mounted.current && client.currentSession() === origin) setFailure(behaviorError(error)); }
     finally { applying.current = false; if (mounted.current) { setPending(false); onPendingChange?.(false); } }
   };
-  return <details id="rider-model-tuning" className={styles.perceptionModels} data-testid="model-tuning">
-    <summary>{t("tuning.title")} · <span>{displayId || t("tuning.noModel")}</span></summary>
+  const Container=editor?"section":"details";
+  return <Container id="rider-model-tuning" className={styles.perceptionModels} data-testid="model-tuning">
+    {editor?<h3>{t("tuning.title")}</h3>:<summary>{t("tuning.title")} · <span>{displayId || t("tuning.noModel")}</span></summary>}
     <div className={styles.perceptionBody}>
-      <p className={styles.hint}>{t("tuning.hint")}</p>
+      {!editor&&<p className={styles.hint}>{t("tuning.hint")}</p>}
       <p className={styles.small} data-testid="tuning-current">{t("tuning.current", { model: displayId || "—", revision: String(policy?.revision ?? "—") })}</p>
       {semantic && <fieldset className={styles.stack} disabled={!supported || pending} onFocusCapture={captureBase}>
         <legend>{t("tuning.semantic")}</legend>
@@ -78,8 +80,8 @@ export function ModelTuning({ client, policy, goals, locked, t, onApplied, onRef
             onChange={event => semanticEdit(field, event.target.value === "" ? Number.NaN : Number(event.target.value))}/></Field>
         </div>)}
       </fieldset>}
-      {depth && <fieldset className={styles.stack} disabled={pending} onFocusCapture={captureBase}><legend>{t("tuning.depth")}</legend>
-        {(["residual_limit", "outlier_limit", "slope_min"] as const).map(field => <Field label={t(field === "residual_limit" ? "perceptionResidual" : field === "outlier_limit" ? "perceptionOutliers" : "perceptionSlope")} key={field}>
+      {depth && <fieldset className={styles.stack} disabled={pending||!!editor&&locked} onFocusCapture={captureBase}><legend>{t("tuning.depth")}</legend>
+        {(["residual_limit", "outlier_limit", "slope_min"] as const).map(field => <Field label={t(field === "residual_limit" ? "perceptionResidual" : field === "outlier_limit" ? "perceptionOutliers" : "perceptionSlope")+` (${field==="residual_limit"?"0.01–0.15":field==="outlier_limit"?"0–2":"1–4"})`} key={field}>
           <Input data-testid={"tuning-" + field} type="number" min={field === "residual_limit" ? .01 : field === "slope_min" ? 1 : 0} max={field === "residual_limit" ? .15 : field === "slope_min" ? 4 : 2} step={field === "residual_limit" ? .005 : .1}
             value={Number.isFinite(perception[field]) ? Number(perception[field]) * (field === "outlier_limit" ? 100 : 1) : ""}
             onChange={event => edit(current => ({ ...current, [field]: event.target.value === "" ? Number.NaN : Number(event.target.value) / (field === "outlier_limit" ? 100 : 1) }))}/>
@@ -90,9 +92,9 @@ export function ModelTuning({ client, policy, goals, locked, t, onApplied, onRef
       {host && !semantic && !depth && <p className={styles.hint}>{t("tuning.noModel")}</p>}
       {host && effective && <details data-testid="tuning-effective"><summary>{t("behavior.technicalDetails")}</summary><strong>{t("tuning.effective")}</strong><pre className={styles.pre}>{JSON.stringify(effective, null, 2)}</pre></details>}
       {host && visibleDraft && <Pill tone={valid && !conflict ? "warning" : "danger"}>{t(valid && !conflict ? "unsaved" : "invalidDraft")}</Pill>}
-      {!!(failure || block) && <p role={failure || conflict ? "alert" : "status"} data-testid="tuning-message" className={failure || conflict ? styles.loopError : styles.hint}>{t(failure || block, { model: pipeline?.profile.local_engine ?? "—" })}</p>}
+      {!editor && !!(failure || block) && <p role={failure || conflict ? "alert" : "status"} data-testid="tuning-message" className={failure || conflict ? styles.loopError : styles.hint}>{t(failure || block, { model: pipeline?.profile.local_engine ?? "—" })}</p>}
       {saved !== null && saved === policy?.revision && <p data-testid="tuning-saved" role="status" className={styles.hint}>{t("tuning.saved", { revision: saved })}</p>}
-      <div className={styles.flex}><Button data-testid="tuning-apply" disabled={!changed || !valid || !!block || !client.canMutate} onClick={() => void apply()}>{t(pending ? "behavior.saving" : "tuning.apply")}</Button><Button data-testid="tuning-refresh" disabled={pending} onClick={discard}>{t(visibleDraft ? "behavior.discard" : "refresh")}</Button></div>
+      {!editor&&<div className={styles.flex}><Button data-testid="tuning-apply" disabled={!changed || !valid || !!block || !client.canMutate} onClick={() => void apply()}>{t(pending ? "behavior.saving" : "tuning.apply")}</Button><Button data-testid="tuning-refresh" disabled={pending} onClick={discard}>{t(visibleDraft ? "behavior.discard" : "refresh")}</Button></div>}
     </div>
-  </details>;
+  </Container>;
 }

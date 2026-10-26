@@ -21,7 +21,7 @@ export type RiderStatus = {
   compute?: JsonRecord | null;
   conversation?: JsonRecord | null;
 };
-export type NumericDescriptor = { type?: string; unit?: string; display_unit?: string; display_factor?: number; minimum?: number; maximum?: number; step?: number; display_precision?: number; meaning?: string; available?: boolean };
+export type NumericDescriptor = { type?: string; unit?: string; display_unit?: string; display_factor?: number; minimum?: number; exclusive_minimum?: boolean; maximum?: number; step?: number; display_precision?: number; meaning?: string; available?: boolean };
 export type Gesture = { id?: string; builtin?: boolean; name: string; expr: string; duration: number; contract_version: number; initial: Record<string, number>; tracks: Record<string, Segment[]> };
 export type Segment = { t0: number; t1: number; v0: number; v1: number; ease: string };
 export const record = (value: unknown): JsonRecord => value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {};
