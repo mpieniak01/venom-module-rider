@@ -46,7 +46,7 @@ export function useSamples(deviceId:string|null, previewVisible:boolean, purpose
     catch(err){if(alive.current&&requestEpoch===epoch.current){syncSession(current);setError(errorCode(err));}}
     finally{if(alive.current&&requestEpoch===epoch.current)setBusy(false);}
   },[invalidate,syncSession]);
-  const start=useCallback(async(kind:"manual"|"sequence")=>{
+  const start=useCallback(async(kind:"manual"|"sequence",options?:{recordVideo?:boolean})=>{
     if(!deviceId)return;
     if(sessionRef.current?.state==="collecting")await end();
     const requestEpoch=invalidate();
@@ -54,10 +54,10 @@ export function useSamples(deviceId:string|null, previewVisible:boolean, purpose
     try{
       const next=await apiFetch<Collection>(SAMPLES_BASE+"/sessions",{method:"POST",body:JSON.stringify({
         request_id:createBrowserUuid(),source_device_id:deviceId,
-        policy:{kind,duration_s:10,interval_ms:purpose?.startsWith("motion-study-v1:")?1000:200,max_frames:purpose?.startsWith("motion-study-v1:")?150:50,...(purpose?.startsWith("motion-study-v1:")?{record_images:false,record_video:true}:{}),...(purpose?{scene_group:purpose}:{})},
+        policy:{kind,duration_s:10,interval_ms:purpose?.startsWith("motion-study-v1:")?1000:200,max_frames:purpose?.startsWith("motion-study-v1:")?150:50,...(purpose?.startsWith("motion-study-v1:")?{record_images:false,record_video:options?.recordVideo??true}:{}),...(purpose?{scene_group:purpose}:{})},
       })});
       if(requestEpoch!==epoch.current||!alive.current){finishDetached(next.session_id);return;}
-      syncSession(next);
+      syncSession(next);return next;
     }catch(err){if(alive.current&&requestEpoch===epoch.current)setError(errorCode(err));}
     finally{if(alive.current&&requestEpoch===epoch.current)setBusy(false);}
   },[deviceId,end,invalidate,syncSession,purpose]);

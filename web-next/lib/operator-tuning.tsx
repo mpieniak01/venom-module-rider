@@ -2,8 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { CalibrationDraft } from "./calibration";
 import type { JsonRecord } from "./model";
 
-export type TuningState = { base: JsonRecord | null; draft: JsonRecord | null; manual: CalibrationDraft | null; view: "manual" | "automatic" | "journey"; pane: "motion" | "model"; direction:"forward"|"backward"|"left"|"right"; busy: boolean; modelPending: boolean; modelReady:boolean; modelChoice:{id:string;provider:string;session:string}|null };
-const initial = (): TuningState => ({base:null,draft:null,manual:null,view:"manual",pane:"motion",direction:"forward",busy:false,modelPending:false,modelReady:true,modelChoice:null});
+export type TuningState = { base: JsonRecord | null; draft: JsonRecord | null; manual: CalibrationDraft | null; view: "manual" | "automatic" | "journey"; pane: "motion" | "model"; direction:"forward"|"backward"|"left"|"right"; trialProfile:"A"|"B"|"C"|null; trialRunId:string; busy: boolean; modelPending: boolean; modelReady:boolean; modelChoice:{id:string;provider:string;session:string}|null };
+const initial = (): TuningState => ({base:null,draft:null,manual:null,view:"manual",pane:"motion",direction:"forward",trialProfile:null,trialRunId:"",busy:false,modelPending:false,modelReady:true,modelChoice:null});
 type Workspace = { state:TuningState; setState:Dispatch<SetStateAction<TuningState>>; claimed:{current:boolean}; alive:{current:boolean}; modelApply:{current:((resume?:boolean)=>Promise<{policy:JsonRecord;token:{session:string;epoch:number;generation:string}}|null>)|null} };
 const Context = createContext<Workspace|null>(null);
 function useWorkspace(): Workspace {

@@ -10,6 +10,7 @@ from collections import defaultdict
 from .angle_analysis import enrich, semantics
 from .evidence_contract import validate_evidence
 from .motion_evidence import analyze_manifest
+from .pulse_trials import series_timeline
 
 CHANNELS = ("accel_x", "accel_y", "accel_z", "roll", "pitch", "yaw")
 
@@ -120,7 +121,13 @@ def build_timeline(manifest):
                 )
                 previous = row, valid
         diagnostics = enrich(points, events)
+        trials = series_timeline(rows, origin)
         times = [row["t"] for row in [*points, *events, *outputs]]
+        times += [
+            run["t"] + event["elapsed_ms"] / 1000
+            for run in trials
+            for event in run["events"]
+        ]
         streams.append(
             {
                 "id": hashlib.sha256((device + ":" + session).encode()).hexdigest(),
@@ -133,6 +140,7 @@ def build_timeline(manifest):
                 "events": events,
                 "outputs": outputs,
                 "profiles": profiles,
+                "trials": trials,
                 "skipped_times": skipped_times,
                 "sampling_diagnostics": diagnostics,
             }

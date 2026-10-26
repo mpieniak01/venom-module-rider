@@ -13,6 +13,8 @@ import type { RiderClient } from "../lib/use-rider";
 import type { Translator } from "../lib/i18n";
 import { OperatorStatus } from "./operator-status";
 import { OperatorMessages } from "./operator-console";
+import { PulseTrialsPanel } from "./pulse-trials";
+import type { StudyRecording } from "../lib/use-study-recording";
 import { OperatorMotion } from "./operator-motion";
 import { LoopDecision } from "./loop-decision";
 import { CameraPanel, CameraDetails, ManualPad } from "./control";
@@ -24,7 +26,7 @@ import styles from "../rider.module.css";
 
 const geometryRanges = {fx:[.1,5],fy:[.1,5],cx:[0,1],cy:[0,1],radius_ratio:[.05,5],lookahead_ratio:[.25,8],max_heading_deg:[5,70]} as const;
 
-export function NavigationLoop({client,t,language,recording,operatorDetails}:{client:RiderClient;t:Translator;language:string;recording?:ReactNode;operatorDetails?:ReactNode}) {
+export function NavigationLoop({client,t,language,recording,operatorDetails,studyRecording}:{client:RiderClient;t:Translator;language:string;recording?:ReactNode;operatorDetails?:ReactNode;studyRecording?:StudyRecording}) {
   const workspace=useOperatorTuning();
   const {state:operatorDraft,setState:setOperatorDraft}=workspace;
   const view=operatorDraft.view;
@@ -496,6 +498,7 @@ export function NavigationLoop({client,t,language,recording,operatorDetails}:{cl
         <div ref={railRef} className={styles.tuningBody}>
           <div hidden={operatorDraft.pane!=="motion"} data-testid="operator-motion-pane">
             <div hidden={view!=="manual"}>{(safety.owner!=="manual"&&safety.state==="ARMED")&&<Button data-testid="takeover-manual" disabled={!connected||!!client.busy} onClick={()=>void client.takeManual(t("manual"))}>{t("takeManual")}</Button>}<ManualPad client={client} t={t} language={language} compact minimal/></div>
+            {view==="manual"&&studyRecording&&<PulseTrialsPanel client={client} t={t} recording={studyRecording}/>}
             {view!=="manual"&&draft&&<div data-testid="automatic-motion-settings">        <div className={styles.grid}>
           <Field label={t(view==="journey"?"loopJourneySpeed":"loopSpeed",{limit:String(navigationSpeedLimit(policy,view==="journey"))})}><Input data-testid="automatic-speed" disabled={settingsLocked} type="number" min="0.01" max={navigationSpeedLimit(policy,view==="journey")} step="0.01" value={Number(draft.speed)} onChange={e=>setDraft({...draft,speed:Number(e.target.value)})}/></Field>
           <Field label={t("loopBudget")}><Input disabled={settingsLocked} type="number" min="100" max="500" step="10" value={Number(draft.decision_budget_ms)} onChange={e=>setDraft({...draft,decision_budget_ms:Number(e.target.value)})}/></Field>

@@ -647,3 +647,14 @@ The camera and host inference can continue displaying a separate passive preview
 while preparation is fresh and the executor is disarmed or qualifying. A healthy
 Pi producer then takes over the preview; diagnostic results never qualify motion,
 carry journey authority or renew a movement deadline. STOP still cancels Start.
+
+
+## Manual pulse trials A/B/C
+
+The Motion panel offers three Pi-owned recipes: A is one 500 ms pulse, B is two 250 ms pulses with 100 ms zero gaps, C is five 100 ms pulses with 100 ms zero gaps. Selecting a recipe prepares the visible forward-duration draft. Existing direction strength and ramps remain the common settings; other directions and navigation/model configuration are preserved. Editing the duration away from the recipe shows custom settings.
+
+Start trial applies the manual settings, opens a motion-only recording and submits one fresh, explicitly consented Start. It does not enable camera/video. Pi schedules the series in its existing executor, confirms zero output before each gap and ends the trial's permission. Global STOP, manual intervention, lost authority and the fixed 1500 ms series deadline retire all remaining pulses. A late HTTP reply or reopening the panel cannot repeat a Start. Saved manual presets are not overwritten. The form retains the last applied values after the trial.
+
+Calibration's existing A/B comparison can select a whole series, show completed pulse counts and actual times, and compare common settings. Pi-relative events are anchored to host reception; this is not proof of synchronized IMU timing or physical stopping/distance. Sparse IMU data is not converted into invented smoothness or distance.
+
+The module exposes GET /api/v1/rider/motion/trials/profiles, POST /api/v1/rider/motion/trials and GET /api/v1/rider/motion/trials/{request_id}. Pi recipes/status use rider.pulse_trials version 1. Start uses the existing manual safety/consent channel and settings revision. Older Pi without this capability keeps ordinary manual control and does not expose trial Start.

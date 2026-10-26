@@ -1,5 +1,5 @@
 import { apiFetch } from "@/lib/api-client";
-import { calibrationValues, validCalibration } from "./calibration";
+import { calibrationDraft, calibrationValues, validCalibration } from "./calibration";
 import { applyOperatorSettings } from "./apply-operator-settings";
 import { loopSettingsValues, navigationPulseLimit, navigationSpeedLimit, navigationTurnPulseLimit } from "./loop-controls";
 import { behaviorDraft, validBehaviorDraft } from "./behavior";
@@ -31,15 +31,16 @@ export function validOperatorNavigation(base:JsonRecord,draft:JsonRecord):boolea
 export function useOperatorApply(workspace:ReturnType<typeof useOperatorTuning>,client:RiderClient) {
  const {state,setState,claimed,alive}=workspace,settings=settingsOf(client.status);
  const navigationDirty=!!state.base&&!!state.draft&&JSON.stringify(state.base)!==JSON.stringify(state.draft);
- const manualDirty=!!state.manual&&(JSON.stringify(state.manual.directions)!==JSON.stringify(settings.directions)||JSON.stringify(state.manual.values)!==JSON.stringify(settings.values));
+ const manualDirty=!!state.manual&&(JSON.stringify(state.manual.directions)!==JSON.stringify(settings.directions)||JSON.stringify(calibrationValues(state.manual,settings))!==JSON.stringify(calibrationValues(calibrationDraft(settings),settings)));
  const dirty=navigationDirty||manualDirty;
  const valid=(!navigationDirty||validOperatorNavigation(state.base!,state.draft!))&&(!manualDirty||validCalibration(state.manual!,settings));
- const apply=async(resumeObservation=true,prepareOnly=false)=>{
-  if(claimed.current||!dirty&&!prepareOnly||!valid)throw new Error('operator_settings_invalid');
+ const apply=async(resumeObservation=true,prepareOnly=false,scope:"all"|"manual"="all")=>{
+  const selectedDirty=scope==="manual"?manualDirty:dirty,selectedValid=scope==="manual"?(!manualDirty||validCalibration(state.manual!,settings)):valid;
+  if(claimed.current||!selectedDirty&&!prepareOnly||!selectedValid)throw new Error('operator_settings_invalid');
   claimed.current=true;setState(previous=>({...previous,busy:true}));
   try{
    const result=await applyOperatorSettings({
-    ...(navigationDirty?{navigation:{revision:Number(state.base!.revision),values:loopSettingsValues(state.base!,state.draft!)}}:{}),
+    ...(navigationDirty&&scope==="all"?{navigation:{revision:Number(state.base!.revision),values:loopSettingsValues(state.base!,state.draft!)}}:{}),
     ...(manualDirty?{manual:{revision:state.manual!.revision,values:calibrationValues(state.manual!,settings),directions:state.manual!.directions}}:{}),
    },{
     read:path=>apiFetch<JsonRecord>('/api/v1/rider'+path),

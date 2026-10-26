@@ -548,3 +548,11 @@
 .tuningBody .padStop svg { width:20px; height:20px; }
 .tuningBody .padStop span { font-size:10px; }
 .tuningBody [data-testid="operator-status"] { margin-top:16px; }
+
+.pulseTrials { margin-top:16px; padding-top:12px; border-top:1px solid var(--r-border); }
+.pulseTrials .flex { margin-top:8px; }
+
+.pulseComparison { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:12px; margin:12px 0; }
+.pulseComparison > p { grid-column:1/-1; }
+.pulseComparison > div { padding:12px; border:1px solid var(--r-border); border-radius:12px; min-width:0; }
+.pulseComparison svg { display:block; width:100%; height:auto; }
