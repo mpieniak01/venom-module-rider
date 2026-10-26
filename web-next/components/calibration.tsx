@@ -1,3 +1,5 @@
+import { useOperatorTuning } from "../lib/operator-tuning";
+import { useOperatorApply } from "../lib/use-operator-apply";
 import type {StudyRecording} from "../lib/use-study-recording";
 import { MotionStudy } from "./motion-study";
 import { LoopTimingPanel } from "./loop-timing";
@@ -14,14 +16,17 @@ import styles from "../rider.module.css";
 
 export function Calibration({ client, t, language, recording }: { client: RiderClient; t: Translator; language: string; recording:StudyRecording }) {
   const settings = settingsOf(client.status);
-  const [draft, setDraft] = useState<CalibrationDraft | null>(null);
+  const workspace=useOperatorTuning();
+  const draft=workspace.state.manual;
+  const setDraft=(manual:CalibrationDraft|null)=>workspace.setState(previous=>({...previous,manual}));
+  const operatorApply=useOperatorApply(workspace,client);
   const [selectedProfile, setSelectedProfile] = useState<string | null>(null);
   const [profileName, setProfileName] = useState<string | null>(null);
   const [deletePending, setDeletePending] = useState(false);
   const effective = draft ?? calibrationDraft(settings);
   const conflict = draft !== null && draft.revision !== settings.revision;
   const valid = validCalibration(effective, settings);
-  const canEdit = client.canMutate && !client.busy && !client.activeDirection;
+  const canEdit = client.canMutate && !operatorApply.busy;
   const schema = record(settings.parameter_schema);
   const profiles = record(settings.profiles);
   const selected = selectedProfile ?? str(settings.active_profile);
@@ -30,6 +35,7 @@ export function Calibration({ client, t, language, recording }: { client: RiderC
   const setValue = (field: string, value: number) => setDraft({ ...effective, values: { ...effective.values, [field]: value } });
   const save = async (profile?: JsonRecord) => {
     if (!valid || conflict) return;
+    if(!profile){try{await operatorApply.apply();}catch(error){client.setNotice({key:"requestFailed",code:String(error),tone:"error"});}return;}
     const result = await client.mutate("/settings", { revision: effective.revision, values: calibrationValues(effective, settings), directions: effective.directions, ...(profile ? { profile } : {}) });
     if (result) { setDraft(null); setSelectedProfile(null); setProfileName(null); }
   };
