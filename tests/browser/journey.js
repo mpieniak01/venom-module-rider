@@ -107,6 +107,7 @@ async page => {
     await page.getByTestId("journey-start").click();
     await wait(()=>journey.active,"second journey did not start");
     await wait(async()=>await page.getByTestId("rider-forward").isDisabled(),"journey authority not observed");
+    await page.getByTestId("workspace-manual").click();
     rejectStop=true;const rejected=calls.length;
     await page.getByTestId("takeover-manual").click();
     await wait(()=>calls.length>rejected,"takeover did not issue STOP");
@@ -121,7 +122,7 @@ async page => {
     scenarios.push("manual takeover requires successful STOP, fresh state, then explicit manual ARM; rejected STOP never arms");
     await page.setViewportSize({width:390,height:844});
     const modeRow=page.getByRole("group",{name:"Widok sterowania"});
-    const manualPanel=page.getByRole("complementary",{name:"Sterowanie ręczne"});
+    const manualPanel=page.getByTestId("operator-tuning");
     await wait(async()=>{const modes=await modeRow.boundingBox(),pad=await manualPanel.boundingBox();return modes&&pad&&modes.y+modes.height<=pad.y+1;},"wrapped journey modes overlap manual controls");
     scenarios.push("three workspace modes fit phone layout without overlapping manual controls");
     return {passed:scenarios,mutations:calls.map(call=>({path:call.path,action:call.body.action??(call.path==="/navigation/journey"?"journey":"refresh")})),fixtureOnly:true};
