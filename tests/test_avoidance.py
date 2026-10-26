@@ -78,3 +78,13 @@ def test_per_run_turn_budget_never_resets_on_clear():
         action, reason, state, _ = plan(obstacle(), state, SETTINGS, "ready", True)
         assert action == "stop"
     assert reason == "avoidance_turn_limit"
+
+
+def test_updated_turn_limits_reject_values_above_full_scale_and_500_ms():
+    import pytest
+    from pydantic import ValidationError
+
+    assert AvoidanceSettings(turn_speed=1.0, turn_ms=500).turn_ms == 500
+    for values in ({"turn_speed": 1.001}, {"turn_ms": 501}):
+        with pytest.raises(ValidationError):
+            AvoidanceSettings(**values)

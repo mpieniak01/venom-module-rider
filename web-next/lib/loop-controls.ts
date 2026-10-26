@@ -73,8 +73,18 @@ export function navigationSettingsDriveBlocked(status: RiderStatus | null, contr
 export function navigationPulseLimit(policy: JsonRecord | null, journey = false): number {
   const limits = record(policy?.motion_limits);
   if (limits.version === 1 && Number.isInteger(limits.max_motion_ms) && Number(limits.max_motion_ms) >= 50)
-    return Math.min(250, Number(limits.max_motion_ms));
+    return Math.min(500, Number(limits.max_motion_ms));
   return journey || record(policy?.avoidance).enabled === true ? 150 : 200;
+}
+/** Capabilities belong to Pi; old firmware keeps its original motion bounds. */
+export function navigationSpeedLimit(policy: JsonRecord | null, journey = false, turn = false): number {
+  const limits = record(policy?.motion_limits), value = limits[turn ? "max_turn_speed" : "max_speed"];
+  if (limits.version === 1 && typeof value === "number" && Number.isFinite(value) && value >= .01) return Math.min(1, value);
+  return turn || journey || record(policy?.avoidance).enabled === true ? .1 : .15;
+}
+export function navigationTurnPulseLimit(policy: JsonRecord | null): number {
+  const limits = record(policy?.motion_limits);
+  return limits.version === 1 && Number.isInteger(limits.max_turn_ms) && Number(limits.max_turn_ms) >= 50 ? Math.min(500, Number(limits.max_turn_ms)) : 150;
 }
 export function loopSettingsValues(policy: JsonRecord, draft: JsonRecord): JsonRecord {
   // Pi presentation metadata is read-only; only persisted policy fields are writable.

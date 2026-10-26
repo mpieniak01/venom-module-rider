@@ -165,7 +165,7 @@ async def test_long_clear_sequence_preserves_session_and_bounded_storage(vision)
     for seq in range(1, 202):
         result = await decide(vision, seq)
     assert now[0] > 10 and result["action"] == "go"
-    assert result["valid_for_ms"] <= 200
+    assert result["valid_for_ms"] <= 300
     assert len(loop.runs) == 1 and len(loop.previews) == 0
     assert loop.status()["navigation_journey_version"] == 1
     another = VisionLoop(Detector())
@@ -355,7 +355,7 @@ def test_journey_http_contract_survives_both_image_transports(monkeypatch, trans
             result = response.json()
             assert result["journey"] == f.journey.model_dump()
             assert result["host_session"] == app.state.rider_vision.host_session
-            assert result["valid_for_ms"] <= 200
+            assert result["valid_for_ms"] <= 300
         assert result["action"] == "go"
         assert pi.opened == (1 if transport == "mjpeg" else 0)
         assert pi.snapshot_requests == 0

@@ -147,7 +147,7 @@ export function slowLeaseFactor(state: JsonRecord, policy: JsonRecord | null, sa
     || !Number.isSafeInteger(decision.clear_count) || Number(decision.clear_count) < 3
     || !finite(factor) || factor <= 0 || factor > 1 || factor !== (catalog.activeParameters ?? profile?.parameters)?.slow_speed_factor
     || !finite(age) || age < 0 || age > 1 || !finite(permit) || permit - age * 1000 < 50
-    || !Number.isInteger(decision.valid_for_ms) || Number(decision.valid_for_ms) < 1 || Number(decision.valid_for_ms) > 200)
+    || !Number.isInteger(decision.valid_for_ms) || Number(decision.valid_for_ms) < 1 || Number(decision.valid_for_ms) > 500)
     return null;
   return factor;
 }
