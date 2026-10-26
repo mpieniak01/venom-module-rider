@@ -44,6 +44,7 @@ check-web:
 	node --check tests/browser/native-stream-recovery.js
 	node --check tests/browser/preview-continuity.js
 	node --check tests/browser/operator-priority.js
+	node --check tests/browser/operator-start-settings.js
 	node --check tests/browser/control-workspace.js
 	node --check tests/browser/vision-sectors.js
 	node --check tests/browser/automatic-capture.js

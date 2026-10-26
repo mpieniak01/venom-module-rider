@@ -35,7 +35,7 @@ export function Calibration({ client, t, language, recording }: { client: RiderC
   const setValue = (field: string, value: number) => setDraft({ ...effective, values: { ...effective.values, [field]: value } });
   const save = async (profile?: JsonRecord) => {
     if (!valid || conflict) return;
-    if(!profile){try{await operatorApply.apply();}catch(error){client.setNotice({key:"requestFailed",code:String(error),tone:"error"});}return;}
+    if(!profile){try{await operatorApply.apply(true,false,"manual");}catch(error){client.setNotice({key:"requestFailed",code:String(error),tone:"error"});}return;}
     const result = await client.mutate("/settings", { revision: effective.revision, values: calibrationValues(effective, settings), directions: effective.directions, ...(profile ? { profile } : {}) });
     if (result) { setDraft(null); setSelectedProfile(null); setProfileName(null); }
   };
@@ -61,7 +61,7 @@ export function Calibration({ client, t, language, recording }: { client: RiderC
     </div>
     <div className={styles.calibrationBottom}>
       <Panel title={t("ramp")}>      <div className={styles.grid3} style={{ marginTop: 16 }}>{Object.entries(record(schema.value_fields)).map(([field, descriptor]) => <NumberField compact key={field} label={t(field)} value={Number(effective.values[field])} descriptor={record(descriptor) as NumericDescriptor} disabled={!canEdit} onChange={value => setValue(field, value)} />)}<Field label={t("ramp_mode")}><Select value={String(effective.values.ramp_mode)} disabled={!canEdit} onChange={event => setValue("ramp_mode", Number(event.target.value))}>{rows(schema.ramp_modes).map(mode => <option key={String(mode.value)} value={String(mode.value)}>{t(str(mode.id))}</option>)}</Select></Field></div>
-      <div className={`${styles.flex} ${styles.space}`} style={{ marginTop: 20 }}><div>{draft && <Pill tone={valid && !conflict ? "warning" : "danger"}>{t(valid && !conflict ? "unsaved" : "invalidDraft")}</Pill>}</div><div className={styles.flex}><Button disabled={!draft} onClick={() => setDraft(null)}>{t("resetDraft")}</Button><Button tone="primary" data-testid="calibration-save" disabled={!canEdit || !draft || !valid || conflict} onClick={() => void save()}>{t("save")}</Button></div></div>
+      <div className={`${styles.flex} ${styles.space}`} style={{ marginTop: 20 }}><div>{draft && <Pill tone={valid && !conflict ? "warning" : "danger"}>{t(valid && !conflict ? "unsaved" : "invalidDraft")}</Pill>}</div><div className={styles.flex}><Button disabled={!draft} onClick={() => setDraft(null)}>{t("resetDraft")}</Button><Button tone="primary" data-testid="calibration-save" disabled={!canEdit || !operatorApply.manualDirty || !valid || conflict} onClick={() => void save()}>{t("save")}</Button></div></div>
 </Panel>
       <MotionStudy key={client.status?.connection.session} recording={recording} t={t} language={language}/>
     </div>

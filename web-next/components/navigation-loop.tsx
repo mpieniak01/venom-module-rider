@@ -310,7 +310,7 @@ export function NavigationLoop({client,t,language,recording,operatorDetails,stud
       const target=await prepareStart(origin);ensureOperation(origin);
       const plan=t(record(target.avoidance).enabled===true?"avoidanceTrialPlan":"trialPlan")+" · "+String(target.speed)+" · ≤ "+String(target.max_motion_ms)+" ms";
       trialArmed.current=true;
-      const warm = operatorPrioritySupported(client.status) && loopState.operator_control_version === 1 && loopState.running === true && loopState.stale !== true && safetyOf(client.status).state === "ARMED";
+      const warm = !dirty && operatorPrioritySupported(client.status) && loopState.operator_control_version === 1 && loopState.running === true && loopState.stale !== true && safetyOf(client.status).state === "ARMED";
       const epoch = client.currentMotionEpoch();
       if(warm)await client.command({action:"navigation_resume"},true,true);
       else await client.startNavigationTrial(plan,Number(target.revision));

@@ -30,6 +30,7 @@ const fixtures={
 const cases=[
   {name:"pulse-trials",fixture:"workspace",file:"pulse-trials.js"},
   {name:"journey-settings",fixture:"workspace",file:"journey-settings.js"},
+  {name:"operator-start-settings",fixture:"workspace",file:"operator-start-settings.js"},
   {name:"input-region-operator",fixture:"input-region-operator",file:"input-region-operator.js"},
   {name:"input-region",fixture:"input-region",file:"input-region.js"},
   {name:"room-preset",fixture:"room-preset",file:"room-preset.js"},
