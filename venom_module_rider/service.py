@@ -534,6 +534,10 @@ class RiderService:
         )
         if not stop:
             self.check_session(session)
+        if body.get("turn_mode") == "in_place" and body.get("mode") != "release":
+            controls = self.data(await self.read("/api/calibration/controls", 0.2))
+            if (controls.get("control_modes") or {}).get("in_place_turn_version") != 1:
+                raise RiderError("in_place_turn_unsupported", 409)
         if stop:
             self.stop_sample_events("auto_global_stop", retire_recording=False)
         if scoped_release:

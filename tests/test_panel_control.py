@@ -158,3 +158,52 @@ def test_in_place_turn_schema_is_scoped():
     ):
         with pytest.raises(ValidationError):
             Command(**values, turn_mode="in_place")
+
+
+async def test_old_pi_cannot_silently_fall_back_to_legacy_turn():
+    service, pi = domain()
+    await service.select("demo", service.session)
+    try:
+        await bind(service, pi, "panel-a")
+        with pytest.raises(RiderError, match="in_place_turn_unsupported"):
+            await service.control(
+                command(
+                    pi,
+                    "move",
+                    direction="left",
+                    mode="hold",
+                    device_settings=True,
+                    panel_id="panel-a",
+                    turn_mode="in_place",
+                ),
+                service.session,
+            )
+        assert not pi.safety()["moving"]
+    finally:
+        await service.close()
+
+
+async def test_supported_pi_receives_explicit_turn_mode():
+    service, pi = domain()
+    pi.controls["control_modes"]["in_place_turn_version"] = 1
+    await service.select("demo", service.session)
+    try:
+        await bind(service, pi, "panel-a")
+        await service.control(
+            command(
+                pi,
+                "move",
+                direction="right",
+                mode="hold",
+                device_settings=True,
+                panel_id="panel-a",
+                turn_mode="in_place",
+            ),
+            service.session,
+        )
+        assert any(
+            row["path"] == "/api/control" and row["body"].get("turn_mode") == "in_place"
+            for row in pi.trace
+        )
+    finally:
+        await service.close()
