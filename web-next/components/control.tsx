@@ -11,18 +11,20 @@ import { perceptionFrameCurrent } from "../lib/perception";
 /* eslint-disable @next/next/no-img-element -- Pi binary frames use revocable object URLs. */
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { displayedPreview, previewLifetime } from "../lib/preview-media";
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Camera, Eye, EyeOff, CirclePause, CircleStop } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, RotateCcw, RotateCw, Camera, Eye, EyeOff, CirclePause, CircleStop } from "lucide-react";
 import { actuatorState, displayValue, finite, formatTime, record, safetyOf, settingsOf, type Direction, type NumericDescriptor } from "../lib/model";
 import type { Translator } from "../lib/i18n";
 import type { Frame, RiderClient } from "../lib/use-rider";
 import { Button, Empty, Field, Panel, Pill, Range, Select } from "./primitives";
 import styles from "../rider.module.css";
 
-const arrows = [
+const arrows: {direction:Direction;row:number;column:number;Icon:typeof ArrowUp;turnMode?:"in_place"}[] = [
   { direction: "forward" as const, row: 1, column: 2, Icon: ArrowUp },
   { direction: "left" as const, row: 2, column: 1, Icon: ArrowLeft },
   { direction: "right" as const, row: 2, column: 3, Icon: ArrowRight },
   { direction: "backward" as const, row: 3, column: 2, Icon: ArrowDown },
+  { direction: "left", row: 3, column: 1, Icon: RotateCcw, turnMode:"in_place" },
+  { direction: "right", row: 3, column: 3, Icon: RotateCw, turnMode:"in_place" },
 ];
 export function ManualPad({ client, t, language, compact = false, minimal = false, children }: { client: RiderClient; t: Translator; language: string; compact?: boolean; minimal?: boolean; children?: ReactNode }) {
   const [mode, setMode] = useState<"pulse" | "continuous">("pulse");
@@ -34,11 +36,11 @@ export function ManualPad({ client, t, language, compact = false, minimal = fals
   const speedDescriptor = record(schema.speed) as NumericDescriptor;
   const continuous = mode === "continuous";
   const available = continuous ? client.canContinuous : client.canNavigate;
-  const pointerDown = (direction: Direction, event: React.PointerEvent<HTMLButtonElement>) => {
+  const pointerDown = (direction: Direction, event: React.PointerEvent<HTMLButtonElement>, turnMode?: "in_place") => {
     if (continuous || !available || event.button !== 0) return;
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
-    client.hold.start(direction, event.pointerId);
+    client.hold.start(direction, event.pointerId, turnMode);
   };
   const chooseMode = (next: "pulse" | "continuous") => {
     if (next === mode) return;
@@ -56,28 +58,30 @@ export function ManualPad({ client, t, language, compact = false, minimal = fals
       </Select>
     </label>
     <div className={styles.pad} role="group" aria-label={t("manual")} aria-describedby={minimal ? undefined : helpId} data-mode={mode}>
-      {arrows.map(({ direction, row, column, Icon }) => {
-        const active = client.activeDirection === direction && client.manualMode === (continuous ? "continuous" : "hold");
-        return <button type="button" key={direction} aria-label={t(direction)} title={t(direction)} aria-pressed={active} disabled={!available} data-testid={`rider-${direction}`} className={`${styles.arrow} ${active ? styles.arrowActive : ""}`} style={{ gridRow: row, gridColumn: column }}
-          onPointerDown={event => pointerDown(direction, event)}
+      {arrows.map(({ direction, row, column, Icon, turnMode }) => {
+        const label=turnMode?t(direction==="left"?"turnInPlaceLeft":"turnInPlaceRight"):t(direction);
+        const enabled=available&&(!turnMode||record(settings.control_modes).in_place_turn_version===1);
+        const active = client.activeDirection === direction && (client.manualTurnMode??null)===(turnMode??null) && client.manualMode === (continuous ? "continuous" : "hold");
+        return <button type="button" key={direction+(turnMode??"")} aria-label={label} title={label} aria-pressed={active} disabled={!enabled} data-testid={turnMode?"rider-spin-"+direction:"rider-"+direction} className={`${styles.arrow} ${active ? styles.arrowActive : ""}`} style={{ gridRow: row, gridColumn: column }}
+          onPointerDown={event => pointerDown(direction, event, turnMode)}
           onPointerUp={event => { if (!continuous) client.hold.end(event.pointerId); }}
           onPointerCancel={event => { if (!continuous) client.hold.release(event.pointerId); }}
           onLostPointerCapture={event => { if (!continuous) client.hold.release(event.pointerId); }}
           onClick={event => {
-            if (!available) return;
-            if (continuous) client.hold.toggle(direction);
-            else if (event.detail === 0 && !client.activeDirection) { client.hold.start(direction, -2); client.hold.end(-2); }
+            if (!enabled) return;
+            if (continuous) client.hold.toggle(direction, turnMode);
+            else if (event.detail === 0 && !client.activeDirection) { client.hold.start(direction, -2, turnMode); client.hold.end(-2); }
           }}
           onKeyDown={event => {
             if (!["Enter", " "].includes(event.key)) return;
             if (event.repeat) { event.preventDefault(); return; }
-            if (!continuous && available) { event.preventDefault(); client.hold.start(direction, -1); }
+            if (!continuous && enabled) { event.preventDefault(); client.hold.start(direction, -1, turnMode); }
           }}
           onKeyUp={event => {
             if (!continuous && ["Enter", " "].includes(event.key)) { event.preventDefault(); client.hold.end(-1); }
           }}
           onBlur={() => client.hold.releasePointer()}>
-          <Icon size={compact ? 20 : 25} />{!compact && <span>{t(direction)}</span>}<span className={styles.small}>{displayValue(record(directions[direction]).speed, speedDescriptor, language)} {speedDescriptor.display_unit ?? ""}</span>
+          <Icon size={compact ? 20 : 25} />{turnMode?<span className={styles.small}>{t("turnInPlace")}</span>:!compact && <span>{t(direction)}</span>}{!turnMode&&<span className={styles.small}>{displayValue(record(directions[direction]).speed, speedDescriptor, language)} {speedDescriptor.display_unit ?? ""}</span>}
         </button>;
       })}
       <button type="button" className={`${styles.padCenter} ${styles.padStop}`} style={{ gridRow: 2, gridColumn: 2 }} aria-label={t("stopMotors")} title={t(journeyOwnsMotion(client.status) ? "journeyStop" : operatorPrioritySupported(client.status) ? "operatorPauseHint" : "manualStopHint")} data-testid="rider-pad-stop" onClick={() => void client.stopManual().catch(() => undefined)}><CircleStop size={27} /><span>{t("stopShort")}</span></button>

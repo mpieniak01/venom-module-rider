@@ -1,8 +1,8 @@
 import type { Direction } from "./model";
 
 export type HoldTiming = { click_threshold_ms: number; hold_renewal_ms: number; hold_timeout_ms: number; request_ttl_ms: number; supported: string[] };
-export type MovementIntent = { direction: Direction; mode: "pulse" | "hold" | "release" };
-type Press = { direction: Direction; pointerId: number; started: number; held: boolean; token: number; latched?: boolean };
+export type MovementIntent = { direction: Direction; mode: "pulse" | "hold" | "release"; turn_mode?: "in_place" };
+type Press = { direction: Direction; pointerId: number; started: number; held: boolean; token: number; latched?: boolean; turn_mode?: "in_place" };
 export function readHoldTiming(value: unknown): HoldTiming | null {
   if (!value || typeof value !== "object") return null;
   const row = value as Record<string, unknown>;
@@ -27,31 +27,34 @@ export class HoldController {
     prepare?: (current: () => boolean) => Promise<void> | void;
     send: (intent: MovementIntent, current: () => boolean) => Promise<void>;
     onActive: (direction: Direction | null) => void;
+    onTurnMode?: (mode: "in_place" | null) => void;
     onMode?: (mode: "hold" | "continuous" | null) => void;
     onError: (error: unknown) => void;
     cancelPending?: () => boolean | void;
     now?: () => number;
   }) {}
-  start(direction: Direction, pointerId: number) {
+  start(direction: Direction, pointerId: number, turnMode?: "in_place") {
     const timing = this.options.timing();
     if (!timing || !this.options.canMove()) return;
     this.options.cancelPending?.();
     this.clearTimer();
     const token = ++this.token;
-    this.press = { direction, pointerId, started: this.now(), held: false, token };
+    this.press = { direction, pointerId, started: this.now(), held: false, token, ...(turnMode ? {turn_mode:turnMode} : {}) };
     this.options.onActive(direction);
+    this.options.onTurnMode?.(turnMode ?? null);
     this.options.onMode?.("hold");
     this.prepare(token);
     this.timer = setTimeout(() => this.beginHold(token), timing.click_threshold_ms);
   }
-  toggle(direction: Direction) {
-    if (this.press?.latched && this.press.direction === direction) { this.release(); return; }
+  toggle(direction: Direction, turnMode?: "in_place") {
+    if (this.press?.latched && this.press.direction === direction && this.press.turn_mode === turnMode) { this.release(); return; }
     if (!this.options.timing() || !this.options.canMove()) return;
     this.options.cancelPending?.();
     this.clearTimer();
     const token = ++this.token;
-    this.press = { direction, pointerId: -3, started: this.now(), held: true, token, latched: true };
+    this.press = { direction, pointerId: -3, started: this.now(), held: true, token, latched: true, ...(turnMode ? {turn_mode:turnMode} : {}) };
     this.options.onActive(direction);
+    this.options.onTurnMode?.(turnMode ?? null);
     this.options.onMode?.("continuous");
     this.prepare(token);
     void this.renew(token);
@@ -62,13 +65,14 @@ export class HoldController {
     if (!press || press.pointerId !== pointerId) return;
     this.press = null;
     this.clearTimer();
+    this.options.onTurnMode?.(null);
     this.options.onActive(null);
     this.options.onMode?.(null);
     const token = ++this.token;
     if (this.preparation?.token === press.token) this.preparation.token = token;
-    if (press.held) { if (!this.options.cancelPending?.()) this.enqueueRelease(press.direction, token); }
+    if (press.held) { if (!this.options.cancelPending?.()) this.enqueueRelease(press, token); }
     else {
-      void this.dispatch({ direction: press.direction, mode: "pulse" }, () => token === this.token && !this.press);
+      void this.dispatch(this.intent(press, "pulse"), () => token === this.token && !this.press);
     }
   }
   release(pointerId?: number) {
@@ -77,16 +81,18 @@ export class HoldController {
     if (!press) { if (pointerId === undefined && this.sendingMode === "pulse") { ++this.token; this.options.cancelPending?.(); } return; }
     this.press = null;
     this.clearTimer();
+    this.options.onTurnMode?.(null);
     this.options.onActive(null);
     this.options.onMode?.(null);
     const token = ++this.token;
     const cancelled = this.options.cancelPending?.();
     if (this.preparation?.token === press.token) this.preparation.token = token;
-    if (press?.held && !cancelled) this.enqueueRelease(press.direction, token);
+    if (press?.held && !cancelled) this.enqueueRelease(press, token);
   }
   cancel() {
     this.options.cancelPending?.();
     this.press = null; ++this.token; this.preparation = null; this.clearTimer();
+    this.options.onTurnMode?.(null);
     this.options.onActive(null); this.options.onMode?.(null);
   }
   private prepare(token: number) {
@@ -119,7 +125,7 @@ export class HoldController {
     if (!press || press.token !== token || !timing || !this.options.canMove()) { this.release(); return; }
     // The producer watchdog applies if a request stalls; do not enqueue renewals.
     const started = this.now();
-    await this.dispatch({ direction: press.direction, mode: "hold" }, () => this.press?.token === token && this.options.canMove());
+    await this.dispatch(this.intent(press, "hold"), () => this.press?.token === token && this.options.canMove());
     if (this.press?.token !== token) return;
     const elapsed = this.now() - started;
     if (elapsed >= timing.hold_timeout_ms) {
@@ -129,8 +135,11 @@ export class HoldController {
     }
     this.timer = setTimeout(() => { void this.renew(token); }, Math.max(0, timing.hold_renewal_ms - elapsed));
   }
-  private enqueueRelease(direction: Direction, token: number) {
-    void this.dispatch({ direction, mode: "release" }, () => this.token === token && !this.press);
+  private intent(press: Press, mode: MovementIntent["mode"]): MovementIntent {
+    return {direction:press.direction,mode,...(press.turn_mode ? {turn_mode:press.turn_mode} : {})};
+  }
+  private enqueueRelease(press: Press, token: number) {
+    void this.dispatch(this.intent(press, "release"), () => this.token === token && !this.press);
   }
   private async dispatch(intent: MovementIntent, valid: () => boolean) {
     const preparation = this.preparation;

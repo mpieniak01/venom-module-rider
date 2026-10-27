@@ -658,3 +658,18 @@ Start trial applies the manual settings, opens a motion-only recording and submi
 Calibration's existing A/B comparison can select a whole series, show completed pulse counts and actual times, and compare common settings. Pi-relative events are anchored to host reception; this is not proof of synchronized IMU timing or physical stopping/distance. Sparse IMU data is not converted into invented smoothness or distance.
 
 The module exposes GET /api/v1/rider/motion/trials/profiles, POST /api/v1/rider/motion/trials and GET /api/v1/rider/motion/trials/{request_id}. Pi recipes/status use rider.pulse_trials version 1. Start uses the existing manual safety/consent channel and settings revision. Older Pi without this capability keeps ordinary manual control and does not expose trial Start.
+
+### Manual in-place turns
+
+The pad keeps the existing left/right arrows and adds two curved arrows labelled
+“In place”. These send turn_mode="in_place" with the existing direction,
+pulse/hold/release mode and device-owned settings revision. They use the
+corresponding left/right speed and duration. Pi advertises support through
+control_modes.in_place_turn_version=1; older devices keep the existing controls
+and cannot activate the new arrows.
+
+The paired Rider-Pi change brakes translation before requesting yaw with VX=0.
+Neither the gesture nor the brake phase extends its original deadline.
+This is a requested body maneuver, not direct independent wheel control.
+Physical pivot accuracy on the balancing platform requires separate operator
+acceptance. Unit and browser tests use inert adapters and never arm a robot.

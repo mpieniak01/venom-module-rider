@@ -142,3 +142,19 @@ async def test_fixture_watchdog_expires_without_disarming_or_archiving():
         assert not pi.camera_on
     finally:
         await service.close()
+
+
+def test_in_place_turn_schema_is_scoped():
+    assert (
+        Command(
+            action="move", direction="left", device_settings=True, turn_mode="in_place"
+        ).turn_mode
+        == "in_place"
+    )
+    for values in (
+        {"action": "height"},
+        {"action": "move", "direction": "forward", "device_settings": True},
+        {"action": "move", "direction": "left", "device_settings": False},
+    ):
+        with pytest.raises(ValidationError):
+            Command(**values, turn_mode="in_place")

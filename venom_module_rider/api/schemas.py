@@ -56,6 +56,7 @@ class Command(StrictModel):
     arming_mode: Literal["operator", "timed"] | None = None
     lease_s: float | None = None
     direction: Literal["forward", "backward", "left", "right"] | None = None
+    turn_mode: Literal["in_place"] | None = None
     mode: Literal["pulse", "hold", "release"] | None = None
     device_settings: StrictBool | None = None
     intervene: StrictBool | None = None
@@ -80,6 +81,12 @@ class Command(StrictModel):
 
     @model_validator(mode="after")
     def supersession_scope(self):
+        if self.turn_mode is not None and not (
+            self.action == "move"
+            and self.device_settings is True
+            and self.direction in {"left", "right"}
+        ):
+            raise ValueError("invalid_turn_mode")
         if self.supersedes_operation_id is not None and not (
             self.action == "navigation_pause"
             or self.action == "move"

@@ -41,6 +41,7 @@ class MotionIntent(MotionModel):
     seq: StrictInt | None = None
     direction: Literal["forward", "backward", "left", "right"] | None = None
     mode: Literal["pulse", "hold", "release"] | None = None
+    turn_mode: Literal["in_place"] | None = None
     intensity: float | None = None
     duration_s: float | None = None
     settings_revision: StrictInt | None = None
