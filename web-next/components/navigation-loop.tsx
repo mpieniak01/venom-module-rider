@@ -102,6 +102,8 @@ export function NavigationLoop({client,t,language,recording,operatorDetails,stud
         if(!navigationReadCurrent(request,stateAppliedSequence.current,incoming.revision,policySession.current===session?policyRef.current?.revision:undefined))return;
         stateAppliedSequence.current=request;
         apply(row);
+        // Preview follows the applied Pi policy even while form drafts stay dirty.
+        if(typeof incoming.revision==="number")setPerceptionPolicy?.(incoming);
         if(typeof incoming.revision==="number")setProfileSnapshot(previous=>previous.session===session&&Number(previous.policy?.revision??-1)>Number(incoming.revision)?previous:{policy:incoming,session:session??""});
         if((policySession.current!==session||Number(incoming.revision)>=Number(policyRef.current?.revision??-1))&&((!policyRef.current||!dirtyRef.current)&&typeof incoming.revision==="number"&&(incoming.revision>Number(policyRef.current?.revision??-1)||incoming.revision===policyRef.current?.revision&&JSON.stringify(incoming)!==JSON.stringify(policyRef.current))))applyPolicy(incoming);
         if(first){setRuntime(record(row.runtime));configured=true;}
@@ -120,7 +122,7 @@ export function NavigationLoop({client,t,language,recording,operatorDetails,stud
     document.addEventListener("visibilitychange",visibility);
     void tick(true);
     return ()=>{abort.abort();clearTimeout(timer);document.removeEventListener("visibilitychange",visibility);};
-  },[connected,session,refresh,t,applyPolicy]);
+  },[connected,session,refresh,t,applyPolicy,setPerceptionPolicy]);
   const phase=loopPhase(connected,loopState,goals);
   const active=goals.observe===true||goals.drive===true;
   const settingsLocked=!!operation||loading;
@@ -141,8 +143,9 @@ export function NavigationLoop({client,t,language,recording,operatorDetails,stud
     if(currentSession()!==origin||!navigationReadCurrent(request,stateAppliedSequence.current,record(row.config).revision,policyRef.current?.revision))return;
     stateAppliedSequence.current=request;
     setLoopState(record(row.status));setGoals(record(row.goals));setDetector(record(row.detector));
+    if(typeof record(row.config).revision==="number")setPerceptionPolicy?.(record(row.config));
     if(refreshPolicy&&!dirtyRef.current&&typeof record(row.config).revision==="number")applyPolicy(record(row.config));
-  },[currentSession,applyPolicy]);
+  },[currentSession,applyPolicy,setPerceptionPolicy]);
   const failure=useCallback((err:unknown)=>{
     setTrialFailure(err);
     const diagnostic=record(record(record(record(err).data).detail).details).navigation;

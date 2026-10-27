@@ -28,6 +28,7 @@ const fixtures={
   workspace:"global-study-fixture.tsx",
 };
 const cases=[
+  {name:"preview-dirty-policy",fixture:"workspace",file:"preview-dirty-policy.js"},
   {name:"pulse-trials",fixture:"workspace",file:"pulse-trials.js"},
   {name:"journey-settings",fixture:"workspace",file:"journey-settings.js"},
   {name:"operator-start-settings",fixture:"workspace",file:"operator-start-settings.js"},
