@@ -71,6 +71,14 @@ class RiderService:
         )
         self.read_metrics = ReadMetrics()
         self.devices = {device.id: device for device in devices}
+        self.builtin_demo_id: str | None = None
+        if client_factory is PiClient and not any(
+            device.mode == "demo" for device in devices
+        ):
+            demo_id = "demo" if "demo" not in self.devices else "local-demo"
+            self.devices[demo_id] = Device(demo_id, "Demo", "http://127.0.0.1", "demo")
+            self.builtin_demo_id = demo_id
+        self.demo_states: dict[str, Any] = {}
         self.device: Device | None = None
         self.client: PiClient | None = None
         self.session = uuid.uuid4().hex
@@ -154,12 +162,30 @@ class RiderService:
                 if self.conversation_drainer:
                     await self.conversation_drainer()
                 await self._cancel_transport_tasks()
-                warning = await self._stop_previous()
+                target = self.devices.get(device_id)
+                if target is not None and target.mode == "demo":
+                    try:
+                        warning = await asyncio.wait_for(
+                            self._stop_previous(), timeout=1.0
+                        )
+                    except TimeoutError:
+                        warning = "previous_device_stop_unconfirmed"
+                else:
+                    warning = await self._stop_previous()
                 if persist:
                     persist_device(self.selection_file, device_id)
                 await self._close_transport()
                 self.device = self.devices.get(device_id)
-                self.client = self.factory(self.device) if self.device else None
+                if (
+                    self.device
+                    and self.device.mode == "demo"
+                    and self.factory is PiClient
+                ):
+                    from .simulation import client as simulation_client
+
+                    self.client = simulation_client(self.device, self.demo_states)
+                else:
+                    self.client = self.factory(self.device) if self.device else None
                 if self.client is not None and isinstance(self.client, PiClient):
                     self.client.transport_invalidated = self._transport_invalidated
                 self.session = uuid.uuid4().hex
@@ -524,14 +550,18 @@ class RiderService:
         action = body.get("action")
         stop = action in {"stop", "disarm"}
         intervention = (
-            action == "move"
+            action in {"move", "height", "balance"}
             and body.get("intervene") is True
             and type(body.get("operator_intervention_version")) is int
             and body["operator_intervention_version"] == 1
         )
         scoped_release = intervention and body.get("mode") == "release"
-        priority = action == "navigation_pause" or (
-            action == "move" and body.get("intervene") is True
+        priority = (
+            action == "navigation_pause"
+            or action == "move"
+            and body.get("intervene") is True
+            or action in {"height", "balance"}
+            and intervention
         )
         if not stop:
             self.check_session(session)
@@ -568,8 +598,11 @@ class RiderService:
             generation = safety["generation"]
             seq = body["seq"]
             self.sequences[generation] = seq
+        # A figure Start must never fall back to generic ARM on an older Pi.
         path = (
-            "/api/safety"
+            "/api/motion/figures/runs"
+            if "figure_id" in body
+            else "/api/safety"
             if action in {"arm", "disarm", "stop", "clear_estop"}
             else "/api/control"
         )

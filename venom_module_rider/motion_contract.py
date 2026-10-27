@@ -42,6 +42,9 @@ class MotionIntent(MotionModel):
     direction: Literal["forward", "backward", "left", "right"] | None = None
     mode: Literal["pulse", "hold", "release"] | None = None
     turn_mode: Literal["in_place"] | None = None
+    figure_id: str | None = Field(default=None, max_length=64)
+    figure_version: StrictInt | None = None
+    figure_run_id: str | None = Field(default=None, max_length=128)
     intensity: float | None = None
     duration_s: float | None = None
     settings_revision: StrictInt | None = None

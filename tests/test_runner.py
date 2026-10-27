@@ -16,10 +16,10 @@ def test_demo_cannot_use_an_environment_device(monkeypatch):
         "RIDER_DEVICES_JSON",
         '[{"id":"robot","label":"Robot","url":"http://robot.invalid","mode":"device"}]',
     )
-    devices, default, demo = runner.targets(None, None, 18880)
-    assert demo and default == "demo" and devices[0]["url"] == "http://127.0.0.1:18880"
+    devices, default, demo = runner.targets(None, None)
+    assert demo and default == "demo" and devices == []
     with pytest.raises(ValueError):
-        runner.targets(None, "robot", 18880)
+        runner.targets(None, "robot")
 
 
 def test_live_requires_explicit_validated_file(tmp_path, monkeypatch):
@@ -37,14 +37,14 @@ def test_live_requires_explicit_validated_file(tmp_path, monkeypatch):
             ]
         )
     )
-    devices, default, demo = runner.targets(path, None, 18880)
+    devices, default, demo = runner.targets(path, None)
     assert not demo and default == "" and devices[0]["id"] == "robot"
-    assert runner.targets(path, "robot", 18880)[1] == "robot"
+    assert runner.targets(path, "robot")[1] == "robot"
     with pytest.raises(ValueError):
-        runner.targets(path, "missing", 18880)
+        runner.targets(path, "missing")
     monkeypatch.setenv("RIDER_DEMO_ONLY", "true")
     with pytest.raises(Exception, match="invalid_device_configuration"):
-        runner.targets(path, "robot", 18880)
+        runner.targets(path, "robot")
 
 
 @pytest.mark.parametrize("profile", [None, "llm_off"])
@@ -79,7 +79,7 @@ def test_audio_is_opt_in_for_configured_host():
         runner.resolve_audio_enabled(True, True)
 
 
-def test_mixed_launcher_has_demo_and_prod_with_separate_credentials(
+def test_device_launcher_uses_builtin_demo_without_a_fixture_endpoint(
     tmp_path, monkeypatch
 ):
     monkeypatch.delenv("RIDER_DEMO_ONLY", raising=False)
@@ -91,14 +91,77 @@ def test_mixed_launcher_has_demo_and_prod_with_separate_credentials(
         "url": "http://127.0.0.1:18881",
     }
     path.write_text(json.dumps([production]))
-    devices, selected, isolated = runner.targets(path, None, 18880, with_demo=True)
+    devices, selected, isolated = runner.targets(path, "demo")
     assert selected == "demo" and not isolated
-    assert [d["mode"] for d in devices] == ["demo", "device"]
-    assert devices[0]["compute_token_env"] == "RIDER_DEMO_COMPUTE_TOKEN"
-    assert devices[0]["agent_token_env"] == "RIDER_DEMO_AGENT_TOKEN"
-    assert devices[1]["compute_token_env"] is None
-    assert devices[1]["agent_token_env"] == "RIDER_AGENT_TOKEN"
-    assert runner.targets(path, "prod", 18880, with_demo=True)[1] == "prod"
+    assert [d["id"] for d in devices] == ["prod"]
+    assert runner.targets(path, "prod")[1] == "prod"
     path.write_text(json.dumps([{**production, "id": "demo"}]))
     with pytest.raises(ValueError, match="reserved"):
-        runner.targets(path, None, 18880, with_demo=True)
+        runner.targets(path, None)
+
+
+def test_launcher_starts_only_host_api_and_ui_without_a_demo_listener(
+    tmp_path, monkeypatch
+):
+    core = tmp_path / "core"
+    module = core / "modules/venom-module-rider"
+    (module / "scripts").mkdir(parents=True)
+    (core / ".venv/bin").mkdir(parents=True)
+    (core / ".venv/bin/python").touch()
+    (core / "web-next/node_modules/next").mkdir(parents=True)
+    monkeypatch.setattr(runner, "__file__", str(module / "scripts/run_demo.py"))
+    monkeypatch.setattr(runner.sys, "argv", ["run_demo.py", "--core-root", str(core)])
+    monkeypatch.setattr(runner.signal, "signal", lambda *args: None)
+    checked_ports, children, probes = [], [], []
+    monkeypatch.setattr(
+        runner, "free_port", lambda port: checked_ports.append(port) or True
+    )
+    monkeypatch.setattr(runner.subprocess, "run", lambda *args, **kwargs: None)
+
+    class Process:
+        stopped = False
+
+        def __init__(self, command, **kwargs):
+            self.pid = len(children) + 100
+            children.append((command, kwargs, self))
+
+        def poll(self):
+            return 0 if self.stopped else None
+
+        def terminate(self):
+            self.stopped = True
+
+        def wait(self, **kwargs):
+            return 0
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    monkeypatch.setattr(runner.subprocess, "Popen", Process)
+    monkeypatch.setattr(
+        runner.urllib.request,
+        "urlopen",
+        lambda url, **kwargs: probes.append(url) or Response(),
+    )
+
+    def finish(*args):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(runner.time, "sleep", finish)
+    with pytest.raises(KeyboardInterrupt):
+        runner.main()
+    assert checked_ports == [8800, 3300]
+    assert len(children) == 2
+    assert "uvicorn" in children[0][0]
+    assert "node_modules/next/dist/bin/next" in children[1][0]
+    assert json.loads(children[0][1]["env"]["RIDER_DEVICES_JSON"]) == []
+    assert children[0][1]["env"]["RIDER_DEFAULT_DEVICE"] == "demo"
+    assert probes == [
+        "http://127.0.0.1:8800/api/v1/rider/config",
+        "http://127.0.0.1:3300/rider",
+    ]
+    assert all(process.stopped for _, _, process in children)

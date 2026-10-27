@@ -1,3 +1,4 @@
+import {SimulationPreview} from "./simulation";
 import { useOperatorTuning } from "../lib/operator-tuning";
 import { useOperatorApply } from "../lib/use-operator-apply";
 import { createBrowserUuid } from "@/lib/optional-modules/transport";
@@ -14,6 +15,7 @@ import type { Translator } from "../lib/i18n";
 import { OperatorStatus } from "./operator-status";
 import { OperatorMessages } from "./operator-console";
 import { PulseTrialsPanel } from "./pulse-trials";
+import { FiguresPanel } from "./figures";
 import type { StudyRecording } from "../lib/use-study-recording";
 import { OperatorMotion } from "./operator-motion";
 import { LoopDecision } from "./loop-decision";
@@ -493,7 +495,7 @@ export function NavigationLoop({client,t,language,recording,operatorDetails,stud
     </div>
     <div className={styles.driveWorkspace}>
       <div className={styles.workspaceContent} data-testid="workspace-content" role="region" aria-label={t("workspaceObservation")}>
-        <div className={styles.loopCamera}><CameraPanel client={client} t={t} language={language} compact showTools={false} editor={editingZone && draft && Array.isArray(draft.corridor) ? {value:draft.corridor as number[],disabled:settingsLocked,onChange:value=>setDraft({...draft,corridor:value})}:undefined}/></div>
+        <div className={styles.loopCamera}>{client.status?.connection.mode==="demo"&&safety.simulated===true?<SimulationPreview status={client.status} t={t}/>:(<CameraPanel client={client} t={t} language={language} compact showTools={false} editor={editingZone && draft && Array.isArray(draft.corridor) ? {value:draft.corridor as number[],disabled:settingsLocked,onChange:value=>setDraft({...draft,corridor:value})}:undefined}/>)}</div>
         <div className={styles.workspaceMessages} data-testid="workspace-messages">      <div className={styles.commandReason} role="status" data-testid="command-reason" hidden={!commandReason&&!(prepareAction&&!dirty&&!(view==="journey"&&confirmJourney))}>
         <span>{commandReason}</span>
         {prepareAction&&!dirty&&!(view==="journey"&&confirmJourney)&&<Button data-testid="prepare-navigation" disabled={!connected||!!operation||loading||!!observeBlock||goals.drive===true} onClick={()=>{if(!acceptanceBlock)void acceptTrial();else showPreparation();}}>{t(!acceptanceBlock?"workspace.confirm":active?"workspace.preparation":"workspace.prepare")}</Button>}
@@ -504,6 +506,7 @@ export function NavigationLoop({client,t,language,recording,operatorDetails,stud
         <div ref={railRef} className={styles.tuningBody}>
           <div hidden={operatorDraft.pane!=="motion"} data-testid="operator-motion-pane">
             <div hidden={view!=="manual"}><ManualPad client={client} t={t} language={language} compact minimal/>{(safety.owner!=="manual"&&safety.state==="ARMED")&&<Button data-testid="takeover-manual" disabled={!connected||!!client.busy} onClick={()=>void client.takeManual(t("manual"))}>{t("takeManual")}</Button>}</div>
+            {view==="manual"&&<FiguresPanel client={client} t={t}/>}
             {view==="manual"&&studyRecording&&<PulseTrialsPanel client={client} t={t} recording={studyRecording}/>}
             {view!=="manual"&&draft&&<div data-testid="automatic-motion-settings">        <div className={styles.grid}>
           <Field label={t(view==="journey"?"loopJourneySpeed":"loopSpeed",{limit:String(navigationSpeedLimit(policy,view==="journey"))})}><Input data-testid="automatic-speed" disabled={settingsLocked} type="number" min="0.01" max={navigationSpeedLimit(policy,view==="journey")} step="0.01" value={Number(draft.speed)} onChange={e=>setDraft({...draft,speed:Number(e.target.value)})}/></Field>

@@ -51,7 +51,7 @@
     "limits": {
       "linear_speed": 1.0,
       "turn_speed": 1.0,
-      "pulse_duration": 0.5,
+      "pulse_duration": 1.0,
       "speed_limit": 1.0,
       "linear_rate": 100.0,
       "turn_rate": 100.0,
@@ -152,7 +152,7 @@
           "display_unit": "ms",
           "display_factor": 1000,
           "minimum": 0.01,
-          "maximum": 0.5,
+          "maximum": 1.0,
           "display_precision": 0,
           "meaning": "whole_click_pulse"
         }

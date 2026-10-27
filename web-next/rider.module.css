@@ -401,7 +401,7 @@
 @container rider (min-width:900px) {
   .header { flex-wrap:nowrap; gap:12px; }
   .brand { flex:0 0 140px; }
-  .toolbar { display:grid; grid-template-columns:minmax(120px,1fr) 120px 36px 178px 104px 36px; gap:8px; flex:1; }
+  .toolbar { display:grid; grid-template-columns:minmax(120px,1fr) 120px 36px max-content 36px; gap:8px; flex:1; }
   .environmentSelect { font-size:11px; gap:6px; }
   .environmentSelect select { width:90px; }
   .toolbar > .button { padding:0 6px; }
@@ -427,8 +427,7 @@
   .page .toolbar .pill { width:100%; }
   .toolbar [data-testid="rider-refresh"] { grid-column:3; grid-row:1; padding:0; }
   .toolbar [data-testid="workspace-expand"] { grid-column:4; grid-row:1; padding:0; }
-  .page .toolbar .armArmed, .page .toolbar .armDisarmed { grid-column:1 / 3; grid-row:2; width:100%; }
-  .toolbar [data-testid="rider-stop"] { grid-column:3 / 5; grid-row:2; width:100%; padding:0 8px; }
+  .toolbar .recordingActions { grid-column:1 / -1; grid-row:2; display:grid; grid-template-columns:1fr 1fr; width:100%; }
   .tabs { margin-bottom:6px; }
   .tab { padding:8px; font-size:12px; }
   .drivingSurface, .pageFocused .drivingSurface { height:auto; grid-template-rows:minmax(40px,auto) 84px auto; gap:6px; }
@@ -561,3 +560,15 @@
 .pulseComparison > p { grid-column:1/-1; }
 .pulseComparison > div { padding:12px; border:1px solid var(--r-border); border-radius:12px; min-width:0; }
 .pulseComparison svg { display:block; width:100%; height:auto; }
+
+.figurePanel { border-top: 1px solid var(--rider-border, #263644); padding-top: 14px; margin-top: 14px; }
+.figurePanel h3 { margin: 0 0 8px; font-size: 14px; }
+.figureDescription { min-height: 176px; display: grid; align-content: start; gap: 5px; font-size: 12px; padding: 8px 0; }
+.figureDescription p { margin: 0 0 4px; }
+.figureStatus { min-height: 48px; font-size: 12px; padding-top: 8px; overflow-wrap: anywhere; }
+
+.toolbar .recordingActions .button { white-space:nowrap; }
+
+.recordingState { height:36px; line-height:18px; overflow:auto; }
+
+@container rider (min-width:721px) { .toolbar .recordingActions { flex-wrap:nowrap; width:auto; } }

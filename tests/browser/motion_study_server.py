@@ -161,7 +161,7 @@ async def lifespan(app):
     with tempfile.TemporaryDirectory(prefix="rider-motion-fixture-") as folder:
         pi = DemoPi()
         transport = httpx.ASGITransport(app=create_app(pi))
-        device = Device("fixture", "Fixture", "http://127.0.0.1:18880", "demo")
+        device = Device("fixture", "Fixture", "http://127.0.0.1", "demo")
         service = RiderService(
             (device,), client_factory=lambda d: FixturePiClient(d, transport=transport)
         )

@@ -36,7 +36,7 @@ async def setup_proxy(monkeypatch, handler):
     monkeypatch.setattr(
         "venom_module_rider.api.routes.ensure_module_mutation_allowed", lambda **_: None
     )
-    device = Device("pi", "Fixture", "http://127.0.0.1:18880", "prod")
+    device = Device("pi", "Fixture", "http://127.0.0.1", "prod")
     service = RiderService(
         (device,),
         client_factory=lambda selected: PiClient(
@@ -312,7 +312,7 @@ async def test_status_preparation_has_same_existing_pi_start_identity(monkeypatc
         "state": "failed",
     }
     response = envelope({"preparation": preparation}, "rider.navigation_loop")
-    selected = Device("pi", "Fixture", "http://127.0.0.1:18880", "prod")
+    selected = Device("pi", "Fixture", "http://127.0.0.1", "prod")
     client = PiClient(
         selected,
         transport=httpx.MockTransport(
@@ -334,7 +334,7 @@ async def test_status_preparation_has_same_existing_pi_start_identity(monkeypatc
 async def test_unconfirmed_feature_stop_502_is_not_masked_as_success():
     from venom_module_rider.errors import RiderError
 
-    selected = Device("pi", "Fixture", "http://127.0.0.1:18880", "prod")
+    selected = Device("pi", "Fixture", "http://127.0.0.1", "prod")
     packet = {
         "ok": False,
         "error": {"code": "http_502"},

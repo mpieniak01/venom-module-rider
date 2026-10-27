@@ -379,7 +379,7 @@ async def test_audio_transcribe_and_tts_return_pcm16_wav():
 def host(monkeypatch):
     monkeypatch.setenv("RIDER_COMPUTE_TOKEN", "fixture-secret")
     monkeypatch.delenv("RIDER_ACCESS_TOKEN", raising=False)
-    device = Device("demo", "Demo", "http://127.0.0.1:18880", "demo")
+    device = Device("demo", "Demo", "http://127.0.0.1", "demo")
     app = FastAPI()
     app.state.rider = RiderService((device,))
     app.state.rider_compute = ComputeService(DemoEngines())

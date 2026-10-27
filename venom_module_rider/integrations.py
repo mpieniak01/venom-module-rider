@@ -156,7 +156,16 @@ async def observe_integration(app: Any) -> dict:
         "observed_at": _utc(time.time()),
     }
     try:
-        devices = tuple(service.devices.values()) if service else configured_devices()
+        devices = (
+            tuple(
+                device
+                for device in service.devices.values()
+                if device.id != getattr(service, "builtin_demo_id", None)
+                or device is service.device
+            )
+            if service
+            else configured_devices()
+        )
     except RiderError:
         result.update(
             resources_complete=False,

@@ -4,7 +4,7 @@ An optional Venom module for manual operation of Rider-Pi. Venom supplies the UI
 
 ## R1
 
-- Manual arrows: click for a pulse, hold for continuous intent, release for braking without disarming. A global red/green ARM switch and persistent STOP remain visible.
+- Manual arrows: click for a pulse, hold for continuous intent, release for braking. The pad STOP cancels the current motion or sequence; Escape provides the same global STOP. Explicit gestures obtain Pi authority without a separate ARM button. Recording controls occupy the main toolbar.
 - Camera RAW/PROC preview, posture-height commands and roll-compensation controls.
 - A permanent status under the driving keypad shows battery charge, Pi axis readings, target posture height and roll compensation. SDK axes keep their producer units; missing or stale readings display as unavailable. Height changes require an explicit Apply. Measurements retains detailed observations, source times, CPU/RAM history and CPU interval peaks.
 - Direction-specific calibration in producer-defined units, smoothing curves and profile create/save/apply/rename/delete.
@@ -18,7 +18,7 @@ The driving screen keeps the camera next to a **Motion / Model** tuning panel. M
 
 **Apply** uses one settings flow: stop active movement, pause requested observation, write the changed manual/navigation settings and model selection, then restore observation only. It never resumes driving. Failed writes retain the remaining draft. **Apply and Start** first applies the visible draft and uses the resulting Pi revision; a cold Start prepares analysis and waits for a fresh image for that revision before requesting motion. STOP supersedes a pending preparation or write and prevents subsequent admission or observation restart. Pi still enforces explicit consent, generation and capture/decision deadlines.
 
-Compatible Pi versions expose the same maximum command magnitude (1.0) and pulse duration (500 ms) for manual, automatic and Automat2 control, including avoidance turns. Numeric labels show their allowed ranges. Existing saved values remain the initial form values, and a manual direction preset can retain a lower maximum. Older Pi versions retain their advertised or legacy bounds. Navigation uses its own policy limits rather than the manual direction preset; ramps remain shared. Pulses and reply validity are still shortened by the remaining capture/decision budget (at most 500 ms), and expired decisions cannot continue motion.
+Compatible Pi versions expose the same maximum command magnitude (1.0) and pulse duration (1000 ms) for manual, automatic and Automat2 control, including avoidance turns. Numeric labels show their allowed ranges. Existing saved values remain the initial form values, and a manual direction preset can retain a lower maximum. Older Pi versions retain their advertised or legacy bounds. Navigation uses its own policy limits rather than the manual direction preset; ramps remain shared. Manual single pulses retain their configured duration up to 1 s; hold renewals and request TTL remain bounded at 500 ms. Autonomous pulses and reply validity are still shortened by the remaining capture/decision budget (at most 500 ms), and expired decisions cannot continue motion.
 
 ## R2 — compute and perception
 
@@ -162,10 +162,7 @@ Configure devices on the **server**, using private environment configuration:
 
     RIDER_DEVICES_JSON=[{"id":"robot","label":"Rider-Pi","url":"https://rider.local","mode":"device"}]
 
-The default list is empty. The permanent **Demo / Prod** selector uses this single
-device list; there is no second environment setting. A browser can select only
-configured IDs and cannot supply a destination URL. Unconfigured modes remain
-visible and disabled. Selection stops previous active motion and navigation,
+The standard service always provides a built-in **Demo** simulation. Physical devices remain explicitly allowlisted. The permanent **Demo / Prod** selector uses this single list; a browser can select only known IDs and cannot supply a destination URL. Unconfigured production remains visible and disabled. Selection stops previous active motion and navigation,
 creates a new session, and clears observations, pending commands and preview
 subscriptions. An unreachable previous Pi produces an explicit unconfirmed-stop
 notice; its own watchdog still owns braking.
@@ -187,9 +184,9 @@ From the module checkout:
     source ../../.venv/bin/activate
     make demo
 
-The launcher reuses existing Python and Node environments, starts a loopback Pi fixture and the **real Venom host API/UI**, and prints http://localhost:3300/rider. Defaults are UI 3300, host API 8800 and fixture 18880; flags on scripts/run_demo.py allow different unused ports. Ctrl-C closes only the launcher's own processes.
+The optional launcher reuses existing Python and Node environments and starts only the **Venom API/UI**, with built-in Demo. Defaults are UI 3300 and API 8800. It starts no separate Pi fixture, listener or third process. Ctrl-C closes only the launcher's own API/UI processes. If the regular stack is running, select Demo there instead.
 
-The demo forces RIDER_DEMO_ONLY=true, disables physical IoT and LLM startup, and accepts only loopback fixtures. Simulated values and actuator acknowledgements are marked DEMO. Fixture state is ephemeral. A fixture result is not evidence of physical motion or device rendering.
+The isolated launcher sets RIDER_DEMO_ONLY=true and disables physical IoT and LLM startup. Demo commands use the internal ASGI transport. Simulated values and actuator acknowledgements are marked DEMO. Fixture state is ephemeral. A fixture result is not evidence of physical motion or device rendering.
 
 
 ### Recorded camera replay
@@ -203,19 +200,10 @@ inference that could reject a Pi decision. The response wait is bounded to
 manual ARM through the existing Pi control contract. Giving control to Venom
 uses the independently calibrated drive policy and timed navigation ARM.
 
-For a hardware-free replay, keep a recorded `last_frame.jpg` and a
-`manifest.json` containing its `original_mtime` outside Git. Supply the actual,
-hardware-free `apps/compute/decision_lease.py` from the matching Pi checkout:
-
-    make demo ARGS="--replay-dir /path/to/recording --decision-lease-source /path/to/Rider-Pi/apps/compute/decision_lease.py"
-
-Configure the local segmentation model with `RIDER_VISION_MODEL` and
-`RIDER_VISION_SHA256`. Replay uses the real Venom vision endpoint and Pi's
-monotonic decision permit; actuator callbacks only change fixture state.
-The preview labels a replay and retains the original recording timestamp.
-Replay requires the local fixture; it can coexist with a production allowlist
-when `--with-demo` is explicitly enabled. It always targets the demo ID.
-Defaults remain observation, disarmed and no running camera or loop.
+Recorded replay remains a library-level test fixture in
+`demo_navigation.py`, using recorded JPEGs and the matching Pi decision lease
+source. It does not require a separately running fixture service. The ordinary
+Demo selector provides interactive motion simulation in the module process.
 
 For cross-repository integration checks, set `RIDER_TEST_PI_LEASE` to that Pi
 source file when running `make check`. The scenarios test correlated frames,
@@ -231,18 +219,16 @@ Use a private device allowlist JSON under ignored config/local/. Pass it explici
 
     make demo ARGS="--device-file config/local/devices.json --device-id robot"
 
-Alternatively invoke scripts/run_demo.py with those arguments. Without the file flag the launcher always starts the isolated fixture, even if a real device exists in the inherited environment. File mode starts only the Venom API/UI, preserves the hardware authority on Pi, and never automatically arms or starts a resource. It is an operator panel, not an automated physical-motion test runner. The configured-device host defaults to the `full` LLM runtime profile so the Venom cockpit can select installed models. Use `--runtime-profile light` or `--runtime-profile llm_off` explicitly to restrict the host. The isolated fixture always remains `llm_off`; model warmup and background optional services remain disabled by this launcher.
+Alternatively invoke scripts/run_demo.py with those arguments. Without the file flag the launcher always uses the built-in simulation, even if a real device exists in the inherited environment. File mode starts only the Venom API/UI, preserves the hardware authority on Pi, and never automatically arms or starts a resource. It is an operator panel, not an automated physical-motion test runner. The configured-device host defaults to the `full` LLM runtime profile so the Venom cockpit can select installed models. Use `--runtime-profile light` or `--runtime-profile llm_off` explicitly to restrict the host. The isolated fixture always remains `llm_off`; model warmup and background optional services remain disabled by this launcher.
 
-To keep both modes available in one local panel, configure the private production
-allowlist once and add the local fixture:
-
-    make demo ARGS="--device-file /private/devices.json --with-demo"
+Demo is automatically available alongside allowlisted physical devices.
+No additional demo endpoint, fixture flag or separate service is configured.
+Select Demo from the regular panel; use an explicit device ID when a launcher
+should initially select a configured target.
 
 The initial selection is **Demo**, unless a saved operator choice exists.
 Switch Demo/Prod in the panel without changing files or restarting services.
-The fixture and production target have separate credential references; built-in
-demo tokens are never used for production. Recorded replay flags apply only to
-the local fixture. Automated switching checks use two fixtures; registering a
+The simulation and production targets have separate transports; the simulation never opens a network connection to a Pi. Automated switching checks use two fixtures; registering a
 production target does not constitute a physical-device test.
 
 Service and resource operations have a separate bounded response timeout. Motion
@@ -673,3 +659,61 @@ Neither the gesture nor the brake phase extends its original deadline.
 This is a requested body maneuver, not direct independent wheel control.
 Physical pivot accuracy on the balancing platform requires separate operator
 acceptance. Unit and browser tests use inert adapters and never arm a robot.
+
+
+### Own figure sequences (local manual trials)
+
+The manual motion pane exposes six Pi-owned experimental recipes: side sway,
+height change, forward/backward, snake, lift/rotate and circular body sway.
+They use our sequence executor and posture/velocity setpoints, never native
+firmware ACTION/PERFORM or manufacturer applications.
+
+Selection and status reads do not actuate. Explicit Start uses the normal
+operator gate. One run owns the existing executor; manual input and STOP
+retire all pending steps. Panel contact is bounded at 500 ms; late contact,
+reopening a page or repeating a request cannot restart a completed run.
+The panel shows recipe duration, initial posture and bounded strength.
+Saved manual settings are not overwritten. Older Pi versions cannot receive
+generic ARM as a fallback for an unsupported figure endpoint.
+
+These recipes are available for manual qualification, not claimed replicas
+of manufacturer motion. Final status keeps physical completion unverified.
+The result JSON can be downloaded before the next trial. It contains bounded
+command events and settings; it is not video, a measured trajectory or a
+permanent archive. Pose STOP retains the last setpoint and cannot prove
+mechanical completion.
+
+API: `/api/v1/rider/motion/figures`, `/runs`, `/runs/{id}`,
+`/runs/{id}/cancel`, `/runs/{id}/export`.
+Validation: `make check-python`, `make check-web`, and the inert
+`figures` browser regression registered in
+`scripts/check_browser_regressions.mjs --only figures`.
+
+Manual height Apply supports the Pi capability `operator_height_intervention_version: 1`.
+Selecting a target is inert. Apply sends one explicit, consented height intervention,
+which stops an earlier drive before setting the target (device range 75–115 SDK).
+An older Pi retains the existing manual-ARM path. Height feedback is the last
+accepted SDK target, not a measured physical height; it is unknown after executor
+restart. E-Stop and expired or superseded commands remain rejected.
+
+
+### Operator toolbar and built-in motion simulation
+
+The toolbar has one Record session / End recording pair. Recording never arms,
+moves, or starts a camera. There is no duplicate ARM or STOP in the header.
+The directional pad STOP and Escape invalidate active motion, figures and trials;
+a held-button release still uses bounded braking.
+
+The standard Demo client uses an in-process ASGI transport. Its configured URL
+is never used for sockets, SSH, UART or a hardware SDK. Switching away from an
+unreachable previous target is bounded to one second; an unconfirmed STOP stays
+reported but does not prevent selecting Demo. Physical targets remain separate
+and require explicit selection. Demo offers manual forward/backward and turns,
+height, compensation, STOP and a relative pose preview. The coordinates are
+simulation command-time units, not measured metres or an acceptance test for
+hardware dynamics. Autonomous vision qualification and manufacturer-figure
+acceptance still require their existing dedicated workflows.
+
+Tests: tests/test_local_simulation.py forbids real network transport, covers an
+offline physical target and checks every simulated motion/pose command.
+The operator-demo browser regression uses mocked endpoints and the real panel.

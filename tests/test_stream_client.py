@@ -10,7 +10,7 @@ from venom_module_rider.client import PiClient, expected_contract
 from venom_module_rider.config import Device
 from venom_module_rider.errors import RiderError
 
-DEVICE = Device("pi", "Pi fixture", "http://127.0.0.1:18880", "device")
+DEVICE = Device("pi", "Pi fixture", "http://127.0.0.1", "device")
 
 
 def wire(payload=None, metadata=None):

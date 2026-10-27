@@ -1,6 +1,5 @@
 import {useImageReference,ImageReferenceControls,ImageReferenceOverlay} from "./image-reference";
 import { VisionSectors } from "./vision-sectors";
-import { journeyOwnsMotion, operatorPrioritySupported } from "../lib/navigation";
 import { CameraPipelineControls } from "./camera-pipeline";
 import { framePipelineCurrent } from "../lib/camera-pipeline";
 import { CorridorOverlay, type CorridorEditorProps } from "./corridor-overlay";
@@ -85,8 +84,9 @@ export function ManualPad({ client, t, language, compact = false, minimal = fals
           <Icon size={compact ? 20 : 25} />{turnMode?<span className={styles.small}>{t("turnInPlace")}</span>:!compact && <span>{t(direction)}</span>}{!turnMode&&<span className={styles.small}>{displayValue(record(directions[direction]).speed, speedDescriptor, language)} {speedDescriptor.display_unit ?? ""}</span>}
         </button>;
       })}
-      <button type="button" className={`${styles.padCenter} ${styles.padStop}`} style={{ gridRow: 2, gridColumn: 2 }} aria-label={t("stopMotors")} title={t(journeyOwnsMotion(client.status) ? "journeyStop" : operatorPrioritySupported(client.status) ? "operatorPauseHint" : "manualStopHint")} data-testid="rider-pad-stop" onClick={() => void client.stopManual().catch(() => undefined)}><CircleStop size={27} /><span>{t("stopShort")}</span></button>
+      <button type="button" className={`${styles.padCenter} ${styles.padStop}`} style={{ gridRow: 2, gridColumn: 2 }} aria-label={t("stopMotors")} title={t("stopHint")} data-testid="rider-pad-stop" onClick={() => void client.stopManual().catch(() => undefined)}><CircleStop size={27} /><span>{t("stopShort")}</span></button>
     </div>
+    {safety.state==="ESTOP"&&<Button data-testid="rider-clear-estop" disabled={!!client.busy} onClick={()=>void client.command({action:"clear_estop",operator_consent:true,operator_plan:t("clearStop")})}>{t("clearStop")}</Button>}
     {minimal?<div className={styles.manualReadout} data-testid="manual-feedback">
       <div role="status"><Pill tone={safety.state==="ARMED"?"good":"warning"}>{t(safety.state==="ARMED"?"armed":safety.state==="ESTOP"?"estop":safety.state==="DISARMED"?"disarmed":"unknown")}</Pill>{client.activeDirection&&<span>{t(client.activeDirection)}</span>}</div>
       {children}
@@ -126,7 +126,7 @@ export function Posture({ client, t, language, compact = false }: { client: Ride
       && (!finite(descriptor.step) || descriptor.step <= 0 || Number.isInteger((value - descriptor.minimum) / descriptor.step));
     return <div className={styles.operatorPosture} data-testid="operator-posture">
       <div className={styles.operatorHeight}>
-        <Field label={t("operator.height") + " · " + (descriptor.display_unit ?? "SDK")}>
+        <Field label={t("operator.height") + " · " + (descriptor.display_unit ?? "SDK") + " (" + descriptor.minimum + "–" + descriptor.maximum + ")"}>
           <div className={styles.flex}><Range data-testid="operator-height" aria-label={t("operator.height")} value={finite(value) ? value : 0}
             min={descriptor.minimum} max={descriptor.maximum} step={descriptor.step ?? 1}
             disabled={!client.canMutate || !heightAvailable || !!client.busy}
@@ -139,21 +139,21 @@ export function Posture({ client, t, language, compact = false }: { client: Ride
             }}
             onChange={event => setDraftHeight(Number(event.target.value))}/><strong data-testid="operator-height-value">{chosen ? displayValue(value, descriptor, language) : "—"}</strong></div>
         </Field>
-        <Button data-testid="operator-height-apply" disabled={!client.canMove || !heightAvailable || !!client.busy || !valid || !chosen}
+        <Button data-testid="operator-height-apply" disabled={!(client.canSetHeight ?? client.canMove) || !heightAvailable || !!client.busy || !valid || !chosen}
           onClick={() => { if (valid) void client.command({ action: "height", height: value }).then(response => { if (response) setDraftHeight(null); }); }}>{t("apply")}</Button>
       </div>
       <div className={styles.operatorBalance}>
         <div><span>{t("balance")}</span><strong data-testid="operator-balance-state">{t(balance.enabled === true ? "on" : balance.enabled === false ? "off" : "unknown")}</strong></div>
         <Button data-testid="operator-balance" aria-pressed={balance.enabled === true}
-          disabled={!client.canMove || balanceDescriptor.type !== "boolean" || record(capabilities.balance).available === false || !!client.busy}
+          disabled={!(client.canSetBalance ?? client.canMove) || balanceDescriptor.type !== "boolean" || record(capabilities.balance).available === false || !!client.busy}
           onClick={() => void client.command({ action: "balance", enabled: balance.enabled !== true })}>{t(balance.enabled === true ? "disable" : "enable")}</Button>
       </div>
     </div>;
   }
   return <Panel title={t("posture")}>
-    {heightAvailable && height !== undefined ? <><Field label={`${t("height")} · ${descriptor.display_unit ?? descriptor.unit ?? ""}`}><div className={`${styles.flex} ${styles.space}`}><Range type="range" min={descriptor.minimum} max={descriptor.maximum} step={descriptor.step} value={height} onChange={event => setDraftHeight(Number(event.target.value))} disabled={!client.canMutate} /><strong>{displayValue(height, descriptor, language)}</strong></div></Field><p className={styles.hint}>{t("heightHint")}</p><div className={`${styles.flex} ${styles.space}`}><span className={styles.small}>{t("heightTarget")}: {displayValue(target.value, descriptor, language)} {descriptor.display_unit} · {formatTime(target.ts, language)}</span><Button disabled={!client.canMove || client.busy === "height" || !finite(height)} onClick={() => void client.command({ action: "height", height })}>{t("apply")}</Button></div></> : <Empty>{t("unavailable")}</Empty>}
+    {heightAvailable && height !== undefined ? <><Field label={`${t("height")} · ${descriptor.display_unit ?? descriptor.unit ?? ""} (${descriptor.minimum}–${descriptor.maximum})`}><div className={`${styles.flex} ${styles.space}`}><Range type="range" min={descriptor.minimum} max={descriptor.maximum} step={descriptor.step} value={height} onChange={event => setDraftHeight(Number(event.target.value))} disabled={!client.canMutate} /><strong>{displayValue(height, descriptor, language)}</strong></div></Field><p className={styles.hint}>{t("heightHint")}</p><div className={`${styles.flex} ${styles.space}`}><span className={styles.small}>{t("heightTarget")}: {displayValue(target.value, descriptor, language)} {descriptor.display_unit} · {formatTime(target.ts, language)}</span><Button disabled={!(client.canSetHeight ?? client.canMove) || !!client.busy || !finite(height)} onClick={() => void client.command({ action: "height", height })}>{t("apply")}</Button></div></> : <Empty>{t("unavailable")}</Empty>}
     <div className={styles.rule} />
-    <div className={`${styles.flex} ${styles.space}`}><div><strong style={{ fontSize: 13 }}>{t("balance")}</strong><p className={styles.hint} style={{ marginBottom: 0 }}>{t("balanceHint")}</p></div><Button aria-pressed={balance.enabled === true} disabled={!client.canMove || (balanceDescriptor.type !== "boolean" || record(capabilities.balance).available === false) || client.busy === "balance"} onClick={() => void client.command({ action: "balance", enabled: balance.enabled !== true })}>{t(balance.enabled === true ? "disable" : "enable")}</Button></div>
+    <div className={`${styles.flex} ${styles.space}`}><div><strong style={{ fontSize: 13 }}>{t("balance")}</strong><p className={styles.hint} style={{ marginBottom: 0 }}>{t("balanceHint")}</p></div><Button aria-pressed={balance.enabled === true} disabled={!(client.canSetBalance ?? client.canMove) || (balanceDescriptor.type !== "boolean" || record(capabilities.balance).available === false) || client.busy === "balance"} onClick={() => void client.command({ action: "balance", enabled: balance.enabled !== true })}>{t(balance.enabled === true ? "disable" : "enable")}</Button></div>
     <div className={styles.meta}>{t("state")}: {t(balance.enabled === true ? "on" : balance.enabled === false ? "off" : "unknown")}</div>
   </Panel>;
 }

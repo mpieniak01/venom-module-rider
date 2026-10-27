@@ -85,7 +85,7 @@ async def test_camera_stop_http_contract_is_repeatable_in_demo(monkeypatch):
         "venom_module_rider.api.routes.ensure_module_mutation_allowed", lambda **_: None
     )
     pi = DemoPi()
-    device = Device("demo", "Demo", "http://127.0.0.1:18880", "demo")
+    device = Device("demo", "Demo", "http://127.0.0.1", "demo")
     domain = RiderService(
         (device,),
         client_factory=lambda selected: PiClient(

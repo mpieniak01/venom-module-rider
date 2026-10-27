@@ -23,6 +23,7 @@ from . import (
     automatic_routes,
     compute_routes,
     conversation_routes,
+    figure_routes,
     motion_evidence_routes,
     perception_routes,
     pipeline_routes,
@@ -250,6 +251,7 @@ router.include_router(analysis_routes.router)
 router.include_router(automatic_routes.router)
 router.include_router(motion_evidence_routes.router)
 router.include_router(pulse_trial_routes.router)
+router.include_router(figure_routes.router)
 Session = Annotated[str | None, Header(alias="X-Rider-Session")]
 
 
