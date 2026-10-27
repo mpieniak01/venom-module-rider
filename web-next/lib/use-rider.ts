@@ -473,6 +473,26 @@ export function useRider(section: Section) {
       await poll("control",true);return result;
     }finally{motionBlocked.current=Math.max(0,motionBlocked.current-1);setBusy(value=>value==="pulse-trial"?null:value);}
   },[hold,poll,makeEnvelope,mutation]);
+  const startFigure = useCallback(async (identifier:string,plan:string):Promise<string> => {
+    hold.cancel();
+    await command({action:"stop"},true,true);
+    const origin=sessionRef.current,epoch=motionEpoch.current;
+    motionBlocked.current+=1;setBusy("figure-start");
+    try{
+      await poll("control",true);
+      if(sessionRef.current!==origin||motionEpoch.current!==epoch||document.hidden)throw new Error("figure_cancelled");
+      const envelope=makeEnvelope({action:"arm",owner:"manual",arming_mode:"operator",operator_consent:true,operator_plan:plan,figure_id:identifier,figure_version:1});
+      await mutation("/motion/figures/runs",envelope,"POST",true);
+      if(sessionRef.current!==origin||motionEpoch.current!==epoch||document.hidden)throw new Error("figure_cancelled");
+      await poll("control",true);
+      return str(envelope.request_id);
+    }finally{motionBlocked.current=Math.max(0,motionBlocked.current-1);setBusy(value=>value==="figure-start"?null:value);}
+  },[hold,command,poll,makeEnvelope,mutation]);
+  const keepFigure = useCallback(async (runId:string,identifier:string,plan:string) => {
+    if(document.hidden)throw new Error("figure_contact_lost");
+    const envelope=makeEnvelope({action:"arm",owner:"manual",arming_mode:"operator",operator_consent:true,operator_plan:plan,figure_id:identifier,figure_version:1,figure_run_id:runId});
+    return mutation("/motion/figures/runs",envelope,"POST",true);
+  },[makeEnvelope,mutation]);
   const currentManualSettings=useCallback(()=>settingsOf(statusRef.current),[]);
   const currentSession = useCallback(() => sessionRef.current, []);
   const currentMotionEpoch = useCallback(() => motionEpoch.current, []);
@@ -728,6 +748,6 @@ export function useRider(section: Section) {
   // ARM always refreshes the fast control endpoint before making its envelope.
   // The latency of a diagnostics view must not prevent that refresh request.
   const canArm = canRequestArm(status);
-  return { currentManualSettings, startPulseTrial, pipeline, config, status, loading, notice, setNotice, busy, activeDirection, manualMode, manualTurnMode, manualRequest, panelId, canContinuous: continuousAvailable(status, panelId) && canNavigate(), controlFresh: hasFreshControl(), canMutate: isConnected(), canArm, canNavigate: canNavigate(), canMove: movementReady(), poll, refresh, refreshing, command, stopManual, startNavigationTrial, startNavigationJourney, currentSession, currentMotionEpoch, currentGeneration, currentCamera, setPerceptionPolicy, invalidatePerceptionPreview, perceptionSelection, mutate: runMutation, takeManual, selectDevice, hold, camera, cameraStream, setCameraStream, cameraTransition, setCameraTransition, markCameraDecoded, runtimeFrame, showRuntimeFrame, setShowRuntimeFrame, mediaError };
+  return { startFigure, keepFigure, currentManualSettings, startPulseTrial, pipeline, config, status, loading, notice, setNotice, busy, activeDirection, manualMode, manualTurnMode, manualRequest, panelId, canContinuous: continuousAvailable(status, panelId) && canNavigate(), controlFresh: hasFreshControl(), canMutate: isConnected(), canArm, canNavigate: canNavigate(), canMove: movementReady(), poll, refresh, refreshing, command, stopManual, startNavigationTrial, startNavigationJourney, currentSession, currentMotionEpoch, currentGeneration, currentCamera, setPerceptionPolicy, invalidatePerceptionPreview, perceptionSelection, mutate: runMutation, takeManual, selectDevice, hold, camera, cameraStream, setCameraStream, cameraTransition, setCameraTransition, markCameraDecoded, runtimeFrame, showRuntimeFrame, setShowRuntimeFrame, mediaError };
 }
 export type RiderClient = ReturnType<typeof useRider>;

@@ -246,6 +246,9 @@ def begin(domain, body, session):
         direction=direction,
         mode=mode,
         turn_mode="in_place" if body.get("turn_mode") == "in_place" else None,
+        figure_id=text(body.get("figure_id"), 64),
+        figure_version=integer(body.get("figure_version")),
+        figure_run_id=text(body.get("figure_run_id")),
         intensity=number(row.get("speed"))
         if snapshot["qualification"] == "request-revision-match"
         else None,

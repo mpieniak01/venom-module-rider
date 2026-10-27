@@ -84,6 +84,7 @@ def expected_contract(path: str):
         return exact[path]
     for prefix, contract in (
         ("/api/motion/trials", ("rider.pulse_trials", 1)),
+        ("/api/motion/figures", ("rider.figures", 1)),
         ("/api/resource/", ("rider.resources", 1)),
         ("/api/logic/feature/", ("rider.tasks", 2)),
         ("/api/services/", ("rider.services", 2)),

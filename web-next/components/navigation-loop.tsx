@@ -14,6 +14,7 @@ import type { Translator } from "../lib/i18n";
 import { OperatorStatus } from "./operator-status";
 import { OperatorMessages } from "./operator-console";
 import { PulseTrialsPanel } from "./pulse-trials";
+import { FiguresPanel } from "./figures";
 import type { StudyRecording } from "../lib/use-study-recording";
 import { OperatorMotion } from "./operator-motion";
 import { LoopDecision } from "./loop-decision";
@@ -504,6 +505,7 @@ export function NavigationLoop({client,t,language,recording,operatorDetails,stud
         <div ref={railRef} className={styles.tuningBody}>
           <div hidden={operatorDraft.pane!=="motion"} data-testid="operator-motion-pane">
             <div hidden={view!=="manual"}><ManualPad client={client} t={t} language={language} compact minimal/>{(safety.owner!=="manual"&&safety.state==="ARMED")&&<Button data-testid="takeover-manual" disabled={!connected||!!client.busy} onClick={()=>void client.takeManual(t("manual"))}>{t("takeManual")}</Button>}</div>
+            {view==="manual"&&<FiguresPanel client={client} t={t}/>}
             {view==="manual"&&studyRecording&&<PulseTrialsPanel client={client} t={t} recording={studyRecording}/>}
             {view!=="manual"&&draft&&<div data-testid="automatic-motion-settings">        <div className={styles.grid}>
           <Field label={t(view==="journey"?"loopJourneySpeed":"loopSpeed",{limit:String(navigationSpeedLimit(policy,view==="journey"))})}><Input data-testid="automatic-speed" disabled={settingsLocked} type="number" min="0.01" max={navigationSpeedLimit(policy,view==="journey")} step="0.01" value={Number(draft.speed)} onChange={e=>setDraft({...draft,speed:Number(e.target.value)})}/></Field>

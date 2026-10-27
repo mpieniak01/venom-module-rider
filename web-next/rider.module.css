@@ -561,3 +561,9 @@
 .pulseComparison > p { grid-column:1/-1; }
 .pulseComparison > div { padding:12px; border:1px solid var(--r-border); border-radius:12px; min-width:0; }
 .pulseComparison svg { display:block; width:100%; height:auto; }
+
+.figurePanel { border-top: 1px solid var(--rider-border, #263644); padding-top: 14px; margin-top: 14px; }
+.figurePanel h3 { margin: 0 0 8px; font-size: 14px; }
+.figureDescription { min-height: 176px; display: grid; align-content: start; gap: 5px; font-size: 12px; padding: 8px 0; }
+.figureDescription p { margin: 0 0 4px; }
+.figureStatus { min-height: 48px; font-size: 12px; padding-top: 8px; overflow-wrap: anywhere; }

@@ -568,8 +568,11 @@ class RiderService:
             generation = safety["generation"]
             seq = body["seq"]
             self.sequences[generation] = seq
+        # A figure Start must never fall back to generic ARM on an older Pi.
         path = (
-            "/api/safety"
+            "/api/motion/figures/runs"
+            if "figure_id" in body
+            else "/api/safety"
             if action in {"arm", "disarm", "stop", "clear_estop"}
             else "/api/control"
         )

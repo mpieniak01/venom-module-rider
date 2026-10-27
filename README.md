@@ -673,3 +673,32 @@ Neither the gesture nor the brake phase extends its original deadline.
 This is a requested body maneuver, not direct independent wheel control.
 Physical pivot accuracy on the balancing platform requires separate operator
 acceptance. Unit and browser tests use inert adapters and never arm a robot.
+
+
+### Own figure sequences (local manual trials)
+
+The manual motion pane exposes six Pi-owned experimental recipes: side sway,
+height change, forward/backward, snake, lift/rotate and circular body sway.
+They use our sequence executor and posture/velocity setpoints, never native
+firmware ACTION/PERFORM or manufacturer applications.
+
+Selection and status reads do not actuate. Explicit Start uses the normal
+operator gate. One run owns the existing executor; manual input and STOP
+retire all pending steps. Panel contact is bounded at 500 ms; late contact,
+reopening a page or repeating a request cannot restart a completed run.
+The panel shows recipe duration, initial posture and bounded strength.
+Saved manual settings are not overwritten. Older Pi versions cannot receive
+generic ARM as a fallback for an unsupported figure endpoint.
+
+These recipes are available for manual qualification, not claimed replicas
+of manufacturer motion. Final status keeps physical completion unverified.
+The result JSON can be downloaded before the next trial. It contains bounded
+command events and settings; it is not video, a measured trajectory or a
+permanent archive. Pose STOP retains the last setpoint and cannot prove
+mechanical completion.
+
+API: `/api/v1/rider/motion/figures`, `/runs`, `/runs/{id}`,
+`/runs/{id}/cancel`, `/runs/{id}/export`.
+Validation: `make check-python`, `make check-web`, and the inert
+`figures` browser regression registered in
+`scripts/check_browser_regressions.mjs --only figures`.
