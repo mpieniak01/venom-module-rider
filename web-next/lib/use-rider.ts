@@ -57,6 +57,7 @@ export function useRider(section: Section) {
   const pendingAtomic = useRef<JsonRecord|null>(null);
   const cancelPendingRef = useRef<() => boolean>(() => false);
   const motionEpoch = useRef(0);
+  const operatorStops = useRef(0);
   const pendingHandoff = useRef<{requestId:string;generation:string;session:string;epoch:number;deadline:number;navigationOperation?:string}|null>(null);
   const pendingResume = useRef<{requestId:string;generation:string}|null>(null);
   const sessionRef = useRef("");
@@ -415,6 +416,7 @@ export function useRider(section: Section) {
     finally { if (safetyAction) motionBlocked.current = Math.max(0, motionBlocked.current - 1); setBusy(value => value === key ? null : value); }
   }, [hold, poll, sendControl]);
   const stopManual = useCallback(async () => {
+    operatorStops.current += 1;
     motionEpoch.current += 1;
     hold.cancel();
     return command({action:"stop"},true);
@@ -476,8 +478,10 @@ export function useRider(section: Section) {
   },[hold,poll,makeEnvelope,mutation]);
   const startFigure = useCallback(async (identifier:string,plan:string):Promise<string> => {
     hold.cancel();
+    const origin=sessionRef.current,stops=operatorStops.current;
     await command({action:"stop"},true,true);
-    const origin=sessionRef.current,epoch=motionEpoch.current;
+    if(operatorStops.current!==stops||sessionRef.current!==origin||document.hidden)throw new Error("figure_cancelled");
+    const epoch=motionEpoch.current;
     motionBlocked.current+=1;setBusy("figure-start");
     try{
       await poll("control",true);

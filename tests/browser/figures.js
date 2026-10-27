@@ -18,7 +18,9 @@ async page=>{
  check((await page.evaluate(()=>window.figureFixture.calls)).filter(c=>c.kind==="start").length===1,"replayed start");
  const after=await page.getByTestId("figure-start").boundingBox();
  check(Math.abs(before.y-after.y)<=1,"Start jumped after status changed");
- check(await page.getByTestId("figure-export").getAttribute("href"),"export missing");
+ const exported=page.waitForEvent("download");
+ await page.getByTestId("figure-export").click();
+ check((await exported).suggestedFilename().startsWith("figure-"),"export missing");
  await page.evaluate(()=>{window.figureFixture.complete=false;});
  await page.getByTestId("figure-start").click();
  await page.waitForFunction(()=>window.figureFixture.run.phase==="running");
