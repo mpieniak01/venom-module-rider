@@ -491,7 +491,7 @@ export function NavigationLoop({client,t,language,recording,operatorDetails,stud
       </div>
 
     </div>
-    {!settingsError&&!journeyError&&!visibleError&&<OperatorMessages client={client} t={t} authority={view==="manual"}/>}
+    <div className={styles.workspaceMessages} data-testid="workspace-messages">{!settingsError&&!journeyError&&!visibleError&&<OperatorMessages client={client} t={t} authority={view==="manual"}/>}</div>
     <div className={styles.driveWorkspace}>
       <div className={styles.workspaceContent} data-testid="workspace-content" role="region" aria-label={t("workspaceObservation")}>
         <div className={styles.loopCamera}><CameraPanel client={client} t={t} language={language} compact showTools={false} editor={editingZone && draft && Array.isArray(draft.corridor) ? {value:draft.corridor as number[],disabled:settingsLocked,onChange:value=>setDraft({...draft,corridor:value})}:undefined}/></div>
@@ -500,7 +500,7 @@ export function NavigationLoop({client,t,language,recording,operatorDetails,stud
         <div className={styles.tuningTabs} role="tablist" aria-label={t("operator.tuning")}>{(["motion","model"] as const).map(pane=><Button key={pane} role="tab" aria-selected={operatorDraft.pane===pane} data-testid={"tuning-tab-"+pane} tone={operatorDraft.pane===pane?"primary":undefined} onClick={()=>setOperatorDraft(previous=>({...previous,pane}))}>{t("operator."+pane)}</Button>)}</div>
         <div ref={railRef} className={styles.tuningBody}>
           <div hidden={operatorDraft.pane!=="motion"} data-testid="operator-motion-pane">
-            <div hidden={view!=="manual"}>{(safety.owner!=="manual"&&safety.state==="ARMED")&&<Button data-testid="takeover-manual" disabled={!connected||!!client.busy} onClick={()=>void client.takeManual(t("manual"))}>{t("takeManual")}</Button>}<ManualPad client={client} t={t} language={language} compact minimal/></div>
+            <div hidden={view!=="manual"}><ManualPad client={client} t={t} language={language} compact minimal/>{(safety.owner!=="manual"&&safety.state==="ARMED")&&<Button data-testid="takeover-manual" disabled={!connected||!!client.busy} onClick={()=>void client.takeManual(t("manual"))}>{t("takeManual")}</Button>}</div>
             {view==="manual"&&studyRecording&&<PulseTrialsPanel client={client} t={t} recording={studyRecording}/>}
             {view!=="manual"&&draft&&<div data-testid="automatic-motion-settings">        <div className={styles.grid}>
           <Field label={t(view==="journey"?"loopJourneySpeed":"loopSpeed",{limit:String(navigationSpeedLimit(policy,view==="journey"))})}><Input data-testid="automatic-speed" disabled={settingsLocked} type="number" min="0.01" max={navigationSpeedLimit(policy,view==="journey")} step="0.01" value={Number(draft.speed)} onChange={e=>setDraft({...draft,speed:Number(e.target.value)})}/></Field>

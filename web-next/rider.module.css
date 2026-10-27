@@ -541,7 +541,10 @@
 }
 
 .drivingSurface, .pageFocused .drivingSurface { display:flex; flex-direction:column; }
-.drivingSurface > .operatorMessages { height:auto; min-height:0; padding:0; }
+/* Status changes must never move the camera or the manual targets. */
+.workspaceMessages { flex:0 0 44px; height:44px; min-height:44px; overflow:hidden; }
+.workspaceMessages > .operatorMessages { height:44px; min-height:44px; }
+.tuningBody { overflow-anchor:none; }
 .tuningBody .manualPad { display:grid; grid-template-rows:36px 144px auto; gap:6px; }
 .tuningBody .pad { grid-template-columns:repeat(3,60px); grid-template-rows:repeat(3,44px); gap:6px; margin:0; }
 .tuningBody .pad .small { font-size:10px; }
