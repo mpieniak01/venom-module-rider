@@ -15,7 +15,7 @@ from urllib.parse import urlsplit
 import httpx
 from fastapi.responses import Response
 
-from .motion_limits import MAX_MOTION_MS, MAX_SPEED
+from .motion_limits import MAX_DECISION_MS, MAX_MOTION_MS, MAX_SPEED
 from .vision_contract import VisionFrame
 
 LOOP_GOALS = {"s14_venom_navigation": "drive", "s15_venom_perception": "observe"}
@@ -32,7 +32,7 @@ DEFAULT_POLICY: dict[str, Any] = {
         "max_motion_ms": MAX_MOTION_MS,
         "max_turn_speed": MAX_SPEED,
         "max_turn_ms": MAX_MOTION_MS,
-        "max_decision_ms": MAX_MOTION_MS,
+        "max_decision_ms": MAX_DECISION_MS,
     },
     "corridor": [0.35, 0.80, 0.65, 0.95],
     "calibration_id": "",
