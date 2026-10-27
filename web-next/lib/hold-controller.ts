@@ -140,6 +140,14 @@ export class HoldController {
       if (this.now() - preparation.started >= (this.options.timing()?.request_ttl_ms ?? 0)) { this.cancel(); return; }
       preparation.ready = true;
     }
+    // Releasing must reach Pi even while an earlier hold response is stalled.
+    // The newer sequence retires late renewals; never wait for their HTTP ACK.
+    if (intent.mode === "release") {
+      if (!valid()) return;
+      try { await this.options.send(intent, valid); }
+      catch (error) { this.options.onError(error); }
+      return;
+    }
     // Replacement waits only for the request already being sent, never for a queue.
     if (this.sending) await this.inFlight;
     if (!valid()) return;
