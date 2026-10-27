@@ -476,23 +476,36 @@ export function useRider(section: Section) {
       await poll("control",true);return result;
     }finally{motionBlocked.current=Math.max(0,motionBlocked.current-1);setBusy(value=>value==="pulse-trial"?null:value);}
   },[hold,poll,makeEnvelope,mutation]);
-  const startFigure = useCallback(async (identifier:string,plan:string):Promise<string> => {
+  const startFigure = useCallback(async (identifier:string,plan:string,signal?:AbortSignal):Promise<string> => {
     hold.cancel();
     const origin=sessionRef.current,stops=operatorStops.current;
-    await command({action:"stop"},true,true);
-    if(operatorStops.current!==stops||sessionRef.current!==origin||document.hidden)throw new Error("figure_cancelled");
-    const epoch=motionEpoch.current;
-    motionBlocked.current+=1;setBusy("figure-start");
+    let epoch:number|null=null,dispatched=false,blocked=false;
+    const onAbort=()=>{
+      // Only stop the still-current start; a newer gesture or device owns its own motion.
+      if(dispatched&&epoch===motionEpoch.current&&sessionRef.current===origin)
+        void stopManual().catch(()=>undefined);
+    };
+    if(signal?.aborted)throw new Error("figure_cancelled");
+    signal?.addEventListener("abort",onAbort,{once:true});
     try{
+      await command({action:"stop"},true,true);
+      if(signal?.aborted||operatorStops.current!==stops||sessionRef.current!==origin||document.hidden)throw new Error("figure_cancelled");
+      epoch=motionEpoch.current;
+      motionBlocked.current+=1;blocked=true;setBusy("figure-start");
       await poll("control",true);
-      if(sessionRef.current!==origin||motionEpoch.current!==epoch||document.hidden)throw new Error("figure_cancelled");
+      if(signal?.aborted||sessionRef.current!==origin||motionEpoch.current!==epoch||document.hidden)throw new Error("figure_cancelled");
       const envelope=makeEnvelope({action:"arm",owner:"manual",arming_mode:"operator",operator_consent:true,operator_plan:plan,figure_id:identifier,figure_version:1});
+      dispatched=true;
       await mutation("/motion/figures/runs",envelope,"POST",true);
-      if(sessionRef.current!==origin||motionEpoch.current!==epoch||document.hidden)throw new Error("figure_cancelled");
+      if(signal?.aborted||sessionRef.current!==origin||motionEpoch.current!==epoch||document.hidden)throw new Error("figure_cancelled");
       await poll("control",true);
+      if(signal?.aborted||sessionRef.current!==origin||motionEpoch.current!==epoch||document.hidden)throw new Error("figure_cancelled");
       return str(envelope.request_id);
-    }finally{motionBlocked.current=Math.max(0,motionBlocked.current-1);setBusy(value=>value==="figure-start"?null:value);}
-  },[hold,command,poll,makeEnvelope,mutation]);
+    }finally{
+      signal?.removeEventListener("abort",onAbort);
+      if(blocked){motionBlocked.current=Math.max(0,motionBlocked.current-1);setBusy(value=>value==="figure-start"?null:value);}
+    }
+  },[hold,command,poll,makeEnvelope,mutation,stopManual]);
   const keepFigure = useCallback(async (runId:string,identifier:string,plan:string) => {
     if(document.hidden)throw new Error("figure_contact_lost");
     const envelope=makeEnvelope({action:"arm",owner:"manual",arming_mode:"operator",operator_consent:true,operator_plan:plan,figure_id:identifier,figure_version:1,figure_run_id:runId});

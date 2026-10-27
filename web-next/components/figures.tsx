@@ -16,10 +16,27 @@ export function FiguresPanel({client,t}:{client:RiderClient;t:Translator}){
  const owner=useRef<{session:string;plan:string;id:string}|null>(null);
  const claimed=useRef(false);
  const cancelledRun=useRef<string|null>(null);
+ const starting=useRef<AbortController|null>(null);
+ const mounted=useRef(false);
+ const unobserved=useRef<{id:string;session:string}|null>(null);
  const currentSession=client.currentSession,keepFigure=client.keepFigure;
  const session=currentSession();
  const chosen=recipes.find(row=>row.id===selected);
  const active=figureActive(run);
+ useEffect(()=>{
+  mounted.current=true;
+  const retire=()=>{
+   starting.current?.abort();
+   const pending=unobserved.current;unobserved.current=null;
+   if(pending){
+    cancelledRun.current=pending.id;
+    void apiFetch("/api/v1/rider/motion/figures/runs/"+encodeURIComponent(pending.id)+"/cancel",{method:"POST",headers:{"X-Rider-Session":pending.session},body:"{}"}).catch(()=>undefined);
+   }
+  };
+  const visibility=()=>{if(document.hidden)retire();};
+  document.addEventListener("visibilitychange",visibility);
+  return()=>{mounted.current=false;document.removeEventListener("visibilitychange",visibility);retire();};
+ },[]);
  useEffect(()=>{
   let cancelled=false;setRecipes([]);
   if(supported&&client.canMutate)void apiFetch("/api/v1/rider/motion/figures").then(row=>{if(!cancelled)setRecipes(figureCatalog(data(row)));}).catch(error=>{if(!cancelled)setFailure(errorCode(error));});
@@ -27,6 +44,7 @@ export function FiguresPanel({client,t}:{client:RiderClient;t:Translator}){
  },[supported,session,client.canMutate]);
  useEffect(()=>{
   if(!runId||!owner.current)return;
+  if(unobserved.current?.id===runId)unobserved.current=null;
   const own=owner.current;let alive=true,running=true,timer:ReturnType<typeof setTimeout>|undefined;
   const cancel=()=>{running=false;cancelledRun.current=runId;clearTimeout(timer);return apiFetch("/api/v1/rider/motion/figures/runs/"+encodeURIComponent(runId)+"/cancel",{method:"POST",headers:{"X-Rider-Session":own.session},body:"{}"}).catch(()=>undefined);};
   const tick=async()=>{
@@ -54,13 +72,18 @@ export function FiguresPanel({client,t}:{client:RiderClient;t:Translator}){
  const start=async()=>{
   if(!chosen||!chosen.available||claimed.current||active)return;
   claimed.current=true;setBusy(true);setFailure("");
+  const controller=new AbortController(),origin=client.currentSession();starting.current=controller;
   const plan=t("figures.plan",{name:t("figures.name."+chosen.id),seconds:chosen.duration_ms/1000,height:chosen.initial_height??"—",roll:chosen.initial_roll??"—"});
   try{
-   const id=await client.startFigure(chosen.id,plan);
-   owner.current={session:client.currentSession(),plan,id:chosen.id};
+   const id=await client.startFigure(chosen.id,plan,controller.signal);
+   if(controller.signal.aborted||client.currentSession()!==origin){
+    void apiFetch("/api/v1/rider/motion/figures/runs/"+encodeURIComponent(id)+"/cancel",{method:"POST",headers:{"X-Rider-Session":origin},body:"{}"}).catch(()=>undefined);
+    return;
+   }
+   owner.current={session:origin,plan,id:chosen.id};unobserved.current={id,session:origin};
    setRun({phase:"preparing",step:0,step_count:0});setRunId(id);
-  }catch(error){setFailure(errorCode(error));}
-  finally{claimed.current=false;setBusy(false);}
+  }catch(error){if(!controller.signal.aborted)setFailure(errorCode(error));}
+  finally{if(starting.current===controller)starting.current=null;claimed.current=false;if(mounted.current)setBusy(false);}
  };
  const cancel=async()=>{
   if(!runId)return;

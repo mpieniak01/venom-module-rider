@@ -1,5 +1,6 @@
 """Figure API and evidence tests use inert Pi responses only."""
 
+import asyncio
 import copy
 import json
 
@@ -12,6 +13,7 @@ from test_pulse_trials import body
 from venom_module_rider.api.figure_routes import FigureRequest, identifier
 from venom_module_rider.client import expected_contract
 from venom_module_rider.demo import envelope
+from venom_module_rider.errors import RiderError
 
 
 def request(**changes):
@@ -155,6 +157,31 @@ def test_recorded_motion_intent_retains_own_recipe_metadata():
     )
     assert row.model_dump()["figure_id"] == "sway"
     assert copy.deepcopy(row).figure_version == 1
+
+
+async def test_stop_supersedes_a_dispatched_figure_start(monkeypatch):
+    entered = asyncio.Event()
+    calls = []
+
+    async def handle(incoming):
+        calls.append(incoming.url.path)
+        if incoming.url.path == "/api/motion/figures/runs":
+            entered.set()
+            await asyncio.Event().wait()
+        reply = envelope({"ok": True, "confirmed": True})
+        return httpx.Response(200, content=reply.body, headers=reply.headers)
+
+    service, client = await setup_proxy(monkeypatch, handle)
+    try:
+        pending = asyncio.create_task(service.control(request(), service.session))
+        await asyncio.wait_for(entered.wait(), 1)
+        await asyncio.wait_for(service.control({"action": "stop"}, service.session), 1)
+        with pytest.raises(RiderError, match="command_superseded"):
+            await pending
+        assert calls == ["/api/motion/figures/runs", "/api/safety"]
+    finally:
+        await client.aclose()
+        await service.close()
 
 
 async def test_older_pi_without_figures_never_receives_generic_arm(monkeypatch):

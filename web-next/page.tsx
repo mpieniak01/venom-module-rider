@@ -84,8 +84,8 @@ export default function RiderPage() {
   const client = useRider(section);
   const recording=useStudyRecording(client.config?.device_id??null,client.config?.session??null);
   const connection = client.status?.connection;
-  const { command } = client;
-  const stop = useCallback(() => { void command({ action: "stop" }); }, [command]);
+  const { stopManual } = client;
+  const stop = useCallback(() => { void stopManual().catch(() => undefined); }, [stopManual]);
   useEffect(() => {
     const key = (event: KeyboardEvent) => { if (event.key === "Escape" && !event.repeat) { event.preventDefault(); stop(); } };
     window.addEventListener("keydown", key); return () => window.removeEventListener("keydown", key);

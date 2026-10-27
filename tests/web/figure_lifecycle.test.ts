@@ -50,7 +50,7 @@ async function renderFixture(file:string,apiFetch:(path:string,options?:RequestI
   client=(exports.useRider as (section:string)=>RiderClient)("control");return null;
  };
  await React.act(async()=>{root.render(React.createElement(View as import("react").ComponentType<Row>,props));await pause();});
- return {dom,downloads,get client(){assert.ok(client);return client;},async close(){
+ return {root,dom,downloads,get client(){assert.ok(client);return client;},async close(){
   await React.act(async()=>root.unmount());dom.window.close();Object.assign(globalThis,previous);
  }};
 }
@@ -122,4 +122,107 @@ test("figure export uses the API request pipeline and downloads its JSON respons
   assert.equal(calls.filter(path=>path.endsWith("/export")).length,1);
   assert.deepEqual(JSON.parse(await f.downloads[0].text()),exported);
  }finally{await f.close();}
+});
+
+
+for(const stage of ["preliminary-stop","dispatched"] as const){
+ test("aborting figure start during "+stage+" prevents late motion",async()=>{
+  const gate=deferred(),entered=deferred(),calls:Row[]=[];
+  const api=async(path:string,options?:RequestInit)=>{
+   const body=options?.body?JSON.parse(String(options.body)):null;
+   if(body){
+    calls.push({path,body});
+    if(stage==="preliminary-stop"&&path.endsWith("/control")&&calls.length===1 ||
+       stage==="dispatched"&&path.endsWith("/motion/figures/runs")){
+     entered.resolve();await gate.promise;
+    }
+   }
+   if(path.endsWith("/config"))return {devices:[],device_id:"demo",session:"fixture"};
+   if(path.includes("/status"))return status();
+   return {ok:true,confirmed:true,pending:false};
+  };
+  const f=await renderFixture("web-next/lib/use-rider.ts",api);
+  const controller=new AbortController();
+  try{
+   let start!:Promise<string>;
+   await React.act(async()=>{start=f.client.startFigure("sway","inert test",controller.signal);void start.catch(()=>{});await entered.promise;});
+   await React.act(async()=>{controller.abort();await pause();});
+   const stops=calls.filter(row=>String(row.path).endsWith("/control")&&(row.body as Row).action==="stop");
+   assert.equal(stops.length,stage==="dispatched"?2:1,"a dispatched start must be stopped immediately");
+   await React.act(async()=>{gate.resolve();await assert.rejects(start,/figure_cancelled/);});
+   assert.equal(calls.filter(row=>String(row.path).endsWith("/motion/figures/runs")).length,stage==="dispatched"?1:0);
+  }finally{gate.resolve();await f.close();}
+ });
+}
+
+test("abort does not stop again after a newer operator STOP",async()=>{
+ const gate=deferred(),entered=deferred(),calls:Row[]=[];
+ const api=async(path:string,options?:RequestInit)=>{
+  const body=options?.body?JSON.parse(String(options.body)):null;
+  if(body){calls.push({path,body});if(path.endsWith("/motion/figures/runs")){entered.resolve();await gate.promise;}}
+  if(path.endsWith("/config"))return {devices:[],device_id:"demo",session:"fixture"};
+  if(path.includes("/status"))return status();
+  return {ok:true,confirmed:true,pending:false};
+ };
+ const f=await renderFixture("web-next/lib/use-rider.ts",api),controller=new AbortController();
+ try{
+  let start!:Promise<string>;
+  await React.act(async()=>{start=f.client.startFigure("sway","inert test",controller.signal);void start.catch(()=>{});await entered.promise;});
+  await React.act(async()=>{await f.client.stopManual();controller.abort();await pause();});
+  assert.equal(calls.filter(row=>String(row.path).endsWith("/control")&&(row.body as Row).action==="stop").length,2);
+  await React.act(async()=>{gate.resolve();await assert.rejects(start,/figure_cancelled/);});
+ }finally{gate.resolve();await f.close();}
+});
+
+
+test("hiding the page aborts a pending figure start",async()=>{
+ const gate=deferred(),entered=deferred(),calls:string[]=[];
+ let signal:AbortSignal|undefined;
+ const client={status:{control:{safety:{figures:{version:1}}}},canMutate:true,controlFresh:true,busy:null,
+  currentSession:()=>"fixture",startFigure:async(_id:string,_plan:string,received:AbortSignal)=>{
+   signal=received;entered.resolve();await gate.promise;return "hidden-run";
+  },keepFigure:async()=>{}} as unknown as RiderClient;
+ const api=async(path:string)=>{
+  calls.push(path);
+  if(path.endsWith("/figures"))return {version:1,implementation:"own_sequence",figures:[{id:"sway",version:1,implementation:"own_sequence",qualification:"manual_trial",physical_completion:"unverified",duration_ms:4000,available:true,maximum_speed:.25,intensity_factor:.3}]};
+  return {run:{phase:"running"}};
+ };
+ const f=await renderFixture("web-next/components/figures.tsx",api,{client,t:(key:string)=>translate("pl",key)});
+ try{
+  await React.act(async()=>{f.dom.window.document.querySelector('[data-testid="figure-start"]').click();await entered.promise;});
+  await React.act(async()=>{
+   Object.defineProperty(f.dom.window.document,"hidden",{value:true,configurable:true});
+   f.dom.window.document.dispatchEvent(new f.dom.window.Event("visibilitychange"));
+  });
+  assert.equal(signal?.aborted,true);
+  await React.act(async()=>{gate.resolve();await pause();});
+  assert.ok(calls.some(path=>path.endsWith("/hidden-run/cancel")));
+  await React.act(async()=>{
+   Object.defineProperty(f.dom.window.document,"hidden",{value:false,configurable:true});
+   f.dom.window.document.dispatchEvent(new f.dom.window.Event("visibilitychange"));await pause();
+  });
+  assert.equal(f.dom.window.document.querySelector('[data-testid="figure-start"]').disabled,false,"hidden cancellation left Start disabled");
+ }finally{gate.resolve();await f.close();}
+});
+
+test("unmount aborts a pending start and scopes cancellation of a late accepted run",async()=>{
+ const gate=deferred(),entered=deferred(),calls:string[]=[];
+ let signal:AbortSignal|undefined;
+ const client={status:{control:{safety:{figures:{version:1}}}},canMutate:true,controlFresh:true,busy:null,
+  currentSession:()=>"fixture",startFigure:async(_id:string,_plan:string,received:AbortSignal)=>{
+   signal=received;entered.resolve();await gate.promise;return "delayed-run";
+  },keepFigure:async()=>{}} as unknown as RiderClient;
+ const api=async(path:string)=>{
+  calls.push(path);
+  if(path.endsWith("/figures"))return {version:1,implementation:"own_sequence",figures:[{id:"sway",version:1,implementation:"own_sequence",qualification:"manual_trial",physical_completion:"unverified",duration_ms:4000,available:true,maximum_speed:.25,intensity_factor:.3}]};
+  return {run:{phase:"running"}};
+ };
+ const f=await renderFixture("web-next/components/figures.tsx",api,{client,t:(key:string)=>translate("pl",key)});
+ try{
+  await React.act(async()=>{f.dom.window.document.querySelector('[data-testid="figure-start"]').click();await entered.promise;});
+  await React.act(async()=>f.root.unmount());
+  assert.equal(signal?.aborted,true);
+  await React.act(async()=>{gate.resolve();await pause();});
+  assert.ok(calls.some(path=>path.endsWith("/delayed-run/cancel")),"late accepted run was not cancelled");
+ }finally{gate.resolve();await f.close();}
 });
