@@ -65,6 +65,8 @@ async page=>{
   await page.waitForFunction(()=>document.querySelector('[data-testid="operator-balance-state"]').textContent==="Włączony");
   for(const size of [{width:1440,height:1000},{width:390,height:844}]){
    await page.setViewportSize(size);check(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),"operator header overflow");
+   const aligned=await page.evaluate(()=>{const a=document.querySelector('[data-testid="study-record"]').getBoundingClientRect(),b=document.querySelector('[data-testid="study-end"]').getBoundingClientRect();return Math.abs(a.y-b.y)<2;});
+   check(aligned,"recording actions do not share one row");
   }
   return {result:"PASS",fixtureOnly:true,cases:["offline Prod to Demo","inert recording","single toolbar actions","no ARM","one full STOP","simulated movement","height","balance","desktop/mobile"]};
  }finally{await page.goto("about:blank");await page.unroute("**/api/v1/rider/**");}

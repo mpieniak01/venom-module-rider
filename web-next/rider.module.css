@@ -401,7 +401,7 @@
 @container rider (min-width:900px) {
   .header { flex-wrap:nowrap; gap:12px; }
   .brand { flex:0 0 140px; }
-  .toolbar { display:grid; grid-template-columns:minmax(120px,1fr) 120px 36px 178px 104px 36px; gap:8px; flex:1; }
+  .toolbar { display:grid; grid-template-columns:minmax(120px,1fr) 120px 36px max-content 36px; gap:8px; flex:1; }
   .environmentSelect { font-size:11px; gap:6px; }
   .environmentSelect select { width:90px; }
   .toolbar > .button { padding:0 6px; }
@@ -570,3 +570,5 @@
 .toolbar .recordingActions .button { white-space:nowrap; }
 
 .recordingState { height:36px; line-height:18px; overflow:auto; }
+
+@container rider (min-width:721px) { .toolbar .recordingActions { flex-wrap:nowrap; width:auto; } }
