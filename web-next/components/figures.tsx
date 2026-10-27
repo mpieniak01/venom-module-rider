@@ -59,8 +59,13 @@ export function FiguresPanel({client,t}:{client:RiderClient;t:Translator}){
     running=figureActive(next);
     if(!running)return;
    }catch(error){
-    if(!alive)return;
-    try{const next=record(data(await apiFetch("/api/v1/rider/motion/figures/runs/"+encodeURIComponent(runId))).run);if(!figureActive(next)){setRun(next);running=false;return;}}catch{}
+    if(!alive||cancelledRun.current===runId)return;
+    try{
+     const next=record(data(await apiFetch("/api/v1/rider/motion/figures/runs/"+encodeURIComponent(runId))).run);
+     if(!alive||cancelledRun.current===runId)return;
+     if(!figureActive(next)){setRun(next);running=false;return;}
+    }catch{}
+    if(!alive||cancelledRun.current===runId)return;
     setFailure(errorCode(error));running=false;void cancel();return;
    }
    if(alive&&running&&cancelledRun.current!==runId)timer=setTimeout(()=>void tick(),200);

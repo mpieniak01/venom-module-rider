@@ -102,6 +102,62 @@ test("cancelling a figure stops further renewal before cancellation is acknowled
   assert.equal(renewals,before,"an ARM keepalive was sent after Cancel");
  }finally{await React.act(async()=>{cancellation.resolve();await pause();});await f.close();}
 });
+
+for(const stage of ["keepalive","recovery"] as const){
+ test("cancel ignores a delayed "+stage+" failure and sends one cancellation",async()=>{
+  const pendingCancel=deferred(),cancelEntered=deferred(),recovery=deferred(),recoveryEntered=deferred(),keepEntered=deferred();
+  let failKeep!: (error:Error)=>void;
+  const keep=new Promise<void>((_resolve,reject)=>{failKeep=reject;});
+  const calls:string[]=[];let recovering=false;
+  const client={status:{control:{safety:{figures:{version:1}}}},canMutate:true,controlFresh:true,busy:null,
+   currentSession:()=>"fixture",startFigure:async()=>"run",keepFigure:async()=>{keepEntered.resolve();await keep;}} as unknown as RiderClient;
+  const api=async(path:string)=>{
+   calls.push(path);
+   if(path.endsWith("/cancel")){cancelEntered.resolve();await pendingCancel.promise;return {};}
+   if(path.endsWith("/figures"))return {version:1,implementation:"own_sequence",figures:[{id:"sway",version:1,implementation:"own_sequence",qualification:"manual_trial",physical_completion:"unverified",duration_ms:4000,available:true,maximum_speed:.25,intensity_factor:.3}]};
+   if(recovering){recoveryEntered.resolve();await recovery.promise;}
+   return {run:{phase:"running",step:1,step_count:2}};
+  };
+  const f=await renderFixture("web-next/components/figures.tsx",api,{client,t:(key:string)=>translate("pl",key)});
+  try{
+   await React.act(async()=>{f.dom.window.document.querySelector('[data-testid="figure-start"]').click();await pause();});
+   await keepEntered.promise;
+   if(stage==="recovery"){await React.act(async()=>{recovering=true;failKeep(new Error("offline"));await pause();});await recoveryEntered.promise;}
+   await React.act(async()=>{f.dom.window.document.querySelector('[data-testid="figure-cancel"]').click();await pause();});
+   await cancelEntered.promise;
+   await React.act(async()=>{
+    if(stage==="keepalive")failKeep(new Error("offline"));else recovery.resolve();
+    await pause();
+   });
+   assert.equal(calls.filter(path=>path.endsWith("/cancel")).length,1,"duplicate cancellation after operator cancelled");
+   assert.doesNotMatch(f.dom.window.document.querySelector('[data-testid="figure-status"]').textContent,/Nie udało/);
+  }finally{
+   failKeep(new Error("cleanup"));recovery.resolve();
+   await React.act(async()=>{pendingCancel.resolve();await pause();});
+   await f.close();
+  }
+ });
+}
+
+
+test("a real keepalive failure still shows an error and cancels the active run",async()=>{
+ const calls:string[]=[];
+ const client={status:{control:{safety:{figures:{version:1}}}},canMutate:true,controlFresh:true,busy:null,
+  currentSession:()=>"fixture",startFigure:async()=>"run",keepFigure:async()=>{throw new Error("offline");}} as unknown as RiderClient;
+ const api=async(path:string)=>{
+  calls.push(path);
+  if(path.endsWith("/figures"))return {version:1,implementation:"own_sequence",figures:[{id:"sway",version:1,implementation:"own_sequence",qualification:"manual_trial",physical_completion:"unverified",duration_ms:4000,available:true,maximum_speed:.25,intensity_factor:.3}]};
+  return {run:{phase:"running",step:1,step_count:2}};
+ };
+ const f=await renderFixture("web-next/components/figures.tsx",api,{client,t:(key:string)=>translate("pl",key)});
+ try{
+  await React.act(async()=>{f.dom.window.document.querySelector('[data-testid="figure-start"]').click();await pause();});
+  await React.act(async()=>{await pause();});
+  assert.equal(calls.filter(path=>path.endsWith("/cancel")).length,1);
+  assert.match(f.dom.window.document.querySelector('[data-testid="figure-status"]').textContent,/Nie udało/);
+ }finally{await f.close();}
+});
+
 test("figure export uses the API request pipeline and downloads its JSON response",async()=>{
  const calls:string[]=[];
  const client={status:{control:{safety:{figures:{version:1}}}},canMutate:true,controlFresh:true,busy:null,
