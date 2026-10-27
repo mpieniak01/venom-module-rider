@@ -67,12 +67,18 @@ async page => {
       await page.getByTestId("rider-forward").waitFor({state:"visible"});
       await page.waitForTimeout(150);
       const initial=await bounds();
+      const camera=page.getByTestId("workspace-content").locator("img").first();
+      const cameraBefore=await camera.boundingBox();
+      const messageBox=await page.getByTestId("workspace-messages").boundingBox();
+      check(cameraBefore&&messageBox&&messageBox.y>=cameraBefore.y+cameraBefore.height,"messages must be below camera");
       motionActive=true;
       await page.getByTestId("takeover-manual").waitFor({state:"visible"});
       await same(initial,"owner/notice transition "+viewport.width);
       motionActive=false;
       await wait(async()=>!(await page.getByTestId("takeover-manual").count()),"disarmed state not applied");
       await same(initial,"notice cleared "+viewport.width);
+      const cameraAfter=await camera.boundingBox();
+      check(cameraAfter&&Math.abs(cameraAfter.y-cameraBefore.y)<=1&&Math.abs(cameraAfter.height-cameraBefore.height)<=1,"message changed camera geometry");
     }
     check(calls.length===0,"layout test sent a mutation");
     return {pass:true,viewports:3,robot_contacted:false};

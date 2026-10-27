@@ -147,6 +147,8 @@ export function NavigationLoop({client,t,language,recording,operatorDetails,stud
     if(refreshPolicy&&!dirtyRef.current&&typeof record(row.config).revision==="number")applyPolicy(record(row.config));
   },[currentSession,applyPolicy,setPerceptionPolicy]);
   const failure=useCallback((err:unknown)=>{
+    // STOP, leaving the panel and superseded operations are expected cancellation.
+    if(errorCode(err)==="navigation_trial_cancelled"){setTrialFailure(null);setError("");setTrialResult("");return;}
     setTrialFailure(err);
     const diagnostic=record(record(record(record(err).data).detail).details).navigation;
     const row=record(diagnostic);setErrorRun(String(row.run_id??""));const cause=String(record(row.motion_failure).reason??row.stop_reason??"");
@@ -326,7 +328,7 @@ export function NavigationLoop({client,t,language,recording,operatorDetails,stud
     })();
     startTask.current=task;
     try{await task;}
-    catch(err){if(!stopping.current){failure(err);setTrialResult("trialFailed");}}
+    catch(err){if(!stopping.current){failure(err);if(errorCode(err)!=="navigation_trial_cancelled")setTrialResult("trialFailed");}}
     finally{startTask.current=null;setOperatorDraft(previous=>({...previous,busy:false}));if(!stopping.current)setOperation(null);}
   };
   const runJourney=async()=>{
@@ -347,7 +349,7 @@ export function NavigationLoop({client,t,language,recording,operatorDetails,stud
       if(refreshError){setReadError(t("loopStartedReadFailed")+" · "+errorCode(refreshError));setLoopState(previous=>({...previous,stale:true}));}
       setJourneyRequested(true);
     })();startTask.current=task;
-    try{await task;}catch(err){if(!stopping.current&&client.currentMotionEpoch()===operationEpoch.current&&client.currentSession()===origin)setJourneyError(errorCode(err));}
+    try{await task;}catch(err){if(!stopping.current&&errorCode(err)!=="navigation_trial_cancelled"&&client.currentMotionEpoch()===operationEpoch.current&&client.currentSession()===origin)setJourneyError(errorCode(err));}
     finally{startTask.current=null;setOperatorDraft(previous=>({...previous,busy:false}));if(!stopping.current)setOperation(null);}
   };
   const stopJourney=async()=>{
@@ -414,7 +416,7 @@ export function NavigationLoop({client,t,language,recording,operatorDetails,stud
   const displayedStopReason=sharedTrial?String(sharedTrial.stop_reason):trialStopReason;
   const preparation=diagnostic.preparation;
   const hasPreparationError=trialPreparation({},trialFailure)!==null;
-  const visibleError=diagnostic.requestErrorCovered||preparation?.source==="pi"&&hasPreparationError||errorRun&&sharedTrial?.run_id===errorRun?"":error;
+  const visibleError=error.includes("navigation_trial_cancelled")||diagnostic.requestErrorCovered||preparation?.source==="pi"&&hasPreparationError||errorRun&&sharedTrial?.run_id===errorRun?"":error;
   const sharedRecovery=sharedTrial&&recoveryFailure?.runId===sharedTrial.run_id?recoveryFailure:null;
 
   const safety = safetyOf(client.status);
@@ -485,16 +487,16 @@ export function NavigationLoop({client,t,language,recording,operatorDetails,stud
             </div>
           </Panel>
         </div>
-      <div className={styles.commandReason} role="status" data-testid="command-reason">
-        <span>{commandReason}</span>
-        {prepareAction&&!dirty&&!(view==="journey"&&confirmJourney)&&<Button data-testid="prepare-navigation" disabled={!connected||!!operation||loading||!!observeBlock||goals.drive===true} onClick={()=>{if(!acceptanceBlock)void acceptTrial();else showPreparation();}}>{t(!acceptanceBlock?"workspace.confirm":active?"workspace.preparation":"workspace.prepare")}</Button>}
-      </div>
+
 
     </div>
-    <div className={styles.workspaceMessages} data-testid="workspace-messages">{!settingsError&&!journeyError&&!visibleError&&<OperatorMessages client={client} t={t} authority={view==="manual"}/>}</div>
     <div className={styles.driveWorkspace}>
       <div className={styles.workspaceContent} data-testid="workspace-content" role="region" aria-label={t("workspaceObservation")}>
         <div className={styles.loopCamera}><CameraPanel client={client} t={t} language={language} compact showTools={false} editor={editingZone && draft && Array.isArray(draft.corridor) ? {value:draft.corridor as number[],disabled:settingsLocked,onChange:value=>setDraft({...draft,corridor:value})}:undefined}/></div>
+        <div className={styles.workspaceMessages} data-testid="workspace-messages">      <div className={styles.commandReason} role="status" data-testid="command-reason" hidden={!commandReason&&!(prepareAction&&!dirty&&!(view==="journey"&&confirmJourney))}>
+        <span>{commandReason}</span>
+        {prepareAction&&!dirty&&!(view==="journey"&&confirmJourney)&&<Button data-testid="prepare-navigation" disabled={!connected||!!operation||loading||!!observeBlock||goals.drive===true} onClick={()=>{if(!acceptanceBlock)void acceptTrial();else showPreparation();}}>{t(!acceptanceBlock?"workspace.confirm":active?"workspace.preparation":"workspace.prepare")}</Button>}
+      </div>{!commandReason&&!settingsError&&!journeyError&&!visibleError&&<OperatorMessages client={client} t={t} authority={view==="manual"}/>}</div>
       </div>
       <aside className={styles.tuningRail} aria-label={t("operator.tuning")} data-testid="operator-tuning">
         <div className={styles.tuningTabs} role="tablist" aria-label={t("operator.tuning")}>{(["motion","model"] as const).map(pane=><Button key={pane} role="tab" aria-selected={operatorDraft.pane===pane} data-testid={"tuning-tab-"+pane} tone={operatorDraft.pane===pane?"primary":undefined} onClick={()=>setOperatorDraft(previous=>({...previous,pane}))}>{t("operator."+pane)}</Button>)}</div>

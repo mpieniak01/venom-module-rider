@@ -5,7 +5,7 @@ async page => {
   await page.goto('about:blank');
   const wait=async(fn,message)=>{const end=Date.now()+9000;while(!await fn()){check(Date.now()<end,message);await new Promise(resolve=>setTimeout(resolve,40));}};
   const sha='a'.repeat(64),calls=[];
-  let armed=true,owner='manual',operator='paused',producer=true,generation='fixture-0',serial=0;
+  let armed=true,owner='manual',operator='paused',producer=true,generation='fixture-0',serial=0,cancelResume=true;
   const advance=()=>generation='fixture-'+(++serial);
   const settings={revision:1,control_modes:{version:1,supported:["pulse","hold","release"],hold_renewal_ms:150,hold_timeout_ms:500,click_threshold_ms:180,request_ttl_ms:500},values:{linear_speed:.2,turn_speed:.2,pulse_duration:.25,speed_limit:1,linear_rate:.5,linear_deceleration:1,turn_rate:4,turn_deceleration:4,reversal_pause:0,ramp_mode:0},directions:Object.fromEntries(['forward','backward','left','right'].map(name=>[name,{speed:.2,duration:.25,minimum:0,maximum:1,step:.01}])),parameter_schema:{direction_fields:{speed:{minimum:0,maximum:1}},value_fields:Object.fromEntries(['linear_rate','linear_deceleration','turn_rate','turn_deceleration','reversal_pause'].map(key=>[key,{minimum:key==='reversal_pause'?0:.001,maximum:key==='reversal_pause'?.25:100,display_factor:1}])),ramp_modes:[{value:0,id:'linear'}]}};
   const policy={revision:1,mode:'drive',speed:.1,max_motion_ms:150,decision_budget_ms:300,corridor:[.35,.65,.65,.95],perception:{engine:'depth_plane'},verified:true,calibration_id:'operator-fixture',model_sha256:sha};
@@ -17,6 +17,7 @@ async page => {
     if(request.method()!=='GET'){
       const body=request.postDataJSON();calls.push({path,body});
       if(path==='/control'){
+        if(body.action==='navigation_resume'&&cancelResume)return json({detail:{code:'navigation_trial_cancelled'}},409);
         if(body.action==='stop'){armed=false;owner=null;operator='idle';advance();}
         else if(body.action==='navigation_resume'){check(armed&&!body.operator_consent&&!body.operator_plan,'warm resume renewed or lost consent');owner='navigation';operator='active';advance();}
         else throw new Error('unexpected control '+body.action);
@@ -37,6 +38,11 @@ async page => {
   try{
     await page.goto(base+'/rider');await page.getByTestId('workspace-automatic').click();
     await wait(async()=>await page.getByTestId('loop-start').isEnabled(),'unchanged warm Start unavailable');
+    await page.getByTestId('loop-start').click();
+    await wait(()=>calls.length===1,'cancelled resume not requested');
+    await wait(async()=>await page.getByTestId('loop-start').isEnabled(),'cancelled operation did not release Start');
+    check(!(await page.locator('body').innerText()).includes('navigation_trial_cancelled'),'expected cancellation persisted as an error');
+    cancelResume=false;calls.length=0;
     await page.getByTestId('loop-start').click();
     await wait(async()=>(await page.getByTestId('loop-state').innerText()).includes('Automat steruje'),'warm resume not confirmed');
     check(calls.length===1&&calls[0].body.action==='navigation_resume','unchanged Start stopped or renewed consent');
