@@ -524,14 +524,18 @@ class RiderService:
         action = body.get("action")
         stop = action in {"stop", "disarm"}
         intervention = (
-            action == "move"
+            action in {"move", "height"}
             and body.get("intervene") is True
             and type(body.get("operator_intervention_version")) is int
             and body["operator_intervention_version"] == 1
         )
         scoped_release = intervention and body.get("mode") == "release"
-        priority = action == "navigation_pause" or (
-            action == "move" and body.get("intervene") is True
+        priority = (
+            action == "navigation_pause"
+            or action == "move"
+            and body.get("intervene") is True
+            or action == "height"
+            and intervention
         )
         if not stop:
             self.check_session(session)

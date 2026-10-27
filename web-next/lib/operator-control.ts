@@ -6,6 +6,7 @@ export function adoptIntervention(previous: RiderStatus | null, response: JsonRe
   const ack = record(response.ack), safety = record(response.safety), old = safetyOf(previous);
   const pause = intent.action === "navigation_pause";
   const explicit = old.operator_intervention_version === 1 && intent.operator_intervention_version === 1
+    && (intent.action !== "height" || old.operator_height_intervention_version === 1)
     && intent.operator_consent === true && intent.owner === "manual" && intent.arming_mode === "operator"
     && !!str(intent.operator_plan) && ["ARMED", "DISARMED"].includes(str(old.state));
   const scopedPreparation = explicit && old.owner === "navigation" && !!str(intent.supersedes_operation_id)

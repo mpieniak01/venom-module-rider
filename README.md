@@ -702,3 +702,10 @@ API: `/api/v1/rider/motion/figures`, `/runs`, `/runs/{id}`,
 Validation: `make check-python`, `make check-web`, and the inert
 `figures` browser regression registered in
 `scripts/check_browser_regressions.mjs --only figures`.
+
+Manual height Apply supports the Pi capability `operator_height_intervention_version: 1`.
+Selecting a target is inert. Apply sends one explicit, consented height intervention,
+which stops an earlier drive before setting the target (device range 75–115 SDK).
+An older Pi retains the existing manual-ARM path. Height feedback is the last
+accepted SDK target, not a measured physical height; it is unknown after executor
+restart. E-Stop and expired or superseded commands remain rejected.

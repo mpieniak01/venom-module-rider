@@ -98,7 +98,11 @@ class Command(StrictModel):
             raise ValueError("invalid_turn_mode")
         if self.supersedes_operation_id is not None and not (
             self.action == "navigation_pause"
-            or self.action == "move"
+            or (
+                self.action == "move"
+                or self.action == "height"
+                and self.operator_intervention_version == 1
+            )
             and self.intervene is True
         ):
             raise ValueError("operator_supersession_scope")
@@ -108,14 +112,23 @@ class Command(StrictModel):
             raise ValueError("operator_intervention_cancel_scope")
         if self.operator_intervention_version is not None:
             if not (
-                self.action == "move"
+                self.action in {"move", "height"}
                 and self.intervene is True
                 and self.panel_id is not None
                 and self.request_id is not None
                 and 1 <= len(self.request_id.strip()) <= 128
                 and self.device_settings is True
-                and self.direction is not None
-                and self.mode in {"pulse", "hold", "release"}
+                and (
+                    self.action == "move"
+                    and self.direction is not None
+                    and self.mode in {"pulse", "hold", "release"}
+                    or self.action == "height"
+                    and self.height is not None
+                    and self.direction is None
+                    and self.mode is None
+                    and self.turn_mode is None
+                    and self.enabled is None
+                )
             ):
                 raise ValueError("operator_intervention_scope")
             if self.mode == "release":
