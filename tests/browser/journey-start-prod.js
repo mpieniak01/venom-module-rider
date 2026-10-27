@@ -165,7 +165,7 @@ async page => {
     await new Promise(resolve=>setTimeout(resolve,300));
     check(await accept.isDisabled(),"different run frames enabled acceptance");
     check(saves.length===0&&!calls.some(call=>call.path==="/navigation/journey"),"wrong revision/run granted admission");
-    await page.getByTestId("rider-stop").click();
+    await page.keyboard.press("Escape");
     await wait(async()=>!await start.isDisabled(),"STOP did not cancel waiting Start");
     await page.evaluate(()=>{window.__journeyStartProd.run="prod-observe";});
     await wait(async()=>!await accept.isDisabled(),"fresh same-run frames never enable acceptance");
@@ -231,7 +231,7 @@ async page => {
     check(!calls.slice(beforeConfirmStart).some(call=>call.path==="/goal/s15_venom_perception"&&call.body.enabled),"confirm-and-start unnecessarily restarted observation before journey preparation");
     scenarios.push("one explicit primary click saves both qualifications with Pi writable keys then starts revision135");
     check(calls.filter(call=>call.path==="/navigation/journey").length===1,"Start submitted duplicate journey");
-    await page.getByTestId("rider-stop").click();
+    await page.keyboard.press("Escape");
     await wait(()=>state==="DISARMED"&&!journey?.active,"STOP did not end journey");
     await wait(async()=>!await start.isDisabled(),"stopped journey does not allow explicit restart");
     scenarios.push("explicit Start alone posts the scoped journey contract; STOP ends it");
@@ -243,7 +243,7 @@ async page => {
       await new Promise(resolve=>setTimeout(resolve,250));
       check(await page.evaluate(()=>window.__journeyStartProd.frames)>before,"pending Start interrupted the visible stream");
     }
-    await page.getByTestId("rider-stop").click();
+    await page.keyboard.press("Escape");
     await wait(()=>!journeyPending,"cancelled Start did not settle");
     check(state==="DISARMED"&&!journey?.active&&!drive,"late Start reclaimed motion after STOP");
     check(calls.filter(call=>call.path==="/navigation/journey").length===2,"STOP triggered an extra restart");
@@ -262,7 +262,7 @@ async page => {
       check(await page.evaluate(()=>window.__journeyStartProd.frames)>before,"acceptance write stopped live frames");
     }
     const beforeStopDuringSave=calls.length;
-    await page.getByTestId("rider-stop").click();
+    await page.keyboard.press("Escape");
     await wait(()=>!savePending,"late confirmation write never settled");
     await new Promise(resolve=>setTimeout(resolve,150));
     check(calls.filter(call=>call.path==="/navigation/journey").length===2,"late confirmation started a journey after STOP");
@@ -292,7 +292,7 @@ async page => {
     const draftTransaction=calls.slice(beforeDraftStart),draftWrite=draftTransaction.findIndex(call=>call.path==="/navigation/config"&&call.body.values.verified===false),admission=draftTransaction.findIndex(call=>call.path==="/navigation/journey");
     check(draftWrite>=0&&admission>draftWrite&&draftTransaction[admission].body.config_revision===policy.revision,"Start preceded visible draft and fresh acceptance");
     check(draftTransaction.filter(call=>call.path==="/navigation/journey").length===1,"draft triggered multiple journeys");
-    await page.getByTestId("rider-stop").click();await wait(()=>!journey.active&&!drive,"draft journey STOP failed");
+    await page.keyboard.press("Escape");await wait(()=>!journey.active&&!drive,"draft journey STOP failed");
     scenarios.push("one Apply and Start saves the visible speed/pulse, receives fresh revision-matched analysis, then admits exactly that revision");
     return {fixtureOnly:true,fixtureMode,continuous,profileId,modelId,passed:scenarios,revision:policy.revision,saveRowHeight,mutationPaths:calls.map(call=>call.path),strictWritableKeys:writable};
   } finally {

@@ -34,6 +34,7 @@ const cases=[
   {name:"in-place-turn",fixture:"in-place-turn",file:"in-place-turn.js"},
   {name:"figures",fixture:"figures",file:"figures.js"},
   {name:"height",fixture:"height",file:"height.js"},
+  {name:"operator-demo",fixture:"workspace",file:"operator-demo.js"},
   {name:"manual-control-stability",fixture:"workspace",file:"manual-control-stability.js"},
   {name:"preview-dirty-policy",fixture:"workspace",file:"preview-dirty-policy.js"},
   {name:"pulse-trials",fixture:"workspace",file:"pulse-trials.js"},

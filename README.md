@@ -4,7 +4,7 @@ An optional Venom module for manual operation of Rider-Pi. Venom supplies the UI
 
 ## R1
 
-- Manual arrows: click for a pulse, hold for continuous intent, release for braking without disarming. A global red/green ARM switch and persistent STOP remain visible.
+- Manual arrows: click for a pulse, hold for continuous intent, release for braking. The pad STOP cancels the current motion or sequence; Escape provides the same global STOP. Explicit gestures obtain Pi authority without a separate ARM button. Recording controls occupy the main toolbar.
 - Camera RAW/PROC preview, posture-height commands and roll-compensation controls.
 - A permanent status under the driving keypad shows battery charge, Pi axis readings, target posture height and roll compensation. SDK axes keep their producer units; missing or stale readings display as unavailable. Height changes require an explicit Apply. Measurements retains detailed observations, source times, CPU/RAM history and CPU interval peaks.
 - Direction-specific calibration in producer-defined units, smoothing curves and profile create/save/apply/rename/delete.
@@ -162,10 +162,7 @@ Configure devices on the **server**, using private environment configuration:
 
     RIDER_DEVICES_JSON=[{"id":"robot","label":"Rider-Pi","url":"https://rider.local","mode":"device"}]
 
-The default list is empty. The permanent **Demo / Prod** selector uses this single
-device list; there is no second environment setting. A browser can select only
-configured IDs and cannot supply a destination URL. Unconfigured modes remain
-visible and disabled. Selection stops previous active motion and navigation,
+The standard service always provides a built-in **Demo** simulation. Physical devices remain explicitly allowlisted. The permanent **Demo / Prod** selector uses this single list; a browser can select only known IDs and cannot supply a destination URL. Unconfigured production remains visible and disabled. Selection stops previous active motion and navigation,
 creates a new session, and clears observations, pending commands and preview
 subscriptions. An unreachable previous Pi produces an explicit unconfirmed-stop
 notice; its own watchdog still owns braking.
@@ -233,8 +230,7 @@ Use a private device allowlist JSON under ignored config/local/. Pass it explici
 
 Alternatively invoke scripts/run_demo.py with those arguments. Without the file flag the launcher always starts the isolated fixture, even if a real device exists in the inherited environment. File mode starts only the Venom API/UI, preserves the hardware authority on Pi, and never automatically arms or starts a resource. It is an operator panel, not an automated physical-motion test runner. The configured-device host defaults to the `full` LLM runtime profile so the Venom cockpit can select installed models. Use `--runtime-profile light` or `--runtime-profile llm_off` explicitly to restrict the host. The isolated fixture always remains `llm_off`; model warmup and background optional services remain disabled by this launcher.
 
-To keep both modes available in one local panel, configure the private production
-allowlist once and add the local fixture:
+The standard module provides Demo in-process even when every physical Pi is off. No server on port 18880 is required. The standalone replay launcher remains optional for recorded-image/model experiments:
 
     make demo ARGS="--device-file /private/devices.json --with-demo"
 
@@ -709,3 +705,25 @@ which stops an earlier drive before setting the target (device range 75–115 SD
 An older Pi retains the existing manual-ARM path. Height feedback is the last
 accepted SDK target, not a measured physical height; it is unknown after executor
 restart. E-Stop and expired or superseded commands remain rejected.
+
+
+### Operator toolbar and built-in motion simulation
+
+The toolbar has one Record session / End recording pair. Recording never arms,
+moves, or starts a camera. There is no duplicate ARM or STOP in the header.
+The directional pad STOP and Escape invalidate active motion, figures and trials;
+a held-button release still uses bounded braking.
+
+The standard Demo client uses an in-process ASGI transport. Its configured URL
+is never used for sockets, SSH, UART or a hardware SDK. Switching away from an
+unreachable previous target is bounded to one second; an unconfirmed STOP stays
+reported but does not prevent selecting Demo. Physical targets remain separate
+and require explicit selection. Demo offers manual forward/backward and turns,
+height, compensation, STOP and a relative pose preview. The coordinates are
+simulation command-time units, not measured metres or an acceptance test for
+hardware dynamics. Autonomous vision qualification and manufacturer-figure
+acceptance still require their existing dedicated workflows.
+
+Tests: tests/test_local_simulation.py forbids real network transport, covers an
+offline physical target and checks every simulated motion/pose command.
+The operator-demo browser regression uses mocked endpoints and the real panel.

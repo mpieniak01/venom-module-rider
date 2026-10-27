@@ -1,3 +1,4 @@
+import {SimulationPreview} from "./simulation";
 import { useOperatorTuning } from "../lib/operator-tuning";
 import { useOperatorApply } from "../lib/use-operator-apply";
 import { createBrowserUuid } from "@/lib/optional-modules/transport";
@@ -494,7 +495,7 @@ export function NavigationLoop({client,t,language,recording,operatorDetails,stud
     </div>
     <div className={styles.driveWorkspace}>
       <div className={styles.workspaceContent} data-testid="workspace-content" role="region" aria-label={t("workspaceObservation")}>
-        <div className={styles.loopCamera}><CameraPanel client={client} t={t} language={language} compact showTools={false} editor={editingZone && draft && Array.isArray(draft.corridor) ? {value:draft.corridor as number[],disabled:settingsLocked,onChange:value=>setDraft({...draft,corridor:value})}:undefined}/></div>
+        <div className={styles.loopCamera}>{client.status?.connection.mode==="demo"&&safety.simulated===true?<SimulationPreview status={client.status} t={t}/>:(<CameraPanel client={client} t={t} language={language} compact showTools={false} editor={editingZone && draft && Array.isArray(draft.corridor) ? {value:draft.corridor as number[],disabled:settingsLocked,onChange:value=>setDraft({...draft,corridor:value})}:undefined}/>)}</div>
         <div className={styles.workspaceMessages} data-testid="workspace-messages">      <div className={styles.commandReason} role="status" data-testid="command-reason" hidden={!commandReason&&!(prepareAction&&!dirty&&!(view==="journey"&&confirmJourney))}>
         <span>{commandReason}</span>
         {prepareAction&&!dirty&&!(view==="journey"&&confirmJourney)&&<Button data-testid="prepare-navigation" disabled={!connected||!!operation||loading||!!observeBlock||goals.drive===true} onClick={()=>{if(!acceptanceBlock)void acceptTrial();else showPreparation();}}>{t(!acceptanceBlock?"workspace.confirm":active?"workspace.preparation":"workspace.prepare")}</Button>}

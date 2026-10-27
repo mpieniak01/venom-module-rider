@@ -18,3 +18,15 @@ export function heightAvailable(status:RiderStatus|null,panelId:string):boolean 
  return heightInterventionSupported(status)?heightInterventionAvailable(status,panelId)
   :navigationAvailable(status,panelId)&&safetyOf(status).owner==="manual";
 }
+
+export function balanceInterventionSupported(status:RiderStatus|null):boolean {
+ return safetyOf(status).operator_posture_intervention_version===1;
+}
+export function balanceAvailable(status:RiderStatus|null,panelId:string):boolean {
+ if(!balanceInterventionSupported(status))return navigationAvailable(status,panelId)&&safetyOf(status).owner==="manual";
+ const safety=safetyOf(status);
+ return !!panelId&&!!status?.connection.configured&&["online","degraded"].includes(status.connection.status)
+  &&!status.errors.control&&safety.stale!==true&&safety.ready===true&&["DISARMED","ARMED"].includes(str(safety.state))
+  &&record(record(safety.capabilities).balance).available===true&&record(safety.panel_control).version===1
+  &&!!str(safety.generation)&&Number.isInteger(settingsOf(status).revision);
+}

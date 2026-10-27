@@ -100,7 +100,7 @@ class Command(StrictModel):
             self.action == "navigation_pause"
             or (
                 self.action == "move"
-                or self.action == "height"
+                or self.action in {"height", "balance"}
                 and self.operator_intervention_version == 1
             )
             and self.intervene is True
@@ -112,7 +112,7 @@ class Command(StrictModel):
             raise ValueError("operator_intervention_cancel_scope")
         if self.operator_intervention_version is not None:
             if not (
-                self.action in {"move", "height"}
+                self.action in {"move", "height", "balance"}
                 and self.intervene is True
                 and self.panel_id is not None
                 and self.request_id is not None
@@ -128,6 +128,12 @@ class Command(StrictModel):
                     and self.mode is None
                     and self.turn_mode is None
                     and self.enabled is None
+                    or self.action == "balance"
+                    and self.enabled is not None
+                    and self.height is None
+                    and self.direction is None
+                    and self.mode is None
+                    and self.turn_mode is None
                 )
             ):
                 raise ValueError("operator_intervention_scope")

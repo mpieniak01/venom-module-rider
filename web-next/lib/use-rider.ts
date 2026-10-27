@@ -14,14 +14,14 @@ import { perceptionPolicy, perceptionResultMatches, previewMatchesSelection, typ
 import { decodePreview, nextPreviewDelay, previewLifetime, previewRequestCurrent, retainedPreview, expiredNativeCandidate } from "./preview-media";
 import { configForConnection } from "./device-session";
 import { adoptIntervention } from "./operator-control";
-import {heightAvailable, heightInterventionAvailable, heightInterventionSupported} from "./posture";
+import {heightAvailable, heightInterventionAvailable, heightInterventionSupported, balanceAvailable, balanceInterventionSupported} from "./posture";
 import { HoldController, readHoldTiming, type MovementIntent } from "./hold-controller";
 import { canRequestArm, commandAccepted, controlIdentity, data, errorCode, faceRunning, featureRows, finite, frameRequested, record, safetyOf, settingsOf, str, type DeviceConfig, type Direction, type JsonRecord, type RiderStatus, type Section } from "./model";
 
 const BASE = "/api/v1/rider";
 export type Notice = { key: string; code?: string; tone: "error" | "success" | "info" };
 export type Frame = { cameraSource?: JsonRecord; pipelineIdentity?: string; captureKey?: string; analysis?: JsonRecord; ageMs?: number; receivedAt?: number; ageSource?: string; decoded?: boolean; url: string; stale: boolean; source: string; fileAt: string; id: string; knownFreshness: boolean; visionState: string; visionReason: string; inferenceMs: string; visionPolicy: string; recordedAt: string };
-import { continuousAvailable, controlChanged, freshControl, navigationAvailable, navigationView, observationClock, journeyOwnsMotion, manualStopAction, manualInterventionAvailable, manualInterventionSupported, operatorPrioritySupported, operatorSessionActive, retainControl, type ControlClock } from "./navigation";
+import { continuousAvailable, controlChanged, freshControl, navigationAvailable, navigationView, observationClock, journeyOwnsMotion, manualInterventionAvailable, manualInterventionSupported, operatorPrioritySupported, operatorSessionActive, retainControl, type ControlClock } from "./navigation";
 /** Own the current device session, gesture transport and camera subscriptions. */
 export function useRider(section: Section) {
   const [config, setConfig] = useState<DeviceConfig | null>(null);
@@ -332,8 +332,8 @@ export function useRider(section: Section) {
     // Never send an old press after STOP, replacement, device or generation change.
     if (!current()) return {};
     if (!stopping && (origin !== controlIdentity(statusRef.current) || revision !== settingsOf(statusRef.current).revision)) throw Object.assign(new Error("stale_control"), { data: { error: "stale_control" } });
-    const heightIntervention = action === "height" && heightInterventionSupported(statusRef.current);
-    if (heightIntervention && !heightInterventionAvailable(statusRef.current,panelId)) throw Object.assign(new Error("stale_control"),{data:{error:"stale_control"}});
+    const heightIntervention = action === "height" && heightInterventionSupported(statusRef.current) || action === "balance" && balanceInterventionSupported(statusRef.current);
+    if (heightIntervention && !(action==="balance"?balanceAvailable(statusRef.current,panelId):heightInterventionAvailable(statusRef.current,panelId))) throw Object.assign(new Error("stale_control"),{data:{error:"stale_control"}});
     const superseding = (action === "move" || action === "navigation_pause" || heightIntervention)
       ? pendingJourney.current ?? pendingResume.current ?? (safetyOf(statusRef.current).owner === "navigation" ? { requestId:str(record(safetyOf(statusRef.current).operator_control).operation_id), generation:str(safetyOf(statusRef.current).generation) } : null)
       : null;
@@ -344,7 +344,7 @@ export function useRider(section: Section) {
     const interventionEpoch = motionEpoch.current, interventionSession = sessionRef.current;
     const adopting = intervene || action === "navigation_pause";
     if (adopting) abortReads();
-    const envelope = makeEnvelope({ ...body, ...(intervene ? {intervene:true} : {}), ...(atomic ? {operator_intervention_version:1, operator_consent:true, operator_plan:heightIntervention?`height ${String(body.height)} SDK`:`manual ${str(body.direction)}`, owner:"manual", arming_mode:"operator", ...(heightIntervention?{device_settings:true}:{})} : {}), ...(superseding ? {supersedes_operation_id:superseding.requestId} : {}) });
+    const envelope = makeEnvelope({ ...body, ...(intervene ? {intervene:true} : {}), ...(atomic ? {operator_intervention_version:1, operator_consent:true, operator_plan:heightIntervention?(action==="height"?`height ${String(body.height)} SDK`:`balance ${String(body.enabled)}`):`manual ${str(body.direction)}`, owner:"manual", arming_mode:"operator", ...(heightIntervention?{device_settings:true}:{})} : {}), ...(superseding ? {supersedes_operation_id:superseding.requestId} : {}) });
     const interventionDeadline = Date.now() + Number(envelope.ttl_ms);
     if (atomic && action === "move") pendingAtomic.current = envelope;
     if (adopting) pendingHandoff.current = {requestId:str(envelope.request_id),generation:str(envelope.generation),session:interventionSession,epoch:interventionEpoch,deadline:Date.now()+Number(envelope.ttl_ms),navigationOperation:atomic?str(envelope.supersedes_operation_id):undefined};
@@ -417,11 +417,9 @@ export function useRider(section: Section) {
   const stopManual = useCallback(async () => {
     motionEpoch.current += 1;
     hold.cancel();
-    if (journeyPreparing.current > 0 || pendingJourney.current || manualStopAction(statusRef.current, panelId) === "stop") return command({ action: "stop" }, true);
-    if (manualStopAction(statusRef.current, panelId) === "navigation_pause" || pendingResume.current) return command({ action: "navigation_pause" }, true);
-    if (!navigationAvailable(statusRef.current, panelId)) return null;
-    return command({ action: "move", device_settings: true, direction: "forward", mode: "release" });
-  }, [command, hold, panelId]);
+    return command({action:"stop"},true);
+
+  }, [command, hold]);
   const startNavigationTrial = useCallback(async (plan: string, revision: number) => {
     const origin = sessionRef.current, epoch = motionEpoch.current;
     const priority = operatorPrioritySupported(statusRef.current);
@@ -751,6 +749,6 @@ export function useRider(section: Section) {
   // ARM always refreshes the fast control endpoint before making its envelope.
   // The latency of a diagnostics view must not prevent that refresh request.
   const canArm = canRequestArm(status);
-  return { startFigure, keepFigure, currentManualSettings, startPulseTrial, pipeline, config, status, loading, notice, setNotice, busy, activeDirection, manualMode, manualTurnMode, manualRequest, panelId, canContinuous: continuousAvailable(status, panelId) && canNavigate(), controlFresh: hasFreshControl(), canMutate: isConnected(), canArm, canNavigate: canNavigate(), canMove: movementReady(), canSetHeight: motionBlocked.current === 0 && heightAvailable(status,panelId), poll, refresh, refreshing, command, stopManual, startNavigationTrial, startNavigationJourney, currentSession, currentMotionEpoch, currentGeneration, currentCamera, setPerceptionPolicy, invalidatePerceptionPreview, perceptionSelection, mutate: runMutation, takeManual, selectDevice, hold, camera, cameraStream, setCameraStream, cameraTransition, setCameraTransition, markCameraDecoded, runtimeFrame, showRuntimeFrame, setShowRuntimeFrame, mediaError };
+  return { startFigure, keepFigure, currentManualSettings, startPulseTrial, pipeline, config, status, loading, notice, setNotice, busy, activeDirection, manualMode, manualTurnMode, manualRequest, panelId, canContinuous: continuousAvailable(status, panelId) && canNavigate(), controlFresh: hasFreshControl(), canMutate: isConnected(), canArm, canNavigate: canNavigate(), canMove: movementReady(), canSetHeight: motionBlocked.current === 0 && heightAvailable(status,panelId), canSetBalance: motionBlocked.current === 0 && balanceAvailable(status,panelId), poll, refresh, refreshing, command, stopManual, startNavigationTrial, startNavigationJourney, currentSession, currentMotionEpoch, currentGeneration, currentCamera, setPerceptionPolicy, invalidatePerceptionPreview, perceptionSelection, mutate: runMutation, takeManual, selectDevice, hold, camera, cameraStream, setCameraStream, cameraTransition, setCameraTransition, markCameraDecoded, runtimeFrame, showRuntimeFrame, setShowRuntimeFrame, mediaError };
 }
 export type RiderClient = ReturnType<typeof useRider>;

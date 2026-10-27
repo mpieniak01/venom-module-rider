@@ -51,11 +51,16 @@ def envelope(data, family="rider.safety", version=1, *, status=200, operation=No
 
 
 class DemoPi:
-    def __init__(self, *, navigation=None):
+    def __init__(self, *, navigation=None, simulate=False):
         from .demo_conversation import attach
 
         attach(self)
+        from .simulation import DemoSimulation
+
+        self.simulation = DemoSimulation() if simulate else None
         self.controls = copy.deepcopy(CONTRACTS["settings"])
+        if simulate:
+            self.controls["control_modes"]["in_place_turn_version"] = 1
         self.library = copy.deepcopy(CONTRACTS["face"])
         self.runtime = {"running": False, **copy.deepcopy(self.library)}
         self.generation = uuid.uuid4().hex
@@ -85,6 +90,8 @@ class DemoPi:
             navigation.attach(self)
 
     def safety(self):
+        if self.simulation:
+            self.simulation.update(self.deadline)
         now = time.time()
         if (
             self.arming_deadline is not None
@@ -150,11 +157,16 @@ class DemoPi:
                     **self.controls["parameter_schema"]["actuator_fields"],
                 }.items()
             },
+            **(self.simulation.snapshot(self) if self.simulation else {}),
         }
 
     def control(self, body):
         action = body.get("action")
+        if self.simulation:
+            self.simulation.update(self.deadline)
         if action in {"stop", "disarm"}:
+            if self.simulation:
+                self.simulation.stop()
             if (
                 "expected_generation" in body
                 and body["expected_generation"] != self.generation
@@ -182,6 +194,7 @@ class DemoPi:
             if (
                 body.get("generation") != self.generation
                 and not supersedes
+                and not (self.simulation and self.simulation.release_origin(self, body))
                 or type(body.get("seq")) is not int
                 or body["seq"] <= last_seq
             ):
@@ -192,8 +205,14 @@ class DemoPi:
                 or body["ts"] > time.time() + 0.1
             ):
                 return envelope({"error": "expired_command"}, status=409)
+            transferred = False
+            if self.simulation:
+                try:
+                    transferred = self.simulation.takeover(self, body)
+                except ValueError as exc:
+                    return envelope({"error": str(exc)}, status=409)
             if action in {"navigation_pause", "navigation_resume"} or (
-                action == "move" and body.get("intervene") is True
+                action == "move" and body.get("intervene") is True and not transferred
             ):
                 if self.navigation is None:
                     return envelope(
@@ -203,7 +222,9 @@ class DemoPi:
                     self.navigation.operator_command(body)
                 except ValueError as exc:
                     return envelope({"error": str(exc)}, status=409)
-            if action in {"navigation_pause", "navigation_resume"}:
+            if action in {"navigation_pause", "navigation_resume"} or (
+                self.simulation and transferred and body.get("mode") == "release"
+            ):
                 pass
             elif action == "clear_estop":
                 self.state = "DISARMED"
@@ -281,6 +302,8 @@ class DemoPi:
                             ]
                         )
                         self.deadline = time.monotonic() + duration
+                    if self.simulation:
+                        self.simulation.drive(self, body)
                 elif action == "height":
                     descriptor = self.controls["parameter_schema"]["actuator_fields"][
                         "height"
@@ -306,6 +329,7 @@ class DemoPi:
             "panel_id": body.get("panel_id"),
             "seq": body.get("seq"),
             "command_generation": body.get("generation"),
+            "generation": self.generation,
             "observed_at": time.time(),
             "accepted": True,
             "status": "executed",
@@ -317,6 +341,7 @@ class DemoPi:
         return envelope(
             {
                 "safety": self.safety(),
+                "server_time": time.time(),
                 "ack": self.ack,
                 "confirmed": True,
                 "pending": False,
