@@ -18,6 +18,7 @@ if(args.some((value,index)=>value!=="--only"&&args[index-1]!=="--only"))throw ne
 const filter=args.includes("--only")?args[args.indexOf("--only")+1]:"";
 if(args.includes("--only")&&!filter)throw new Error("--only requires a regression name");
 const fixtures={
+  "in-place-turn":"in-place-turn-fixture.tsx",
   "input-region-operator":"input-region-operator-fixture.tsx",
   "input-region":"input-region-fixture.tsx",
   "room-preset":"room-preset-fixture.tsx",
@@ -28,6 +29,9 @@ const fixtures={
   workspace:"global-study-fixture.tsx",
 };
 const cases=[
+  {name:"in-place-turn",fixture:"in-place-turn",file:"in-place-turn.js"},
+  {name:"manual-control-stability",fixture:"workspace",file:"manual-control-stability.js"},
+  {name:"preview-dirty-policy",fixture:"workspace",file:"preview-dirty-policy.js"},
   {name:"pulse-trials",fixture:"workspace",file:"pulse-trials.js"},
   {name:"journey-settings",fixture:"workspace",file:"journey-settings.js"},
   {name:"operator-start-settings",fixture:"workspace",file:"operator-start-settings.js"},

@@ -226,7 +226,7 @@ test("release and replacement cancel a pending atomic handoff before its acknowl
   controller.start("forward",1);t.mock.timers.tick(timing.click_threshold_ms);await flush();
   const before=cancelled;controller.end(1);
   assert.equal(cancelled,before+1,"release must cancel without waiting for in-flight ACK");
-  assert.equal(sent.length,1);
+  await flush();assert.deepEqual(sent.map(intent=>intent.mode),["hold","release"]);
   finish();await flush();assert.deepEqual(sent.map(intent=>intent.mode),["hold","release"]);
   controller.cancel();
 });
@@ -247,4 +247,33 @@ test("an acknowledged scoped cancellation suppresses an unscoped release against
   const controller=new HoldController({timing:()=>timing,canMove:()=>true,cancelPending:()=>{const cancelled=pending;pending=false;return cancelled;},send:async intent=>{intents.push(intent);pending=true;await new Promise<void>(resolve=>{finish=resolve;});},onActive:()=>undefined,onError:()=>undefined});
   controller.start("forward",1);t.mock.timers.tick(timing.click_threshold_ms);await flush();controller.end(1);
   finish();await flush();assert.deepEqual(intents.map(intent=>intent.mode),["hold"]);controller.cancel();
+});
+
+test("pointer release bypasses a stalled hold ACK and cannot replay its renewal", async t => {
+  let finish: (() => void) | undefined;
+  const { controller, intents } = setup(t, async intent => {
+    if (intent.mode === "hold") await new Promise<void>(resolve => { finish = resolve; });
+  });
+  controller.start("forward", 1);
+  t.mock.timers.tick(timing.click_threshold_ms); await flush();
+  controller.end(1); await flush();
+  assert.deepEqual(intents.map(intent => intent.mode), ["hold", "release"]);
+  finish?.(); await flush();
+  t.mock.timers.tick(timing.hold_timeout_ms * 2); await flush();
+  assert.deepEqual(intents.map(intent => intent.mode), ["hold", "release"]);
+});
+
+test("in-place arrows retain their distinct maneuver through hold and release", async t => {
+  const {controller,intents}=setup(t);
+  controller.start("left",1,"in_place");
+  t.mock.timers.tick(timing.click_threshold_ms);await flush();
+  controller.end(1);await flush();
+  assert.deepEqual(intents,[{direction:"left",mode:"hold",turn_mode:"in_place"},{direction:"left",mode:"release",turn_mode:"in_place"}]);
+});
+test("normal and in-place continuous turns are different intents", async t => {
+  const {controller,intents}=setup(t);
+  controller.toggle("left","in_place");await flush();
+  controller.toggle("left");await flush();
+  assert.deepEqual(intents.map(({turn_mode})=>turn_mode),["in_place",undefined]);
+  controller.cancel();
 });

@@ -194,6 +194,7 @@ class MotionWriter:
 
 
 def begin(domain, body, session):
+    """Capture maneuver and authoritative settings for active recordings."""
     registry = domain.samples
     if (
         registry is None
@@ -244,6 +245,7 @@ def begin(domain, body, session):
         seq=integer(body.get("seq")),
         direction=direction,
         mode=mode,
+        turn_mode="in_place" if body.get("turn_mode") == "in_place" else None,
         intensity=number(row.get("speed"))
         if snapshot["qualification"] == "request-revision-match"
         else None,

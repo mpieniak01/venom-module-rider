@@ -21,6 +21,7 @@ const BASE = "/api/v1/rider";
 export type Notice = { key: string; code?: string; tone: "error" | "success" | "info" };
 export type Frame = { cameraSource?: JsonRecord; pipelineIdentity?: string; captureKey?: string; analysis?: JsonRecord; ageMs?: number; receivedAt?: number; ageSource?: string; decoded?: boolean; url: string; stale: boolean; source: string; fileAt: string; id: string; knownFreshness: boolean; visionState: string; visionReason: string; inferenceMs: string; visionPolicy: string; recordedAt: string };
 import { continuousAvailable, controlChanged, freshControl, navigationAvailable, navigationView, observationClock, journeyOwnsMotion, manualStopAction, manualInterventionAvailable, manualInterventionSupported, operatorPrioritySupported, operatorSessionActive, retainControl, type ControlClock } from "./navigation";
+/** Own the current device session, gesture transport and camera subscriptions. */
 export function useRider(section: Section) {
   const [config, setConfig] = useState<DeviceConfig | null>(null);
   const [status, setStatus] = useState<RiderStatus | null>(null);
@@ -28,6 +29,7 @@ export function useRider(section: Section) {
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [panelId] = useState(() => createBrowserUuid());
+  const [manualTurnMode, setManualTurnMode] = useState<"in_place" | null>(null);
   const [manualMode, setManualMode] = useState<"hold" | "continuous" | null>(null);
   const [manualRequest, setManualRequest] = useState<JsonRecord | null>(null);
   const [activeDirection, setActiveDirection] = useState<Direction | null>(null);
@@ -83,6 +85,7 @@ export function useRider(section: Section) {
     send: async (intent: MovementIntent, current: () => boolean) => { await commandRef.current({ action: "move", device_settings: true, ...intent }, current); },
     onActive: setActiveDirection,
     onMode: setManualMode,
+    onTurnMode: setManualTurnMode,
     onError: (error) => setNotice({ key: errorCode(error) === "hold_timed_out" ? "holdExpired" : "requestFailed", code: errorCode(error), tone: "error" }),
   }));
   const replaceFrame = useCallback((kind: "camera" | "face", next: Frame | null, retain = false, busyRetry = false) => {
@@ -405,7 +408,7 @@ export function useRider(section: Section) {
     setBusy(key);
     const epoch = motionEpoch.current;
     try { if ((key === "arm" || key === "clear_estop") && !clockRef.current) await poll("control", true); const response = await sendControl(body, () => true, !quiet); if (key !== "move") await poll(undefined, key === "navigation_resume" || key === "navigation_pause"); return response; }
-    catch (error) { if (epoch === motionEpoch.current || key !== "navigation_resume") hold.cancel(); setNotice({ key: errorCode(error).includes("stale") ? "staleControl" : "requestFailed", code: errorCode(error), tone: "error" }); if (throwOnError) throw error; return null; }
+    catch (error) { if (epoch === motionEpoch.current || key !== "navigation_resume") hold.cancel(); if(errorCode(error)!=="navigation_trial_cancelled") setNotice({ key: errorCode(error).includes("stale") ? "staleControl" : "requestFailed", code: errorCode(error), tone: "error" }); if (throwOnError) throw error; return null; }
     finally { if (safetyAction) motionBlocked.current = Math.max(0, motionBlocked.current - 1); setBusy(value => value === key ? null : value); }
   }, [hold, poll, sendControl]);
   const stopManual = useCallback(async () => {
@@ -725,6 +728,6 @@ export function useRider(section: Section) {
   // ARM always refreshes the fast control endpoint before making its envelope.
   // The latency of a diagnostics view must not prevent that refresh request.
   const canArm = canRequestArm(status);
-  return { currentManualSettings, startPulseTrial, pipeline, config, status, loading, notice, setNotice, busy, activeDirection, manualMode, manualRequest, panelId, canContinuous: continuousAvailable(status, panelId) && canNavigate(), controlFresh: hasFreshControl(), canMutate: isConnected(), canArm, canNavigate: canNavigate(), canMove: movementReady(), poll, refresh, refreshing, command, stopManual, startNavigationTrial, startNavigationJourney, currentSession, currentMotionEpoch, currentGeneration, currentCamera, setPerceptionPolicy, invalidatePerceptionPreview, perceptionSelection, mutate: runMutation, takeManual, selectDevice, hold, camera, cameraStream, setCameraStream, cameraTransition, setCameraTransition, markCameraDecoded, runtimeFrame, showRuntimeFrame, setShowRuntimeFrame, mediaError };
+  return { currentManualSettings, startPulseTrial, pipeline, config, status, loading, notice, setNotice, busy, activeDirection, manualMode, manualTurnMode, manualRequest, panelId, canContinuous: continuousAvailable(status, panelId) && canNavigate(), controlFresh: hasFreshControl(), canMutate: isConnected(), canArm, canNavigate: canNavigate(), canMove: movementReady(), poll, refresh, refreshing, command, stopManual, startNavigationTrial, startNavigationJourney, currentSession, currentMotionEpoch, currentGeneration, currentCamera, setPerceptionPolicy, invalidatePerceptionPreview, perceptionSelection, mutate: runMutation, takeManual, selectDevice, hold, camera, cameraStream, setCameraStream, cameraTransition, setCameraTransition, markCameraDecoded, runtimeFrame, showRuntimeFrame, setShowRuntimeFrame, mediaError };
 }
 export type RiderClient = ReturnType<typeof useRider>;
