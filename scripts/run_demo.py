@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the local R1 panel: isolated demo by default, explicit device file for Pi."""
+"""Run API/UI with in-process Demo or an explicit physical-device allowlist."""
 
 from __future__ import annotations
 
@@ -18,41 +18,22 @@ from pathlib import Path
 from venom_module_rider.config import configured_devices
 
 
-def targets(device_file, device_id, pi_port, *, with_demo=False):
+def targets(device_file, device_id):
+    """Only physical targets need configuration; Demo is provided in-process."""
     if device_file is None:
         if device_id not in {None, "demo"}:
             raise ValueError("Demo supports only the demo device ID.")
-        return (
-            [
-                {
-                    "id": "demo",
-                    "label": "Rider-Pi demo",
-                    "mode": "demo",
-                    "url": f"http://127.0.0.1:{pi_port}",
-                }
-            ],
-            "demo",
-            True,
-        )
-    devices = list(configured_devices(device_file.read_text()))
-    if with_demo:
-        if any(device.id == "demo" for device in devices):
-            raise ValueError("The demo ID is reserved for the local fixture.")
-        demo = targets(None, None, pi_port)[0][0]
-        demo.update(
-            compute_token_env="RIDER_DEMO_COMPUTE_TOKEN",
-            agent_token_env="RIDER_DEMO_AGENT_TOKEN",
-        )
-        devices = list(
-            configured_devices(json.dumps([demo, *[asdict(d) for d in devices]]))
-        )
-    if device_id and device_id not in {device.id for device in devices}:
+        return [], "demo", True
+    devices = [
+        device
+        for device in configured_devices(device_file.read_text())
+        if device.mode != "demo"
+    ]
+    if any(device.id == "demo" for device in devices):
+        raise ValueError("The demo ID is reserved for the built-in simulation.")
+    if device_id and device_id not in {"demo", *(device.id for device in devices)}:
         raise ValueError("Selected ID is absent from the private device file.")
-    return (
-        [asdict(device) for device in devices],
-        device_id or ("demo" if with_demo else ""),
-        False,
-    )
+    return [asdict(device) for device in devices], device_id or "", False
 
 
 def resolve_runtime_profile(demo_only, requested_profile=None):
@@ -83,18 +64,12 @@ def main():
     parser.add_argument("--core-root", type=Path, default=module.parent.parent)
     parser.add_argument("--api-port", type=int, default=8800)
     parser.add_argument("--web-port", type=int, default=3300)
-    parser.add_argument("--pi-port", type=int, default=18880)
     parser.add_argument(
         "--device-file",
         type=Path,
         help="Explicit private JSON device allowlist; omits the fixture",
     )
     parser.add_argument("--device-id", help="Optional default device ID; never arms")
-    parser.add_argument(
-        "--with-demo",
-        action="store_true",
-        help="Keep the local demo alongside the private device allowlist",
-    )
     parser.add_argument(
         "--runtime-profile",
         choices=("full", "light", "llm_off"),
@@ -105,31 +80,13 @@ def main():
         action="store_true",
         help="Enable shared host STT/TTS for an explicitly configured device host",
     )
-    parser.add_argument(
-        "--replay-dir",
-        type=Path,
-        help="Private recorded frame directory; hardware-free demo only",
-    )
-    parser.add_argument(
-        "--decision-lease-source",
-        type=Path,
-        help="Local Pi decision_lease.py used by replay",
-    )
     args = parser.parse_args()
-    devices, default_device, demo_only = targets(
-        args.device_file, args.device_id, args.pi_port, with_demo=args.with_demo
-    )
-    fixture_enabled = demo_only or args.with_demo
+    devices, default_device, demo_only = targets(args.device_file, args.device_id)
     try:
         runtime_profile = resolve_runtime_profile(demo_only, args.runtime_profile)
         audio_enabled = resolve_audio_enabled(demo_only, args.enable_audio)
     except ValueError as exc:
         parser.error(str(exc))
-    if args.replay_dir and (not fixture_enabled or not args.decision_lease_source):
-        parser.error(
-            "Recorded replay requires the local demo fixture "
-            "and Pi decision lease source."
-        )
     core = args.core_root.resolve()
     python = core / ".venv/bin/python"
     web = core / "web-next"
@@ -139,11 +96,7 @@ def main():
         parser.error(
             "Keep this module checkout inside the selected core modules/ collection."
         )
-    ports = (
-        (args.api_port, args.web_port, args.pi_port)
-        if fixture_enabled
-        else (args.api_port, args.web_port)
-    )
+    ports = (args.api_port, args.web_port)
     if len(set(ports)) != len(ports) or not all(free_port(port) for port in ports):
         parser.error("Choose distinct available loopback ports.")
     logs = core / "logs"
@@ -182,7 +135,6 @@ def main():
         QUEUE_NAMESPACE="rider-dev",
         API_OPTIONAL_MODULES="manifest:" + str(module / "module.json"),
         RIDER_DEMO_ONLY="true" if demo_only else "false",
-        RIDER_REPLAY_API_URL=api_url,
         RIDER_DEFAULT_DEVICE=default_device,
         RIDER_SELECTION_FILE=str(core / "data/modules/rider/panel-selection.json"),
         RIDER_DEVICES_JSON=json.dumps(devices),
@@ -195,10 +147,6 @@ def main():
         api_env.pop("RIDER_ACCESS_TOKEN", None)
         api_env["RIDER_COMPUTE_TOKEN"] = "rider-demo-only-token"
         api_env["RIDER_AGENT_TOKEN"] = "rider-demo-only-agent-token"
-    if args.with_demo:
-        api_env["RIDER_DEMO_COMPUTE_TOKEN"] = "rider-demo-only-token"
-        api_env["RIDER_DEMO_AGENT_TOKEN"] = "rider-demo-only-agent-token"
-    fixture_env = {**api_env, "RIDER_AGENT_TOKEN": "rider-demo-only-agent-token"}
     web_env = {
         **api_env,
         "API_PROXY_TARGET": api_url,
@@ -222,28 +170,6 @@ def main():
     signal.signal(signal.SIGTERM, stop_signal)
     try:
         specifications = [
-            (
-                "pi",
-                [
-                    str(python),
-                    "-m",
-                    "venom_module_rider.demo",
-                    "--port",
-                    str(args.pi_port),
-                    *(
-                        [
-                            "--replay-dir",
-                            str(args.replay_dir),
-                            "--decision-lease-source",
-                            str(args.decision_lease_source),
-                        ]
-                        if args.replay_dir
-                        else []
-                    ),
-                ],
-                core,
-                fixture_env,
-            ),
             (
                 "api",
                 [
@@ -275,8 +201,6 @@ def main():
                 web_env,
             ),
         ]
-        if not fixture_enabled:
-            specifications = [row for row in specifications if row[0] != "pi"]
         for name, command, cwd, env in specifications:
             log = (logs / f"r1-demo-{name}.log").open("w")
             streams.append(log)
@@ -309,11 +233,6 @@ def main():
                         pass
                     with urllib.request.urlopen(web_url + "/rider", timeout=2):
                         pass
-                    if fixture_enabled:
-                        with urllib.request.urlopen(
-                            f"http://127.0.0.1:{args.pi_port}/healthz", timeout=1
-                        ):
-                            pass
                     ready = True
                     print(
                         f"R1 panel ready: http://localhost:{args.web_port}/rider",
@@ -321,7 +240,7 @@ def main():
                     )
                     print(
                         (
-                            "Hardware-free Pi fixture; "
+                            "Built-in motion simulation; "
                             "LLM and physical IoT bridge disabled."
                         )
                         if demo_only

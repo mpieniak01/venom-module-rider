@@ -1,8 +1,7 @@
-"""Loopback-only Pi contract fixture. It imports no robot, UART or GPIO driver."""
+"""In-process Pi contract model and test fixture; no sockets or hardware drivers."""
 
 from __future__ import annotations
 
-import argparse
 import copy
 import hashlib
 import io
@@ -850,39 +849,3 @@ def create_app(pi: DemoPi | None = None):
         return envelope({"error": "unknown_fixture_route"}, status=404)
 
     return app
-
-
-def main():
-    import uvicorn
-
-    parser = argparse.ArgumentParser(
-        description="Loopback-only, hardware-free Pi fixture"
-    )
-    parser.add_argument("--port", type=int, default=18880)
-    parser.add_argument("--replay-dir", type=Path)
-    parser.add_argument("--decision-lease-source", type=Path)
-    args = parser.parse_args()
-    navigation = None
-    if args.replay_dir:
-        import os
-
-        from .demo_navigation import ReplayNavigation, load_pi_lease
-
-        if not args.decision_lease_source:
-            parser.error("Replay requires the actual local Pi decision lease source.")
-        manifest = json.loads((args.replay_dir / "manifest.json").read_text())
-        navigation = ReplayNavigation(
-            (args.replay_dir / "last_frame.jpg").read_bytes(),
-            load_pi_lease(args.decision_lease_source),
-            recorded_at=manifest["original_mtime"],
-            model_sha=os.getenv("RIDER_VISION_SHA256", ""),
-            api_url=os.getenv("RIDER_REPLAY_API_URL", "http://127.0.0.1:8800"),
-            token=os.getenv("RIDER_DEMO_COMPUTE_TOKEN", "rider-demo-only-token"),
-        )
-    uvicorn.run(
-        create_app(DemoPi(navigation=navigation)), host="127.0.0.1", port=args.port
-    )
-
-
-if __name__ == "__main__":
-    main()

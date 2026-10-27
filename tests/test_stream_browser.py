@@ -26,7 +26,7 @@ class Browser:
 
 
 async def setup():
-    device = Device("pi", "Fixture", "http://127.0.0.1:18880", "device")
+    device = Device("pi", "Fixture", "http://127.0.0.1", "device")
     pi = PiFixture(device)
     domain = RiderService((device,), client_factory=lambda _device: pi)
     await domain.select("pi", domain.session)

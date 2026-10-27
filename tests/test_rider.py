@@ -18,7 +18,7 @@ from venom_module_rider.demo import DemoPi, create_app, envelope
 from venom_module_rider.errors import RiderError
 from venom_module_rider.service import RiderService
 
-DEVICE = Device("demo", "Demo", "http://127.0.0.1:18880", "demo")
+DEVICE = Device("demo", "Demo", "http://127.0.0.1", "demo")
 
 
 def domain(pi=None):

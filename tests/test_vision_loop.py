@@ -286,7 +286,7 @@ def test_vision_http_lane_auth_origin_and_metadata(monkeypatch):
 
     monkeypatch.setenv("RIDER_COMPUTE_TOKEN", "fixture-token")
     app = FastAPI()
-    device = Device("pi", "Fixture", "http://127.0.0.1:18880", "demo")
+    device = Device("pi", "Fixture", "http://127.0.0.1", "demo")
     app.state.rider = RiderService((device,))
     app.state.rider_vision = VisionLoop(Detector())
     app.include_router(router)

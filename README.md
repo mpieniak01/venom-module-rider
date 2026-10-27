@@ -184,9 +184,9 @@ From the module checkout:
     source ../../.venv/bin/activate
     make demo
 
-The launcher reuses existing Python and Node environments, starts a loopback Pi fixture and the **real Venom host API/UI**, and prints http://localhost:3300/rider. Defaults are UI 3300, host API 8800 and fixture 18880; flags on scripts/run_demo.py allow different unused ports. Ctrl-C closes only the launcher's own processes.
+The optional launcher reuses existing Python and Node environments and starts only the **Venom API/UI**, with built-in Demo. Defaults are UI 3300 and API 8800. It starts no separate Pi fixture, listener or third process. Ctrl-C closes only the launcher's own API/UI processes. If the regular stack is running, select Demo there instead.
 
-The demo forces RIDER_DEMO_ONLY=true, disables physical IoT and LLM startup, and accepts only loopback fixtures. Simulated values and actuator acknowledgements are marked DEMO. Fixture state is ephemeral. A fixture result is not evidence of physical motion or device rendering.
+The isolated launcher sets RIDER_DEMO_ONLY=true and disables physical IoT and LLM startup. Demo commands use the internal ASGI transport. Simulated values and actuator acknowledgements are marked DEMO. Fixture state is ephemeral. A fixture result is not evidence of physical motion or device rendering.
 
 
 ### Recorded camera replay
@@ -200,19 +200,10 @@ inference that could reject a Pi decision. The response wait is bounded to
 manual ARM through the existing Pi control contract. Giving control to Venom
 uses the independently calibrated drive policy and timed navigation ARM.
 
-For a hardware-free replay, keep a recorded `last_frame.jpg` and a
-`manifest.json` containing its `original_mtime` outside Git. Supply the actual,
-hardware-free `apps/compute/decision_lease.py` from the matching Pi checkout:
-
-    make demo ARGS="--replay-dir /path/to/recording --decision-lease-source /path/to/Rider-Pi/apps/compute/decision_lease.py"
-
-Configure the local segmentation model with `RIDER_VISION_MODEL` and
-`RIDER_VISION_SHA256`. Replay uses the real Venom vision endpoint and Pi's
-monotonic decision permit; actuator callbacks only change fixture state.
-The preview labels a replay and retains the original recording timestamp.
-Replay requires the local fixture; it can coexist with a production allowlist
-when `--with-demo` is explicitly enabled. It always targets the demo ID.
-Defaults remain observation, disarmed and no running camera or loop.
+Recorded replay remains a library-level test fixture in
+`demo_navigation.py`, using recorded JPEGs and the matching Pi decision lease
+source. It does not require a separately running fixture service. The ordinary
+Demo selector provides interactive motion simulation in the module process.
 
 For cross-repository integration checks, set `RIDER_TEST_PI_LEASE` to that Pi
 source file when running `make check`. The scenarios test correlated frames,
@@ -228,17 +219,16 @@ Use a private device allowlist JSON under ignored config/local/. Pass it explici
 
     make demo ARGS="--device-file config/local/devices.json --device-id robot"
 
-Alternatively invoke scripts/run_demo.py with those arguments. Without the file flag the launcher always starts the isolated fixture, even if a real device exists in the inherited environment. File mode starts only the Venom API/UI, preserves the hardware authority on Pi, and never automatically arms or starts a resource. It is an operator panel, not an automated physical-motion test runner. The configured-device host defaults to the `full` LLM runtime profile so the Venom cockpit can select installed models. Use `--runtime-profile light` or `--runtime-profile llm_off` explicitly to restrict the host. The isolated fixture always remains `llm_off`; model warmup and background optional services remain disabled by this launcher.
+Alternatively invoke scripts/run_demo.py with those arguments. Without the file flag the launcher always uses the built-in simulation, even if a real device exists in the inherited environment. File mode starts only the Venom API/UI, preserves the hardware authority on Pi, and never automatically arms or starts a resource. It is an operator panel, not an automated physical-motion test runner. The configured-device host defaults to the `full` LLM runtime profile so the Venom cockpit can select installed models. Use `--runtime-profile light` or `--runtime-profile llm_off` explicitly to restrict the host. The isolated fixture always remains `llm_off`; model warmup and background optional services remain disabled by this launcher.
 
-The standard module provides Demo in-process even when every physical Pi is off. No server on port 18880 is required. The standalone replay launcher remains optional for recorded-image/model experiments:
-
-    make demo ARGS="--device-file /private/devices.json --with-demo"
+Demo is automatically available alongside allowlisted physical devices.
+No additional demo endpoint, fixture flag or separate service is configured.
+Select Demo from the regular panel; use an explicit device ID when a launcher
+should initially select a configured target.
 
 The initial selection is **Demo**, unless a saved operator choice exists.
 Switch Demo/Prod in the panel without changing files or restarting services.
-The fixture and production target have separate credential references; built-in
-demo tokens are never used for production. Recorded replay flags apply only to
-the local fixture. Automated switching checks use two fixtures; registering a
+The simulation and production targets have separate transports; the simulation never opens a network connection to a Pi. Automated switching checks use two fixtures; registering a
 production target does not constitute a physical-device test.
 
 Service and resource operations have a separate bounded response timeout. Motion

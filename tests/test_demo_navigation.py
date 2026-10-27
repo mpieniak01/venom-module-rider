@@ -274,7 +274,7 @@ async def test_full_authenticated_loop_actual_pi_permit_go_obstacle_timeout_and_
     monkeypatch.setenv("RIDER_COMPUTE_TOKEN", "replay-fixture-token")
     app = FastAPI()
     app.state.rider = RiderService(
-        (Device("demo", "Replay", "http://127.0.0.1:18880", "demo"),)
+        (Device("demo", "Replay", "http://127.0.0.1", "demo"),)
     )
     app.state.rider_vision = loop
     app.include_router(router)
@@ -418,7 +418,7 @@ async def test_recorded_depth_model_reaches_simulated_drive_then_stops(monkeypat
     monkeypatch.setenv("RIDER_COMPUTE_TOKEN", "isolated-recording-fixture")
     app = FastAPI()
     app.state.rider = RiderService(
-        (Device("demo", "Replay", "http://127.0.0.1:18880", "demo"),)
+        (Device("demo", "Replay", "http://127.0.0.1", "demo"),)
     )
     app.state.rider_vision = loop
     app.include_router(router)

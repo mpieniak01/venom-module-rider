@@ -1,4 +1,4 @@
-.PHONY: check check-python check-web test demo demo-pi
+.PHONY: check check-python check-web test demo
 HOST ?= ../..
 PYTHON ?= $(HOST)/.venv/bin/python
 RUFF ?= $(HOST)/.venv/bin/ruff
@@ -71,9 +71,6 @@ test:
 
 demo:
 	PYTHONPATH=$(HOST):. $(PYTHON) scripts/run_demo.py $(ARGS)
-
-demo-pi:
-	$(PYTHON) -m venom_module_rider.demo --port 18880
 
 .PHONY: research-depth
 DA3_PYTHON ?= data/da3-research/venv/bin/python

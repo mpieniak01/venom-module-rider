@@ -162,7 +162,7 @@ class Detector:
 
 def fixture(monkeypatch):
     monkeypatch.setenv("RIDER_COMPUTE_TOKEN", "fixture-compute")
-    device = Device("pi", "Pi fixture", "http://127.0.0.1:18880", "device")
+    device = Device("pi", "Pi fixture", "http://127.0.0.1", "device")
     instances = []
 
     def factory(device):
@@ -690,7 +690,7 @@ def test_network_delayed_part_is_stale_despite_small_send_age_and_never_infers(
 
 
 async def test_cached_status_timing_is_never_redated_as_a_new_age_anchor():
-    device = Device("pi", "Fixture", "http://127.0.0.1:18880", "device")
+    device = Device("pi", "Fixture", "http://127.0.0.1", "device")
     pi = PiFixture(device)
     domain = RiderService((device,), client_factory=lambda _device: pi)
     await domain.select("pi", domain.session)

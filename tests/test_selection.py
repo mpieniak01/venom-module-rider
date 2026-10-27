@@ -14,7 +14,7 @@ from venom_module_rider.errors import RiderError
 from venom_module_rider.service import RiderService
 
 DEVICES = (
-    Device("demo", "Demo", "http://127.0.0.1:18880", "demo"),
+    Device("demo", "Demo", "http://127.0.0.1", "demo"),
     Device("prod", "Prod fixture", "http://127.0.0.1:18881", "device"),
 )
 
