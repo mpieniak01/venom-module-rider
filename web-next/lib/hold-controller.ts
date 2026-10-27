@@ -33,6 +33,7 @@ export class HoldController {
     cancelPending?: () => boolean | void;
     now?: () => number;
   }) {}
+  /** Start one pointer gesture without replaying a previous direction. */
   start(direction: Direction, pointerId: number, turnMode?: "in_place") {
     const timing = this.options.timing();
     if (!timing || !this.options.canMove()) return;
@@ -46,6 +47,7 @@ export class HoldController {
     this.prepare(token);
     this.timer = setTimeout(() => this.beginHold(token), timing.click_threshold_ms);
   }
+  /** Toggle a continuous gesture, treating in-place and legacy turns separately. */
   toggle(direction: Direction, turnMode?: "in_place") {
     if (this.press?.latched && this.press.direction === direction && this.press.turn_mode === turnMode) { this.release(); return; }
     if (!this.options.timing() || !this.options.canMove()) return;
@@ -60,6 +62,7 @@ export class HoldController {
     void this.renew(token);
   }
   releasePointer() { if (!this.press?.latched) this.release(); }
+  /** Finish a click or send release immediately for an established hold. */
   end(pointerId: number) {
     const press = this.press;
     if (!press || press.pointerId !== pointerId) return;
@@ -75,6 +78,7 @@ export class HoldController {
       void this.dispatch(this.intent(press, "pulse"), () => token === this.token && !this.press);
     }
   }
+  /** Release only the matching gesture and cancel a pending atomic takeover. */
   release(pointerId?: number) {
     if (pointerId !== undefined && this.press?.pointerId !== pointerId) return;
     const press = this.press;
@@ -89,6 +93,7 @@ export class HoldController {
     if (this.preparation?.token === press.token) this.preparation.token = token;
     if (press?.held && !cancelled) this.enqueueRelease(press, token);
   }
+  /** Invalidate local gestures and timers at the STOP/session boundary. */
   cancel() {
     this.options.cancelPending?.();
     this.press = null; ++this.token; this.preparation = null; this.clearTimer();
@@ -119,6 +124,7 @@ export class HoldController {
     press.held = true;
     void this.renew(token);
   }
+  /** Renew a live gesture once, stopping at its original timeout. */
   private async renew(token: number) {
     const press = this.press;
     const timing = this.options.timing();
@@ -135,12 +141,15 @@ export class HoldController {
     }
     this.timer = setTimeout(() => { void this.renew(token); }, Math.max(0, timing.hold_renewal_ms - elapsed));
   }
+  /** Carry the selected maneuver into every pulse, renewal and release. */
   private intent(press: Press, mode: MovementIntent["mode"]): MovementIntent {
     return {direction:press.direction,mode,...(press.turn_mode ? {turn_mode:press.turn_mode} : {})};
   }
+  /** Dispatch zero intent independently of a stalled motion acknowledgement. */
   private enqueueRelease(press: Press, token: number) {
     void this.dispatch(this.intent(press, "release"), () => this.token === token && !this.press);
   }
+  /** Serialize motion renewals while allowing release to bypass their ACK. */
   private async dispatch(intent: MovementIntent, valid: () => boolean) {
     const preparation = this.preparation;
     if (preparation && !preparation.ready) {

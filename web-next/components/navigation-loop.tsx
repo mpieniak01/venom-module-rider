@@ -26,6 +26,7 @@ import styles from "../rider.module.css";
 
 const geometryRanges = {fx:[.1,5],fy:[.1,5],cx:[0,1],cy:[0,1],radius_ratio:[.05,5],lookahead_ratio:[.25,8],max_heading_deg:[5,70]} as const;
 
+/** Coordinate navigation drafts, live preview and bounded operator requests. */
 export function NavigationLoop({client,t,language,recording,operatorDetails,studyRecording}:{client:RiderClient;t:Translator;language:string;recording?:ReactNode;operatorDetails?:ReactNode;studyRecording?:StudyRecording}) {
   const workspace=useOperatorTuning();
   const {state:operatorDraft,setState:setOperatorDraft}=workspace;

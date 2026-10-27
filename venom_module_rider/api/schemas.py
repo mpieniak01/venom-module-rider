@@ -79,8 +79,17 @@ class Command(StrictModel):
             raise ValueError("invalid_panel_id")
         return value
 
+    @model_validator(mode="before")
+    @classmethod
+    def stop_ignores_turn_metadata(cls, value):
+        """Stopping does not depend on inherited motion-only metadata."""
+        if isinstance(value, dict) and value.get("action") in {"stop", "disarm"}:
+            return {key: item for key, item in value.items() if key != "turn_mode"}
+        return value
+
     @model_validator(mode="after")
     def supersession_scope(self):
+        """Validate maneuver and takeover fields within operator scope."""
         if self.turn_mode is not None and not (
             self.action == "move"
             and self.device_settings is True

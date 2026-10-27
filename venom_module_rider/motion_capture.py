@@ -194,6 +194,7 @@ class MotionWriter:
 
 
 def begin(domain, body, session):
+    """Capture maneuver and authoritative settings for active recordings."""
     registry = domain.samples
     if (
         registry is None

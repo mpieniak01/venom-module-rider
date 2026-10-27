@@ -9,6 +9,7 @@ import styles from "../../web-next/rider.module.css";
 const calls:(MovementIntent&{at:number})[]=[];
 declare global {interface Window {spinCalls:typeof calls}}
 window.spinCalls=calls;
+/** Exercise the real manual pad with an inert, deliberately delayed gesture sender. */
 function Fixture(){
  const [direction,setDirection]=useState<Direction|null>(null);
  const [mode,setMode]=useState<"hold"|"continuous"|null>(null);

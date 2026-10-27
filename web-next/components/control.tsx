@@ -26,6 +26,7 @@ const arrows: {direction:Direction;row:number;column:number;Icon:typeof ArrowUp;
   { direction: "left", row: 3, column: 1, Icon: RotateCcw, turnMode:"in_place" },
   { direction: "right", row: 3, column: 3, Icon: RotateCw, turnMode:"in_place" },
 ];
+/** Render separate legacy and in-place gestures using Pi-owned motion settings. */
 export function ManualPad({ client, t, language, compact = false, minimal = false, children }: { client: RiderClient; t: Translator; language: string; compact?: boolean; minimal?: boolean; children?: ReactNode }) {
   const [mode, setMode] = useState<"pulse" | "continuous">("pulse");
   const helpId = useId();

@@ -145,6 +145,7 @@ async def test_fixture_watchdog_expires_without_disarming_or_archiving():
 
 
 def test_in_place_turn_schema_is_scoped():
+    """Verify in place turn schema is scoped."""
     assert (
         Command(
             action="move", direction="left", device_settings=True, turn_mode="in_place"
@@ -161,6 +162,7 @@ def test_in_place_turn_schema_is_scoped():
 
 
 async def test_old_pi_cannot_silently_fall_back_to_legacy_turn():
+    """Verify old pi cannot silently fall back to legacy turn."""
     service, pi = domain()
     await service.select("demo", service.session)
     try:
@@ -184,6 +186,7 @@ async def test_old_pi_cannot_silently_fall_back_to_legacy_turn():
 
 
 async def test_supported_pi_receives_explicit_turn_mode():
+    """Verify supported pi receives explicit turn mode."""
     service, pi = domain()
     pi.controls["control_modes"]["in_place_turn_version"] = 1
     await service.select("demo", service.session)
@@ -205,5 +208,51 @@ async def test_supported_pi_receives_explicit_turn_mode():
             row["path"] == "/api/control" and row["body"].get("turn_mode") == "in_place"
             for row in pi.trace
         )
+    finally:
+        await service.close()
+
+
+@pytest.mark.parametrize("version", [True, False, 1.0, "1", 2, None])
+async def test_in_place_capability_requires_integer_one(version):
+    """Verify in place capability requires integer one."""
+    service, pi = domain()
+    pi.controls["control_modes"]["in_place_turn_version"] = version
+    await service.select("demo", service.session)
+    try:
+        await bind(service, pi, "panel-a")
+        with pytest.raises(RiderError, match="in_place_turn_unsupported"):
+            await service.control(
+                command(
+                    pi,
+                    "move",
+                    direction="left",
+                    mode="pulse",
+                    device_settings=True,
+                    panel_id="panel-a",
+                    turn_mode="in_place",
+                ),
+                service.session,
+            )
+    finally:
+        await service.close()
+
+
+@pytest.mark.parametrize("action", ["stop", "disarm"])
+@pytest.mark.parametrize("turn_mode", ["in_place", "old", True])
+def test_stop_schema_ignores_stale_turn_metadata(action, turn_mode):
+    """Verify stop schema ignores stale turn metadata."""
+    assert Command(action=action, turn_mode=turn_mode).turn_mode is None
+
+
+async def test_stop_with_turn_metadata_does_not_read_unsupported_capability():
+    """Verify stop with turn metadata does not read unsupported capability."""
+    service, pi = domain()
+    await service.select("demo", service.session)
+    try:
+        await bind(service, pi, "panel-a")
+        result = await service.control(
+            command(pi, "stop", turn_mode="in_place"), service.session
+        )
+        assert result["data"]["safety"]["state"] == "DISARMED"
     finally:
         await service.close()

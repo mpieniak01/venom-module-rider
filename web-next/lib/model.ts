@@ -44,7 +44,9 @@ export const timestampMs = (value: unknown): number | null => { if (finite(value
 export const formatNumber = (value: unknown, locale: string, precision = 1): string => finite(value) ? new Intl.NumberFormat(locale, { maximumFractionDigits: precision }).format(value) : "—";
 export const formatTime = (value: unknown, locale: string): string => { const at = timestampMs(value); return at === null ? "—" : new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(at); };
 export const displayValue = (value: unknown, descriptor: NumericDescriptor, locale: string): string => formatNumber(finite(value) ? value * (descriptor.display_factor ?? 1) : value, locale, descriptor.display_precision ?? 1);
+/** Normalize protocol failures and the one expected local navigation cancellation. */
 export function errorCode(error: unknown): string {
+  if (error instanceof Error && error.message === "navigation_trial_cancelled") return "navigation_trial_cancelled";
   const outer = record(error); const response = record(outer.data); const detail = record(response.detail); const nested = record(response.error);
   return str(detail.code) || str(nested.code) || str(response.error) || (outer.name === "AbortError" ? "cancelled" : "request_failed");
 }
