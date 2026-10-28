@@ -5,6 +5,8 @@ import copy
 import importlib.util
 import time
 from collections import OrderedDict
+from dataclasses import dataclass
+from typing import Any
 from uuid import uuid4
 
 from . import depth_trace
@@ -19,6 +21,48 @@ from .sector_trend import update as sector_trend
 from .steering import plan as steering_plan
 from .vision_overlay import preview_sectors
 from .workers import VisionWorkers
+
+
+@dataclass(slots=True)
+class _DecisionRun:
+    """State and history captured when one frame reserves its sequence."""
+
+    device_id: Any
+    frame: Any
+    key: Any
+    identity: Any
+    previous: Any
+    signature: Any
+    planner: Any
+    now: float
+    count: int
+    state: dict
+
+
+@dataclass(slots=True)
+class _DecisionSignals:
+    """Calibrated intent refined by the existing planner and temporal veto."""
+
+    model: Any
+    permitted: bool
+    action: str
+    vision_action: str
+    reason: Any
+
+
+@dataclass(slots=True)
+class _DecisionPublication:
+    """Source-bound metadata shared by sample, preview and response publication."""
+
+    elapsed: float
+    image_sectors: Any
+    sector_space: str
+    journey: dict
+    source_reference: Any
+    diagnostic: bool
+    input_ticket: Any
+    capture_key: Any = None
+    image: Any = None
 
 
 class VisionLoop:
@@ -251,17 +295,8 @@ class VisionLoop:
                 self.inference_cache.popitem(last=False)
         return task
 
-    async def decide(
-        self,
-        device_id,
-        frame,
-        payload,
-        *,
-        with_preview=False,
-        input_ticket=None,
-        source_key=None,
-        source_reference=None,
-    ):
+    def _validate_decision_input(self, device_id, frame):
+        """Validate input and production priority before inference admission."""
         if self.closed:
             raise RiderError("module_closed", 503)
         generation = self.models.runtime.generation if self.models else 0
@@ -280,9 +315,10 @@ class VisionLoop:
             for identity, row in self.runs.items()
         ):
             raise RiderError("vision_production_priority", 429)
-        frame, cached_task = await self._admit_inference(
-            device_id, frame, source_key, with_preview
-        )
+        return generation, depth_mode
+
+    def _reserve_decision(self, device_id, frame, source_key, source_reference):
+        """Reserve sequence and capture planner history before inference can suspend."""
         key = self._inference_key(device_id, frame, source_key)
         identity = (device_id, frame.run_id)
         previous = self.runs.get(identity)
@@ -343,10 +379,21 @@ class VisionLoop:
             except Exception:
                 # Optional offline scheduling must never break live decisions.
                 self.priority_errors += 1
-        selected = self.depth_detector if depth_mode else self.detector
-        task = cached_task or self._start_inference(
-            key, frame, payload, diagnostic=with_preview
+        return _DecisionRun(
+            device_id,
+            frame,
+            key,
+            identity,
+            previous,
+            signature,
+            prior_planner,
+            now,
+            count,
+            state,
         )
+
+    async def _await_decision_inference(self, task, frame):
+        """Keep shielding, depth identity and sanitized timeout handling together."""
         try:
             detected = await asyncio.wait_for(
                 asyncio.shield(task), (frame.deadline_ms - frame.age_ms) / 1000
@@ -375,10 +422,17 @@ class VisionLoop:
         finally:
             if task.done():
                 self._drain(task)
+        return result
+
+    def _validate_inferred_model(self, run, generation):
+        """Reject a model switch before publishing any inference-derived state."""
         if self.models is not None and generation != self.models.runtime.generation:
             raise RiderError("model_selection_conflict", 409)
         if self.models is not None:
-            self.models.runtime.validate(device_id, frame)
+            self.models.runtime.validate(run.device_id, run.frame)
+
+    def _trace_decision(self, run, result, payload, depth_mode):
+        """Record diagnostics without letting storage grant or revoke clearance."""
         trace_depth = result.pop("_trace_depth", None)
         if depth_mode and trace_depth is not None:
             # Diagnostic only: exact input of this inference, never another RAW.
@@ -394,48 +448,51 @@ class VisionLoop:
                             if not key.startswith("_")
                         },
                         "stage": "depth_assessment",
-                        "avoidance": frame.avoidance.model_dump(mode="json"),
-                        "device_id": device_id,
-                        "run_id": frame.run_id,
-                        "frame_id": frame.frame_id,
-                        "sequence": frame.sequence,
-                        "config_revision": frame.config_revision,
+                        "avoidance": run.frame.avoidance.model_dump(mode="json"),
+                        "device_id": run.device_id,
+                        "run_id": run.frame.run_id,
+                        "frame_id": run.frame.frame_id,
+                        "sequence": run.frame.sequence,
+                        "config_revision": run.frame.config_revision,
                     },
-                    frame.corridor,
-                    frame.perception,
+                    run.frame.corridor,
+                    run.frame.perception,
                 )
                 if trace_id:
                     result["depth_trace_id"] = trace_id
             except Exception:
                 # Storage must neither grant nor revoke a visual decision.
                 pass
-        # Full heading grid stays in the depth trace, not Pi's bounded response
-        # or the preview HTTP header. Keep only selected paths and gap extents.
-        result.pop("heading_candidates", None)
+
+    def _observe_decision(self, run, result, source_reference):
+        """Advance the same source-bound temporal observer or retire legacy maps."""
         temporal = None
-        if frame.behavior.profile_id != "legacy":
+        if run.frame.behavior.profile_id != "legacy":
             from .navigation_policy import evaluate
             from .temporal_evidence import TemporalEvidence
 
-            observer = self.temporal_runs.setdefault(identity, TemporalEvidence())
+            observer = self.temporal_runs.setdefault(run.identity, TemporalEvidence())
             temporal = evaluate(
                 result,
-                frame,
+                run.frame,
                 observer,
                 context={
-                    "signature": signature,
-                    "device_id": device_id,
-                    "run_id": frame.run_id,
+                    "signature": run.signature,
+                    "device_id": run.device_id,
+                    "run_id": run.frame.run_id,
                 },
-                captured_s=now - frame.age_ms / 1000,
+                captured_s=run.now - run.frame.age_ms / 1000,
                 source=source_reference,
             )
         else:
             result.pop("_navigation_maps", None)
-        elapsed = (self.clock() - now) * 1000
-        if elapsed + frame.age_ms >= frame.deadline_ms:
-            if identity in self.temporal_runs:
-                self.temporal_runs[identity].reset()
+        return temporal
+
+    def _expire_inference(self, run, result, elapsed):
+        """Expire inference output against the original admitted capture budget."""
+        if elapsed + run.frame.age_ms >= run.frame.deadline_ms:
+            if run.identity in self.temporal_runs:
+                self.temporal_runs[run.identity].reset()
             result = {
                 "state": "unknown",
                 "reason": "vision_decision_expired",
@@ -446,283 +503,224 @@ class VisionLoop:
                     else {}
                 ),
             }
-        count = (
-            count + 1
-            if result["state"] == "clear"
-            else count
-            if temporal and temporal["action"] == "slow" and count >= 3
-            else 0
-        )
-        state["count"] = count
-        if self.closed:
-            raise RiderError("module_closed", 503)
+        return result
+
+    def _calibrated_signals(self, run, result, selected, generation, depth_mode):
+        """Describe calibrated intent without granting any new movement authority."""
         status = (
-            self.models.runtime.detector_status(frame.perception.model_dump())
-            if self.models is not None and frame.perception.model_id
+            self.models.runtime.detector_status(run.frame.perception.model_dump())
+            if self.models is not None and run.frame.perception.model_id
             else selected.status()
         )
         model = status.get("sha256", "")
         result.update(
-            model_id=frame.perception.model_id
+            model_id=run.frame.perception.model_id
             or (
                 "depth-anything-v2-indoor-small"
                 if depth_mode
                 else "segformer-b0-ade20k"
             ),
-            artifact_sha256=frame.perception.artifact_sha256,
+            artifact_sha256=run.frame.perception.artifact_sha256,
             model_generation=generation,
         )
         permitted = (
-            frame.mode == "drive"
-            and frame.verified
-            and (not frame.perception.model_id or depth_mode)
-            and bool(frame.calibration_id)
-            and model == frame.model_sha256
+            run.frame.mode == "drive"
+            and run.frame.verified
+            and (not run.frame.perception.model_id or depth_mode)
+            and bool(run.frame.calibration_id)
+            and model == run.frame.model_sha256
             and len(model) == 64
         )
         action = (
-            "go" if permitted and count >= 3 and result["state"] == "clear" else "stop"
+            "go"
+            if permitted and run.count >= 3 and result["state"] == "clear"
+            else "stop"
         )
-        vision_action = "go" if count >= 3 and result["state"] == "clear" else "stop"
-        if result["state"] != "clear":
-            motion_reason = result["reason"]
-        elif count < 3:
-            motion_reason = "clear_frames_pending"
-        elif frame.mode != "drive":
-            motion_reason = "observe_only"
-        elif not permitted:
-            motion_reason = "calibration_not_validated"
-        else:
-            motion_reason = "clear_frames_ready"
+        vision_action = (
+            "go" if run.count >= 3 and result["state"] == "clear" else "stop"
+        )
+        motion_reason = _decision_motion_reason(run.frame, result, run.count, permitted)
+        return _DecisionSignals(model, permitted, action, vision_action, motion_reason)
+
+    def _update_decision_sectors(self, run, result, depth_mode):
+        """Update sector history before taking the unmirrored preview snapshot."""
         if depth_mode and "sectors" in result:
             history = (
-                previous.get("sector_history")
-                if previous and now - previous["at"] <= 0.5
+                run.previous.get("sector_history")
+                if run.previous and run.now - run.previous["at"] <= 0.5
                 else None
             )
-            if frame.motion_phase != "ready":
+            if run.frame.motion_phase != "ready":
                 history = None
-            result["sectors"], state["sector_history"] = sector_trend(
+            result["sectors"], run.state["sector_history"] = sector_trend(
                 result["sectors"], history
             )
-        # JPEG annotations use source-space geometry, before command-side mirroring.
-        image_sectors = preview_sectors(result)
-        sector_space = (
-            "projected_paths"
-            if result.get("geometry") == "ground_capsule"
-            else "image"
-            if image_sectors
-            else "unavailable"
-        )
-        if frame.protocol_version == 2:
-            if frame.avoidance.enabled and depth_mode:
-                prior = dict(previous.get("avoidance") or {}) if previous else {}
-                if previous and now - previous["at"] > 0.5:
-                    prior.update(counts={"left": 0, "right": 0}, front=0, paused=False)
-                action, motion_reason, planner, sectors = plan(
-                    result,
-                    prior,
-                    frame.avoidance,
-                    frame.motion_phase,
-                    permitted,
-                )
-                state["avoidance"] = planner
-                result.update(
-                    sectors=sectors,
-                    maneuver_clear_count=3 if action.startswith("turn_") else 0,
-                    maneuver_phase=motion_reason,
-                    turn_count=planner["turns"],
-                )
-            else:
-                action, motion_reason = "stop", "avoidance_not_enabled"
-        if frame.protocol_version == 3:
-            prior = prior_planner
-            if previous and now - previous["at"] > 0.5:
-                prior.update(counts={"left": 0, "right": 0}, front=0)
-            action, motion_reason, planner, sectors, paths, terminal = steering_plan(
-                result,
-                prior,
-                frame.avoidance,
-                frame.motion_phase,
-                permitted and frame.avoidance.enabled and depth_mode,
-            )
-            state["avoidance"] = planner
-            result.update(
-                sectors=sectors,
-                paths=paths,
-                terminal_stop=terminal,
-                maneuver_clear_count=3 if action.startswith("steer_") else 0,
-                maneuver_phase=motion_reason,
-                turn_count=planner["turns"],
-                stalled_corrections=planner.get("stalled", 0),
-                progress_delta=planner.get("progress_delta"),
-                pose_resets=planner.get("pose_resets", 0),
-            )
-        if temporal is not None:
-            if result.get("reason") == "vision_decision_expired":
-                action, vision_action = "stop", "stop"
-            else:
-                vision_action = temporal["action"] if count >= 3 else "stop"
-                if (
-                    vision_action == "slow"
-                    and permitted
-                    and frame.motion_phase == "ready"
-                    and not result.get("terminal_stop")
-                ):
-                    action, motion_reason = "slow", temporal["reason"]
-                elif temporal["action"] == "stop":
-                    # A confirmed distant obstacle may use qualified side paths.
-                    # A near or unreliable observation vetoes every maneuver.
-                    steering_allowed = (
-                        action.startswith(("turn_", "steer_"))
-                        and temporal.get("state") == "obstacle"
-                        and temporal.get("near_guard_clear") is True
-                        and temporal.get("evidence_frames", 0) >= 3
-                        and temporal.get("spatial", {}).get("valid") is True
-                        and temporal.get("spatial", {}).get("hard_stop") is not True
-                    )
-                    if not steering_allowed:
-                        action, motion_reason = "stop", temporal["reason"]
-        record_result(state, frame, action, result)
-        journey_result = (
-            {"journey": frame.journey.model_dump(), "host_session": self.host_session}
-            if frame.journey is not None
-            else {}
-        )
-        capture_key = None
+
+    def _record_decision_sample(self, run, result, payload, signals, publication):
+        """Capture and annotate this inference only after planner output is final."""
+        publication.capture_key = None
         if self.samples is not None:
             from .sample_sources import vision
 
-            capture_key = vision(
+            publication.capture_key = vision(
                 self.samples,
-                device_id,
+                run.device_id,
                 self.source_session()
                 if callable(self.source_session)
                 else self.source_session,
-                frame,
+                run.frame,
                 payload,
-                elapsed=elapsed,
-                input_ticket=input_ticket,
-                diagnostic=with_preview,
+                elapsed=publication.elapsed,
+                input_ticket=publication.input_ticket,
+                diagnostic=publication.diagnostic,
             )
-            if capture_key:
+            if publication.capture_key:
                 self.samples.annotate_prediction(
-                    capture_key,
+                    publication.capture_key,
                     {
                         **{
                             key: value
                             for key, value in result.items()
                             if not key.startswith("_")
                         },
-                        "model_sha256": model,
-                        "action": action,
-                        "vision_action": vision_action,
-                        "input_frame": frame.model_dump(mode="json"),
-                        **journey_result,
-                        "perception_engine": frame.perception.engine,
-                        "inference_ms": round(elapsed, 2),
+                        "model_sha256": signals.model,
+                        "action": signals.action,
+                        "vision_action": signals.vision_action,
+                        "input_frame": run.frame.model_dump(mode="json"),
+                        **publication.journey,
+                        "perception_engine": run.frame.perception.engine,
+                        "inference_ms": round(publication.elapsed, 2),
                         "valid_for_ms": min(
                             MAX_DECISION_MS,
-                            max(0, int(frame.deadline_ms - frame.age_ms - elapsed)),
+                            max(
+                                0,
+                                int(
+                                    run.frame.deadline_ms
+                                    - run.frame.age_ms
+                                    - publication.elapsed
+                                ),
+                            ),
                         ),
-                        "diagnostic": with_preview,
+                        "diagnostic": publication.diagnostic,
                     },
                 )
-        image = result.pop("_preview", None)
-        if image is not None:
-            self.previews[device_id] = (
-                now - frame.age_ms / 1000,
-                image,
+
+    def _publish_decision_preview(self, run, result, signals, publication):
+        """Publish the captured source-space preview and wake existing waiters."""
+        publication.image = result.pop("_preview", None)
+        if publication.image is not None:
+            self.previews[run.device_id] = (
+                run.now - run.frame.age_ms / 1000,
+                publication.image,
                 {
                     **result,
-                    "sectors": image_sectors,
-                    "sector_space": sector_space,
-                    "frame_id": frame.frame_id,
-                    "run_id": frame.run_id,
-                    "sequence": frame.sequence,
-                    "capture_key": capture_key,
-                    "clear_count": count,
-                    "vision_action": vision_action,
-                    "model_sha256": model,
-                    **({"source": source_reference} if source_reference else {}),
+                    "sectors": publication.image_sectors,
+                    "sector_space": publication.sector_space,
+                    "frame_id": run.frame.frame_id,
+                    "run_id": run.frame.run_id,
+                    "sequence": run.frame.sequence,
+                    "capture_key": publication.capture_key,
+                    "clear_count": run.count,
+                    "vision_action": signals.vision_action,
+                    "model_sha256": signals.model,
+                    **(
+                        {"source": publication.source_reference}
+                        if publication.source_reference
+                        else {}
+                    ),
                     "age_source": (
                         "pi-send-plus-host-elapsed"
-                        if source_reference
+                        if publication.source_reference
                         else "host-received"
-                        if with_preview
+                        if publication.diagnostic
                         else "pi-reported-plus-host-elapsed"
                     ),
-                    "corridor": frame.corridor,
-                    "config_revision": frame.config_revision,
-                    **journey_result,
-                    "observed_at": time.time() - (frame.age_ms + elapsed) / 1000,
+                    "corridor": run.frame.corridor,
+                    "config_revision": run.frame.config_revision,
+                    **publication.journey,
+                    "observed_at": time.time()
+                    - (run.frame.age_ms + publication.elapsed) / 1000,
                 },
-                round(elapsed, 2),
+                round(publication.elapsed, 2),
             )
-            self.previews.move_to_end(device_id)
+            self.previews.move_to_end(run.device_id)
             while len(self.previews) > 16:
                 self.previews.popitem(last=False)
         else:
-            self.previews.pop(device_id, None)
+            self.previews.pop(run.device_id, None)
         changed, self.preview_changed = self.preview_changed, asyncio.Event()
         changed.set()
+
+    def _decision_response(self, run, result, signals, publication, depth_mode):
+        """Build the existing bounded response without exposing diagnostic arrays."""
         from .navigation_profiles import policy_digest
 
         response = {
             **result,
             **(
                 {
-                    "behavior": frame.behavior.model_dump(),
+                    "behavior": run.frame.behavior.model_dump(),
                     "effective_policy_sha256": policy_digest(
-                        frame.behavior.model_dump(), frame.perception.model_dump()
+                        run.frame.behavior.model_dump(),
+                        run.frame.perception.model_dump(),
                     ),
                 }
-                if frame.behavior.profile_id != "legacy"
+                if run.frame.behavior.profile_id != "legacy"
                 else {}
             ),
             **(
                 {
-                    "_preview": image,
+                    "_preview": publication.image,
                     "_preview_analysis": {
-                        "sectors": image_sectors,
-                        "sector_space": sector_space,
+                        "sectors": publication.image_sectors,
+                        "sector_space": publication.sector_space,
                     },
                 }
-                if with_preview and image is not None
+                if publication.diagnostic and publication.image is not None
                 else {}
             ),
-            **({"source": source_reference} if source_reference else {}),
-            **journey_result,
-            "action": action,
-            "vision_action": vision_action,
-            "motion_reason": motion_reason,
-            "protocol_version": frame.protocol_version,
-            "run_id": frame.run_id,
-            "frame_id": frame.frame_id,
-            "sequence": frame.sequence,
-            "config_revision": frame.config_revision,
-            "valid_for_ms": min(
-                MAX_DECISION_MS, max(0, int(frame.deadline_ms - frame.age_ms - elapsed))
+            **(
+                {"source": publication.source_reference}
+                if publication.source_reference
+                else {}
             ),
-            "model_sha256": model,
-            "inference_ms": round(elapsed, 2),
-            "clear_count": count,
+            **publication.journey,
+            "action": signals.action,
+            "vision_action": signals.vision_action,
+            "motion_reason": signals.reason,
+            "protocol_version": run.frame.protocol_version,
+            "run_id": run.frame.run_id,
+            "frame_id": run.frame.frame_id,
+            "sequence": run.frame.sequence,
+            "config_revision": run.frame.config_revision,
+            "valid_for_ms": min(
+                MAX_DECISION_MS,
+                max(
+                    0,
+                    int(run.frame.deadline_ms - run.frame.age_ms - publication.elapsed),
+                ),
+            ),
+            "model_sha256": signals.model,
+            "inference_ms": round(publication.elapsed, 2),
+            "clear_count": run.count,
             "physical_clearance": "unverified",
-            "perception_engine": frame.perception.engine,
-            "drive_supported": not frame.perception.model_id or depth_mode,
+            "perception_engine": run.frame.perception.engine,
+            "drive_supported": not run.frame.perception.model_id or depth_mode,
         }
 
-        # Planning, prediction annotation and preview publication also spend
-        # the original capture budget. Never return an earlier GO/TTL after
-        # this post-inference work has exhausted it.
-        complete_ms = max(0.0, (self.clock() - now) * 1000)
+        return response
+
+    def _complete_decision(self, run, response, publication):
+        """Account for all post-inference work before allowing a positive TTL."""
+        complete_ms = max(0.0, (self.clock() - run.now) * 1000)
         response["decision_elapsed_ms"] = round(complete_ms, 2)
         response["valid_for_ms"] = min(
-            MAX_DECISION_MS, max(0, int(frame.deadline_ms - frame.age_ms - complete_ms))
+            MAX_DECISION_MS,
+            max(0, int(run.frame.deadline_ms - run.frame.age_ms - complete_ms)),
         )
         if response["valid_for_ms"] == 0:
-            if identity in self.temporal_runs:
-                self.temporal_runs[identity].reset()
+            if run.identity in self.temporal_runs:
+                self.temporal_runs[run.identity].reset()
             response.update(
                 state="unknown",
                 reason="vision_decision_expired",
@@ -735,29 +733,102 @@ class VisionLoop:
             )
             response.pop("_preview", None)
             response.pop("_preview_analysis", None)
-            state["count"] = 0
-            if "avoidance" in state:
-                state["avoidance"].update(front=0, counts={"left": 0, "right": 0})
-            if frame.journey is not None:
-                state["journey_completed"] = False
+            run.state["count"] = 0
+            if "avoidance" in run.state:
+                run.state["avoidance"].update(front=0, counts={"left": 0, "right": 0})
+            if run.frame.journey is not None:
+                run.state["journey_completed"] = False
             if "maneuver_clear_count" in response:
                 response.update(
                     maneuver_clear_count=0, maneuver_phase="vision_decision_expired"
                 )
-            self.previews.pop(device_id, None)
-            if capture_key and self.samples is not None:
+            self.previews.pop(run.device_id, None)
+            if publication.capture_key and self.samples is not None:
                 self.samples.annotate_prediction(
-                    capture_key,
+                    publication.capture_key,
                     {
                         **{
                             key: value
                             for key, value in response.items()
                             if not key.startswith("_")
                         },
-                        "input_frame": frame.model_dump(mode="json"),
-                        "diagnostic": with_preview,
+                        "input_frame": run.frame.model_dump(mode="json"),
+                        "diagnostic": publication.diagnostic,
                     },
                 )
+
+    async def decide(
+        self,
+        device_id,
+        frame,
+        payload,
+        *,
+        with_preview=False,
+        input_ticket=None,
+        source_key=None,
+        source_reference=None,
+    ):
+        """Admit, assess and publish one source-bound decision within its TTL."""
+        generation, depth_mode = self._validate_decision_input(device_id, frame)
+        frame, cached_task = await self._admit_inference(
+            device_id, frame, source_key, with_preview
+        )
+        run = self._reserve_decision(device_id, frame, source_key, source_reference)
+        selected = self.depth_detector if depth_mode else self.detector
+        task = cached_task or self._start_inference(
+            run.key, frame, payload, diagnostic=with_preview
+        )
+        result = await self._await_decision_inference(task, frame)
+        self._validate_inferred_model(run, generation)
+        self._trace_decision(run, result, payload, depth_mode)
+        # Full grids remain diagnostic; bounded responses retain selected paths only.
+        result.pop("heading_candidates", None)
+        temporal = self._observe_decision(run, result, source_reference)
+        elapsed = (self.clock() - run.now) * 1000
+        result = self._expire_inference(run, result, elapsed)
+        run.count = (
+            run.count + 1
+            if result["state"] == "clear"
+            else run.count
+            if temporal and temporal["action"] == "slow" and run.count >= 3
+            else 0
+        )
+        run.state["count"] = run.count
+        if self.closed:
+            raise RiderError("module_closed", 503)
+        signals = self._calibrated_signals(
+            run, result, selected, generation, depth_mode
+        )
+        self._update_decision_sectors(run, result, depth_mode)
+        # Preview sectors precede command-side mirroring and planner mutations.
+        image_sectors, sector_space = _decision_preview_space(result)
+        if frame.protocol_version == 2:
+            _plan_decision_v2(run, result, signals, depth_mode)
+        if frame.protocol_version == 3:
+            _plan_decision_v3(run, result, signals, depth_mode)
+        _apply_temporal_decision(run, result, signals, temporal)
+        record_result(run.state, frame, signals.action, result)
+        journey_result = (
+            {"journey": frame.journey.model_dump(), "host_session": self.host_session}
+            if frame.journey is not None
+            else {}
+        )
+        publication = _DecisionPublication(
+            elapsed,
+            image_sectors,
+            sector_space,
+            journey_result,
+            source_reference,
+            with_preview,
+            input_ticket,
+        )
+        self._record_decision_sample(run, result, payload, signals, publication)
+        self._publish_decision_preview(run, result, signals, publication)
+        response = self._decision_response(
+            run, result, signals, publication, depth_mode
+        )
+        # Sampling and publication still spend the original capture budget.
+        self._complete_decision(run, response, publication)
         return response
 
     def preview(self, device_id, *, corridor=None, revision=None, run_id=None):
@@ -847,3 +918,109 @@ class VisionLoop:
                 await asyncio.gather(*pending, *snapshots, return_exceptions=True)
         finally:
             self.workers.close()
+
+
+def _decision_motion_reason(frame, result, count, permitted):
+    """Apply the original priority of image, count, mode and calibration reasons."""
+    if result["state"] != "clear":
+        motion_reason = result["reason"]
+    elif count < 3:
+        motion_reason = "clear_frames_pending"
+    elif frame.mode != "drive":
+        motion_reason = "observe_only"
+    elif not permitted:
+        motion_reason = "calibration_not_validated"
+    else:
+        motion_reason = "clear_frames_ready"
+    return motion_reason
+
+
+def _decision_preview_space(result):
+    """Snapshot original sectors before command-side mirroring changes them."""
+    image_sectors = preview_sectors(result)
+    sector_space = (
+        "projected_paths"
+        if result.get("geometry") == "ground_capsule"
+        else "image"
+        if image_sectors
+        else "unavailable"
+    )
+    return image_sectors, sector_space
+
+
+def _plan_decision_v2(run, result, signals, depth_mode):
+    """Apply the existing bounded turn planner only for protocol version two."""
+    if run.frame.avoidance.enabled and depth_mode:
+        prior = dict(run.previous.get("avoidance") or {}) if run.previous else {}
+        if run.previous and run.now - run.previous["at"] > 0.5:
+            prior.update(counts={"left": 0, "right": 0}, front=0, paused=False)
+        signals.action, signals.reason, planner, sectors = plan(
+            result,
+            prior,
+            run.frame.avoidance,
+            run.frame.motion_phase,
+            signals.permitted,
+        )
+        run.state["avoidance"] = planner
+        result.update(
+            sectors=sectors,
+            maneuver_clear_count=3 if signals.action.startswith("turn_") else 0,
+            maneuver_phase=signals.reason,
+            turn_count=planner["turns"],
+        )
+    else:
+        signals.action, signals.reason = "stop", "avoidance_not_enabled"
+
+
+def _plan_decision_v3(run, result, signals, depth_mode):
+    """Apply the existing pose-aware planner without resetting captured history."""
+    prior = run.planner
+    if run.previous and run.now - run.previous["at"] > 0.5:
+        prior.update(counts={"left": 0, "right": 0}, front=0)
+    signals.action, signals.reason, planner, sectors, paths, terminal = steering_plan(
+        result,
+        prior,
+        run.frame.avoidance,
+        run.frame.motion_phase,
+        signals.permitted and run.frame.avoidance.enabled and depth_mode,
+    )
+    run.state["avoidance"] = planner
+    result.update(
+        sectors=sectors,
+        paths=paths,
+        terminal_stop=terminal,
+        maneuver_clear_count=3 if signals.action.startswith("steer_") else 0,
+        maneuver_phase=signals.reason,
+        turn_count=planner["turns"],
+        stalled_corrections=planner.get("stalled", 0),
+        progress_delta=planner.get("progress_delta"),
+        pose_resets=planner.get("pose_resets", 0),
+    )
+
+
+def _apply_temporal_decision(run, result, signals, temporal):
+    """Retain temporal STOP precedence and the qualified side-path exception."""
+    if temporal is None:
+        return
+    if result.get("reason") == "vision_decision_expired":
+        signals.action, signals.vision_action = "stop", "stop"
+        return
+    signals.vision_action = temporal["action"] if run.count >= 3 else "stop"
+    if (
+        signals.vision_action == "slow"
+        and signals.permitted
+        and run.frame.motion_phase == "ready"
+        and not result.get("terminal_stop")
+    ):
+        signals.action, signals.reason = "slow", temporal["reason"]
+    elif temporal["action"] == "stop":
+        steering_allowed = (
+            signals.action.startswith(("turn_", "steer_"))
+            and temporal.get("state") == "obstacle"
+            and temporal.get("near_guard_clear") is True
+            and temporal.get("evidence_frames", 0) >= 3
+            and temporal.get("spatial", {}).get("valid") is True
+            and temporal.get("spatial", {}).get("hard_stop") is not True
+        )
+        if not steering_allowed:
+            signals.action, signals.reason = "stop", temporal["reason"]
