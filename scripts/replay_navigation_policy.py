@@ -8,10 +8,11 @@ assessment. Without it, the strict map baseline is labelled reconstructed.
 """
 
 import argparse
+import io
 import json
 from collections import Counter
 from collections.abc import Mapping
-from hashlib import file_digest, sha256
+from hashlib import sha256
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -33,27 +34,29 @@ def _asset(root: Path, value: Any) -> Path:
     return path
 
 
-def _read_maps(path: Path) -> dict[str, Any]:
+def _read_maps(path: Path) -> tuple[dict[str, Any], str]:
     import numpy as np
 
-    with np.load(path, allow_pickle=False) as archive:
+    from venom_module_rider.navigation_archive import _read_regular_file
+
+    payload = _read_regular_file(path, 32 * 1024 * 1024, "replay_maps_path")
+    # Check and load the same immutable bytes; never reopen a replaceable path.
+    import zipfile
+
+    with zipfile.ZipFile(io.BytesIO(payload)) as members:
+        entries = members.infolist()
+        if (
+            len(entries) > 16
+            or sum(item.file_size for item in entries) > 12 * 1024 * 1024
+            or any(item.file_size > 4 * 1024 * 1024 for item in entries)
+        ):
+            raise ValueError("replay_maps_bounds")
+    with np.load(io.BytesIO(payload), allow_pickle=False) as archive:
         if not (
             {"floor", "obstacle", "uncertain"}.issubset(archive.files)
             or {"labels", "confidence"}.issubset(archive.files)
         ):
             raise ValueError("replay_maps_keys")
-        # Bound declared arrays before materializing compressed payloads.
-        # The NPZ ZIP member size also bounds decompression memory.
-        import zipfile
-
-        with zipfile.ZipFile(path) as members:
-            entries = members.infolist()
-            if (
-                len(entries) > 16
-                or sum(item.file_size for item in entries) > 12 * 1024 * 1024
-                or any(item.file_size > 4 * 1024 * 1024 for item in entries)
-            ):
-                raise ValueError("replay_maps_bounds")
         maps = {
             key: archive[key]
             for key in (
@@ -80,7 +83,7 @@ def _read_maps(path: Path) -> dict[str, Any]:
                 if value.shape != () or value.dtype != np.bool_:
                     raise ValueError("replay_geometry_metadata")
                 maps[key] = bool(value.item())
-    return maps
+    return maps, sha256(payload).hexdigest()
 
 
 def _model_identity(row: Mapping[str, Any], perception: Mapping[str, Any]) -> None:
@@ -119,8 +122,7 @@ def replay(
     if output.suffix != ".jsonl":
         raise ValueError("replay_output_format")
     maps_digest = sha256()
-    with manifest.open("rb") as stream:
-        manifest_digest = file_digest(stream, "sha256").hexdigest()
+    manifest_digest = sha256()
     dimensions: set[tuple[int, int]] = set()
     profile: dict[str, Any] = {"id": "research", "qualified": False}
     if behavior is not None:
@@ -137,10 +139,12 @@ def replay(
         }
     output.parent.mkdir(parents=True, exist_ok=True)
     with (
-        manifest.open(encoding="utf-8") as source,
+        manifest.open("rb") as source,
         output.open("x", encoding="utf-8") as target,
     ):
-        for line in source:
+        for raw_line in source:
+            manifest_digest.update(raw_line)
+            line = raw_line.decode("utf-8")
             if len(line) > 64 * 1024:
                 raise ValueError("replay_manifest_bounds")
             if not line.strip():
@@ -149,7 +153,7 @@ def replay(
             if perception is not None:
                 _model_identity(row, perception)
             path = _asset(manifest.parent, row["maps"])
-            maps = _read_maps(path)
+            maps, map_sha256 = _read_maps(path)
             if ("labels" in maps) != ("confidence" in maps):
                 raise ValueError("replay_semantic_pair")
             if perception is not None:
@@ -161,7 +165,6 @@ def replay(
                     or not {"floor", "obstacle", "uncertain"}.issubset(maps)
                 ):
                     raise ValueError("replay_depth_maps_required")
-            map_sha256 = sha256(path.read_bytes()).hexdigest()
             maps_digest.update(map_sha256.encode())
             shape = maps["floor"].shape if "floor" in maps else maps["labels"].shape
             dimensions.add(tuple(shape))
@@ -235,7 +238,7 @@ def replay(
         "source_dimensions": [
             {"width": width, "height": height} for height, width in sorted(dimensions)
         ],
-        "manifest_sha256": manifest_digest,
+        "manifest_sha256": manifest_digest.hexdigest(),
         "maps_digest_sha256": maps_digest.hexdigest(),
         "params_sha256": sha256(
             json.dumps(dict(params), sort_keys=True, allow_nan=False).encode()

@@ -588,6 +588,12 @@ class ComputeService:
         job.output, job.output_mime = result.binary, result.content_type
         self._finish(job, "succeeded")
 
+    async def _cancel_running_worker(self, job: Job):
+        self._cancel_job(job, "cancelled", "compute_cancelled")
+        self._cancel_pending()
+        if self.inference is not None:
+            await asyncio.gather(self.inference, return_exceptions=True)
+
     async def _run_jobs(self):
         while self.pending and not self.closed:
             self._prune()
@@ -602,10 +608,7 @@ class ComputeService:
                 # the queue worker itself must propagate after cleanup.
                 current = asyncio.current_task()
                 if current is not None and current.cancelling():
-                    self._cancel_job(job, "cancelled", "compute_cancelled")
-                    self._cancel_pending()
-                    if self.inference is not None:
-                        await asyncio.gather(self.inference, return_exceptions=True)
+                    await self._cancel_running_worker(job)
                     raise
                 self._finish(job, "cancelled", "compute_cancelled")
             except Exception as exc:
