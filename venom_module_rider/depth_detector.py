@@ -49,26 +49,9 @@ def assess_depth(depth, corridor, settings, *, evidence=False, input_bounds=None
     """Fit with broad support; score the STOP zone. No physical distance."""
     import numpy as np
 
-    if depth.ndim != 2 or min(depth.shape) < 32:
-        raise ValueError("vision_model_output")
-    h, w = depth.shape
-    x0, y0, x1, y1 = corridor
-    if not 0 <= x0 < x1 <= 1 or not 0 <= y0 < y1 <= 1:
-        raise ValueError("vision_corridor_invalid")
-    y, x = np.mgrid[0:h, 0:w]
-    mask = (x >= x0 * w) & (x < x1 * w) & (y >= y0 * h) & (y < y1 * h)
-    observed = np.ones(depth.shape, dtype=bool)
-    if input_bounds is not None:
-        a, b, c, d = input_bounds
-        observed[:] = False
-        observed[b:d, a:c] = True
-    if (
-        mask.sum() < 64
-        or not np.isfinite(depth[observed]).all()
-        or (depth[observed] <= 0).any()
-        or (mask & ~observed).any()
-    ):
-        raise ValueError("vision_model_output")
+    h, w, x0, y0, x1, y1, y, x, mask, observed = _depth_scoring_mask(
+        depth, corridor, input_bounds
+    )
     # A shorter STOP horizon must not also shrink the plane-fitting support:
     # a flat obstacle could otherwise become the fitted ground. Keep at least
     # the original 30% image-height support, while scoring only the chosen zone.
@@ -81,16 +64,9 @@ def assess_depth(depth, corridor, settings, *, evidence=False, input_bounds=None
     design = np.column_stack(
         (x[reference] / w, y[reference] / h, np.ones(reference.sum()))
     )
-    coefficients = np.linalg.lstsq(design, inverse_reference, rcond=None)[0]
-    reference_fit = "least_squares"
-    initial_errors = np.abs(inverse_reference - design @ coefficients) / scale
-    if float((initial_errors > settings.residual_limit).mean()) > 0.20:
-        from .image_ground_reference import recover
-
-        recovered = recover(design, inverse_reference, scale, settings)
-        if recovered is not None:
-            coefficients = recovered
-            reference_fit = "supported_trimmed_plane"
+    coefficients, reference_fit = _fit_depth_plane(
+        design, inverse_reference, scale, settings
+    )
     scoring_design = np.column_stack((x[mask] / w, y[mask] / h, np.ones(mask.sum())))
     # Positive residuals are nearer than the fitted plane; negative ones are
     # farther away. Keep both: a recess/drop-off must not become a clear path.
@@ -166,35 +142,17 @@ def assess_depth(depth, corridor, settings, *, evidence=False, input_bounds=None
         "_errors": error_map,
     }
     if evidence:
-        from .navigation_maps import depth_maps
-
-        signed_map = np.full(depth.shape, np.nan)
-        signed_map[mask] = signed_errors
-        assessment["_navigation_maps"] = depth_maps(
-            error_map,
-            signed_map,
-            settings.residual_limit,
-            valid=reference_valid and oriented,
+        _depth_evidence_maps(
+            assessment,
+            evidence,
+            depth,
+            settings,
+            (x, y, w, h, coefficients, scale),
+            (mask, error_map, signed_errors),
+            reference_valid and oriented,
         )
-        if (
-            isinstance(evidence, dict)
-            and evidence.get("object_tracking_enabled") is True
-        ):
-            plane = coefficients[0] * x / w + coefficients[1] * y / h + coefficients[2]
-            signed_context = (1.0 / depth - plane) / scale
-            context = (y >= h * 0.35) & (y < h * 0.98)
-            signed_context = np.where(context, signed_context, np.nan)
-            assessment["_object_maps"] = depth_maps(
-                abs(signed_context),
-                signed_context,
-                settings.residual_limit,
-                valid=reference_valid and oriented,
-            )
 
-    if input_bounds is not None:
-        for key in ("_navigation_maps", "_object_maps"):
-            if key in assessment:
-                assessment[key]["input_bounds"] = input_bounds
+    _copy_depth_input_bounds(assessment, input_bounds)
     return assessment
 
 
@@ -227,28 +185,12 @@ def render_depth(
 ):
     """Render the same geometry overlay in live and offline analysis."""
     import numpy as np
-    from PIL import Image, ImageDraw
+    from PIL import Image
 
     errors = assessment.pop("_errors")
     # Unscored pixels stay identical to the camera image, not unknown/yellow.
     colors = np.asarray(image, dtype=np.uint8).copy()
-    if assessment.get("geometry") != "ground_capsule":
-        y, x = np.mgrid[: depth.shape[0], : depth.shape[1]]
-        palette = {"clear": (35, 210, 100), "obstacle": (240, 60, 65)}
-        for side_name in ("left", "right"):
-            sector = assessment.get("sectors", {}).get(side_name, {})
-            bounds = sector.get("corridor")
-            if bounds is None:
-                continue
-            left, top, right, bottom = bounds
-            mask = (x >= left * image.width) & (x < right * image.width)
-            mask &= (y >= top * image.height) & (y < bottom * image.height)
-            state = (
-                sector.get("state")
-                if sector.get("coverage_complete") is True
-                else "unknown"
-            )
-            colors[mask] = palette.get(state, (255, 185, 35))
+    _color_depth_sectors(image, depth, assessment, colors)
     colors[np.isfinite(errors) & (errors <= settings.residual_limit)] = (
         35,
         210,
@@ -259,40 +201,7 @@ def render_depth(
         colors[np.isfinite(errors)] = (255, 185, 35)
     preview = Image.blend(image, Image.fromarray(colors), 0.4)
     if draw_geometry:
-        x0, y0, x1, y1 = corridor
-        draw = ImageDraw.Draw(preview)
-        overlays = assessment.pop("_path_overlay", None)
-        projected = assessment.get("geometry") == "ground_capsule"
-        draw_sectors(
-            draw,
-            image.size,
-            assessment.get("sectors", {}),
-            outlines=overlays,
-            projected=projected,
-        )
-        if not projected and (geometry is None or geometry.mode == "image"):
-            reference_y0 = assessment["plane_reference_corridor"][1]
-            if reference_y0 < y0:
-                # Dashed blue: fitting context, not an additional STOP zone.
-                left, right = int(x0 * (image.width - 1)), int(x1 * (image.width - 1))
-                top, bottom = (
-                    int(reference_y0 * (image.height - 1)),
-                    int(y0 * (image.height - 1)),
-                )
-                for pos in range(left, right, 10):
-                    draw.line(
-                        (pos, top, min(pos + 5, right), top),
-                        fill=(80, 170, 255),
-                        width=2,
-                    )
-                for side in (left, right):
-                    for pos in range(top, bottom, 10):
-                        draw.line(
-                            (side, pos, side, min(pos + 5, bottom)),
-                            fill=(80, 170, 255),
-                            width=2,
-                        )
-            draw_stop_border(draw, depth.shape, corridor)
+        _draw_depth_overlay(preview, depth, assessment, corridor, geometry)
     stream = io.BytesIO()
     preview.save(stream, format="JPEG", quality=85)
     return stream.getvalue()
@@ -369,51 +278,12 @@ class DepthDetector:
 
         image = decode_payload(payload)
         box = input_box(image, settings.input_region)
-        if settings.input_region is not None:
-            if not settings.input_region.covers(corridor):
-                raise ValueError("navigation_input_region_excludes_reference")
-            if (
-                geometry is not None
-                and geometry.mode == "ground"
-                and not settings.input_region.full
-            ):
-                raise ValueError("navigation_input_region_requires_image_geometry")
+        _validate_depth_crop(settings, corridor, geometry)
         model_image = image.crop(box) if box != (0, 0, *image.size) else image
         rgb = np.asarray(model_image, dtype=np.float32) / 255
         if rgb.mean() < 0.04 or rgb.std() < 0.01:
             # Publish the actual rejected capture, never retain a previous green mask.
-            projected = geometry is not None and geometry.mode == "ground"
-            sectors = (
-                {}
-                if projected
-                else {
-                    side: {
-                        "state": "unknown",
-                        "corridor": bounds,
-                        "coverage_complete": 0 <= bounds[0] < bounds[2] <= 1,
-                    }
-                    for side, bounds in sector_regions(corridor).items()
-                }
-            )
-            from .overlay_geometry import analysis_geometry
-
-            stream = io.BytesIO()
-            image.save(stream, format="JPEG", quality=85)
-            return {
-                "state": "unknown",
-                "reason": "vision_image_quality",
-                "overlay_geometry": analysis_geometry(
-                    image.size,
-                    {"geometry": "ground_capsule"} if projected else {},
-                    corridor,
-                    box,
-                ),
-                "sectors": sectors,
-                **({"geometry": "ground_capsule"} if projected else {}),
-                "drive_supported": True,
-                "distance_measurement": False,
-                "_preview": stream.getvalue(),
-            }
+            return _quality_depth_preview(image, corridor, geometry, box)
         self._load()
         processor, model = self.processor, self.model
         if processor is None or model is None:
@@ -442,14 +312,7 @@ class DepthDetector:
             from .adaptive_ground import assess
 
             assessment = assess(depth, corridor, settings, geometry, evidence=evidence)
-        if evidence and "_navigation_maps" in assessment:
-            from .navigation_maps import source_gray
-
-            assessment["_navigation_maps"]["gray"] = source_gray(image)
-            if "_object_maps" in assessment:
-                assessment["_object_maps"]["gray"] = assessment["_navigation_maps"][
-                    "gray"
-                ]
+        _bind_depth_source_gray(assessment, image, evidence)
         from .overlay_geometry import analysis_geometry
 
         assessment["overlay_geometry"] = analysis_geometry(
@@ -464,3 +327,213 @@ class DepthDetector:
             "model_sha256": self.digest,
             "_trace_depth": depth,
         }
+
+
+def _color_depth_sectors(image, depth, assessment, colors):
+    """Color only measured image sectors before scored-pixel precedence."""
+    import numpy as np
+
+    if assessment.get("geometry") != "ground_capsule":
+        y, x = np.mgrid[: depth.shape[0], : depth.shape[1]]
+        palette = {"clear": (35, 210, 100), "obstacle": (240, 60, 65)}
+        for side_name in ("left", "right"):
+            sector = assessment.get("sectors", {}).get(side_name, {})
+            bounds = sector.get("corridor")
+            if bounds is None:
+                continue
+            left, top, right, bottom = bounds
+            mask = (x >= left * image.width) & (x < right * image.width)
+            mask &= (y >= top * image.height) & (y < bottom * image.height)
+            state = (
+                sector.get("state")
+                if sector.get("coverage_complete") is True
+                else "unknown"
+            )
+            colors[mask] = palette.get(state, (255, 185, 35))
+
+
+def _draw_depth_overlay(preview, depth, assessment, corridor, geometry):
+    """Render frozen path sectors and the unchanged optional fitting reference."""
+    from PIL import ImageDraw
+
+    x0, y0, x1, y1 = corridor
+    draw = ImageDraw.Draw(preview)
+    overlays = assessment.pop("_path_overlay", None)
+    projected = assessment.get("geometry") == "ground_capsule"
+    draw_sectors(
+        draw,
+        preview.size,
+        assessment.get("sectors", {}),
+        outlines=overlays,
+        projected=projected,
+    )
+    if not projected and (geometry is None or geometry.mode == "image"):
+        _draw_reference_border(draw, preview, depth, assessment, corridor, x0, y0, x1)
+
+
+def _draw_reference_border(draw, preview, depth, assessment, corridor, x0, y0, x1):
+    """Draw fitting context dashes followed by the exact STOP border."""
+    reference_y0 = assessment["plane_reference_corridor"][1]
+    if reference_y0 < y0:
+        # Dashed blue: fitting context, not an additional STOP zone.
+        left, right = int(x0 * (preview.width - 1)), int(x1 * (preview.width - 1))
+        top, bottom = (
+            int(reference_y0 * (preview.height - 1)),
+            int(y0 * (preview.height - 1)),
+        )
+        for pos in range(left, right, 10):
+            draw.line(
+                (pos, top, min(pos + 5, right), top),
+                fill=(80, 170, 255),
+                width=2,
+            )
+        for side in (left, right):
+            for pos in range(top, bottom, 10):
+                draw.line(
+                    (side, pos, side, min(pos + 5, bottom)),
+                    fill=(80, 170, 255),
+                    width=2,
+                )
+    draw_stop_border(draw, depth.shape, corridor)
+
+
+def _depth_scoring_mask(depth, corridor, input_bounds):
+    """Validate depth, corridor and observed coverage before any plane fitting."""
+    import numpy as np
+
+    if depth.ndim != 2 or min(depth.shape) < 32:
+        raise ValueError("vision_model_output")
+    h, w = depth.shape
+    x0, y0, x1, y1 = corridor
+    if not 0 <= x0 < x1 <= 1 or not 0 <= y0 < y1 <= 1:
+        raise ValueError("vision_corridor_invalid")
+    y, x = np.mgrid[0:h, 0:w]
+    mask = (x >= x0 * w) & (x < x1 * w) & (y >= y0 * h) & (y < y1 * h)
+    observed = np.ones(depth.shape, dtype=bool)
+    if input_bounds is not None:
+        a, b, c, d = input_bounds
+        observed[:] = False
+        observed[b:d, a:c] = True
+    if (
+        mask.sum() < 64
+        or not np.isfinite(depth[observed]).all()
+        or (depth[observed] <= 0).any()
+        or (mask & ~observed).any()
+    ):
+        raise ValueError("vision_model_output")
+    return h, w, x0, y0, x1, y1, y, x, mask, observed
+
+
+def _fit_depth_plane(design, inverse_reference, scale, settings):
+    """Retain least-squares fitting and the supported-trimmed recovery gate."""
+    import numpy as np
+
+    coefficients = np.linalg.lstsq(design, inverse_reference, rcond=None)[0]
+    reference_fit = "least_squares"
+    initial_errors = np.abs(inverse_reference - design @ coefficients) / scale
+    if float((initial_errors > settings.residual_limit).mean()) > 0.20:
+        from .image_ground_reference import recover
+
+        recovered = recover(design, inverse_reference, scale, settings)
+        if recovered is not None:
+            coefficients = recovered
+            reference_fit = "supported_trimmed_plane"
+    return coefficients, reference_fit
+
+
+def _depth_evidence_maps(assessment, evidence, depth, settings, plane, scoring, valid):
+    """Populate opt-in maps without altering NaN support or source alignment."""
+    import numpy as np
+
+    x, y, w, h, coefficients, scale = plane
+    mask, error_map, signed_errors = scoring
+    from .navigation_maps import depth_maps
+
+    signed_map = np.full(depth.shape, np.nan)
+    signed_map[mask] = signed_errors
+    assessment["_navigation_maps"] = depth_maps(
+        error_map,
+        signed_map,
+        settings.residual_limit,
+        valid=valid,
+    )
+    if isinstance(evidence, dict) and evidence.get("object_tracking_enabled") is True:
+        plane = coefficients[0] * x / w + coefficients[1] * y / h + coefficients[2]
+        signed_context = (1.0 / depth - plane) / scale
+        context = (y >= h * 0.35) & (y < h * 0.98)
+        signed_context = np.where(context, signed_context, np.nan)
+        assessment["_object_maps"] = depth_maps(
+            abs(signed_context),
+            signed_context,
+            settings.residual_limit,
+            valid=valid,
+        )
+
+
+def _validate_depth_crop(settings, corridor, geometry):
+    """Validate reference coverage before the geometry restriction for
+    cropped inputs.
+    """
+    if settings.input_region is not None:
+        if not settings.input_region.covers(corridor):
+            raise ValueError("navigation_input_region_excludes_reference")
+        if (
+            geometry is not None
+            and geometry.mode == "ground"
+            and not settings.input_region.full
+        ):
+            raise ValueError("navigation_input_region_requires_image_geometry")
+
+
+def _quality_depth_preview(image, corridor, geometry, box):
+    """Publish the rejected capture itself without retaining any previous green mask."""
+    projected = geometry is not None and geometry.mode == "ground"
+    sectors = (
+        {}
+        if projected
+        else {
+            side: {
+                "state": "unknown",
+                "corridor": bounds,
+                "coverage_complete": 0 <= bounds[0] < bounds[2] <= 1,
+            }
+            for side, bounds in sector_regions(corridor).items()
+        }
+    )
+    from .overlay_geometry import analysis_geometry
+
+    stream = io.BytesIO()
+    image.save(stream, format="JPEG", quality=85)
+    return {
+        "state": "unknown",
+        "reason": "vision_image_quality",
+        "overlay_geometry": analysis_geometry(
+            image.size,
+            {"geometry": "ground_capsule"} if projected else {},
+            corridor,
+            box,
+        ),
+        "sectors": sectors,
+        **({"geometry": "ground_capsule"} if projected else {}),
+        "drive_supported": True,
+        "distance_measurement": False,
+        "_preview": stream.getvalue(),
+    }
+
+
+def _bind_depth_source_gray(assessment, image, evidence):
+    """Attach one shared source-gray map only to explicitly captured evidence."""
+    if evidence and "_navigation_maps" in assessment:
+        from .navigation_maps import source_gray
+
+        assessment["_navigation_maps"]["gray"] = source_gray(image)
+        if "_object_maps" in assessment:
+            assessment["_object_maps"]["gray"] = assessment["_navigation_maps"]["gray"]
+
+
+def _copy_depth_input_bounds(assessment, input_bounds):
+    """Attach unchanged source-coordinate crop bounds only to produced private maps."""
+    if input_bounds is not None:
+        for key in ("_navigation_maps", "_object_maps"):
+            if key in assessment:
+                assessment[key]["input_bounds"] = input_bounds

@@ -23,7 +23,7 @@ class ObstaclePersistence:
         self.captured_s = None
 
     def apply(self, maps, corridor, *, context, sequence, frame_id, captured_s, params):
-        import cv2
+        """Retain causal obstacle proofs while rejected residuals stay uncertain."""
         import numpy as np
 
         required = params.get("obstacle_support_frames", 1)
@@ -31,20 +31,8 @@ class ObstaclePersistence:
             self.reset()
             return maps, {"enabled": False}
         identity = json.dumps(dict(context), sort_keys=True, allow_nan=False)
-        invalid = (
-            maps.get("valid", True) is not True
-            or not math.isfinite(captured_s)
-            or self.identity is not None
-            and identity != self.identity
-            or self.sequence is not None
-            and sequence <= self.sequence
-            or self.frame_id is not None
-            and frame_id == self.frame_id
-            or self.captured_s is not None
-            and (
-                captured_s <= self.captured_s
-                or (captured_s - self.captured_s) * 1000 > params["max_gap_ms"]
-            )
+        invalid = _persistence_context_invalid(
+            self, maps, identity, sequence, frame_id, captured_s, params
         )
         if invalid:
             self.reset()
@@ -64,58 +52,9 @@ class ObstaclePersistence:
             self.reset()
             return maps, {"enabled": True, "state": "tracking_unavailable"}
         h, w = obstacle.shape
-        if transform is not None:
-            self.history = deque(
-                (
-                    (
-                        cv2.warpAffine(
-                            old.astype(np.uint8),
-                            transform,
-                            (w, h),
-                            flags=cv2.INTER_NEAREST,
-                        ).astype(bool),
-                        cv2.warpAffine(
-                            visible.astype(np.uint8),
-                            transform,
-                            (w, h),
-                            flags=cv2.INTER_NEAREST,
-                        ).astype(bool),
-                        observed_s,
-                    )
-                    for old, visible, observed_s in self.history
-                ),
-                maxlen=4,
-            )
-        while (
-            self.history
-            and (captured_s - self.history[0][2]) * 1000 > params["history_ms"]
-        ):
-            self.history.popleft()
-        window = int(params["obstacle_window_frames"])
-        while len(self.history) >= window:
-            self.history.popleft()
-        count, labels, stats, _ = cv2.connectedComponentsWithStats(
-            obstacle.astype(np.uint8), connectivity=8
-        )
-        areas = stats[:, cv2.CC_STAT_AREA]
-        support = np.ones(count, dtype=np.int32)
-        radius = int(params["obstacle_match_tolerance_px"])
-        kernel = np.ones((2 * radius + 1, 2 * radius + 1), np.uint8)
-        for old, visible, _observed_s in self.history:
-            expanded = cv2.dilate(old.astype(np.uint8), kernel).astype(bool)
-            overlap = np.bincount(labels[expanded], minlength=count) / np.maximum(
-                1, areas
-            )
-            coverage = np.bincount(labels[visible], minlength=count) / np.maximum(
-                1, areas
-            )
-            support += (overlap >= params["obstacle_match_overlap"]) & (
-                coverage >= params["obstacle_min_previous_coverage"]
-            )
-        accepted = support >= required
-        accepted[0] = False
-        confirmed = obstacle & accepted[labels]
-        uncertain = obstacle & ~confirmed
+        _project_persistence_history(self, transform, w, h)
+        window = _trim_persistence_history(self, captured_s, params)
+        confirmed, uncertain = _persistent_components(self, obstacle, params, required)
         self.history.append((obstacle.copy(), visible_now.copy(), captured_s))
         while len(self.history) > window - 1:
             self.history.popleft()
@@ -139,3 +78,90 @@ class ObstaclePersistence:
             "uncertain_pixels": int(uncertain.sum()),
             "suppression_is_floor_evidence": False,
         }
+
+
+def _persistence_context_invalid(
+    self, maps, identity, sequence, frame_id, captured_s, params
+):
+    """Preserve map, context, sequence, duplicate and capture-gap rejection order."""
+    return (
+        maps.get("valid", True) is not True
+        or not math.isfinite(captured_s)
+        or (self.identity is not None and identity != self.identity)
+        or (self.sequence is not None and sequence <= self.sequence)
+        or (self.frame_id is not None and frame_id == self.frame_id)
+        or (
+            self.captured_s is not None
+            and (
+                captured_s <= self.captured_s
+                or (captured_s - self.captured_s) * 1000 > params["max_gap_ms"]
+            )
+        )
+    )
+
+
+def _project_persistence_history(self, transform, w, h):
+    """Warp old masks with identical nearest-neighbor geometry."""
+    import cv2
+    import numpy as np
+
+    if transform is not None:
+        self.history = deque(
+            (
+                (
+                    cv2.warpAffine(
+                        old.astype(np.uint8),
+                        transform,
+                        (w, h),
+                        flags=cv2.INTER_NEAREST,
+                    ).astype(bool),
+                    cv2.warpAffine(
+                        visible.astype(np.uint8),
+                        transform,
+                        (w, h),
+                        flags=cv2.INTER_NEAREST,
+                    ).astype(bool),
+                    observed_s,
+                )
+                for old, visible, observed_s in self.history
+            ),
+            maxlen=4,
+        )
+
+
+def _trim_persistence_history(self, captured_s, params):
+    """Drop expired and over-window proofs before computing current support."""
+    while (
+        self.history and (captured_s - self.history[0][2]) * 1000 > params["history_ms"]
+    ):
+        self.history.popleft()
+    window = int(params["obstacle_window_frames"])
+    while len(self.history) >= window:
+        self.history.popleft()
+    return window
+
+
+def _persistent_components(self, obstacle, params, required):
+    """Score components against prior obstacle overlap and visible coverage."""
+    import cv2
+    import numpy as np
+
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(
+        obstacle.astype(np.uint8), connectivity=8
+    )
+    areas = stats[:, cv2.CC_STAT_AREA]
+    support = np.ones(count, dtype=np.int32)
+    radius = int(params["obstacle_match_tolerance_px"])
+    kernel = np.ones((2 * radius + 1, 2 * radius + 1), np.uint8)
+    for old, visible, _observed_s in self.history:
+        expanded = cv2.dilate(old.astype(np.uint8), kernel).astype(bool)
+        overlap = np.bincount(labels[expanded], minlength=count) / np.maximum(1, areas)
+        coverage = np.bincount(labels[visible], minlength=count) / np.maximum(1, areas)
+        support += (overlap >= params["obstacle_match_overlap"]) & (
+            coverage >= params["obstacle_min_previous_coverage"]
+        )
+    accepted = support >= required
+    accepted[0] = False
+    confirmed = obstacle & accepted[labels]
+    uncertain = obstacle & ~confirmed
+    return confirmed, uncertain
