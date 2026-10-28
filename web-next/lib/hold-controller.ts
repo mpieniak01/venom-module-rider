@@ -150,6 +150,14 @@ export class HoldController {
   private enqueueRelease(press: Press, token: number) {
     void this.dispatch(this.intent(press, "release"), () => this.token === token && !this.press);
   }
+  /** Retire an expired queued gesture before its first submitted request. */
+  private canSubmit(preparation:HoldController["preparation"]):boolean {
+    if (preparation && !preparation.submitted) {
+      if (preparation !== this.preparation || this.now() - preparation.started >= (this.options.timing()?.request_ttl_ms ?? 0)) { this.cancel(); return false; }
+      preparation.submitted = true;
+    }
+    return true;
+  }
   /** Serialize motion renewals while allowing release to bypass their ACK. */
   private async dispatch(intent: MovementIntent, valid: () => boolean) {
     const preparation = this.preparation;
@@ -171,10 +179,7 @@ export class HoldController {
     if (this.sending) await this.inFlight;
     if (!valid()) return;
     // Fresh envelope timestamps cannot make a queued, expired gesture current.
-    if (preparation && !preparation.submitted) {
-      if (preparation !== this.preparation || this.now() - preparation.started >= (this.options.timing()?.request_ttl_ms ?? 0)) { this.cancel(); return; }
-      preparation.submitted = true;
-    }
+    if(!this.canSubmit(preparation))return;
     this.sending = true;
     this.sendingMode = intent.mode;
     const sentToken = this.token;

@@ -2,7 +2,7 @@ import {useEffect,useRef,useState} from "react";
 import {apiFetch} from "@/lib/api-client";
 import type {RiderClient} from "../lib/use-rider";
 import type {Translator} from "../lib/i18n";
-import {data,errorCode,record,safetyOf,str,type JsonRecord} from "../lib/model";
+import { scalarText,data,errorCode,record,safetyOf,str,type JsonRecord} from "../lib/model";
 import {figureActive,figureCatalog,type FigureRecipe} from "../lib/figures";
 import {Button,Field,Select} from "./primitives";
 import styles from "../rider.module.css";
@@ -47,25 +47,41 @@ export function FiguresPanel({client,t}:{client:RiderClient;t:Translator}){
   if(unobserved.current?.id===runId)unobserved.current=null;
   const own=owner.current;let alive=true,running=true,timer:ReturnType<typeof setTimeout>|undefined;
   const cancel=()=>{running=false;cancelledRun.current=runId;clearTimeout(timer);return apiFetch("/api/v1/rider/motion/figures/runs/"+encodeURIComponent(runId)+"/cancel",{method:"POST",headers:{"X-Rider-Session":own.session},body:"{}"}).catch(()=>undefined);};
+  /** Reconcile a failed keepalive with a completed run before reporting failure. */
+  const recoverCompleted=async()=>{
+    try{
+     const next=record(data(await apiFetch("/api/v1/rider/motion/figures/runs/"+encodeURIComponent(runId))).run);
+     if(!alive||cancelledRun.current===runId)return true;
+     if(!figureActive(next)){setRun(next);running=false;return true;}
+    }catch{}
+    return false;
+  };
+  /** Retire a hidden or replaced run before submitting another keepalive. */
+  const mayKeepRun=()=>{
+    if(!running||cancelledRun.current===runId)return false;
+    if(!alive||document.hidden||currentSession()!==own.session){
+      if(running)void cancel();
+      return false;
+    }
+    return true;
+  };
+  /** Check retirement again after every asynchronous response. */
+  const retired=()=>!alive||cancelledRun.current===runId;
+  /** Keep one captured figure run alive without replaying a retired run. */
   const tick=async()=>{
-   if(!running||cancelledRun.current===runId)return;
-   if(!alive||document.hidden||currentSession()!==own.session){if(running)void cancel();return;}
+   if(!mayKeepRun())return;
    try{
     await keepFigure(runId,own.id,own.plan);
     if(!alive||!running||cancelledRun.current===runId)return;
     const response=data(await apiFetch("/api/v1/rider/motion/figures/runs/"+encodeURIComponent(runId))),next=record(response.run);
-    if(!alive||cancelledRun.current===runId)return;
+    if(retired())return;
     setRun(next);
     running=figureActive(next);
     if(!running)return;
    }catch(error){
-    if(!alive||cancelledRun.current===runId)return;
-    try{
-     const next=record(data(await apiFetch("/api/v1/rider/motion/figures/runs/"+encodeURIComponent(runId))).run);
-     if(!alive||cancelledRun.current===runId)return;
-     if(!figureActive(next)){setRun(next);running=false;return;}
-    }catch{}
-    if(!alive||cancelledRun.current===runId)return;
+    if(retired())return;
+    if(await recoverCompleted())return;
+    if(retired())return;
     setFailure(errorCode(error));running=false;void cancel();return;
    }
    if(alive&&running&&cancelledRun.current!==runId)timer=setTimeout(()=>void tick(),200);
@@ -113,6 +129,6 @@ export function FiguresPanel({client,t}:{client:RiderClient;t:Translator}){
   <Field label={t("figures.select")}><Select data-testid="figure-select" value={selected} disabled={busy||active} onChange={event=>{setSelected(event.target.value);setFailure("");}}>{recipes.map(row=><option key={row.id} value={row.id}>{t("figures.name."+row.id)}</option>)}</Select></Field>
   {chosen&&<div className={styles.figureDescription} data-testid="figure-plan"><p>{t("figures.description."+chosen.id)}</p><span>{t("figures.duration",{seconds:chosen.duration_ms/1000})}</span>{chosen.initial_height!==null&&<span>{t("figures.height",{value:chosen.initial_height})}</span>}{chosen.initial_roll!==null&&<span>{t("figures.roll",{value:chosen.initial_roll})}</span>}<span>{t("figures.strength",{factor:chosen.intensity_factor*100,limit:chosen.maximum_speed})}</span></div>}
   <div className={styles.flex}><Button tone="primary" size="large" data-testid="figure-start" disabled={!chosen?.available||!client.canMutate||!client.controlFresh||busy||active||!!client.busy} onClick={()=>void start()}>{t("figures.start")}</Button><Button tone="danger" size="large" data-testid="figure-cancel" disabled={!active||busy} onClick={()=>void cancel()}>{t("figures.cancel")}</Button>{runId&&<Button data-testid="figure-export" onClick={()=>void exportRun()}>{t("figures.export")}</Button>}</div>
-  <div className={styles.figureStatus} role="status" data-testid="figure-status">{failure?t("requestFailed")+" · "+failure:run?t("figures.phase."+str(run.phase))+" · "+String(run.step??0)+"/"+String(run.step_count??0):chosen&&!chosen.available?t("figures.unsupported"):t("figures.idle")}</div>
+  <div className={styles.figureStatus} role="status" data-testid="figure-status">{failure?t("requestFailed")+" · "+failure:run?t("figures.phase."+str(run.phase))+" · "+scalarText(run.step??0)+"/"+scalarText(run.step_count??0):chosen&&!chosen.available?t("figures.unsupported"):t("figures.idle")}</div>
  </section>;
 }

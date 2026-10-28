@@ -11,6 +11,7 @@ import type {Translator} from "../lib/i18n";
 import {Button,Field,Input} from "./primitives";
 import styles from "../rider.module.css";
 
+/** Retain reference edits within one captured device session and conflict lifecycle. */
 export function useImageReference(session:string){
   const [state,setState]=useState<ReferenceState|null>(null),[draft,setDraft]=useState<ImageReference|null>(null),[editing,setEditing]=useState(false),[error,setError]=useState(""),[saving,setSaving]=useState(false);
   const [attempt,setAttempt]=useState(0);
@@ -21,11 +22,18 @@ export function useImageReference(session:string){
     void apiFetch("/api/v1/rider/navigation/image-reference",{signal:abort.signal}).then(result=>{if(abort.signal.aborted)return;const value=readReference(data(result));if(!value)throw new Error("invalid_reference");setState(value);}).catch(()=>{if(!abort.signal.aborted)setError("reference.unavailable");});
     return ()=>abort.abort();
   },[session,attempt]);
+  /** Refresh a conflicting reference only while its captured session remains current. */
+  const recoverReference=async(origin:string)=>{
+    const latest=await apiFetch("/api/v1/rider/navigation/image-reference").then(result=>readReference(data(result))).catch(()=>null);if(latest&&owner.current===origin){setState(latest);setDraft(null);setEditing(false);}
+  };
+  /** Check both captured session owners before applying a successful save. */
+  const referenceOwner=(client:RiderClient,origin:string)=>owner.current===origin&&client.currentSession()===origin;
+  /** Save the validated reference and retire only this session's draft. */
   const save=async(client:RiderClient)=>{
     if(!state||!draft||!validReference(draft)||saving)return false;
     const origin=client.currentSession();setSaving(true);setError("");
-    try{const result=await client.mutate("/navigation/image-reference",{revision:state.revision,values:draft},"POST",true);if(owner.current!==origin||client.currentSession()!==origin)return false;const saved=readReference(data(result));if(!saved)throw new Error("invalid_reference");setState(saved);setDraft(null);setEditing(false);return true;}
-    catch(error){if(owner.current!==origin)return false;const conflict=errorCode(error).includes("conflict");if(conflict){const latest=await apiFetch("/api/v1/rider/navigation/image-reference").then(result=>readReference(data(result))).catch(()=>null);if(latest&&owner.current===origin){setState(latest);setDraft(null);setEditing(false);}}if(owner.current===origin)setError(conflict?"conflict":"reference.saveFailed");return false;}
+    try{const result=await client.mutate("/navigation/image-reference",{revision:state.revision,values:draft},"POST",true);if(!referenceOwner(client,origin))return false;const saved=readReference(data(result));if(!saved)throw new Error("invalid_reference");setState(saved);setDraft(null);setEditing(false);return true;}
+    catch(error){if(owner.current!==origin)return false;const conflict=errorCode(error).includes("conflict");if(conflict){await recoverReference(origin);}if(owner.current===origin)setError(conflict?"conflict":"reference.saveFailed");return false;}
     finally{if(owner.current===origin)setSaving(false);}
   };
   const baseline=state?.values??initialReference(),values=draft??baseline;

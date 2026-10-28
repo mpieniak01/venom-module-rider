@@ -1,5 +1,5 @@
 import {readGeometry} from "./overlay-geometry";
-import { record, str, type JsonRecord } from "./model";
+import { scalarText, record, str, type JsonRecord } from "./model";
 import { SAMPLES_BASE } from "./samples";
 
 export const ANALYSIS_BASE="/api/v1/rider/analysis";
@@ -37,7 +37,7 @@ export function readVideoPage(value:unknown,session:string,offset:number):VideoP
 export function videoClock(value:number):string {
   if(!Number.isFinite(value)||value<0)return "—";
   const tenths=Math.floor(value*10),seconds=Math.floor(tenths/10);
-  return Math.floor(seconds/60)+":"+String(seconds%60).padStart(2,"0")+"."+tenths%10;
+  return Math.floor(seconds/60)+":"+scalarText(seconds%60).padStart(2,"0")+"."+tenths%10;
 }
 export function analysisState(row:unknown):AnalysisState {
   const value=record(row).state;
@@ -72,7 +72,7 @@ export function videoRun(report:unknown):boolean{return record(report).input_kin
 export function reportChunks(report:unknown,runId:string):string[] {
   const row=record(report),names=row.row_chunks;
   if(row.run_id!==runId||!Array.isArray(names)||!names.length||names.length>1000
-    ||!names.every((name,index)=>name==="rows-"+String(index).padStart(5,"0")+".json"))
+    ||!names.every((name,index)=>name==="rows-"+scalarText(index).padStart(5,"0")+".json"))
     throw new Error("analysis_video_report_invalid");
   return names as string[];
 }
@@ -110,9 +110,20 @@ export function sameAnalysisSettings(report:unknown,current:JsonRecord):boolean 
   return JSON.stringify(comparable(frozen))===JSON.stringify(comparable(current));
 }
 export type FrameAsset={kind:"original"|"depth"|"overlay"|"mask";path:string;width?:number;height?:number};
-export function analysisFrameAssets(report:unknown,runId:string,session:string,rowValue:unknown,position:number):FrameAsset[] {
-  const reportRow=record(report),row=record(rowValue);
-  if(reportRow.run_id!==runId||!ticket.test(runId)||!hash.test(str(row.raw_sha256)))throw new Error("analysis_frame_identity");
+/** Bind a saved mask to this exact RAW, source index, palette and overlay geometry. */
+function classificationAsset(row:JsonRecord,expected:number,names:unknown[],runId:string):FrameAsset|null {
+  if(row.classification_layer!==undefined&&row.classification_layer!==null){
+    const layer=record(row.classification_layer),name=scalarText(expected).padStart(4,"0")+"-mask.png";
+    if(![1,2].includes(Number(layer.version))||layer.version===2&&!readGeometry(row.overlay_geometry,[Number(layer.width),Number(layer.height)])||layer.palette_version!==1||layer.source_sha256!==row.raw_sha256||layer.artifact!==name
+      ||!integer(layer.width,1)||layer.width>1280||!integer(layer.height,1)||layer.height>720
+      ||names.filter(value=>value===name).length!==1||names.some(value=>typeof value==="string"&&value.endsWith("-overlay.jpg")))
+      throw new Error("analysis_frame_identity");
+    return {kind:"mask",path:ANALYSIS_BASE+"/runs/"+runId+"/artifacts/"+name,width:layer.width,height:layer.height};
+  }else if(names.some(name=>typeof name==="string"&&name.endsWith("-mask.png")))throw new Error("analysis_frame_identity");
+  return null;
+}
+/** Resolve a validated original before composing any derived analysis artifact. */
+function originalAnalysisPath(report:unknown,reportRow:JsonRecord,row:JsonRecord,session:string):string {
   let original:string;
   if(videoRun(report)){
     const source=record(record(reportRow.context).input_source);
@@ -123,21 +134,22 @@ export function analysisFrameAssets(report:unknown,runId:string,session:string,r
     if(!ticket.test(str(row.sample_id)))throw new Error("analysis_frame_identity");
     original=SAMPLES_BASE+"/items/"+row.sample_id+"/original";
   }
+  return original;
+}
+/** Resolve only validated assets belonging to the requested run and original frame. */
+export function analysisFrameAssets(report:unknown,runId:string,session:string,rowValue:unknown,position:number):FrameAsset[] {
+  const reportRow=record(report),row=record(rowValue);
+  if(reportRow.run_id!==runId||!ticket.test(runId)||!hash.test(str(row.raw_sha256)))throw new Error("analysis_frame_identity");
+  const original=originalAnalysisPath(report,reportRow,row,session);
   const expected=videoRun(report)?Number(row.source_index):position;
   if(!integer(expected))throw new Error("analysis_frame_identity");
   const result:FrameAsset[]=[{kind:"original",path:original}];
   const names=Array.isArray(row.artifact_names)?row.artifact_names:[];
-  if(row.classification_layer!==undefined&&row.classification_layer!==null){
-    const layer=record(row.classification_layer),name=String(expected).padStart(4,"0")+"-mask.png";
-    if(![1,2].includes(Number(layer.version))||layer.version===2&&!readGeometry(row.overlay_geometry,[Number(layer.width),Number(layer.height)])||layer.palette_version!==1||layer.source_sha256!==row.raw_sha256||layer.artifact!==name
-      ||!integer(layer.width,1)||layer.width>1280||!integer(layer.height,1)||layer.height>720
-      ||names.filter(value=>value===name).length!==1||names.some(value=>typeof value==="string"&&value.endsWith("-overlay.jpg")))
-      throw new Error("analysis_frame_identity");
-    result.push({kind:"mask",path:ANALYSIS_BASE+"/runs/"+runId+"/artifacts/"+name,width:layer.width,height:layer.height});
-  }else if(names.some(name=>typeof name==="string"&&name.endsWith("-mask.png")))throw new Error("analysis_frame_identity");
+  const mask=classificationAsset(row,expected,names,runId);
+  if(mask)result.push(mask);
   for(const [kind,suffix]of [["depth","depth.png"],["overlay","overlay.jpg"]]as const){
     const files=names.filter(name=>typeof name==="string"&&new RegExp("^[0-9]{4,6}-"+suffix.replace(".","\\.")+"$").test(name));
-    if(files.length>1||(files.length===1&&files[0]!==String(expected).padStart(4,"0")+"-"+suffix))throw new Error("analysis_frame_identity");
+    if(files.length>1||(files.length===1&&files[0]!==scalarText(expected).padStart(4,"0")+"-"+suffix))throw new Error("analysis_frame_identity");
     if(files.length)result.push({kind,path:ANALYSIS_BASE+"/runs/"+runId+"/artifacts/"+files[0]});
   }
   return result;

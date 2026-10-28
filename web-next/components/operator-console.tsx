@@ -1,6 +1,6 @@
 import { WifiOff, X } from "lucide-react";
 import type { Translator } from "../lib/i18n";
-import { formatTime, record, safetyOf, str } from "../lib/model";
+import { scalarText, formatTime, record, safetyOf, str } from "../lib/model";
 import type { RiderClient } from "../lib/use-rider";
 import { journeyOwnsMotion, manualInterventionSupported, operatorPrioritySupported } from "../lib/navigation";
 import { ManualPad } from "./control";
@@ -23,16 +23,32 @@ export function RiderMessages({ client, t, language }: { client: RiderClient; t:
   </div>;
 }
 
+/** Present the highest-priority connection, notice or manual authority message. */
 export function OperatorMessages({client,t,authority=true}:{client:RiderClient;t:Translator;authority?:boolean}) {
+  /** Present the selected notice or manual authority message with unchanged precedence. */
+  function renderMessageText(){
+    return (<span>{notice ? <>{t(notice.code==="panel_owner_mismatch"?"workspace.panelChanged":notice.key)}{notice.code && notice.code!=="panel_owner_mismatch" && <> · {notice.code}</>}</> : authority&&reason ? t(reason) : null}</span>);
+  }
+
+  /** Keep manual ownership and connection blockers in operator-visible priority order. */
+  function manualMessageReason():string|null {
+    if(!client.canMutate)return "workspace.connectionLost";
+    if(client.status?.errors.control||safety.stale===true)return "workspacePermissionUnknown";
+    if(client.canNavigate)return null;
+    if(journey&&!direct)return "manualGestureUnsupported";
+    if(ownsManual)return "workspaceTakeoverNeeded";
+    if(safety.state==="ARMED")return "workspaceAutomaticOwner";
+    return safety.state==="DISARMED"?null:"workspacePermissionUnknown";
+  }
   const safety = safetyOf(client.status);
   const journey = journeyOwnsMotion(client.status);
   const ownsManual = safety.state === "ARMED" && safety.owner === "manual";
   const direct = manualInterventionSupported(client.status);
-  const reason = !client.canMutate ? "workspace.connectionLost" : client.status?.errors.control || safety.stale===true ? "workspacePermissionUnknown" : client.canNavigate ? null : journey && !direct ? "manualGestureUnsupported" : ownsManual ? "workspaceTakeoverNeeded" : safety.state === "ARMED" ? "workspaceAutomaticOwner" : safety.state === "DISARMED" ? null : "workspacePermissionUnknown";
+  const reason=manualMessageReason();
   const notice=client.canMutate&&!client.status?.errors.control&&safety.stale!==true&&client.notice?.tone==="error"?client.notice:null;
   if(!notice&&(!authority||!reason))return null;
   return <div className={styles.operatorMessages+" "+(notice?.tone==="error"?styles.operatorMessageError:"")} data-testid="operator-messages" role={notice?.tone==="error"?"alert":"status"}>
-        <span>{notice ? <>{t(notice.code==="panel_owner_mismatch"?"workspace.panelChanged":notice.key)}{notice.code && notice.code!=="panel_owner_mismatch" && <> · {notice.code}</>}</> : authority&&reason ? t(reason) : null}</span>
+        {renderMessageText()}
         {notice&&<Button aria-label={t("close")} onClick={()=>client.setNotice(null)}><X size={14}/></Button>}
       </div>;
 }
@@ -48,12 +64,13 @@ export function OperatorConsole({ client, t, language }: { client: RiderClient; 
   </Panel>;
 }
 
+/** Display confirmed manual acknowledgement and executor state without inferring motion. */
 export function OperatorDiagnostics({client,t,language}:{client:RiderClient;t:Translator;language:string}) {
   const safety=safetyOf(client.status),execution=record(safety.execution);
   const feedback=manualFeedback(client.status,client.manualRequest,client.controlFresh);
   return <Panel title={t("workspace.controlDiagnostics")}>
     <RiderMessages client={client} t={t} language={language}/>
-    <div className={styles.meta}><span>{t("owner")}: {String(safety.owner??"—")}</span><span>{t("manualAck")}: {String(client.manualRequest?.phase??"—")}</span><span>{t("manualOutput")}: {String(execution.state??"—")}</span></div>
+    <div className={styles.meta}><span>{t("owner")}: {scalarText(safety.owner??"—")}</span><span>{t("manualAck")}: {scalarText(client.manualRequest?.phase??"—")}</span><span>{t("manualOutput")}: {scalarText(execution.state??"—")}</span></div>
     <div className={styles.meta} data-testid="manual-execution">{t(feedback.executionKey)} · {feedback.output}</div>
   </Panel>;
 }

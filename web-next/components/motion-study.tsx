@@ -4,7 +4,7 @@ import {replayStep} from "../lib/attitude";
 import {useEffect,useMemo,useState} from "react";
 import {apiFetch} from "@/lib/api-client";
 import {getApiBaseUrl} from "@/lib/env";
-import {errorCode,formatNumber,formatTime,record} from "../lib/model";
+import { scalarText,errorCode,formatNumber,formatTime,record} from "../lib/model";
 import {angleStream,axisNumber,readTimeline,pointAt,profileAt,streamTimes,nearestTime,trialRequests,alignTrial,pulseEvidence,type MotionStream,type MotionTimeline} from "../lib/motion-timeline";
 import {SAMPLES_BASE,readSessions,type Collection} from "../lib/samples";
 import type {StudyRecording} from "../lib/use-study-recording";
@@ -68,13 +68,31 @@ export function MotionStudy({recording,t,language}:{recording:StudyRecording;t:T
         </Select>
       </Field>)}</div>
       {([[a.value,aStream,setAStream],[b.value,bStream,setBStream]] as const).map(([value,id,set],index)=>value&&value.streams.length>1&&<Field key={index} label={t("study.stream")+" "+(index?"B":"A")}><Select value={id||value.streams[0].id} onChange={e=>set(e.target.value)}>{value.streams.map(s=><option key={s.id} value={s.id}>{s.device_id+" · "+s.source_session.slice(0,8)}</option>)}</Select></Field>)}
-      {([["A",sourceA,aTrial,setATrial],["B",sourceB,bTrial,setBTrial]] as const).map(([label,source,id,set])=>(trialRequests(source).length>0||!!source?.trials?.length)&&<Field key={label} label={t("study.trial")+" "+label}><Select data-testid={"study-trial-"+label} value={trialSelection(source,id)} onChange={e=>set(e.target.value)}><option value="first">{t("study.firstTrial")}</option>{trialRequests(source).map(e=><option key={e.operation_id} value={e.operation_id}>{formatNumber(e.t,language,3)+" s · "+String(e.intent.direction??"")+" · "+String(e.intent.mode??"")+" · "+String(e.intent.request_id??e.operation_id)}</option>)}{!!source?.trials?.length&&<optgroup label={t("pulse.series")}>{source.trials.map(run=><option key={run.run_id} value={"series:"+run.run_id}>{run.profile_id+" · "+run.count+" × "+run.pulse_ms+" ms · "+run.phase}</option>)}</optgroup>}</Select></Field>)}
+      {([["A",sourceA,aTrial,setATrial],["B",sourceB,bTrial,setBTrial]] as const).map(([label,source,id,set])=>(trialRequests(source).length>0||!!source?.trials?.length)&&<Field key={label} label={t("study.trial")+" "+label}><Select data-testid={"study-trial-"+label} value={trialSelection(source,id)} onChange={e=>set(e.target.value)}><option value="first">{t("study.firstTrial")}</option>{trialRequests(source).map(e=><option key={e.operation_id} value={e.operation_id}>{formatNumber(e.t,language,3)+" s · "+scalarText(e.intent.direction??"")+" · "+scalarText(e.intent.mode??"")+" · "+scalarText(e.intent.request_id??e.operation_id)}</option>)}{!!source?.trials?.length&&<optgroup label={t("pulse.series")}>{source.trials.map(run=><option key={run.run_id} value={"series:"+run.run_id}>{run.profile_id+" · "+run.count+" × "+run.pulse_ms+" ms · "+run.phase}</option>)}</optgroup>}</Select></Field>)}
       {a.value&&<MotionTimelineView key={a.value.dataset_revision+":"+b.value?.dataset_revision+":"+streamA?.id+":"+streamB?.id+":"+aTrial+":"+bTrial} a={a.value} b={b.value} streamA={streamA} streamB={streamB} t={t} language={language}/>}
       {aId&&<a className={styles.button} href={getApiBaseUrl()+SAMPLES_BASE+"/sessions/"+aId+"/export"} download>{t("samples.export")} A</a>}
     </div>
   </Panel>;
 }
+/** Keep timeline playback, quality evidence and comparison traces synchronized. */
 export function MotionTimelineView({a,b,streamA,streamB,t,language}:{a:MotionTimeline;b:MotionTimeline|null;streamA:MotionStream|null;streamB:MotionStream|null;t:Translator;language:string}){
+  /** Render recording context, sample quality and pulse evidence before playback controls. */
+  function renderTimelineSummary(){return <>    <PulseSeriesComparison a={seriesA} b={seriesB} t={t} language={language}/>
+    <p className={styles.hint}>{t("study.reception")} · {t("study.revision")} A {a.dataset_revision.slice(0,8)}{b?" · B "+b.dataset_revision.slice(0,8):""}</p>
+    <p>{t("study.context")} A: {a.context?.replace("motion-study-v1:","")||t("unknown")}{b?" · B: "+(b.context?.replace("motion-study-v1:","")||t("unknown")):""}</p>
+    {([["A",a],["B",b]] as const).map(([name,data])=>data&&<p key={name} data-testid={"study-quality-"+name} className={styles.hint}>{name}: {t("study.quality",{samples:Number(data.counts.imu_records??0),drops:Number(data.collection_status.dropped??0),failed:Number(data.collection_status.failed??0),gap:formatNumber(data.source_gaps_s.p95,language,3)})}</p>)}
+    {([["A",streamA],["B",streamB]] as const).map(([name,stream])=>stream&&<div key={name} data-testid={"sampling-"+name} className={styles.hint}>{t("motion.sampling",{name,hz:formatNumber(stream.sampling_diagnostics?.observed_hz,language,2),gap:formatNumber(stream.sampling_diagnostics?.source_interval_max_s,language,3)})}{Array.isArray(stream.sampling_diagnostics?.pulses)&&stream.sampling_diagnostics.pulses.some(p=>record(p).insufficient===true)&&<p>{t("motion.sparse")}</p>}</div>)}
+    <p className={styles.hint}>{t("motion.semantics")}</p>
+    {b&&(!a.context?.replace("motion-study-v1:","")||a.context!==b.context)&&<p role="status">{t("study.contextDifferent")}</p>}
+    {b&&trialA.event?.intent.direction!==trialB.event?.intent.direction&&<p role="status">{t("study.directionDifferent")}</p>}
+    {!seriesA&&!seriesB&&<p className={styles.hint}>{t(trialA.peaks&&(!b||trialB.peaks)?"study.observedRange":"study.insufficient")}</p>}
+    <Details t={t} value={{A:condition(trialA),...(b?{B:condition(trialB)}:{})}}/>
+</>;}
+  /** Render the PlaybackButton section using this render's captured state. */
+  function renderPlaybackButton(){
+    return (<Button data-testid="study-play" disabled={cursor>=max} aria-pressed={playing&&step.next!==null&&!step.gap} onClick={()=>{if(step.gap){chooseTime(step.next!);return;}setPlaying(p=>!p);}}>{t(playing&&step.next!==null&&!step.gap?"attitude.pause":"attitude.play")}</Button>);
+  }
+
   const times=useMemo(()=>streamTimes(streamA,streamB),[streamA,streamB]);
   const anglesA=useMemo(()=>angleStream(streamA),[streamA]),anglesB=useMemo(()=>angleStream(streamB),[streamB]);
   const ratesA=useMemo(()=>angleStream(streamA,true),[streamA]),ratesB=useMemo(()=>angleStream(streamB,true),[streamB]);
@@ -101,19 +119,10 @@ export function MotionTimelineView({a,b,streamA,streamB,t,language}:{a:MotionTim
   const seriesA=streamA?.trials?.find(run=>Math.abs(run.t)<1e-8)??null,seriesB=streamB?.trials?.find(run=>Math.abs(run.t)<1e-8)??null;
   const condition=(trial:ReturnType<typeof pulseEvidence>)=>({intent:trial.event?.intent??null,outcome:trial.result?.outcome??"unknown",profile:trial.profile,observed_range:trial.peaks});
   return <div data-testid="motion-timeline">
-    <PulseSeriesComparison a={seriesA} b={seriesB} t={t} language={language}/>
-    <p className={styles.hint}>{t("study.reception")} · {t("study.revision")} A {a.dataset_revision.slice(0,8)}{b?" · B "+b.dataset_revision.slice(0,8):""}</p>
-    <p>{t("study.context")} A: {a.context?.replace("motion-study-v1:","")||t("unknown")}{b?" · B: "+(b.context?.replace("motion-study-v1:","")||t("unknown")):""}</p>
-    {([["A",a],["B",b]] as const).map(([name,data])=>data&&<p key={name} data-testid={"study-quality-"+name} className={styles.hint}>{name}: {t("study.quality",{samples:Number(data.counts.imu_records??0),drops:Number(data.collection_status.dropped??0),failed:Number(data.collection_status.failed??0),gap:formatNumber(data.source_gaps_s.p95,language,3)})}</p>)}
-    {([["A",streamA],["B",streamB]] as const).map(([name,stream])=>stream&&<div key={name} data-testid={"sampling-"+name} className={styles.hint}>{t("motion.sampling",{name,hz:formatNumber(stream.sampling_diagnostics?.observed_hz,language,2),gap:formatNumber(stream.sampling_diagnostics?.source_interval_max_s,language,3)})}{Array.isArray(stream.sampling_diagnostics?.pulses)&&stream.sampling_diagnostics.pulses.some(p=>record(p).insufficient===true)&&<p>{t("motion.sparse")}</p>}</div>)}
-    <p className={styles.hint}>{t("motion.semantics")}</p>
-    {b&&(!a.context?.replace("motion-study-v1:","")||a.context!==b.context)&&<p role="status">{t("study.contextDifferent")}</p>}
-    {b&&trialA.event?.intent.direction!==trialB.event?.intent.direction&&<p role="status">{t("study.directionDifferent")}</p>}
-    {!seriesA&&!seriesB&&<p className={styles.hint}>{t(trialA.peaks&&(!b||trialB.peaks)?"study.observedRange":"study.insufficient")}</p>}
-    <Details t={t} value={{A:condition(trialA),...(b?{B:condition(trialB)}:{})}}/>
+    {renderTimelineSummary()}
     {!times.length?<Empty>{t("study.noData")}</Empty>:<>
       <div className={styles.flex}>
-        <Button data-testid="study-play" disabled={cursor>=max} aria-pressed={playing&&step.next!==null&&!step.gap} onClick={()=>{if(step.gap){chooseTime(step.next!);return;}setPlaying(p=>!p);}}>{t(playing&&step.next!==null&&!step.gap?"attitude.pause":"attitude.play")}</Button>
+        {renderPlaybackButton()}
         <Button data-testid="study-prev" onClick={()=>next(-1)} disabled={cursor<=min}>{t("study.previous")}</Button>
         <Button data-testid="study-next" onClick={()=>next(1)} disabled={cursor>=max}>{t("study.next")}</Button>
         <span className={styles.small}>A ━ · B ┄</span>

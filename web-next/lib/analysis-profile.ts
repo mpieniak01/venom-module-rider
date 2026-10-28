@@ -1,5 +1,5 @@
 import {inputBounds} from "./input-region";
-import { record, type JsonRecord } from "./model";
+import { record, str, type JsonRecord } from "./model";
 import { behaviorSelection, type BehaviorSelection } from "./behavior";
 import { SEMANTIC_MODEL_IDS, TUNING_BOUNDS, TUNING_FIELDS } from "./model-tuning";
 
@@ -9,13 +9,8 @@ export type RiderAnalysisSettings = { revision: number; behavior: BehaviorSelect
 export function semanticProfile(profile: AnalysisProfile | undefined): boolean {
   return profile?.task === "semantic" || profile?.backend === "semantic";
 }
-/** Copy only experiment settings. Provider selection, artifact identity and motion approval never cross this boundary. */
-export function riderAnalysisSettings(value: unknown): RiderAnalysisSettings {
-  const policy = record(value), source = record(policy.perception), corridor = policy.corridor;
-  const behavior = policy.behavior === undefined ? { ...LEGACY_ANALYSIS_BEHAVIOR } : behaviorSelection(policy.behavior);
-  if (!Number.isSafeInteger(policy.revision) || !behavior || !Array.isArray(corridor) || corridor.length !== 4
-    || !corridor.every(item => typeof item === "number" && Number.isFinite(item) && item >= 0 && item <= 1)
-    || corridor[0] >= corridor[2] || corridor[1] >= corridor[3]) throw new Error("analysis_rider_settings_invalid");
+/** Copy validated numeric depth controls without sharing mutable input regions. */
+function depthSettings(source:JsonRecord):JsonRecord {
   const perception: JsonRecord = {};
   for (const [key, low, high, fallback] of [
     ["residual_limit", .01, .15, .06], ["outlier_limit", 0, .02, .005], ["slope_min", 1, 4, 2],
@@ -25,24 +20,36 @@ export function riderAnalysisSettings(value: unknown): RiderAnalysisSettings {
     perception[key] = number;
   }
   if(source.input_region!==undefined){if(!inputBounds(source.input_region).length)throw new Error("analysis_rider_settings_invalid");perception.input_region=structuredClone(source.input_region);}
-  if (source.semantic_models !== undefined) {
-    const models = record(source.semantic_models), copied: JsonRecord = {};
-    if (!source.semantic_models || Array.isArray(source.semantic_models) || typeof source.semantic_models !== "object") throw new Error("analysis_rider_settings_invalid");
-    for (const [id, raw] of Object.entries(models)) {
-      const row = record(raw);
-      if (!(SEMANTIC_MODEL_IDS as readonly string[]).includes(id) || row.version !== 1
-        || !["floor_only", "floor_rug"].includes(String(row.surface))) throw new Error("analysis_rider_settings_invalid");
-      const entry: JsonRecord = { version: 1, surface: row.surface };
-      for (const field of TUNING_FIELDS) {
-        const number = row[field] ?? null;
-        if (number !== null && (typeof number !== "number" || !Number.isFinite(number)
-          || number < TUNING_BOUNDS[field][0] || number > TUNING_BOUNDS[field][1])) throw new Error("analysis_rider_settings_invalid");
-        entry[field] = number;
-      }
-      copied[id] = entry;
-    }
-    perception.semantic_models = copied;
+  return perception;
+}
+/** Validate one semantic model's device-defined tuning bounds. */
+function semanticSettingsEntry(id:string,raw:unknown):JsonRecord {
+  const row=record(raw);
+  if(!(SEMANTIC_MODEL_IDS as readonly string[]).includes(id)||row.version!==1||!["floor_only","floor_rug"].includes(str(row.surface)))throw new Error("analysis_rider_settings_invalid");
+  const entry:JsonRecord={version:1,surface:row.surface};
+  for(const field of TUNING_FIELDS){
+    const number=row[field]??null;
+    if(number!==null&&(typeof number!=="number"||!Number.isFinite(number)||number<TUNING_BOUNDS[field][0]||number>TUNING_BOUNDS[field][1]))throw new Error("analysis_rider_settings_invalid");
+    entry[field]=number;
   }
+  return entry;
+}
+/** Reject malformed model maps before copying each independent model entry. */
+function semanticSettings(value:unknown):JsonRecord {
+  if(!value||Array.isArray(value)||typeof value!=="object")throw new Error("analysis_rider_settings_invalid");
+  const copied:JsonRecord={};
+  for(const [id,raw] of Object.entries(value))copied[id]=semanticSettingsEntry(id,raw);
+  return copied;
+}
+/** Copy only experiment settings. Provider selection, artifact identity and motion approval never cross this boundary. */
+export function riderAnalysisSettings(value: unknown): RiderAnalysisSettings {
+  const policy = record(value), source = record(policy.perception), corridor = policy.corridor;
+  const behavior = policy.behavior === undefined ? { ...LEGACY_ANALYSIS_BEHAVIOR } : behaviorSelection(policy.behavior);
+  if (!Number.isSafeInteger(policy.revision) || !behavior || !Array.isArray(corridor) || corridor.length !== 4
+    || !corridor.every(item => typeof item === "number" && Number.isFinite(item) && item >= 0 && item <= 1)
+    || corridor[0] >= corridor[2] || corridor[1] >= corridor[3]) throw new Error("analysis_rider_settings_invalid");
+  const perception=depthSettings(source);
+  if(source.semantic_models!==undefined)perception.semantic_models=semanticSettings(source.semantic_models);
   return { revision: Number(policy.revision), behavior: { ...behavior }, corridor: [...corridor], perception };
 }
 /** Offline run parameters never alter live selection, and semantic runs never inherit depth geometry or identity. */

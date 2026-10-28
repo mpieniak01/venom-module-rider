@@ -2,7 +2,7 @@ import {useEffect,useRef,useState} from "react";
 import {apiFetch} from "@/lib/api-client";
 import {createBrowserUuid} from "@/lib/optional-modules/transport";
 import {calibrationDraft,calibrationValues} from "../lib/calibration";
-import {data,errorCode,record,safetyOf,settingsOf,type JsonRecord} from "../lib/model";
+import { str, scalarText,data,errorCode,record,safetyOf,settingsOf,type JsonRecord} from "../lib/model";
 import {useOperatorTuning} from "../lib/operator-tuning";
 import {useOperatorApply} from "../lib/use-operator-apply";
 import {matchingPulse,pulseActive,pulseProfiles,pulseRun,type PulseProfile} from "../lib/pulse-trials";
@@ -12,6 +12,7 @@ import type {Translator} from "../lib/i18n";
 import {Button,Field,Input,Select} from "./primitives";
 import styles from "../rider.module.css";
 
+/** Coordinate one explicit pulse run and its owned evidence recording. */
 export function PulseTrialsPanel({client,t,recording}:{client:RiderClient;t:Translator;recording:StudyRecording}){
  const workspace=useOperatorTuning(),{state,setState}=workspace,apply=useOperatorApply(workspace,client);
  const [profiles,setProfiles]=useState<PulseProfile[]>([]),[busy,setBusy]=useState(false),[error,setError]=useState("");
@@ -33,14 +34,20 @@ export function PulseTrialsPanel({client,t,recording}:{client:RiderClient;t:Tran
  useEffect(()=>{
   if(!state.trialRunId||!client.canMutate)return;
   let cancelled=false,timer:ReturnType<typeof setTimeout>|undefined;const deadline=Date.now()+5000;
+  /** Finish only the recording still owned by this pulse run. */
+  const finishRecording=async(aborted=false)=>{
+    const owned=recordingOwned.current;recordingOwned.current=null;
+    if(recordingSession.current?.session_id===owned)await endRecording(aborted);
+  };
+  /** Observe one pulse result until completion or the existing deadline. */
   const tick=async()=>{
    try{
     const value=data(await apiFetch("/api/v1/rider/motion/trials/"+encodeURIComponent(state.trialRunId))),next=pulseRun(value.trial);
     if(cancelled)return;
-    if(next){setRun(next);setError("");if(!pulseActive(next)){if(recordingOwned.current){const owned=recordingOwned.current;recordingOwned.current=null;if(recordingSession.current?.session_id===owned)await endRecording();}return;}}
+    if(next){setRun(next);setError("");if(!pulseActive(next)){if(recordingOwned.current){await finishRecording();}return;}}
    }catch(err){if(!cancelled)setError(previous=>previous||errorCode(err));}
    if(cancelled)return;
-   if(Date.now()>=deadline){setRun(null);if(recordingOwned.current){const owned=recordingOwned.current;recordingOwned.current=null;if(recordingSession.current?.session_id===owned)await endRecording(true);}return;}
+   if(Date.now()>=deadline){setRun(null);if(recordingOwned.current){await finishRecording(true);}return;}
    if(!cancelled)timer=setTimeout(()=>void tick(),200);
   };
   void tick();return()=>{cancelled=true;clearTimeout(timer);};
@@ -77,9 +84,9 @@ export function PulseTrialsPanel({client,t,recording}:{client:RiderClient;t:Tran
   <h3>{t("pulse.title")}</h3>
   <Field label={t("pulse.profile")}><Select data-testid="pulse-profile" value={matches?chosen?.id??"":""} disabled={busy||state.busy} onChange={event=>choose(event.target.value)}><option value="">{t("custom")}</option>{profiles.map(p=><option key={p.id} value={p.id}>{p.id} · {p.count} × {p.pulse_ms} ms{p.gap_ms?` · ${p.gap_ms} ms`:""}</option>)}</Select></Field>
   <Field label={t("study.surface")}><Input data-testid="pulse-context" value={recording.surface} maxLength={80} disabled={busy||recording.capture.session?.state==="collecting"} onChange={event=>recording.setSurface(event.target.value)}/></Field>
-  {matches&&chosen&&<p className={styles.small} data-testid="pulse-plan">{t("pulse.summary",{count:chosen.count,pulse:chosen.pulse_ms,gap:chosen.gap_ms,speed:String(record(effective.directions.forward).speed)})}</p>}
+  {matches&&chosen&&<p className={styles.small} data-testid="pulse-plan">{t("pulse.summary",{count:chosen.count,pulse:chosen.pulse_ms,gap:chosen.gap_ms,speed:scalarText(record(effective.directions.forward).speed)})}</p>}
   <div className={styles.flex}><Button tone="primary" data-testid="pulse-start" disabled={!matches||!client.canMutate||busy||state.busy||active||!!client.busy} onClick={()=>void start()}>{t(busy?"loading":"pulse.start")}</Button></div>
-  {run&&<p className={styles.small} data-testid="pulse-result">{t("pulse.phase."+String(run.phase))} · {String(run.completed_pulses)}/{String(run.count)} · {String(run.elapsed_ms)} ms</p>}
+  {run&&<p className={styles.small} data-testid="pulse-result">{t("pulse.phase."+str(run.phase))} · {scalarText(run.completed_pulses)}/{scalarText(run.count)} · {scalarText(run.elapsed_ms)} ms</p>}
   {error&&<p className={styles.loopError} role="alert" data-testid="pulse-error">{t("requestFailed")} · {error}</p>}
  </section>;
 }

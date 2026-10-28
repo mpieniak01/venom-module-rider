@@ -4,17 +4,23 @@ export function calibrationDraft(settings: JsonRecord): CalibrationDraft {
   return { revision: Number(settings.revision), values: { ...record(settings.values) }, directions: Object.fromEntries(Object.entries(record(settings.directions)).map(([key, row]) => [key, { ...record(row) }])) };
 }
 function inRange(value: unknown, descriptor: JsonRecord): boolean { return finite(value) && (!finite(descriptor.minimum) || value >= descriptor.minimum) && (!finite(descriptor.maximum) || value <= descriptor.maximum) && (descriptor.exclusive_minimum !== true || !finite(descriptor.minimum) || value > descriptor.minimum); }
-export function validCalibration(draft: CalibrationDraft, settings: JsonRecord): boolean {
-  const schema = record(settings.parameter_schema), directionSchema = record(schema.direction_fields), valueSchema = record(schema.value_fields);
-  if (!Number.isInteger(draft.revision)) return false;
-  for (const name of DIRECTIONS) {
-    const row = draft.directions[name]; if (!row) return false;
+/** Validate one direction against its descriptors and achievable ramp duration. */
+function validDirection(name:string,row:JsonRecord,draft:CalibrationDraft,directionSchema:JsonRecord):boolean {
     for (const [field, descriptor] of Object.entries(directionSchema)) if (!inRange(row[field], record(descriptor))) return false;
     const minimum = Number(row.minimum), maximum = Number(row.maximum), speed = Number(row.speed);
     if (minimum > maximum || (speed !== 0 && (speed < minimum || speed > maximum)) || Number(row.step) <= 0) return false;
     const axis = name === "forward" || name === "backward" ? "linear" : "turn";
     const acceleration = Number(draft.values[`${axis}_rate`]), deceleration = Number(draft.values[`${axis}_deceleration`]);
     if (acceleration > 0 && deceleration > 0 && minimum > Number(row.duration) / (1 / acceleration + 1 / deceleration)) return false;
+  return true;
+}
+/** Validate every device-owned calibration field before writing the draft. */
+export function validCalibration(draft: CalibrationDraft, settings: JsonRecord): boolean {
+  const schema = record(settings.parameter_schema), directionSchema = record(schema.direction_fields), valueSchema = record(schema.value_fields);
+  if (!Number.isInteger(draft.revision)) return false;
+  for (const name of DIRECTIONS) {
+    const row = draft.directions[name]; if (!row) return false;
+    if(!validDirection(name,row,draft,directionSchema))return false;
   }
   for (const [field, descriptor] of Object.entries(valueSchema)) if (!inRange(draft.values[field], record(descriptor))) return false;
   return Array.isArray(schema.ramp_modes) && schema.ramp_modes.some(mode => record(mode).value === draft.values.ramp_mode);
