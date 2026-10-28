@@ -244,6 +244,23 @@ This runs Ruff, formatting, mypy, targeted Python tests with a 90% coverage floo
 
 Local session reports, screenshots and operator/device settings stay under ignored docs_dev/, output/ and local environment files. The host integration also requires make pr-fast.
 
+## GitHub Actions and SonarCloud
+
+The Rider repository owns its SonarCloud project and quality gate. The `Rider
+module SonarCloud` workflow runs on pull requests to `main`, pushes to `main`
+and manual dispatch. It checks out a pinned Venom host, runs the module Python
+quality checks and uploads their real coverage report before scanning the module
+sources, scripts, frontend and tests. The `SONAR_TOKEN` repository secret must
+allow analysis of `mpieniak01_venom-module-rider`. Pull requests from forks do
+not receive repository secrets, so the scan fails rather than reporting a green
+quality gate without analysis. Run it separately in an approved trusted workflow. No hardware or Pi network is used on GitHub-hosted runners.
+
+The runner is CPU-only. Eight tests that start the real CUDA-only analysis
+worker are explicitly deselected in this workflow; CUDA and physical-device
+acceptance require separate, explicitly authorized local checks. Other tests run
+with GPU visibility disabled. The XML covers Python module code only; it does not
+claim frontend or scripts coverage. See the workflow for the exact exclusions.
+
 ## Camera, decisions and a forward trial
 
 The control workspace keeps the processed camera view, manual takeover and
