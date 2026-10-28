@@ -65,7 +65,7 @@ export function featureRows(status: RiderStatus | null): JsonRecord[] {
     return { ...item, ...state, ...(state.enabled !== undefined ? { requested: state.enabled, active: state.enabled === true && state.state === "running" } : {}) };
   });
 }
-export function controlIdentity(status: RiderStatus | null): string { const safety = safetyOf(status); return [status?.connection.session, safety.generation, safety.instance_id ?? safety.instance, status?.connection.transport?.generation ?? 0].join(":"); }
+export function controlIdentity(status: RiderStatus | null): string { const safety = safetyOf(status); return [status?.connection.session, safety.generation, safety.instance_id ?? safety.instance, status?.connection.transport?.generation ?? 0].map(value => scalarText(value)).join(":"); }
 export function sensorRows(status: RiderStatus | null): [string, JsonRecord][] {
   const xgo = record(record(data(status?.telemetry).devices).xgo); const observation = record(xgo.observation); const quality = record(observation.sensor_quality ?? xgo.sensor_quality); const sensors = record(quality.sensors ?? quality);
   return Object.entries(sensors).filter(([, sample]) => typeof sample === "object").map(([name, sample]) => [name, record(sample)]);
