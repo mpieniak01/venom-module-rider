@@ -542,6 +542,6 @@ async def test_replay_uses_session_token_and_local_api_only(monkeypatch):
         assert nav.api_url == "http://127.0.0.1:8800"
     finally:
         await nav.close()
-    for url in ("https://localhost", "http://127.0.0.1@remote.invalid"):
+    for url in ("https://remote.invalid", "http://127.0.0.1@remote.invalid"):
         with pytest.raises(ValueError, match="replay_requires_loopback"):
             ReplayNavigation(b"fixture", PermitFixture, api_url=url)

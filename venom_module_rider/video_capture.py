@@ -16,7 +16,7 @@ from pathlib import Path
 import httpx
 
 from .errors import RiderError
-from .local_api import local_api_origin
+from .local_api import local_api_origin, local_api_tls_context
 from .samples_archive import SampleArchive, canonical
 from .stream_contract import SourceDescription
 from .stream_framing import MultipartJpegParser, boundary_from_type
@@ -314,6 +314,7 @@ async def run_record(args):
         headers=headers,
         follow_redirects=False,
         trust_env=False,
+        verify=local_api_tls_context() if origin.startswith("https://") else True,
         timeout=httpx.Timeout(5, read=3),
     ) as client:
         if args.action == "check":

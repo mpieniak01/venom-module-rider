@@ -256,7 +256,7 @@ async def test_extract_rejects_corruption(tmp_path, payload, damage):
         "http://robot:8080",
         "http://127.0.0.1@robot:8080",
         "http://127.0.0.1/?token=x",
-        "https://localhost",
+        "https://robot:8080",
     ],
 )
 @pytest.mark.asyncio

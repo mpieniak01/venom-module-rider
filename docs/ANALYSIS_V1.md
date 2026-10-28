@@ -152,8 +152,14 @@ python -m venom_module_rider.analysis_cli compare FIRST SECOND
 ```
 
 Global `--url` defaults to the existing localhost API on port 8800. It accepts
-only an HTTP loopback origin and does not follow redirects or environment proxies,
-so the configured access token cannot be forwarded to another host.
+only a loopback HTTP or HTTPS origin and does not follow redirects or environment
+proxies. Local development continues to use HTTP; when the API exposes HTTPS,
+certificate and hostname verification is mandatory. `localhost` is normalized to
+`127.0.0.1`; the server certificate must contain that IP address in its SAN.
+Set `RIDER_API_CA_FILE` to
+an operator-provisioned CA certificate if the standard system trust store does
+not contain the issuing CA. This setting does not start or reconfigure Venom.
+The configured access token cannot be forwarded to another host.
 `submit --spec FILE` reads validated AnalysisSpec JSON. It cannot provide model
 paths/URLs, actuator settings, a shell command or a new provider.
 `RIDER_ACCESS_TOKEN`, if configured, supplies the existing authorization header.

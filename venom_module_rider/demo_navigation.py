@@ -15,7 +15,7 @@ from typing import Any
 import httpx
 from fastapi.responses import Response
 
-from .local_api import local_api_origin
+from .local_api import local_api_origin, local_api_tls_context
 from .motion_limits import MAX_DECISION_MS, MAX_MOTION_MS, MAX_SPEED
 from .vision_contract import VisionFrame
 
@@ -96,7 +96,11 @@ class ReplayNavigation:
         self.events: list[dict[str, Any]] = []
         self.frame_number = 0
         self.drop_link = False
-        self.http = httpx.AsyncClient(trust_env=False, follow_redirects=False)
+        self.http = httpx.AsyncClient(
+            trust_env=False,
+            follow_redirects=False,
+            verify=local_api_tls_context() if api_url.startswith("https://") else True,
+        )
         self.motion_generation: str | None = None
         self.trial_requests: list[str] = []
         self.operator_mode = False

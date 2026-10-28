@@ -27,7 +27,7 @@ def request(base, path, body=None):
         data=encoded,
         headers=headers,
     )
-    opener = local_api_opener()
+    opener = local_api_opener(origin)
     with opener.open(operation, timeout=30) as response:
         return json.load(response)
 
