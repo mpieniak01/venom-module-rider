@@ -1,10 +1,15 @@
-.PHONY: check check-python check-web test demo
+.PHONY: check check-python check-web check-standalone test demo
 HOST ?= ../..
 PYTHON ?= $(HOST)/.venv/bin/python
 RUFF ?= $(HOST)/.venv/bin/ruff
 WEB_BIN = $(HOST)/web-next/node_modules/.bin
 
 check: check-python check-web check-browser
+
+# Use an activated standalone environment, not the host's virtualenv.
+STANDALONE_PYTHON ?= python3
+check-standalone:
+	RIDER_TEST_STANDALONE=1 PYTHONPATH=. $(STANDALONE_PYTHON) -m pytest -q --durations=10 @tests/standalone.txt
 
 check-python:
 	$(RUFF) check venom_module_rider scripts tests

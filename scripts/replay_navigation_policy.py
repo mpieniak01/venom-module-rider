@@ -138,7 +138,7 @@ def replay(
     output.parent.mkdir(parents=True, exist_ok=True)
     with (
         manifest.open(encoding="utf-8") as source,
-        output.open("w", encoding="utf-8") as target,
+        output.open("x", encoding="utf-8") as target,
     ):
         for line in source:
             if len(line) > 64 * 1024:
@@ -295,13 +295,14 @@ def main(argv: list[str] | None = None) -> int:
         params = json.loads(args.params.read_text(encoding="utf-8"))
         if not isinstance(params, dict):
             raise ValueError("replay_params")
+    summary_path = args.output.with_suffix(".summary.json")
+    if summary_path.exists() or summary_path.is_symlink():
+        raise FileExistsError("replay_summary_exists")
     summary = replay(
         args.manifest, params, args.output, behavior=behavior, perception=perception
     )
-    summary_path = args.output.with_suffix(".summary.json")
-    summary_path.write_text(
-        json.dumps(summary, indent=2, allow_nan=False) + "\n", encoding="utf-8"
-    )
+    with summary_path.open("x", encoding="utf-8") as stream:
+        stream.write(json.dumps(summary, indent=2, allow_nan=False) + "\n")
     print(json.dumps(summary, indent=2, allow_nan=False))
     return 0
 

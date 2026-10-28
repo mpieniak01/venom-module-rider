@@ -2,6 +2,7 @@
 
 import json
 import zipfile
+from pathlib import Path
 
 from test_motion_evidence import manifest, record
 
@@ -69,6 +70,55 @@ def test_cli_bounds_json_read(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "MAX_MANIFEST_BYTES", 8)
     source = tmp_path / "session.json"
     source.write_text(json.dumps(manifest()))
+    output = tmp_path / "report.json"
+    assert main([str(source), "--output", str(output)]) == 1
+    assert not output.exists()
+
+
+def test_cli_rejects_symlink_swap_before_json_open(tmp_path, monkeypatch):
+    import os
+
+    import venom_module_rider.motion_evidence_cli as cli
+
+    if not hasattr(os, "O_NOFOLLOW"):
+        return
+    source = tmp_path / "session.json"
+    secret = tmp_path / "other.json"
+    source.write_text(json.dumps(manifest()))
+    secret.write_text(json.dumps(manifest([record()])))
+    original_open = os.open
+
+    def replace_before_open(path, flags, *args, **kwargs):
+        if Path(path) == source:
+            source.unlink()
+            source.symlink_to(secret)
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(cli.os, "open", replace_before_open)
+    assert main([str(source), "--output", str(tmp_path / "report.json")]) == 1
+    assert not (tmp_path / "report.json").exists()
+
+
+def test_cli_rejects_symlink_swap_before_zip_open(tmp_path, monkeypatch):
+    import os
+
+    import venom_module_rider.motion_evidence_cli as cli
+
+    if not hasattr(os, "O_NOFOLLOW"):
+        return
+    source, other = tmp_path / "source.zip", tmp_path / "other.zip"
+    for path in (source, other):
+        with zipfile.ZipFile(path, "w") as archive:
+            archive.writestr("manifest.json", json.dumps(manifest()))
+    original_open = os.open
+
+    def swap(path, flags, *args, **kwargs):
+        if Path(path) == source:
+            source.unlink()
+            source.symlink_to(other)
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(cli.os, "open", swap)
     output = tmp_path / "report.json"
     assert main([str(source), "--output", str(output)]) == 1
     assert not output.exists()
