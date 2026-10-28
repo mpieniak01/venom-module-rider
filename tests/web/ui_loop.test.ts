@@ -527,7 +527,11 @@ test("recovery brackets preview polling and late processed GETs cannot publish o
  const dispatch=client.indexOf("const response = await fetch",fetchStart);
  assert.ok(client.indexOf("if (!currentPreview()) return;",fetchStart)<dispatch);
  assert.ok(client.indexOf("!currentPreview()",dispatch)>dispatch);
- assert.ok(client.indexOf("!currentPreview()",client.indexOf("await decodePreview",dispatch))>dispatch);
+ const decodedStart=client.indexOf("const applyDecodedFrame=");
+ const decode=client.indexOf("await decodePreview",decodedStart);
+ const decodedGuard=client.indexOf("!currentPreview()",decode);
+ assert.ok(decodedStart>=0&&decode>decodedStart&&decodedGuard>decode&&decodedGuard<fetchStart);
+ assert.ok(client.indexOf("await applyDecodedFrame(response",dispatch)>dispatch);
  assert.ok(client.includes('cameraStream === "venom" && cameraTransition'));
  assert.ok(client.includes('if (!cameraStream || !["control", "vision", "samples"].includes(section) || processedTransition || nativeStreaming || pipelineBusy || pipelineStopped) return;'));
  assert.ok(client.includes("stale: true, knownFreshness: false"));
@@ -675,3 +679,41 @@ test("STOP or session changes during a successful or failed post-Start GET still
   await assert.rejects(refreshStartedNavigation(async()=>{current=false;if(failed)throw new Error("read_failed");},()=>current),/navigation_trial_cancelled/);
  }
 });
+
+
+test("diagnostic reasons accept protocol strings and never stringify malformed metadata",()=>{
+ const malformed=[{},[],["vision_clear"],17,false];
+ for(const value of malformed){
+  const decision={state:"unknown",reason:value,motion_reason:value};
+  const current=decisionView({running:true,stale:false,decision},{});
+  assert.equal(current.imageReason,"waiting_for_decision");
+  assert.equal(current.reason,"waiting_for_decision");
+  assert.equal(decisionView({running:false,stop_reason:value,decision},{}).reason,"waiting_for_decision");
+ }
+ const exact=decisionView({running:true,decision:{state:"unknown",reason:"vision_low_confidence",motion_reason:"observe_only"}},{});
+ assert.equal(exact.imageReason,"vision_low_confidence");
+ assert.equal(exact.reason,"observe_only");
+ const empty=decisionView({running:true,decision:{state:"unknown",reason:"",motion_reason:""}},{});
+ assert.equal(empty.imageReason,"");
+ assert.equal(empty.reason,"");
+});
+
+
+for(const action of ["go","turn_left","steer_left"]){
+ test(`only the string enum ${action} can supply a navigation reply or permission`,()=>{
+  const decision=action==="go"?{...permissionLoop.decision,action}:{
+   ...permissionLoop.decision,action,protocol_version:action==="steer_left"?3:2,state:"obstacle",vision_action:"stop",
+   sectors:{left:{state:"clear",coverage_complete:true}},
+   paths:{left:{state:"clear",coverage_complete:true},guard:{state:"clear",coverage_complete:true}},
+  };
+  const state={...permissionLoop,decision};
+  const policy={...permissionPolicy,avoidance:{enabled:true,sweep_verified:true,protocol_version:3}};
+  assert.equal(decisionView(state,permissionDetector).reply,action);
+  assert.equal(motionPermission(state,{drive:true},policy,permissionDetector,permissionStatus()).venom,true);
+  for(const malformed of [[action],{action},{toString:()=>action},null,17,true]){
+   const invalid={...state,decision:{...decision,action:malformed}};
+   assert.equal(decisionView(invalid,permissionDetector).reply,"none");
+   assert.equal(motionPermission(invalid,{drive:true},policy,permissionDetector,permissionStatus()).venom,false);
+  }
+ });
+}

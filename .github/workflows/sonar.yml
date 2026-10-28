@@ -68,22 +68,27 @@ jobs:
         with:
           node-version: "24.22.0"
           cache: npm
-          cache-dependency-path: host/web-next/package-lock.json
+          cache-dependency-path: |
+            host/web-next/package-lock.json
+            host/modules/venom-module-rider/tests/web-independent/package-lock.json
       - name: Install host frontend dependencies
         working-directory: host/web-next
         run: npm ci
       - name: Link host frontend dependencies
         working-directory: host/modules/venom-module-rider
         run: ln -s ../../web-next/node_modules node_modules
-      - name: Run host frontend integration checks
+      - name: Install pinned module coverage tools
         working-directory: host/modules/venom-module-rider
-        run: make check-web
+        run: npm ci --prefix tests/web-independent
+      - name: Run host frontend integration checks and collect coverage
+        working-directory: host/modules/venom-module-rider
+        run: make check-web-coverage
       - name: Install Chromium for browser fixtures
         working-directory: host/web-next
         run: npx playwright install --with-deps chromium
       - name: Run isolated browser fixtures
         working-directory: host/modules/venom-module-rider
-        run: make check-browser
+        run: make check-browser-coverage
       - name: Upload browser report
         if: always()
         uses: actions/upload-artifact@v4
@@ -91,8 +96,17 @@ jobs:
           name: rider-browser-regressions
           path: host/modules/venom-module-rider/test-results/browser-regressions/
           if-no-files-found: warn
-  sonar:
-    name: Backend host (pytest + SonarCloud)
+      - name: Upload frontend coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rider-web-coverage
+          path: |
+            host/modules/venom-module-rider/test-results/web-coverage/lcov-unit.info
+            host/modules/venom-module-rider/test-results/web-coverage/lcov-browser.info
+          if-no-files-found: error
+  host-backend-integration:
+    name: Backend host (pytest + coverage)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -147,6 +161,28 @@ jobs:
             host/modules/venom-module-rider/test-results/coverage.xml
             host/modules/venom-module-rider/test-results/scripts-coverage.xml
           if-no-files-found: error
+  # Retain the existing required gate name while tests keep running in parallel.
+  sonar:
+    name: Backend host (pytest + SonarCloud)
+    needs: [host-backend-integration, host-web-integration]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: host/modules/venom-module-rider
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Download backend coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: rider-python-coverage
+          path: host/modules/venom-module-rider/test-results
+      - name: Download frontend coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: rider-web-coverage
+          path: host/modules/venom-module-rider/test-results/web-coverage
       - name: Verify SonarCloud credentials
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

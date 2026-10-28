@@ -20,6 +20,9 @@ from .depth_candidates import (
 from .errors import RiderError
 from .samples_archive import canonical
 
+_MODEL_WEIGHTS_FILENAME = "model.safetensors"
+_MODEL_CONFIG_FILENAME = "config.json"
+
 
 @dataclass(frozen=True)
 class Profile:
@@ -34,7 +37,7 @@ class Profile:
 
     def availability(self):
         """Presence is not a claim of loaded or verified inference."""
-        required = ["config.json", "model.safetensors"]
+        required = [_MODEL_CONFIG_FILENAME, _MODEL_WEIGHTS_FILENAME]
         if self.backend == "da2":
             required += ["manifest.json", "preprocessor_config.json"]
         if not all((self.model / item).is_file() for item in required):
@@ -78,7 +81,7 @@ class Profile:
         error = self.availability()
         if error:
             raise RiderError(error, 503)
-        names = ["config.json", "model.safetensors"]
+        names = [_MODEL_CONFIG_FILENAME, _MODEL_WEIGHTS_FILENAME]
         if self.backend == "da2":
             names.append("preprocessor_config.json")
         files = {name: file_hash(self.model / name) for name in names}
@@ -87,10 +90,12 @@ class Profile:
             if manifest.get("files") != files:
                 raise RiderError("analysis_model_hash_mismatch", 409)
         else:
-            if files["model.safetensors"] != CHECKPOINT_HASHES[self.backend]:
+            if files[_MODEL_WEIGHTS_FILENAME] != CHECKPOINT_HASHES[self.backend]:
                 raise RiderError("analysis_model_hash_mismatch", 409)
             if (
-                json.loads((self.model / "config.json").read_text()).get("model_name")
+                json.loads((self.model / _MODEL_CONFIG_FILENAME).read_text()).get(
+                    "model_name"
+                )
                 != self.backend
             ):
                 raise RiderError("analysis_model_variant_mismatch", 409)

@@ -5,7 +5,11 @@
     "test:web:module": "node ../../scripts/test-web-module.mjs"
   },
   "devDependencies": {
+    "istanbul-lib-coverage": "3.2.2",
+    "istanbul-lib-report": "3.0.1",
+    "istanbul-reports": "3.2.0",
     "tsx": "4.23.15",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "v8-to-istanbul": "9.3.0"
   }
 }

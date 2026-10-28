@@ -151,6 +151,26 @@ export function freshPolicyFrame(frame: (Parameters<typeof freshAnalysisFrame>[0
   return calibrationFrameBlock(frame,stream,state,policy)==="";
 }
 
+/** Accept only protocol string reasons; malformed metadata uses the established fallback. */
+function diagnosticReason(value:unknown):string {
+  return typeof value==="string"?value:"waiting_for_decision";
+}
+/** Resolve image-only reasoning without changing the decision's freshness. */
+function decisionImageReason(current:boolean, decision:JsonRecord, count:number, required:number):string {
+  if(!current)return decision.state?"analysis_not_current":"waiting_for_decision";
+  if(decision.state!=="clear")return diagnosticReason(decision.reason);
+  return count<required?"clear_frames_pending":"clear_frames_ready";
+}
+/** Preserve the device motion reason ahead of the diagnostic fallback. */
+function decisionMotionReason(current:boolean,state:JsonRecord,decision:JsonRecord,count:number,required:number):string {
+  if(!current)return diagnosticReason(state.stop_reason);
+  if(decision.motion_reason!==null&&decision.motion_reason!==undefined)return diagnosticReason(decision.motion_reason);
+  if(decision.state!=="clear")return diagnosticReason(decision.reason);
+  if(count<required)return "clear_frames_pending";
+  if(state.mode==="observe")return "observe_only";
+  return diagnosticReason(decision.reason);
+}
+/** Describe the current model decision without granting motion authority. */
 export function decisionView(state: JsonRecord, detector: JsonRecord) {
   const decision=record(state.decision), required=Number(detector.clear_frames_required)||3;
   const current=state.running===true&&state.stale!==true&&state.latched!==true;
@@ -158,27 +178,24 @@ export function decisionView(state: JsonRecord, detector: JsonRecord) {
   const vision=decision.state==="clear"&&count>=required&&decision.vision_action!=="stop" ? "go":"stop";
   return {
     current, required, count,
-    imageReason:!current?(decision.state?"analysis_not_current":"waiting_for_decision"):decision.state!=="clear"?String(decision.reason??"waiting_for_decision"):count<required?"clear_frames_pending":"clear_frames_ready",
+    imageReason:decisionImageReason(current,decision,count,required),
     vision:current?vision:"none",
-    reply:current&&["go","slow","stop","turn_left","turn_right","steer_left","steer_right"].includes(String(decision.action))?String(decision.action):"none",
-    reason:current?String(decision.motion_reason??(decision.state!=="clear"?decision.reason:count<required?"clear_frames_pending":state.mode==="observe"?"observe_only":decision.reason)??"waiting_for_decision"):String(state.stop_reason??"waiting_for_decision"),
+    reply:current&&["go","slow","stop","turn_left","turn_right","steer_left","steer_right"].includes(str(decision.action))?str(decision.action):"none",
+    reason:decisionMotionReason(current,state,decision,count,required),
     floor:typeof decision.floor_fraction==="number"?decision.floor_fraction:null,
     confidence:typeof decision.confidence_fraction==="number"?decision.confidence_fraction:null,
   };
 }
-export function trialBlock(policy: JsonRecord|null, runtime:JsonRecord, detector:JsonRecord, connected:boolean, dirty:boolean, status:RiderStatus|null, requireAcceptance=true):string {
-  if(!connected)return "loopOffline";
-  if(!policy)return "loopLoadFailed";
-  if(dirty)return "loopUnsaved";
+/** Validate only the optional ground calibration before other trial blockers. */
+function trialGeometryBlock(policy:JsonRecord,detector:JsonRecord):string {
   const avoidance=record(policy.avoidance),geometry=record(avoidance.geometry);
-  if(avoidance.enabled===true&&avoidance.protocol_version===3&&geometry.mode==="ground"){
-    if(detector.ground_geometry_supported!==true)return "geometryHostUpdate";
-    if(!["fx","fy","radius_ratio"].every(key=>typeof geometry[key]==="number"&&Number.isFinite(geometry[key])&&Number(geometry[key])>0))return "geometryCalibrationMissing";
-  }
-  if(runtime.drive!==true)return runtime.drive_reason==="navigation_executor_update_required"?"loopExecutorUpdate":"loopRuntimeMissing";
-  if(detector.configured!==true)return "loopNoModel";
-  if(detector.drive_supported===false)return "loopDepthObservation";
-  if(requireAcceptance&&(!calibrationRecorded(policy)||detector.loaded===true&&!calibrationMatches(policy,detector)))return "loopUnverified";
+  if(avoidance.enabled!==true||avoidance.protocol_version!==3||geometry.mode!=="ground")return "";
+  if(detector.ground_geometry_supported!==true)return "geometryHostUpdate";
+  if(!["fx","fy","radius_ratio"].every(key=>typeof geometry[key]==="number"&&Number.isFinite(geometry[key])&&Number(geometry[key])>0))return "geometryCalibrationMissing";
+  return "";
+}
+/** Keep device authority checks after configuration/model validation. */
+function trialAuthorityBlock(status:RiderStatus|null):string {
   const safety=safetyOf(status);
   if(safety.state==="ESTOP")return "trialEstop";
   if(safety.stale===true||status?.errors?.control)return "trialControlStale";
@@ -188,45 +205,99 @@ export function trialBlock(policy: JsonRecord|null, runtime:JsonRecord, detector
   if(record(safety.execution).inhibit)return "trialExecutionInhibited";
   return "";
 }
+/** Report the first preparation blocker in the established operator order. */
+export function trialBlock(policy: JsonRecord|null, runtime:JsonRecord, detector:JsonRecord, connected:boolean, dirty:boolean, status:RiderStatus|null, requireAcceptance=true):string {
+  if(!connected)return "loopOffline";
+  if(!policy)return "loopLoadFailed";
+  if(dirty)return "loopUnsaved";
+  const geometryBlock=trialGeometryBlock(policy,detector);
+  if(geometryBlock)return geometryBlock;
+  if(runtime.drive!==true)return runtime.drive_reason==="navigation_executor_update_required"?"loopExecutorUpdate":"loopRuntimeMissing";
+  if(detector.configured!==true)return "loopNoModel";
+  if(detector.drive_supported===false)return "loopDepthObservation";
+  if(requireAcceptance&&(!calibrationRecorded(policy)||detector.loaded===true&&!calibrationMatches(policy,detector)))return "loopUnverified";
+  return trialAuthorityBlock(status);
+}
 
+/** A turning display requires all Pi-confirmed clear-path evidence. */
+function turningDecision(decision:JsonRecord,current:boolean,policy:JsonRecord|null,side:string):boolean {
+  if(!current)return false;
+  const supported=decision.protocol_version===2&&["turn_left","turn_right"].includes(str(decision.action))
+    ||decision.protocol_version===3&&["steer_left","steer_right"].includes(str(decision.action))
+      &&["guard",side].every(k=>record(record(decision.paths)[k]).state==="clear"&&record(record(decision.paths)[k]).coverage_complete===true);
+  return supported&&decision.state==="obstacle"&&record(policy?.avoidance).enabled===true
+    &&record(policy?.avoidance).sweep_verified===true&&record(record(decision.sectors)[side]).state==="clear"
+    &&record(record(decision.sectors)[side]).coverage_complete===true;
+}
+/** Ground geometry remains unavailable until the full device reference is valid. */
+function permissionGroundValid(policy:JsonRecord|null,decision:JsonRecord):boolean {
+  const avoidance=record(policy?.avoidance),geometry=record(avoidance.geometry),reference=record(decision.ground_reference);
+  if(geometry.mode!=="ground"||avoidance.enabled!==true)return true;
+  const normal=reference.normal;
+  return decision.geometry==="ground_capsule"&&Array.isArray(normal)&&normal.length===3
+    &&normal.every(v=>typeof v==="number"&&Number.isFinite(v))
+    &&Number(normal[1])>=.2&&normal.reduce((sum:number,v:number)=>sum+v*v,0)>=.9&&normal.reduce((sum:number,v:number)=>sum+v*v,0)<=1.1
+    &&typeof reference.height==="number"&&Number.isFinite(reference.height)&&reference.height>0
+    &&typeof decision.ground_support==="number"&&Number.isFinite(decision.ground_support)&&decision.ground_support>=.3&&decision.ground_support<=1;
+}
+type PermissionFacts={state:JsonRecord;goals:JsonRecord;policy:JsonRecord|null;detector:JsonRecord;safety:JsonRecord;view:ReturnType<typeof decisionView>;ready:boolean;turning:boolean;slow:boolean};
+/** Return the first permission blocker in the established Pi-authority order. */
+/** Apply authority and deadline blockers after the decision and goal checks. */
+function permissionAuthorityBlock(facts:PermissionFacts):string {
+  const {state,policy,detector,safety,view,turning,slow}=facts;
+  if(safety.state!=="ARMED"||safety.can_move!==true)return "permissionDisarmed";
+  if(safety.owner!=="navigation")return "permissionManualOwner";
+  if(!calibrationMatches(policy,detector))return "permissionParameters";
+  if(!view.current)return "permissionNoDecision";
+  if(!turning&&!slow&&(view.reply!=="go"||view.vision!=="go"))return "permissionDecisionStop";
+  if(safety.remote_decision_deadline_supported!==true||!Number.isFinite(state.permit_remaining_ms??record(state.decision).valid_for_ms)||Number(state.permit_remaining_ms??record(state.decision).valid_for_ms)<50)return "permissionPermitShort";
+  return "";
+}
+/** Preserve blocker precedence before evaluating authority and deadline checks. */
+function permissionBlock(facts:PermissionFacts):string {
+  const {state,goals,policy,view,ready,turning,slow}=facts;
+  const decision=record(state.decision);
+  const groundValid=permissionGroundValid(policy,decision);
+  if(!ready)return "permissionExecutorBlocked";
+  if(!groundValid)return "permissionDecisionStop";
+  if(decision.action==="slow"&&!slow)return "permissionSlowUnconfirmed";
+  if(view.current&&view.vision!=="go"&&!turning&&!slow)return "permissionDecisionStop";
+  if(goals.drive!==true||state.mode!=="drive")return goals.observe===true?"permissionObservation":"permissionIdle";
+  return permissionAuthorityBlock(facts);
+}
+/** Choose a granted display reason without conferring actuator permission. */
+function grantedPermissionReason(slow:boolean,turning:boolean,side:string):string {
+  if(slow)return "permissionSlow";
+  if(!turning)return "permissionGo";
+  return side==="left"?"permissionTurnLeft":"permissionTurnRight";
+}
+/** Compute a display permission from current readiness, geometry and ownership. */
 export function motionPermission(state:JsonRecord, goals:JsonRecord, policy:JsonRecord|null, detector:JsonRecord, status:RiderStatus|null) {
   const safety=safetyOf(status), view=decisionView(state,detector);
   const known=!!status?.connection.configured&&["online","degraded"].includes(status.connection.status)&&!status.errors.control&&safety.stale!==true&&!!str(safety.generation)&&["ARMED","DISARMED","ESTOP"].includes(str(safety.state));
-  const decision=record(state.decision),side=["turn_left","steer_left"].includes(String(decision.action))?"left":"right";
-  const turning=view.current&&((decision.protocol_version===2&&["turn_left","turn_right"].includes(String(decision.action)))||(decision.protocol_version===3&&["steer_left","steer_right"].includes(String(decision.action))&&["guard",side].every(k=>record(record(decision.paths)[k]).state==="clear"&&record(record(decision.paths)[k]).coverage_complete===true)))&&decision.state==="obstacle"&&record(policy?.avoidance).enabled===true&&record(policy?.avoidance).sweep_verified===true&&record(record(decision.sectors)[side]).state==="clear"&&record(record(decision.sectors)[side]).coverage_complete===true;
+  const decision=record(state.decision),side=["turn_left","steer_left"].includes(str(decision.action))?"left":"right";
+  const turning=turningDecision(decision,view.current,policy,side);
   const slow=slowLeaseFactor(state,policy,safety)!==null;
   const ready=safety.ready!==false&&record(record(safety.capabilities).move).available===true&&!record(safety.execution).inhibit;
   const manual=known?navigationAvailable(status)&&safety.can_move===true&&ready:null;
-  let reason="permissionUnknown", allowed=false;
+  let reason="permissionUnknown",allowed=false;
   if(known){
-    const geometry=record(record(policy?.avoidance).geometry),reference=record(decision.ground_reference);
-    const normal=reference.normal;
-    const groundValid=geometry.mode!=="ground"||record(policy?.avoidance).enabled!==true
-      ||decision.geometry==="ground_capsule"&&Array.isArray(normal)&&normal.length===3
-        &&normal.every(v=>typeof v==="number"&&Number.isFinite(v))
-        &&Number(normal[1])>=.2&&normal.reduce((sum:number,v:number)=>sum+v*v,0)>=.9&&normal.reduce((sum:number,v:number)=>sum+v*v,0)<=1.1
-        &&typeof reference.height==="number"&&Number.isFinite(reference.height)&&reference.height>0
-        &&typeof decision.ground_support==="number"&&Number.isFinite(decision.ground_support)&&decision.ground_support>=.3&&decision.ground_support<=1;
-    if(!ready)reason="permissionExecutorBlocked";
-    else if(!groundValid)reason="permissionDecisionStop";
-    else if(decision.action==="slow"&&!slow)reason="permissionSlowUnconfirmed";
-    else if(view.current&&view.vision!=="go"&&!turning&&!slow)reason="permissionDecisionStop";
-    else if(goals.drive!==true||state.mode!=="drive")reason=goals.observe===true?"permissionObservation":"permissionIdle";
-    else if(safety.state!=="ARMED"||safety.can_move!==true)reason="permissionDisarmed";
-    else if(safety.owner!=="navigation")reason="permissionManualOwner";
-    else if(!calibrationMatches(policy,detector))reason="permissionParameters";
-    else if(!view.current)reason="permissionNoDecision";
-    else if(!turning&&!slow&&(view.reply!=="go"||view.vision!=="go"))reason="permissionDecisionStop";
-    else if(safety.remote_decision_deadline_supported!==true||!Number.isFinite(state.permit_remaining_ms??record(state.decision).valid_for_ms)||Number(state.permit_remaining_ms??record(state.decision).valid_for_ms)<50)reason="permissionPermitShort";
-    else {allowed=true;reason=slow?"permissionSlow":turning?side==="left"?"permissionTurnLeft":"permissionTurnRight":"permissionGo";}
+    const block=permissionBlock({state,goals,policy,detector,safety,view,ready,turning,slow});
+    allowed=!block;
+    reason=block||grantedPermissionReason(slow,turning,side);
   }
   return {venom:known?allowed:null,manual,reason};
 }
-
+/** Resolve only already-granted action headlines. */
+function grantedExecutionHeadline(action:unknown):string {
+  const labels:Record<string,string>={slow:"permissionVenomSlow",steer_left:"permissionVenomSteerLeft",steer_right:"permissionVenomSteerRight",turn_left:"permissionVenomTurnLeft",turn_right:"permissionVenomTurnRight"};
+  return typeof action==="string"&&Object.hasOwn(labels,action)?labels[action]:"permissionVenomYes";
+}
+/** Describe confirmed executor output before model intent or observation. */
 export function executionHeadline(state:JsonRecord,goals:JsonRecord,status:RiderStatus|null,permission:{venom:boolean|null}):string {
   if(state.mode==="drive"&&goals.drive===true&&state.paused===true&&state.running===true&&state.stale!==true&&safetyOf(status).state==="ARMED"&&safetyOf(status).owner==="navigation")return "trialVisualPause";
   if(permission.venom===null)return "permissionVenomUnknown";
-  if(permission.venom){const action=record(state.decision).action;return action==="slow"?"permissionVenomSlow":action==="steer_left"?"permissionVenomSteerLeft":action==="steer_right"?"permissionVenomSteerRight":action==="turn_left"?"permissionVenomTurnLeft":action==="turn_right"?"permissionVenomTurnRight":"permissionVenomYes";}
+  if(permission.venom)return grantedExecutionHeadline(record(state.decision).action);
   const safety=safetyOf(status);
   if(goals.drive!==true||state.mode!=="drive")return goals.observe===true?"permissionVenomObserve":"permissionVenomIdle";
   if(safety.state==="DISARMED")return "permissionPiDisarmed";

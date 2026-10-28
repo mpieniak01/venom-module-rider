@@ -45,3 +45,19 @@ test("LAN diagnostics and identity readiness have PL EN and DE guidance", () => 
   assert.ok(source("web-next/components/conversation.tsx").includes('config.transport_profile !== "trusted_lan"'));
   assert.ok(source("web-next/components/conversation.tsx").includes("config.transport_identity_verified !== true"));
 });
+
+
+test("control identity preserves valid scalar segments without coercing object metadata", () => {
+  const base = status(0);
+  const identified = (generation: unknown, instance: unknown): RiderStatus => ({
+    ...base, control: { safety: { generation, instance_id: instance } },
+  });
+  assert.equal(controlIdentity(identified("pi-generation", 0)), "same-panel-session:pi-generation:0:0");
+  assert.equal(controlIdentity(identified("pi-generation", false)), "same-panel-session:pi-generation:false:0");
+  assert.equal(controlIdentity({ ...base, control: { safety: { generation: "pi-generation", instance_id: null, instance: "legacy" } } }), "same-panel-session:pi-generation:legacy:0");
+  assert.equal(controlIdentity(null), ":::0");
+  const poisonous = { toString() { throw new Error("Identity must not stringify objects"); } };
+  for (const malformed of [[], ["pi-generation"], {}, poisonous, undefined, null]) {
+    assert.equal(controlIdentity(identified(malformed, malformed)), "same-panel-session:::0");
+  }
+});

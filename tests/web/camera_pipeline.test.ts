@@ -137,3 +137,33 @@ test("PROC metadata identifies the actual local engine, not the newly requested 
   assert.equal(readCameraSource("{}"), undefined);
   assert.equal(readCameraSource("a".repeat(4097)), undefined);
 });
+
+
+test("pipeline enum fields reject malformed JSON types without coercion", () => {
+  const valid = fixture.stopped_status;
+  for (const container of ["profile", "active_profile"]) {
+    for (const field of ["analysis_location", "local_engine", "remote_transport"]) {
+      const profile = { ...valid.profile };
+      for (const invalid of [[profile[field]], [], {}, { toString: "bad" }, null, 1, true]) {
+        const value = JSON.parse(JSON.stringify({
+          ...valid, [container]: { ...profile, [field]: invalid },
+        }));
+        assert.equal(readCameraPipeline(value), null, container + "." + field);
+      }
+    }
+  }
+});
+
+test("pipeline state requires a literal string and preserves valid transport choices", () => {
+  const valid = fixture.stopped_status;
+  for (const state of [["stopped"], ["active"], {}, { toString: "bad" }, null, 0, true]) {
+    assert.equal(readCameraPipeline({ ...valid, state }), null);
+  }
+  for (const remote_transport of ["snapshots", "mjpeg"]) {
+    const profile = { ...valid.profile, analysis_location: "venom", remote_transport };
+    const parsed = readCameraPipeline({ ...valid, profile, active_profile: profile });
+    assert.ok(parsed);
+    assert.equal(cameraPreviewStopped(parsed), true);
+    assert.equal(nativePreview(parsed, "raw"), remote_transport === "mjpeg");
+  }
+});

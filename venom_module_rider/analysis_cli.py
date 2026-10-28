@@ -11,6 +11,8 @@ from pathlib import Path
 
 from .local_api import local_api_opener, local_api_origin, local_api_path
 
+_RUNS_PATH = "/runs/"
+
 
 def request(base, path, body=None):
     origin = local_api_origin(base)
@@ -34,6 +36,7 @@ def request(base, path, body=None):
 
 
 def main(argv=None):
+    """Run the requested explicit offline analysis operation through local API."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", default="http://localhost:8800")
     commands = parser.add_subparsers(dest="action", required=True)
@@ -93,12 +96,12 @@ def main(argv=None):
                 value = request(args.url, "/requests/" + identity)
             elif args.action == "report":
                 value = request(
-                    args.url, "/runs/" + identity + "/artifacts/report.json"
+                    args.url, _RUNS_PATH + identity + "/artifacts/report.json"
                 )
             elif args.action == "cancel":
-                value = request(args.url, "/runs/" + identity + "/cancel", {})
+                value = request(args.url, _RUNS_PATH + identity + "/cancel", {})
             else:
-                value = request(args.url, "/runs/" + identity + "?context=true")
+                value = request(args.url, _RUNS_PATH + identity + "?context=true")
         print(json.dumps(value, indent=2, allow_nan=False))
         return 0
     except urllib.error.HTTPError as exc:

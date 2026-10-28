@@ -22,12 +22,18 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+TEXT_RESPOND = "text.respond"
+AUDIO_TRANSCRIBE = "audio.transcribe"
+AUDIO_SYNTHESIZE = "audio.synthesize"
+VISION_DESCRIBE = "vision.describe"
+CONVERSATION_RESPOND = "conversation.respond"
+
 TASKS = (
-    "text.respond",
-    "audio.transcribe",
-    "audio.synthesize",
-    "vision.describe",
-    "conversation.respond",
+    TEXT_RESPOND,
+    AUDIO_TRANSCRIBE,
+    AUDIO_SYNTHESIZE,
+    VISION_DESCRIBE,
+    CONVERSATION_RESPOND,
 )
 _LOCAL_PROVIDERS = {"ollama", "vllm", "local", "lmstudio", "multi_runtime"}
 _MAX_TEXT = 4096
@@ -303,6 +309,7 @@ class VenomEngines:
             return snapshot
 
     async def capabilities(self) -> dict[str, Any]:
+        """Describe existing shared engines without loading or warming a model."""
         tasks: dict[str, Any] = {}
         try:
             runtime = await self._selected_runtime()
@@ -315,72 +322,12 @@ class VenomEngines:
             revision = await self.revision()
             llm_runtime, snapshot, configured = {"provider": "unavailable"}, {}, False
         llm_runtime["config_revision"] = revision
-        for task in ("text.respond", "vision.describe"):
-            supported = task == "text.respond" or snapshot.get("vision") is True
-            available = bool(
-                configured
-                and supported
-                and snapshot.get("reachable")
-                and snapshot.get("installed")
-            )
-            tasks[task] = {
-                "available": available,
-                "installed": bool(snapshot.get("installed")),
-                "configured": configured,
-                "ready": bool(available and snapshot.get("ready")),
-                "busy": False,
-                "runtime": dict(llm_runtime),
-                "quality": {"simulated": False, "purpose": "scene_description"}
-                if task == "vision.describe"
-                else {"simulated": False},
-                "reason": None if available else "engine_unavailable",
-            }
-        audio = self._audio()
-        whisper, voice = getattr(audio, "whisper", None), getattr(audio, "voice", None)
-        stt_installed = _installed("faster_whisper")
-        stt_configured = bool(whisper and getattr(whisper, "model_size", None))
-        stt_checked = callable(getattr(audio, "transcribe_checked", None))
-        tasks["audio.transcribe"] = {
-            "available": bool(stt_installed and stt_configured and stt_checked),
-            "installed": stt_installed,
-            "configured": stt_configured,
-            "ready": bool(stt_checked and getattr(whisper, "model", None) is not None),
-            "busy": self._audio_lock.locked(),
-            "runtime": {
-                "provider": "faster_whisper",
-                "model": str(getattr(whisper, "model_size", "") or ""),
-                "config_revision": revision,
-            },
-            "quality": {"simulated": False},
-            "languages": ["pl", "en", "de"],
-            "reason": None if stt_checked else "engine_checked_stt_unavailable",
-        }
-        tts_installed = _installed("piper")
-        path = _path_identity(getattr(voice, "model_path", ""))
-        tts_configured = bool(voice and path[1] > 0)
-        tts_real = bool(voice and getattr(voice, "is_fallback_mode", True) is False)
-        tts_languages = _voice_languages(voice)
-        tasks["audio.synthesize"] = {
-            "available": bool(
-                tts_installed and tts_configured and tts_real and tts_languages
-            ),
-            "installed": tts_installed,
-            "configured": tts_configured,
-            "ready": bool(tts_real and getattr(voice, "voice", None) is not None),
-            "busy": self._audio_lock.locked(),
-            "runtime": {
-                "provider": "piper",
-                "model": Path(path[0]).name,
-                "config_revision": revision,
-            },
-            "quality": {"simulated": False},
-            "languages": tts_languages,
-            "reason": None if tts_real else "engine_tts_fallback_refused",
-        }
+        tasks.update(self._llm_task_capabilities(llm_runtime, snapshot, configured))
+        tasks.update(self._audio_task_capabilities(revision))
         from .conversation_engine import capability
 
-        tasks["conversation.respond"] = capability(self.app)
-        tasks["conversation.respond"]["runtime"]["config_revision"] = revision
+        tasks[CONVERSATION_RESPOND] = capability(self.app)
+        tasks[CONVERSATION_RESPOND]["runtime"]["config_revision"] = revision
         return {"tasks": tasks, "config_revision": revision}
 
     async def _drained_audio(self, operation: Callable[[], Awaitable[Any]]) -> Any:
@@ -414,6 +361,7 @@ class VenomEngines:
         metadata: dict[str, Any],
         model_name: str,
     ) -> str:
+        """Consume bounded SSE text and close the captured host iterator."""
         from venom_core.api.schemas.llm_simple import SimpleChatRequest
         from venom_core.services.llm_simple_service import stream_simple_chat
 
@@ -440,21 +388,7 @@ class VenomEngines:
                     raise EngineError("engine_invalid_output")
                 while "\n\n" in pending:
                     event, pending = pending.split("\n\n", 1)
-                    kind = ""
-                    payload: dict[str, Any] = {}
-                    for line in event.splitlines():
-                        if line.startswith("event:"):
-                            kind = line[6:].strip()
-                        elif line.startswith("data:"):
-                            value = json.loads(line[5:].strip())
-                            if isinstance(value, dict):
-                                payload = value
-                    if kind == "error":
-                        raise EngineError("engine_text_failed")
-                    if kind == "content":
-                        output += str(payload.get("text", ""))
-                        if len(output) > _MAX_OUTPUT_TEXT:
-                            raise EngineError("engine_invalid_output")
+                    output = self._text_event(event, output)
         finally:
             close = getattr(iterator, "aclose", None)
             if close:
@@ -605,6 +539,7 @@ class VenomEngines:
         data: bytes | None,
         metadata: dict[str, Any],
     ) -> EngineResult:
+        """Execute one supported task against its captured capability revision."""
         if task not in TASKS:
             raise EngineError("engine_unknown_task", 422)
         language = _language(params)
@@ -616,49 +551,9 @@ class VenomEngines:
             raise EngineUnavailable("engine_language_unavailable")
         revision = caps["config_revision"]
         try:
-            if task == "conversation.respond":
-                from .conversation_engine import execute
-
-                result = await execute(self.app, data or b"", metadata, language)
-                if result is None:
-                    text_cap = caps["tasks"]["text.respond"]
-                    if not text_cap["available"]:
-                        raise EngineUnavailable()
-                    result = EngineResult(
-                        data={
-                            "text": await self._text(
-                                _text_input(data),
-                                language,
-                                metadata,
-                                text_cap["runtime"]["model"],
-                            )
-                        }
-                    )
-                    capability = text_cap
-            elif task == "text.respond":
-                result = EngineResult(
-                    data={
-                        "text": await self._text(
-                            _text_input(data),
-                            language,
-                            metadata,
-                            capability["runtime"]["model"],
-                        )
-                    }
-                )
-            elif task == "audio.synthesize":
-                result = await self._synthesize(_text_input(data))
-            elif task == "audio.transcribe":
-                result = EngineResult(
-                    data=await self._transcribe(data or b"", language)
-                )
-            else:
-                prompt = params.get("prompt", "")
-                if not isinstance(prompt, str) or len(prompt) > 512:
-                    raise EngineError("engine_invalid_prompt", 422)
-                result = EngineResult(
-                    data={"text": await self._vision(data or b"", language, prompt)}
-                )
+            result, capability = await self._execute_task(
+                task, params, data, metadata, language, caps, capability
+            )
         except (EngineError, asyncio.CancelledError):
             raise
         except Exception as exc:
@@ -667,9 +562,9 @@ class VenomEngines:
             raise EngineError("engine_configuration_changed", 409)
         result.runtime = dict(capability["runtime"])
         result.quality = dict(capability["quality"])
-        if task == "audio.transcribe":
+        if task == AUDIO_TRANSCRIBE:
             result.quality["silence"] = result.data["silence"]
-        if task == "vision.describe":
+        if task == VISION_DESCRIBE:
             result.quality["navigation_clearance"] = False
         return result
 
@@ -698,3 +593,148 @@ class VenomEngines:
     async def close(self) -> None:
         """Drain owned work; never close or unload the host's shared engines."""
         await self.drain()
+
+    def _llm_task_capabilities(self, llm_runtime, snapshot, configured):
+        """Describe local text and vision availability without warming models."""
+        tasks = {}
+        for task in (TEXT_RESPOND, VISION_DESCRIBE):
+            supported = task == TEXT_RESPOND or snapshot.get("vision") is True
+            available = bool(
+                configured
+                and supported
+                and snapshot.get("reachable")
+                and snapshot.get("installed")
+            )
+            tasks[task] = {
+                "available": available,
+                "installed": bool(snapshot.get("installed")),
+                "configured": configured,
+                "ready": bool(available and snapshot.get("ready")),
+                "busy": False,
+                "runtime": dict(llm_runtime),
+                "quality": {"simulated": False, "purpose": "scene_description"}
+                if task == VISION_DESCRIBE
+                else {"simulated": False},
+                "reason": None if available else "engine_unavailable",
+            }
+        return tasks
+
+    def _audio_task_capabilities(self, revision):
+        """Describe checked speech adapters and their existing loaded resources."""
+        tasks = {}
+        audio = self._audio()
+        whisper, voice = getattr(audio, "whisper", None), getattr(audio, "voice", None)
+        stt_installed = _installed("faster_whisper")
+        stt_configured = bool(whisper and getattr(whisper, "model_size", None))
+        stt_checked = callable(getattr(audio, "transcribe_checked", None))
+        tasks[AUDIO_TRANSCRIBE] = {
+            "available": bool(stt_installed and stt_configured and stt_checked),
+            "installed": stt_installed,
+            "configured": stt_configured,
+            "ready": bool(stt_checked and getattr(whisper, "model", None) is not None),
+            "busy": self._audio_lock.locked(),
+            "runtime": {
+                "provider": "faster_whisper",
+                "model": str(getattr(whisper, "model_size", "") or ""),
+                "config_revision": revision,
+            },
+            "quality": {"simulated": False},
+            "languages": ["pl", "en", "de"],
+            "reason": None if stt_checked else "engine_checked_stt_unavailable",
+        }
+        tts_installed = _installed("piper")
+        path = _path_identity(getattr(voice, "model_path", ""))
+        tts_configured = bool(voice and path[1] > 0)
+        tts_real = bool(voice and getattr(voice, "is_fallback_mode", True) is False)
+        tts_languages = _voice_languages(voice)
+        tasks[AUDIO_SYNTHESIZE] = {
+            "available": bool(
+                tts_installed and tts_configured and tts_real and tts_languages
+            ),
+            "installed": tts_installed,
+            "configured": tts_configured,
+            "ready": bool(tts_real and getattr(voice, "voice", None) is not None),
+            "busy": self._audio_lock.locked(),
+            "runtime": {
+                "provider": "piper",
+                "model": Path(path[0]).name,
+                "config_revision": revision,
+            },
+            "quality": {"simulated": False},
+            "languages": tts_languages,
+            "reason": None if tts_real else "engine_tts_fallback_refused",
+        }
+        return tasks
+
+    @staticmethod
+    def _text_event(event, output):
+        """Apply one SSE event and enforce the final text output bound."""
+        kind = ""
+        payload: dict[str, Any] = {}
+        for line in event.splitlines():
+            if line.startswith("event:"):
+                kind = line[6:].strip()
+            elif line.startswith("data:"):
+                value = json.loads(line[5:].strip())
+                if isinstance(value, dict):
+                    payload = value
+        if kind == "error":
+            raise EngineError("engine_text_failed")
+        if kind == "content":
+            output += str(payload.get("text", ""))
+            if len(output) > _MAX_OUTPUT_TEXT:
+                raise EngineError("engine_invalid_output")
+        return output
+
+    async def _execute_task(
+        self, task, params, data, metadata, language, caps, capability
+    ):
+        """Dispatch one admitted task while preserving its selected capability."""
+        if task == CONVERSATION_RESPOND:
+            return await self._execute_conversation(data, metadata, language, caps)
+        elif task == TEXT_RESPOND:
+            result = EngineResult(
+                data={
+                    "text": await self._text(
+                        _text_input(data),
+                        language,
+                        metadata,
+                        capability["runtime"]["model"],
+                    )
+                }
+            )
+        elif task == AUDIO_SYNTHESIZE:
+            result = await self._synthesize(_text_input(data))
+        elif task == AUDIO_TRANSCRIBE:
+            result = EngineResult(data=await self._transcribe(data or b"", language))
+        else:
+            prompt = params.get("prompt", "")
+            if not isinstance(prompt, str) or len(prompt) > 512:
+                raise EngineError("engine_invalid_prompt", 422)
+            result = EngineResult(
+                data={"text": await self._vision(data or b"", language, prompt)}
+            )
+        return result, capability
+
+    async def _execute_conversation(self, data, metadata, language, caps):
+        """Use the scoped conversation provider before the existing text fallback."""
+        capability = caps["tasks"][CONVERSATION_RESPOND]
+        from .conversation_engine import execute
+
+        result = await execute(self.app, data or b"", metadata, language)
+        if result is None:
+            text_cap = caps["tasks"][TEXT_RESPOND]
+            if not text_cap["available"]:
+                raise EngineUnavailable()
+            result = EngineResult(
+                data={
+                    "text": await self._text(
+                        _text_input(data),
+                        language,
+                        metadata,
+                        text_cap["runtime"]["model"],
+                    )
+                }
+            )
+            capability = text_cap
+        return result, capability

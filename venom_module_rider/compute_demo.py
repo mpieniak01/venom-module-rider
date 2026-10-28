@@ -7,6 +7,8 @@ from typing import Any
 
 from .compute_contract import TASKS
 
+_CONVERSATION_TASK = "conversation.respond"
+
 
 @dataclass
 class DemoResult:
@@ -25,6 +27,7 @@ class DemoEngines:
         return "demo-v1"
 
     async def capabilities(self):
+        """Describe the in-process demo tasks and their simulated runtime."""
         result: dict[str, Any] = {
             "config_revision": "demo-v1",
             "tasks": {
@@ -46,17 +49,16 @@ class DemoEngines:
         }
         from .conversation_engine import capability
 
-        result["tasks"]["conversation.respond"] = {
+        result["tasks"][_CONVERSATION_TASK] = {
             **capability(getattr(self, "app", None)),
             "quality": {"simulated": True},
         }
-        result["tasks"]["conversation.respond"]["runtime"]["config_revision"] = (
-            "demo-v1"
-        )
+        result["tasks"][_CONVERSATION_TASK]["runtime"]["config_revision"] = "demo-v1"
         return result
 
     async def execute(self, task, params, data, metadata):
-        if task == "conversation.respond":
+        """Execute an admitted demo compute task without physical-device access."""
+        if task == _CONVERSATION_TASK:
             from .conversation_engine import execute
 
             response = await execute(self.app, data, metadata, params["language"])

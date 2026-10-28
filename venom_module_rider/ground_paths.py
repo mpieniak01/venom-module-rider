@@ -5,8 +5,11 @@ from typing import Any
 
 import numpy as np
 
+_WEIGHTED_GRID_EINSUM = "i,ihw->hw"
+
 
 def assess(depth, reference, camera, tolerance, outlier_limit, *, params=None):
+    """Assess directional ground occupancy within the configured geometry."""
     radius = camera.radius_ratio
     step = radius / 4
     along = np.arange(0, camera.lookahead_ratio + radius + step / 2, step)
@@ -33,10 +36,18 @@ def assess(depth, reference, camera, tolerance, outlier_limit, *, params=None):
     )
     observed = ray * depth
     signed = (
-        1 - np.einsum("i,ihw->hw", reference["normal"], observed) / reference["height"]
+        1
+        - np.einsum(_WEIGHTED_GRID_EINSUM, reference["normal"], observed)
+        / reference["height"]
     )
-    ox = np.einsum("i,ihw->hw", reference["right"], observed) / reference["height"]
-    oz = np.einsum("i,ihw->hw", reference["forward"], observed) / reference["height"]
+    ox = (
+        np.einsum(_WEIGHTED_GRID_EINSUM, reference["right"], observed)
+        / reference["height"]
+    )
+    oz = (
+        np.einsum(_WEIGHTED_GRID_EINSUM, reference["forward"], observed)
+        / reference["height"]
+    )
     # A recess is blocked at the missing ground location, not only its distant bottom.
     plane_inverse = (
         reference["coefficients"][0] * px / w
@@ -54,12 +65,14 @@ def assess(depth, reference, camera, tolerance, outlier_limit, *, params=None):
     floor = ray * floor_depth
     ox = np.where(
         hole,
-        np.einsum("i,ihw->hw", reference["right"], floor) / reference["height"],
+        np.einsum(_WEIGHTED_GRID_EINSUM, reference["right"], floor)
+        / reference["height"],
         ox,
     )[occupied]
     oz = np.where(
         hole,
-        np.einsum("i,ihw->hw", reference["forward"], floor) / reference["height"],
+        np.einsum(_WEIGHTED_GRID_EINSUM, reference["forward"], floor)
+        / reference["height"],
         oz,
     )[occupied]
     candidates: list[dict[str, Any]] = []

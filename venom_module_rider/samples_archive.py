@@ -18,6 +18,9 @@ from typing import Protocol
 from .errors import RiderError
 from .evidence_store import EvidenceStore, validate_extension
 
+_MANIFEST_FILENAME = "manifest.json"
+
+
 MAX_MANIFEST_BYTES = 40 * 1024 * 1024
 MAX_EXPORTS = 2
 
@@ -125,6 +128,7 @@ class SampleArchive:
                 fcntl.flock(stream, fcntl.LOCK_UN)
 
     def _export(self, session_id):
+        """Create a bounded sample archive with its manifest and frame artifacts."""
         self._export_slot()
         dataset, revision = self.snapshot(session_id)
         dataset["dataset_revision"] = revision
@@ -145,7 +149,7 @@ class SampleArchive:
             path = Path(temporary.name)
         try:
             with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_STORED) as archive:
-                archive.writestr("manifest.json", manifest)
+                archive.writestr(_MANIFEST_FILENAME, manifest)
                 seen = set()
                 for row in dataset["samples"]:
                     digest = row["raw"]["sha256"]
@@ -203,6 +207,7 @@ class SampleArchive:
 
     @staticmethod
     def validate_zip(source, max_bytes):
+        """Validate archive names, sizes and manifest before importing any frames."""
         if not isinstance(source, io.IOBase) and (
             source.is_symlink() or not source.is_file()
         ):
@@ -229,12 +234,12 @@ class SampleArchive:
                         or entry.flag_bits & 1
                     ):
                         raise RiderError("samples_import_path", 400)
-                info = archive.getinfo("manifest.json")
+                info = archive.getinfo(_MANIFEST_FILENAME)
                 if info.file_size > MAX_MANIFEST_BYTES:
                     raise RiderError("samples_import_size", 413)
                 manifest = json.loads(archive.read(info))
                 SampleArchive._validate_manifest(manifest)
-                expected = {"manifest.json"}
+                expected = {_MANIFEST_FILENAME}
                 for sample in manifest["samples"]:
                     raw = sample["raw"]
                     expected.add(raw["file"])

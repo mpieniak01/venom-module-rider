@@ -5,6 +5,7 @@ async page => {
   await page.goto("about:blank");
   const wait=async(fn,message)=>{const end=Date.now()+8000;while(!await fn()){check(Date.now()<end,message);await new Promise(resolve=>setTimeout(resolve,40));}};
   const sha="a".repeat(64),calls=[],saved=[];
+  let previewError=null,previewErrorReads=0;
   let observe=true,drive=false,motionActive=false,rejectSave=false,rejectResume=false,generation="settings-fixture";
   // Same incomplete ground calibration and saved drive mode as the deployed Pi.
   let policy={motion_limits:{version:1,max_motion_ms:500,max_speed:1,max_turn_ms:500,max_turn_speed:1},protocol_version:1,revision:53,mode:"drive",speed:.1,max_motion_ms:150,decision_budget_ms:300,corridor:[.35,.8,.65,.95],verified:true,calibration_id:"operator-fixture",model_sha256:sha,model_tuning_supported:true,perception:{artifact_sha256:sha,engine:"depth_plane",model_id:"depth-anything-v2-indoor-small",residual_limit:.06,outlier_limit:.005,slope_min:2},avoidance:{enabled:false,protocol_version:3,sweep_verified:false,mirrored:false,turn_speed:.05,turn_ms:100,max_turn_pulses:3,max_stalled_corrections:2,progress_min_delta:.03,geometry:{mode:"ground",fx:null,fy:null,cx:.5,cy:.5,radius_ratio:null,lookahead_ratio:2,max_heading_deg:45}}};
@@ -43,6 +44,7 @@ async page => {
     if(path==="/status")return json({connection:{configured:true,status:"online",session:"journey-settings-fixture",device_id:"fixture",mode:"demo"},polling:{control_ms:100},settings,errors:{},control:{server_time:Date.now()/1000,safety:safety()},health:{},telemetry:{},resources:{},catalog:{features:[]},logic:{},face:{}});
     if(path.startsWith("/navigation/"))return json(navigation());
     if(path==="/camera/pipeline")return json({contract_id:"rider.camera_pipeline",contract_version:1,supported:true,revision:1,state:"active",camera_session:"fixture-camera",transport_epoch:1,active_profile:{analysis_location:"venom",local_engine:"canny",remote_transport:"snapshots"},effective_stages:{},error:null,capabilities:{analysis_locations:["venom"],local_engines:["canny"],remote_transports:["snapshots"]},profile:{analysis_location:"venom",local_engine:"canny",remote_transport:"snapshots"}});
+    if(path==="/camera/venom"&&previewError!==null){previewErrorReads++;return json({detail:{code:previewError}},429);}
     if(path==="/camera/venom")return route.fulfill({status:200,contentType:"image/png",headers:{
       "X-Rider-Stale":"false","X-Rider-Frame-Age-Ms":"0","X-Rider-Frame-Id":"frame-"+policy.revision,
       "X-Rider-Capture-Key":"revision-"+policy.revision,
@@ -55,6 +57,16 @@ async page => {
     await page.goto(base+"/rider");
     const image=()=>page.locator('img[data-capture-key="revision-'+policy.revision+'"]');
     await image().waitFor({state:"visible"});
+    previewError="vision_busy";
+    await wait(()=>previewErrorReads>0,"valid busy reply was not exercised");
+    await wait(()=>page.getByText(/Model przetwarza klatkę|Model is processing a frame|Modell verarbeitet ein Bild/).isVisible(),"valid scalar busy code was not interpreted");
+    const validReads=previewErrorReads;
+    previewError=["vision_busy"];
+    await wait(()=>previewErrorReads>validReads,"malformed busy reply was not exercised");
+    await wait(()=>page.getByText(/Brak wyniku analizy obrazu|No image analysis result|Kein Bildanalyseergebnis/).isVisible(),"array error code was accepted as vision_busy");
+    previewError=null;
+    await wait(()=>image().isVisible(),"preview did not recover after malformed error code");
+
     await page.getByTestId("workspace-automatic").click();
     await page.getByTestId("automatic-speed").fill("0.11");
     check(!await page.getByTestId("settings-save").isDisabled(),"draft not editable");
@@ -62,7 +74,7 @@ async page => {
     await wait(()=>image().isVisible(),"fresh applied-model frame rejected while an unsaved draft exists");
     check(await page.getByTestId("automatic-speed").inputValue()==="0.11","preview synchronization overwrote the unsaved draft");
     check(calls.length===0,"read-only preview recovery mutated Pi");
-    return {pass:true,revision:policy.revision,draft_preserved:true,robot_contacted:false};
+    return {pass:true,revision:policy.revision,draft_preserved:true,typed_error_codes:true,robot_contacted:false};
   } finally {
     // Stop polling before removing mocks, then wait for in-flight handlers.
     await page.goto("about:blank");

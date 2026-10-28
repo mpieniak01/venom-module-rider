@@ -28,6 +28,9 @@ export const record = (value: unknown): JsonRecord => value && typeof value === 
 export const rows = (value: unknown): JsonRecord[] => Array.isArray(value) ? value.map(record) : [];
 export const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
 export const str = (value: unknown): string => typeof value === "string" ? value : "";
+/** Format JSON scalar metadata without coercing objects; validate protocol enums with str. */
+export const scalarText = (value: unknown, fallback = ""): string =>
+  typeof value === "string" || typeof value === "boolean" || finite(value) ? String(value) : fallback;
 export const data = (value: unknown): JsonRecord => { const row = record(value); return row.meta && row.data ? record(row.data) : row; };
 export const safetyOf = (status: RiderStatus | null): JsonRecord => record(data(status?.control).safety);
 export const actuatorState = (status: RiderStatus | null): JsonRecord => record(safetyOf(status).actuators);
@@ -62,7 +65,7 @@ export function featureRows(status: RiderStatus | null): JsonRecord[] {
     return { ...item, ...state, ...(state.enabled !== undefined ? { requested: state.enabled, active: state.enabled === true && state.state === "running" } : {}) };
   });
 }
-export function controlIdentity(status: RiderStatus | null): string { const safety = safetyOf(status); return [status?.connection.session, safety.generation, safety.instance_id ?? safety.instance, status?.connection.transport?.generation ?? 0].join(":"); }
+export function controlIdentity(status: RiderStatus | null): string { const safety = safetyOf(status); return [status?.connection.session, safety.generation, safety.instance_id ?? safety.instance, status?.connection.transport?.generation ?? 0].map(value => scalarText(value)).join(":"); }
 export function sensorRows(status: RiderStatus | null): [string, JsonRecord][] {
   const xgo = record(record(data(status?.telemetry).devices).xgo); const observation = record(xgo.observation); const quality = record(observation.sensor_quality ?? xgo.sensor_quality); const sensors = record(quality.sensors ?? quality);
   return Object.entries(sensors).filter(([, sample]) => typeof sample === "object").map(([name, sample]) => [name, record(sample)]);

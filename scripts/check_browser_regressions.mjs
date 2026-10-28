@@ -14,7 +14,8 @@ const require=createRequire(path.join(webRoot,"package.json"));
 const {build}=require("esbuild"),{chromium}=require("playwright");
 const output=path.join(root,"test-results","browser-regressions");
 const args=process.argv.slice(2);
-if(args.some((value,index)=>value!=="--only"&&args[index-1]!=="--only"))throw new Error("Usage: check_browser_regressions.mjs [--only name]");
+if(args.some((value,index)=>value!=="--coverage"&&value!=="--only"&&args[index-1]!=="--only"))throw new Error("Usage: check_browser_regressions.mjs [--only name] [--coverage]");
+const coverageEnabled=args.includes("--coverage");
 const filter=args.includes("--only")?args[args.indexOf("--only")+1]:"";
 if(args.includes("--only")&&!filter)throw new Error("--only requires a regression name");
 const fixtures={
@@ -57,16 +58,24 @@ const cases=[
     ["room_fluid","yolo26n-sem-ade20k"],
   ].map(([profile,model])=>({name:"journey-"+profile+"-"+model,fixture:"workspace",file:"journey-start-prod.js",query:"?profile="+profile+"&model="+model})),
 ].filter(value=>!filter||value.name.includes(filter));
+if(coverageEnabled&&filter)throw new Error("Coverage requires the complete browser suite; omit --only");
 if(!cases.length)throw new Error("No matching browser regression; nothing was verified");
 await mkdir(output,{recursive:true});
-const assets=new Map();
+const assets=new Map(),bundles=new Map();
 for(const name of new Set(cases.map(value=>value.fixture))){
-  const result=await build({entryPoints:[path.join(root,"tests/browser",fixtures[name])],bundle:true,jsx:"automatic",write:false,
+  const result=await build({entryPoints:[path.join(root,"tests/browser",fixtures[name])],bundle:true,jsx:"automatic",write:false,sourcemap:coverageEnabled?"inline":false,
     nodePaths:[path.join(webRoot,"node_modules")],
     outfile:path.join(output,"assets",name+".js"),alias:{"@":webRoot,"@/lib/i18n":path.join(root,"tests/browser/workspace-host.tsx"),"@/lib/theme":path.join(root,"tests/browser/workspace-host.tsx")},
     define:{"process.env":JSON.stringify({NODE_ENV:"development"})}});
-  for(const file of result.outputFiles)assets.set("/assets/"+path.basename(file.path),file.contents);
+  for(const file of result.outputFiles){
+    const pathname="/assets/"+path.basename(file.path);
+    assets.set(pathname,file.contents);
+    if(file.path.endsWith(".js"))bundles.set(pathname,file.path);
+  }
 }
+const coverage=coverageEnabled
+  ?await (await import("../tests/browser/coverage.mjs")).createBrowserCoverage({root,bundles})
+  :null;
 // Never discover git through PATH: a writable earlier entry can replace the binary.
 // An explicit absolute override supports installations outside the standard location.
 const gitExecutable=process.env.RIDER_GIT_EXECUTABLE??(process.platform==="win32"?String.raw`C:\Program Files\Git\cmd\git.exe`:"/usr/bin/git");
@@ -127,6 +136,7 @@ try{
     page.setDefaultTimeout(10000);page.setDefaultNavigationTimeout(10000);page.on("pageerror",error=>errors.push(error.stack??error.message));
     const started=Date.now();let timer,caseFailed=false;
     await context.tracing.start({screenshots:true,snapshots:true,sources:false});
+    if(coverage)await page.coverage.startJSCoverage({resetOnNavigation:false});
     try{
       const fixtureUrl=origin+"/fixtures/"+item.fixture+".html"+(item.query??"");
       if(item.file!=="operator-parameters.js"){
@@ -148,9 +158,14 @@ try{
       report.cases.push({name:item.name,state:"failed",elapsed_ms:Date.now()-started,error:String(error.stack??error),blocked,pageErrors:errors});
       await page.screenshot({path:path.join(output,item.name+"-failure.png"),fullPage:true,timeout:3000}).catch(()=>{});
       console.error("FAIL "+item.name+": "+error.message);
-    }finally{clearTimeout(timer);await context.tracing.stop(caseFailed?{path:path.join(output,item.name+"-trace.zip")}:{});await context.close();}
+    }finally{
+      clearTimeout(timer);
+      try{if(coverage)await coverage.add(await page.coverage.stopJSCoverage());}
+      finally{await context.tracing.stop(caseFailed?{path:path.join(output,item.name+"-trace.zip")}:{});await context.close();}
+    }
   }
   assert.equal(serverApiRequests,0,"A request escaped the browser guard and reached the static server");
+  if(coverage)report.coverage=await coverage.write();
 }catch(error){report.error=String(error.stack??error);console.error(error.message);process.exitCode=1;}
 finally{
   if(browser)await browser.close();await new Promise(resolve=>server.close(resolve));

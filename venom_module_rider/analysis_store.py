@@ -14,6 +14,9 @@ from .errors import RiderError
 from .samples_archive import SampleArchive, canonical
 from .samples_store import identifier
 
+_BEGIN_WRITE_TRANSACTION = "BEGIN IMMEDIATE"
+
+
 TERMINAL = {"succeeded", "failed", "cancelled"}
 MAX_RUNS = 50
 MAX_SNAPSHOT = 8 * 1024**2
@@ -123,7 +126,7 @@ class AnalysisStore:
             spec.pop("input_source")
         fingerprint = hashlib.sha256(canonical([session_id, spec])).hexdigest()
         with self.samples.db() as db:
-            db.execute("BEGIN IMMEDIATE")
+            db.execute(_BEGIN_WRITE_TRANSACTION)
             old = db.execute(
                 "SELECT * FROM analysis_runs WHERE request_id=?", (request_id,)
             ).fetchone()
@@ -175,7 +178,7 @@ class AnalysisStore:
             raise RiderError("analysis_snapshot_size", 413)
         identity = uuid.uuid4().hex
         with self.samples.db() as db:
-            db.execute("BEGIN IMMEDIATE")
+            db.execute(_BEGIN_WRITE_TRANSACTION)
             # Another HTTP request may have committed the same intent while the
             # snapshot was read. Resolve that result, never replace its inputs.
             old = db.execute(
@@ -298,7 +301,7 @@ class AnalysisStore:
         }:
             raise RiderError("analysis_artifact_format", 415)
         with self.samples.db() as db:
-            db.execute("BEGIN IMMEDIATE")
+            db.execute(_BEGIN_WRITE_TRANSACTION)
             row = self._row(db, identity, context=False)
             if row["state"] != "running" or row["cancel_requested"]:
                 raise RiderError("analysis_not_writable", 409)
@@ -389,7 +392,7 @@ class AnalysisStore:
             except ValueError as exc:
                 raise RiderError("analysis_report_incomplete", 409) from exc
         with self.samples.db() as db:
-            db.execute("BEGIN IMMEDIATE")
+            db.execute(_BEGIN_WRITE_TRANSACTION)
             row = self._row(db, identity)
             if row["state"] in TERMINAL:
                 return self._decode(row)

@@ -14,12 +14,16 @@ from .compute_routes import authenticate, bounded_body
 from .routing import RiderRoute
 from .schemas import NavigationJourneyRequest, NavigationTrialRequest
 
+_NAVIGATION_CONFIG_PATH = "/api/navigation/config"
+
+
 router = APIRouter(route_class=RiderRoute)
 logger = logging.getLogger(__name__)
 
 
 @router.get("/compute/vision/status")
 async def detector_status(request: Request):
+    """Describe detector availability and current navigation configuration."""
     device = authenticate(request)
     domain = request.app.state.rider
     models = getattr(request.app.state, "rider_models", None)
@@ -41,7 +45,7 @@ async def detector_status(request: Request):
 
     if models is not None and domain.transport().device.id == device:
         policy_task = asyncio.create_task(
-            measured("policy_ms", domain.read("/api/navigation/config", 0.2))
+            measured("policy_ms", domain.read(_NAVIGATION_CONFIG_PATH, 0.2))
         )
         tasks.append(policy_task)
     if preparing:
@@ -357,9 +361,10 @@ def profile_presentation(config, detector):
 
 @router.get("/navigation/config")
 async def configuration(request: Request):
+    """Return the selected navigation policy with its model metadata."""
     domain = request.app.state.rider
     try:
-        config = await domain.read("/api/navigation/config", 0.2, force=True)
+        config = await domain.read(_NAVIGATION_CONFIG_PATH, 0.2, force=True)
     except RiderError as exc:
         if exc.status == 404:
             raise RiderError("navigation_api_unavailable", 503) from exc
@@ -406,6 +411,7 @@ async def configuration(request: Request):
 
 @router.post("/navigation/config")
 async def configure(request: Request):
+    """Validate and apply a session-bound navigation configuration."""
     body = await request.json()
     values = body.get("values") if isinstance(body, dict) else None
     if not isinstance(values, dict):
@@ -426,7 +432,7 @@ async def configure(request: Request):
     ):
         raise RiderError("navigation_model_tuning_update_required", 409)
     result = await request.app.state.rider.mutate(
-        "/api/navigation/config", body, request.headers.get("X-Rider-Session")
+        _NAVIGATION_CONFIG_PATH, body, request.headers.get("X-Rider-Session")
     )
     data = result.get("data")
     if isinstance(data, dict) and isinstance(data.get("config"), dict):
@@ -439,10 +445,11 @@ async def configure(request: Request):
 
 @router.get("/navigation/state")
 async def navigation_state(request: Request):
+    """Collect navigation state and configuration for the current session."""
     state = await request.app.state.rider.read(
         "/api/navigation/status", 0.2, force=True
     )
-    config = await request.app.state.rider.read("/api/navigation/config", 0.2)
+    config = await request.app.state.rider.read(_NAVIGATION_CONFIG_PATH, 0.2)
     detector = request.app.state.rider_vision.status(config["data"].get("perception"))
     return {
         "goals": await loop_goals(request.app.state.rider),
@@ -507,7 +514,7 @@ async def validate_model_policy(request, device, frame):
     domain = request.app.state.rider
     if domain.transport().device.id != device:
         raise RiderError("stream_device_not_selected", 409)
-    policy = (await domain.read("/api/navigation/config", 0.2))["data"]
+    policy = (await domain.read(_NAVIGATION_CONFIG_PATH, 0.2))["data"]
     validate_model_policy_from_snapshot(models, device, frame, policy)
     return policy
 
