@@ -1,4 +1,4 @@
-import { record, type JsonRecord } from "./model";
+import { record, str, type JsonRecord } from "./model";
 
 export type CameraProfile = {
   analysis_location: "local" | "venom";
@@ -21,19 +21,21 @@ export type CameraPipeline = {
   error: string | null;
   previewAnchor?: { latest: JsonRecord; receivedAt: number; roundTripMs: number };
 };
+/** Validate literal profile enums without coercing arbitrary JSON values. */
 function profile(value: unknown): CameraProfile | null {
   const p = record(value);
-  if (!["local", "venom"].includes(String(p.analysis_location))
-    || !["canny", "ssd", "tflite"].includes(String(p.local_engine))
-    || !["snapshots", "mjpeg"].includes(String(p.remote_transport))) return null;
+  if (!["local", "venom"].includes(str(p.analysis_location))
+    || !["canny", "ssd", "tflite"].includes(str(p.local_engine))
+    || !["snapshots", "mjpeg"].includes(str(p.remote_transport))) return null;
   return p as CameraProfile;
 }
+/** Read a supported envelope and reject malformed enum or state fields. */
 export function readCameraPipeline(value: unknown): CameraPipeline | null {
   const p = record(value), caps = record(p.capabilities), selected = profile(p.profile);
   if (p.supported === false) return null;
   if (p.contract_id !== "rider.camera_pipeline" || p.contract_version !== 1
     || !Number.isInteger(p.revision) || Number(p.revision) < 1 || !selected
-    || !["stopped", "stopping", "starting", "waiting_frame", "active", "failed"].includes(String(p.state))
+    || !["stopped", "stopping", "starting", "waiting_frame", "active", "failed"].includes(str(p.state))
     || !Number.isInteger(p.transport_epoch) || Number(p.transport_epoch) < 0
     || p.active_profile !== null && !profile(p.active_profile)
     || !["analysis_locations", "local_engines", "remote_transports"].every(key =>

@@ -527,7 +527,11 @@ test("recovery brackets preview polling and late processed GETs cannot publish o
  const dispatch=client.indexOf("const response = await fetch",fetchStart);
  assert.ok(client.indexOf("if (!currentPreview()) return;",fetchStart)<dispatch);
  assert.ok(client.indexOf("!currentPreview()",dispatch)>dispatch);
- assert.ok(client.indexOf("!currentPreview()",client.indexOf("await decodePreview",dispatch))>dispatch);
+ const decodedStart=client.indexOf("const applyDecodedFrame=");
+ const decode=client.indexOf("await decodePreview",decodedStart);
+ const decodedGuard=client.indexOf("!currentPreview()",decode);
+ assert.ok(decodedStart>=0&&decode>decodedStart&&decodedGuard>decode&&decodedGuard<fetchStart);
+ assert.ok(client.indexOf("await applyDecodedFrame(response",dispatch)>dispatch);
  assert.ok(client.includes('cameraStream === "venom" && cameraTransition'));
  assert.ok(client.includes('if (!cameraStream || !["control", "vision", "samples"].includes(section) || processedTransition || nativeStreaming || pipelineBusy || pipelineStopped) return;'));
  assert.ok(client.includes("stale: true, knownFreshness: false"));

@@ -78,7 +78,7 @@ export function ImageReferenceOverlay({reference,size,t,geometry}:{reference:Ref
   const body=v.track_width_cm>0?bodyEdges(v):[[],[]],poly=(points:number[][])=>points.map(([x,y])=>(x*w)+","+Math.min(h-1,y*h)).join(" ");
   const point=(e:PointerEvent<SVGSVGElement>)=>{const b=e.currentTarget.getBoundingClientRect();return imagePoint(e.clientX-b.left,e.clientY-b.top,b.width,b.height,w,h);};
   return <svg data-testid="image-reference-overlay" data-purpose="visual_reference_only" aria-label={t("reference.title")} viewBox={"0 0 "+w+" "+h} preserveAspectRatio="xMidYMid meet" style={{position:"absolute",inset:0,width:"100%",height:"100%",pointerEvents:reference.editing?"auto":"none",touchAction:"none"}}
-    onPointerDown={e=>{if(!reference.editing)return;drag.current=(e.target as Element).closest("[data-reference-handle]")?.getAttribute("data-reference-handle")??null;if(drag.current)e.currentTarget.setPointerCapture(e.pointerId);}}
+    onPointerDown={e=>{if(!reference.editing)return;drag.current=(e.target as Element).closest<HTMLElement | SVGElement>("[data-reference-handle]")?.dataset.referenceHandle??null;if(drag.current)e.currentTarget.setPointerCapture(e.pointerId);}}
     onPointerMove={e=>{const p=point(e);if(p&&drag.current&&reference.editing)reference.setDraft(moveReference(v,drag.current,p[0],p[1]));}}
     onPointerUp={()=>{drag.current=null;}} onPointerCancel={()=>{drag.current=null;}}>
     {model&&<GeometryShapes geometry={model}/>}
