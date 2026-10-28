@@ -99,7 +99,7 @@ async def test_processed_preview_without_actuation_or_pi_processor(legacy, polic
     assert response.headers["x-rider-vision-policy"] == policy
     assert [c for c in domain.calls if c[0] == "camera"] == [("camera", "raw")]
     assert all(state["signature"][2] == "observe" for state in loop.runs.values())
-    assert "no-store" == response.headers["cache-control"]
+    assert response.headers["cache-control"] == "no-store"
 
 
 async def test_stale_input_rejected_before_inference():
