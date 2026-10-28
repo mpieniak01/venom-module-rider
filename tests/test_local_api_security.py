@@ -192,13 +192,17 @@ def test_local_https_verifies_certificate_and_hostname_for_both_clients(
     monkeypatch.setenv("RIDER_ACCESS_TOKEN", "fixture-token")
     monkeypatch.delenv("RIDER_API_CA_FILE", raising=False)
     origin = f"https://localhost:{server.server_port}"
+
+    def check_video():
+        return asyncio.run(
+            video_capture.run_record(SimpleNamespace(url=origin, action="check"))
+        )
+
     try:
         with pytest.raises(urllib.error.URLError):
             analysis_cli.request(origin, "/profiles")
         with pytest.raises(httpx.ConnectError):
-            asyncio.run(
-                video_capture.run_record(SimpleNamespace(url=origin, action="check"))
-            )
+            check_video()
         assert received == []
         monkeypatch.setenv("RIDER_API_CA_FILE", str(cert_file))
         # A trusted certificate for localhost is not sufficient for the
@@ -206,9 +210,7 @@ def test_local_https_verifies_certificate_and_hostname_for_both_clients(
         with pytest.raises(urllib.error.URLError):
             analysis_cli.request(origin, "/profiles")
         with pytest.raises(httpx.ConnectError):
-            asyncio.run(
-                video_capture.run_record(SimpleNamespace(url=origin, action="check"))
-            )
+            check_video()
         assert received == []
         leaf = (
             x509.CertificateBuilder()
@@ -237,9 +239,7 @@ def test_local_https_verifies_certificate_and_hostname_for_both_clients(
         leaf_file.write_bytes(leaf.public_bytes(serialization.Encoding.PEM))
         context.load_cert_chain(leaf_file, key_file)
         assert analysis_cli.request(origin, "/profiles") == {"ok": True}
-        result = asyncio.run(
-            video_capture.run_record(SimpleNamespace(url=origin, action="check"))
-        )
+        result = check_video()
         assert result["navigation"] == {"ok": True}
         assert received == ["Bearer fixture-token"] * 3
     finally:
