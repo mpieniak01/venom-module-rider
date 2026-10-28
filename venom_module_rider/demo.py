@@ -18,6 +18,11 @@ from PIL import Image, ImageDraw
 
 from .demo_compute import GOALS, compute_response, goal_rows
 
+NAVIGATION_CONTRACT = "rider.navigation_loop"
+TASKS_CONTRACT = "rider.tasks"
+FACE_STUDIO_CONTRACT = "rider.face_studio"
+FACE_CONTRACT = "rider.face"
+
 CONTRACTS = json.loads(
     (Path(__file__).parent / "fixtures/pi-contracts.json").read_text()
 )
@@ -89,8 +94,8 @@ class DemoPi:
             navigation.attach(self)
 
     def safety(self):
-        if self.simulation:
-            self.simulation.update(self.deadline)
+        """Report simulated safety and expire timed arming before publication."""
+        self._advance_simulation()
         now = time.time()
         if (
             self.arming_deadline is not None
@@ -160,165 +165,16 @@ class DemoPi:
         }
 
     def control(self, body):
+        """Apply a simulated command and record one accepted acknowledgement."""
         action = body.get("action")
         if self.simulation:
             self.simulation.update(self.deadline)
         if action in {"stop", "disarm"}:
-            if self.simulation:
-                self.simulation.stop()
-            if (
-                "expected_generation" in body
-                and body["expected_generation"] != self.generation
-            ):
-                return envelope({"error": "stale_stop_generation"}, status=409)
-            if self.navigation:
-                if self.navigation.operator_mode:
-                    self.navigation.pause_operator("operator_stop")
-                else:
-                    self.navigation.halt("operator_stop")
-            self.state = "DISARMED"
-            self.owner = None
-            self.panel_id = None
-            self.arming_deadline = None
-            self.deadline = 0.0
-            self.generation = uuid.uuid4().hex
-            self.seq = -1
+            error = self._stop_control(body)
         else:
-            supersedes = bool(
-                self.navigation and self.navigation.supersedes_operation(body)
-            )
-            last_seq = (
-                self.navigation.operation_origin_sequence if supersedes else self.seq
-            )
-            if (
-                body.get("generation") != self.generation
-                and not supersedes
-                and not (self.simulation and self.simulation.release_origin(self, body))
-                or type(body.get("seq")) is not int
-                or body["seq"] <= last_seq
-            ):
-                return envelope({"error": "stale_generation_or_sequence"}, status=409)
-            if (
-                not isinstance(body.get("ts"), (int, float))
-                or time.time() - body["ts"] > body.get("ttl_ms", 0) / 1000
-                or body["ts"] > time.time() + 0.1
-            ):
-                return envelope({"error": "expired_command"}, status=409)
-            transferred = False
-            if self.simulation:
-                try:
-                    transferred = self.simulation.takeover(self, body)
-                except ValueError as exc:
-                    return envelope({"error": str(exc)}, status=409)
-            if action in {"navigation_pause", "navigation_resume"} or (
-                action == "move" and body.get("intervene") is True and not transferred
-            ):
-                if self.navigation is None:
-                    return envelope(
-                        {"error": "operator_control_not_available"}, status=409
-                    )
-                try:
-                    self.navigation.operator_command(body)
-                except ValueError as exc:
-                    return envelope({"error": str(exc)}, status=409)
-            if action in {"navigation_pause", "navigation_resume"} or (
-                self.simulation and transferred and body.get("mode") == "release"
-            ):
-                pass
-            elif action == "clear_estop":
-                self.state = "DISARMED"
-                self.generation = uuid.uuid4().hex
-                self.deadline = 0.0
-            elif action == "arm":
-                if self.state == "ARMED":
-                    return envelope({"error": "already_armed_disarm_first"}, status=409)
-                if self.state == "ESTOP":
-                    return envelope({"error": "estop_active"}, status=409)
-                if body.get("operator_consent") is not True or not body.get(
-                    "operator_plan"
-                ):
-                    return envelope({"error": "operator_consent_required"}, status=400)
-                opt_in = "operator_control_version" in body
-                if opt_in and not (
-                    self.navigation is not None
-                    and type(body["operator_control_version"]) is int
-                    and body["operator_control_version"] == 1
-                    and body.get("owner") == "navigation"
-                    and body.get("execution_context") == "panel"
-                    and body.get("arming_mode") == "timed"
-                    and isinstance(body.get("panel_id"), str)
-                    and bool(body["panel_id"].strip())
-                    and type(body.get("lease_s")) in (int, float)
-                    and math.isfinite(body["lease_s"])
-                    and 0 < body["lease_s"] <= 10
-                ):
-                    return envelope({"error": "operator_control_invalid"}, status=409)
-                if self.navigation:
-                    self.navigation.halt("operator_takeover")
-                    self.navigation.operator_mode = opt_in
-                    self.generation = uuid.uuid4().hex
-                    self.deadline = 0.0
-                self.owner = body.get("owner", "manual")
-                self.panel_id = (
-                    body.get("panel_id")
-                    if (
-                        self.owner == "manual"
-                        or self.navigation
-                        and self.navigation.operator_mode
-                    )
-                    else None
-                )
-                self.arming_mode = body.get(
-                    "arming_mode", "timed" if self.owner == "navigation" else "operator"
-                )
-                self.arming_deadline = (
-                    time.monotonic() + min(float(body.get("lease_s", 10)), 10)
-                    if self.arming_mode == "timed"
-                    else None
-                )
-                self.state = "ARMED"
-                if opt_in and self.navigation:
-                    self.navigation.operation_id = body["request_id"]
-                    self.navigation.operation_origin_generation = self.generation
-                    self.navigation.operation_origin_sequence = body["seq"]
-                    self.navigation.operator_state = "qualifying"
-            elif action in {"move", "height", "balance"}:
-                if self.panel_id is not None and body.get("panel_id") != self.panel_id:
-                    return envelope({"error": "panel_owner_mismatch"}, status=409)
-                if self.state != "ARMED" or self.owner not in {None, "manual"}:
-                    return envelope({"error": "motion_not_armed"}, status=409)
-                if body.get("settings_revision") != self.controls["revision"]:
-                    return envelope({"error": "manual_settings_stale"}, status=409)
-                if action == "move":
-                    if body.get("mode") == "release":
-                        self.deadline = 0.0
-                    else:
-                        duration = (
-                            self.controls["control_modes"]["hold_timeout_ms"] / 1000
-                            if body.get("mode") == "hold"
-                            else self.controls["directions"][body["direction"]][
-                                "duration"
-                            ]
-                        )
-                        self.deadline = time.monotonic() + duration
-                    if self.simulation:
-                        self.simulation.drive(self, body)
-                elif action == "height":
-                    descriptor = self.controls["parameter_schema"]["actuator_fields"][
-                        "height"
-                    ]
-                    value = body.get("height")
-                    if (
-                        type(value) is not int
-                        or not descriptor["minimum"] <= value <= descriptor["maximum"]
-                    ):
-                        return envelope({"error": "invalid_height"}, status=400)
-                    self.height = {"value": value, "ts": time.time()}
-                else:
-                    if type(body.get("enabled")) is not bool:
-                        return envelope({"error": "invalid_balance"}, status=400)
-                    self.balance = {"enabled": body["enabled"], "ts": time.time()}
-            self.seq = body["seq"]
+            error = self._apply_control(body, action)
+        if error is not None:
+            return error
         self.ack = {
             "request_id": body.get("request_id"),
             "action": action,
@@ -358,6 +214,7 @@ class DemoPi:
         )
 
     def settings(self, body):
+        """Validate and store a copied calibration candidate atomically."""
         if body.get("revision") != self.controls["revision"]:
             return envelope({"error": "manual_settings_conflict"}, status=409)
         if self.safety()["moving"]:
@@ -369,56 +226,15 @@ class DemoPi:
                 return envelope({"error": "manual_direction"}, status=400)
             candidate["directions"][direction].update(patch)
         for row in candidate["directions"].values():
-            if (
-                any(
-                    type(v) not in (int, float) or not math.isfinite(v)
-                    for v in row.values()
-                )
-                or not 0 <= row["minimum"] <= row["maximum"] <= 1
-                or row["speed"] != 0
-                and not row["minimum"] <= row["speed"] <= row["maximum"]
-                or not 0 < row["step"] <= max(row["maximum"] - row["minimum"], 1)
-                or not 0.01 <= row["duration"] <= 1
-            ):
+            if self._invalid_direction(row):
                 return envelope(
                     {"error": "manual_settings_direction_range"}, status=400
                 )
         profile = body.get("profile")
         if profile:
-            action = profile.get("action")
-            id_ = profile.get("id")
-            if action == "create":
-                if len(candidate["profiles"]) >= 16:
-                    return envelope({"error": "manual_profile_limit"}, status=400)
-                id_ = uuid.uuid4().hex
-                candidate["profiles"][id_] = {
-                    "name": profile.get("name", "Demo"),
-                    "values": copy.deepcopy(candidate["values"]),
-                    "directions": copy.deepcopy(candidate["directions"]),
-                }
-                candidate["active_profile"] = id_
-            elif id_ not in candidate["profiles"]:
-                return envelope({"error": "manual_profile_unknown"}, status=400)
-            elif action == "apply":
-                row = candidate["profiles"][id_]
-                candidate["values"] = copy.deepcopy(row["values"])
-                candidate["directions"] = copy.deepcopy(row["directions"])
-                candidate["active_profile"] = id_
-            elif action == "save":
-                candidate["profiles"][id_].update(
-                    values=copy.deepcopy(candidate["values"]),
-                    directions=copy.deepcopy(candidate["directions"]),
-                    name=profile.get("name", candidate["profiles"][id_]["name"]),
-                )
-                candidate["active_profile"] = id_
-            elif action == "rename":
-                candidate["profiles"][id_]["name"] = profile.get("name", "Demo")
-            elif action == "delete":
-                del candidate["profiles"][id_]
-                if candidate["active_profile"] == id_:
-                    candidate["active_profile"] = None
-            else:
-                return envelope({"error": "manual_profile_action"}, status=400)
+            error = self._update_profile(candidate, profile)
+            if error is not None:
+                return error
         candidate["revision"] += 1
         candidate["observed_at"] = time.time()
         active = candidate["profiles"].get(candidate["active_profile"])
@@ -457,31 +273,14 @@ class DemoPi:
         }
 
     def image(self, spec=None, *, camera=False):
+        """Render a fixture image without starting a physical camera or display."""
         image = Image.new("RGB", (320, 180) if camera else (240, 240), "#0d1c2e")
         draw = ImageDraw.Draw(image)
         if camera:
             draw.rectangle((32, 30, 286, 142), outline="#61c8d4", width=3)
             draw.text((45, 65), "DEMO - no physical camera", fill="#cce3ee")
         else:
-            initial = (spec or {}).get("initial") or {}
-            dx = float(initial.get("eyes.dx", 0)) * 10
-            dy = float(initial.get("eyes.dy", 0)) * 10
-            skin = (spec or {}).get("skin", "none")
-            if skin != "none":
-                draw.ellipse((22, 12, 218, 229), fill="#b4c6d5")
-            blink = float(initial.get("eyes.blink", 0))
-            for x in (79, 161):
-                draw.ellipse((x - 22, 72, x + 22, 122), fill="#e1f9ff")
-                draw.ellipse(
-                    (x - 9 + dx, 85 + dy, x + 9 + dx, 111 + dy), fill="#30b9d1"
-                )
-                if blink > 0.5:
-                    draw.line((x - 22, 98, x + 22, 98), fill="#0d1c2e", width=9)
-            curve = float(initial.get("mouth.curve", 0.3))
-            if curve < 0:
-                draw.arc((78, 165, 162, 210), 190, 350, fill="#7edce5", width=5)
-            else:
-                draw.arc((78, 145, 162, 190), 10, 170, fill="#7edce5", width=5)
+            self._draw_face(draw, spec)
         output = io.BytesIO()
         image.save(output, format="PNG")
         return Response(
@@ -496,14 +295,796 @@ class DemoPi:
             },
         )
 
+    def _update_profile(self, candidate, profile):
+        """Apply one profile operation to the copied calibration candidate."""
+        action = profile.get("action")
+        id_ = profile.get("id")
+        if action == "create":
+            if len(candidate["profiles"]) >= 16:
+                return envelope({"error": "manual_profile_limit"}, status=400)
+            id_ = uuid.uuid4().hex
+            candidate["profiles"][id_] = {
+                "name": profile.get("name", "Demo"),
+                "values": copy.deepcopy(candidate["values"]),
+                "directions": copy.deepcopy(candidate["directions"]),
+            }
+            candidate["active_profile"] = id_
+        elif id_ not in candidate["profiles"]:
+            return envelope({"error": "manual_profile_unknown"}, status=400)
+        elif action == "apply":
+            row = candidate["profiles"][id_]
+            candidate["values"] = copy.deepcopy(row["values"])
+            candidate["directions"] = copy.deepcopy(row["directions"])
+            candidate["active_profile"] = id_
+        elif action == "save":
+            candidate["profiles"][id_].update(
+                values=copy.deepcopy(candidate["values"]),
+                directions=copy.deepcopy(candidate["directions"]),
+                name=profile.get("name", candidate["profiles"][id_]["name"]),
+            )
+            candidate["active_profile"] = id_
+        elif action == "rename":
+            candidate["profiles"][id_]["name"] = profile.get("name", "Demo")
+        elif action == "delete":
+            del candidate["profiles"][id_]
+            if candidate["active_profile"] == id_:
+                candidate["active_profile"] = None
+        else:
+            return envelope({"error": "manual_profile_action"}, status=400)
+        return None
+
+    @staticmethod
+    def _invalid_direction(row):
+        """Validate calibrated direction bounds before storing settings."""
+        return (
+            any(
+                type(v) not in (int, float) or not math.isfinite(v)
+                for v in row.values()
+            )
+            or not 0 <= row["minimum"] <= row["maximum"] <= 1
+            or (
+                row["speed"] != 0
+                and (not row["minimum"] <= row["speed"] <= row["maximum"])
+            )
+            or (not 0 < row["step"] <= max(row["maximum"] - row["minimum"], 1))
+            or (not 0.01 <= row["duration"] <= 1)
+        )
+
+    def _advance_simulation(self):
+        """Advance fixture simulation before reading the safety clock."""
+        if self.simulation:
+            self.simulation.update(self.deadline)
+
+    def _draw_face(self, draw, spec):
+        """Render a fixture face without changing display resources."""
+        initial = (spec or {}).get("initial") or {}
+        dx = float(initial.get("eyes.dx", 0)) * 10
+        dy = float(initial.get("eyes.dy", 0)) * 10
+        skin = (spec or {}).get("skin", "none")
+        if skin != "none":
+            draw.ellipse((22, 12, 218, 229), fill="#b4c6d5")
+        blink = float(initial.get("eyes.blink", 0))
+        for x in (79, 161):
+            draw.ellipse((x - 22, 72, x + 22, 122), fill="#e1f9ff")
+            draw.ellipse((x - 9 + dx, 85 + dy, x + 9 + dx, 111 + dy), fill="#30b9d1")
+            if blink > 0.5:
+                draw.line((x - 22, 98, x + 22, 98), fill="#0d1c2e", width=9)
+        curve = float(initial.get("mouth.curve", 0.3))
+        if curve < 0:
+            draw.arc((78, 165, 162, 210), 190, 350, fill="#7edce5", width=5)
+        else:
+            draw.arc((78, 145, 162, 190), 10, 170, fill="#7edce5", width=5)
+
+    def _stop_control(self, body):
+        """Stop the operator lane and rotate the simulated generation."""
+        if self.simulation:
+            self.simulation.stop()
+        if (
+            "expected_generation" in body
+            and body["expected_generation"] != self.generation
+        ):
+            return envelope({"error": "stale_stop_generation"}, status=409)
+        if self.navigation:
+            if self.navigation.operator_mode:
+                self.navigation.pause_operator("operator_stop")
+            else:
+                self.navigation.halt("operator_stop")
+        self.state = "DISARMED"
+        self.owner = None
+        self.panel_id = None
+        self.arming_deadline = None
+        self.deadline = 0.0
+        self.generation = uuid.uuid4().hex
+        self.seq = -1
+        return None
+
+    def _validate_control_envelope(self, body):
+        """Reject stale sequence and timestamps before simulated takeover."""
+        supersedes = bool(
+            self.navigation and self.navigation.supersedes_operation(body)
+        )
+        last_seq = self.navigation.operation_origin_sequence if supersedes else self.seq
+        if (
+            body.get("generation") != self.generation
+            and not supersedes
+            and not (self.simulation and self.simulation.release_origin(self, body))
+            or type(body.get("seq")) is not int
+            or body["seq"] <= last_seq
+        ):
+            return envelope({"error": "stale_generation_or_sequence"}, status=409)
+        if (
+            not isinstance(body.get("ts"), (int, float))
+            or time.time() - body["ts"] > body.get("ttl_ms", 0) / 1000
+            or body["ts"] > time.time() + 0.1
+        ):
+            return envelope({"error": "expired_command"}, status=409)
+        return None
+
+    def _apply_control(self, body, action):
+        """Apply one validated non-STOP command before recording its ACK."""
+        error = self._validate_control_envelope(body)
+        if error is not None:
+            return error
+        transferred, error = self._operator_takeover(body, action)
+        if error is not None:
+            return error
+        if action in {"navigation_pause", "navigation_resume"} or (
+            self.simulation and transferred and body.get("mode") == "release"
+        ):
+            pass  # The takeover handler already applied this action.
+        elif action == "clear_estop":
+            self.state = "DISARMED"
+            self.generation = uuid.uuid4().hex
+            self.deadline = 0.0
+        elif action == "arm":
+            error = self._arm_control(body)
+            if error is not None:
+                return error
+        elif action in {"move", "height", "balance"}:
+            error = self._manual_control(body, action)
+            if error is not None:
+                return error
+        self.seq = body["seq"]
+        return None
+
+    def _arm_control(self, body):
+        """Validate consent and establish the requested arming lease."""
+        if self.state == "ARMED":
+            return envelope({"error": "already_armed_disarm_first"}, status=409)
+        if self.state == "ESTOP":
+            return envelope({"error": "estop_active"}, status=409)
+        if body.get("operator_consent") is not True or not body.get("operator_plan"):
+            return envelope({"error": "operator_consent_required"}, status=400)
+        opt_in = "operator_control_version" in body
+        if opt_in and not (
+            self.navigation is not None
+            and type(body["operator_control_version"]) is int
+            and body["operator_control_version"] == 1
+            and body.get("owner") == "navigation"
+            and body.get("execution_context") == "panel"
+            and body.get("arming_mode") == "timed"
+            and isinstance(body.get("panel_id"), str)
+            and bool(body["panel_id"].strip())
+            and type(body.get("lease_s")) in (int, float)
+            and math.isfinite(body["lease_s"])
+            and 0 < body["lease_s"] <= 10
+        ):
+            return envelope({"error": "operator_control_invalid"}, status=409)
+        if self.navigation:
+            self.navigation.halt("operator_takeover")
+            self.navigation.operator_mode = opt_in
+            self.generation = uuid.uuid4().hex
+            self.deadline = 0.0
+        self.owner = body.get("owner", "manual")
+        self.panel_id = (
+            body.get("panel_id")
+            if (
+                self.owner == "manual"
+                or self.navigation
+                and self.navigation.operator_mode
+            )
+            else None
+        )
+        self.arming_mode = body.get(
+            "arming_mode", "timed" if self.owner == "navigation" else "operator"
+        )
+        self.arming_deadline = (
+            time.monotonic() + min(float(body.get("lease_s", 10)), 10)
+            if self.arming_mode == "timed"
+            else None
+        )
+        self.state = "ARMED"
+        if opt_in and self.navigation:
+            self.navigation.operation_id = body["request_id"]
+            self.navigation.operation_origin_generation = self.generation
+            self.navigation.operation_origin_sequence = body["seq"]
+            self.navigation.operator_state = "qualifying"
+        return None
+
+    def _manual_control(self, body, action):
+        """Require manual authority and current calibration."""
+        if self.panel_id is not None and body.get("panel_id") != self.panel_id:
+            return envelope({"error": "panel_owner_mismatch"}, status=409)
+        if self.state != "ARMED" or self.owner not in {None, "manual"}:
+            return envelope({"error": "motion_not_armed"}, status=409)
+        if body.get("settings_revision") != self.controls["revision"]:
+            return envelope({"error": "manual_settings_stale"}, status=409)
+        if action == "move":
+            self._move_control(body)
+        elif action == "height":
+            return self._height_control(body)
+        else:
+            return self._balance_control(body)
+        return None
+
+    def _move_control(self, body):
+        """Set the simulated movement deadline and drive output."""
+        if body.get("mode") == "release":
+            self.deadline = 0.0
+        else:
+            duration = (
+                self.controls["control_modes"]["hold_timeout_ms"] / 1000
+                if body.get("mode") == "hold"
+                else self.controls["directions"][body["direction"]]["duration"]
+            )
+            self.deadline = time.monotonic() + duration
+        if self.simulation:
+            self.simulation.drive(self, body)
+
+    def _height_control(self, body):
+        """Validate calibrated height before changing fixture state."""
+        descriptor = self.controls["parameter_schema"]["actuator_fields"]["height"]
+        value = body.get("height")
+        if (
+            type(value) is not int
+            or not descriptor["minimum"] <= value <= descriptor["maximum"]
+        ):
+            return envelope({"error": "invalid_height"}, status=400)
+        self.height = {"value": value, "ts": time.time()}
+        return None
+
+    def _balance_control(self, body):
+        """Accept a boolean balance toggle without coercion."""
+        if type(body.get("enabled")) is not bool:
+            return envelope({"error": "invalid_balance"}, status=400)
+        self.balance = {"enabled": body["enabled"], "ts": time.time()}
+        return None
+
+    def _operator_takeover(self, body, action):
+        """Apply simulation takeover and operator navigation command validation."""
+        transferred = False
+        if self.simulation:
+            try:
+                transferred = self.simulation.takeover(self, body)
+            except ValueError as exc:
+                return False, envelope({"error": str(exc)}, status=409)
+        if action in {"navigation_pause", "navigation_resume"} or (
+            action == "move" and body.get("intervene") is True and not transferred
+        ):
+            if self.navigation is None:
+                return False, envelope(
+                    {"error": "operator_control_not_available"}, status=409
+                )
+            try:
+                self.navigation.operator_command(body)
+            except ValueError as exc:
+                return False, envelope({"error": str(exc)}, status=409)
+        return transferred, None
+
+
+def _fixture_control_state(state, path, _body):
+    """Handle the control state fixture route in dispatch order."""
+    if path == "/api/control/state":
+        return envelope(
+            {
+                "server_time": time.time(),
+                "safety": state.safety(),
+                "ack": state.ack,
+            }
+        )
+    return None
+
+
+def _fixture_control_command(state, path, body):
+    """Handle the control command fixture route in dispatch order."""
+    if path in {"/api/control", "/api/safety"}:
+        result = state.control(body)
+        if result.status_code < 400:
+            from .demo_conversation import manual
+
+            manual(state)
+        return result
+    return None
+
+
+def _fixture_calibration(state, path, body):
+    """Handle the calibration fixture route in dispatch order."""
+    if path == "/api/calibration/controls":
+        return (
+            state.settings(body)
+            if body
+            else envelope(copy.deepcopy(state.controls), "rider.calibration")
+        )
+    return None
+
+
+def _fixture_telemetry(state, path, _body):
+    """Handle the telemetry fixture route in dispatch order."""
+    if path == "/state":
+        sensors = {
+            name: {
+                "value": value,
+                "unit": unit,
+                "ready": True,
+                "stale": state.stale,
+                "observed_at": time.time(),
+                "quality": "fixture",
+            }
+            for name, value, unit in (
+                ("battery", 0.89, "ratio"),
+                ("roll", -0.8, "sdk_raw"),
+                ("pitch", -3.2, "sdk_raw"),
+                ("yaw", 8.4, "sdk_raw"),
+            )
+        }
+        return envelope(
+            {
+                "devices": {
+                    "xgo": {
+                        "source": "demo",
+                        "instance_id": state.instance,
+                        "sensor_quality": {"sensors": sensors, "ready": True},
+                        "fw": "DEMO",
+                        "observed_at": time.time(),
+                    }
+                },
+                "camera": state.resource("camera"),
+            },
+            "rider.telemetry",
+        )
+    return None
+
+
+def _fixture_health(state, path, _body):
+    """Handle the health fixture route in dispatch order."""
+    if path == "/healthz":
+        return envelope(
+            {
+                "ok": True,
+                "uptime_s": 120,
+                "bus": {"last_msg_age_s": 0.1, "last_heartbeat_age_s": 0.2},
+                "camera": state.resource("camera"),
+                "lcd": state.resource("lcd"),
+            },
+            "rider.health",
+        )
+    return None
+
+
+def _fixture_system(_state, path, _body):
+    """Handle the system fixture route in dispatch order."""
+    if path == "/sysinfo":
+        stamps = [time.time() - (29 - i) * 2 for i in range(30)]
+        cpu = [round(14 + 2 * math.sin(i), 1) for i in range(30)]
+        return envelope(
+            {
+                "cpu_pct": cpu[-1],
+                "cpu_peak_pct": 19,
+                "mem_pct": 24,
+                "mem_used_mb": 240,
+                "mem_total_mb": 1000,
+                "disk_used_gb": 8,
+                "disk_total_gb": 32,
+                "disk_pct": 25,
+                "temp_c": 42,
+                "load1": 0.3,
+                "load5": 0.2,
+                "load15": 0.2,
+                "hist_ts": stamps,
+                "hist_cpu": cpu,
+                "hist_cpu_peak": [19] * 30,
+                "hist_mem": [24] * 30,
+                "sampling": {"period_s": 2},
+                "os_release": "Demo Linux",
+                "ts": time.time(),
+            },
+            "rider.system",
+        )
+    return None
+
+
+def _fixture_frame_service(_state, path, body):
+    """Handle the frame service fixture route in dispatch order."""
+    if path == "/svc/frame-distributor.service" and body.get("action") == "stop":
+        return envelope(
+            {"ok": True, "unit": "frame-distributor.service", "action": "stop"},
+            "rider.services",
+            2,
+        )
+    return None
+
+
+def _fixture_resource(state, path, body):
+    """Handle the resource fixture route in dispatch order."""
+    if path.startswith("/api/resource/"):
+        name = path.split("/")[-1]
+        if body:
+            on = body.get("action") == "on"
+            if name == "camera":
+                state.camera_on = on
+            if name == "lcd":
+                state.lcd_on = on
+        return envelope(state.resource(name), "rider.resources")
+    return None
+
+
+def _fixture_navigation_image(state, path, _body):
+    """Handle the navigation image fixture route in dispatch order."""
+    if path.startswith("/camera/") and state.camera_on and state.navigation:
+        return state.navigation.image()
+    return None
+
+
+def _fixture_camera_image(state, path, _body):
+    """Handle the camera image fixture route in dispatch order."""
+    if path.startswith("/camera/"):
+        return (
+            state.image(camera=True)
+            if state.camera_on
+            else envelope(
+                {"error": "camera_off"},
+                status=404,
+            )
+        )
+    return None
+
+
+def _fixture_catalog(state, path, _body):
+    """Handle the catalog fixture route in dispatch order."""
+    if path == "/api/logic/catalog":
+        return envelope(
+            {
+                "contract_version": 2,
+                "units": CONTRACTS["catalog"]["units"],
+                "features": [
+                    copy.deepcopy(row)
+                    for row in CONTRACTS["catalog"]["features"]
+                    if row["name"] in state.goals
+                ]
+                + goal_rows()
+                + (state.navigation.rows() if state.navigation else []),
+            },
+            "rider.catalog",
+            2,
+        )
+    return None
+
+
+async def _fixture_navigation_trial(state, path, body):
+    """Handle the navigation trial fixture route in dispatch order."""
+    if path == "/api/navigation/trial":
+        if state.navigation is None:
+            return envelope({"error": "navigation_api_unavailable"}, status=503)
+        try:
+            result = await state.navigation.start_trial(body)
+            return envelope(result, NAVIGATION_CONTRACT)
+        except ValueError as exc:
+            return envelope({"error": str(exc)}, NAVIGATION_CONTRACT, status=409)
+    return None
+
+
+def _fixture_navigation_config(state, path, body):
+    """Handle the navigation config fixture route in dispatch order."""
+    if state.navigation and path in {
+        "/api/navigation/config",
+        "/api/navigation/status",
+    }:
+        nav = state.navigation
+        if path.endswith("status"):
+            return envelope(nav.status, NAVIGATION_CONTRACT)
+        if body:
+            try:
+                return envelope(
+                    {"ok": True, "persisted": False, "config": nav.configure(body)},
+                    NAVIGATION_CONTRACT,
+                )
+            except ValueError as exc:
+                return envelope({"error": str(exc)}, NAVIGATION_CONTRACT, status=409)
+        return envelope(nav.policy, NAVIGATION_CONTRACT)
+    return None
+
+
+async def _fixture_navigation_goal(state, path, body):
+    """Handle the navigation goal fixture route in dispatch order."""
+    if (
+        state.navigation
+        and path.startswith("/api/logic/feature/")
+        and path.split("/")[-1] in state.navigation.state.goals
+        and path.split("/")[-1] in {"s14_venom_navigation", "s15_venom_perception"}
+    ):
+        name = path.split("/")[-1]
+        try:
+            if body.get("enabled") is True:
+                await state.navigation.start(name)
+            else:
+                state.navigation.halt("operator_loop_stop")
+            return envelope(
+                {
+                    "name": name,
+                    "enabled": body.get("enabled"),
+                    "confirmed": True,
+                    "actuation": False,
+                },
+                TASKS_CONTRACT,
+                2,
+            )
+        except ValueError as exc:
+            return envelope({"error": str(exc)}, TASKS_CONTRACT, 2, status=409)
+    return None
+
+
+def _fixture_logic_state(state, path, _body):
+    """Handle the logic state fixture route in dispatch order."""
+    if path == "/api/logic/state":
+        return envelope(
+            {
+                "contract_version": 2,
+                "features": {
+                    name: {
+                        "enabled": enabled,
+                        "state": "running" if enabled else "stopped",
+                    }
+                    for name, enabled in state.goals.items()
+                },
+            },
+            TASKS_CONTRACT,
+            2,
+        )
+    return None
+
+
+def _fixture_goal(state, path, body):
+    """Handle the goal fixture route in dispatch order."""
+    if path.startswith("/api/logic/feature/"):
+        name = path.split("/")[-1]
+        if name not in state.goals:
+            return envelope({"error": "unknown_goal"}, status=404)
+        if name in GOALS and body["enabled"] and state.compute_executor is None:
+            return envelope({"error": "compute_executor_unavailable"}, status=503)
+        state.goals[name] = body["enabled"]
+        if name in {"s2_camera_preview", "s12_venom_vision"}:
+            state.camera_on = (
+                state.goals["s2_camera_preview"]
+                or state.goals["s12_venom_vision"]
+                or bool(state.navigation and state.navigation.status["running"])
+            )
+        return envelope({"name": name, "enabled": body["enabled"]}, TASKS_CONTRACT, 2)
+    return None
+
+
+def _fixture_history(state, path, _body):
+    """Handle the history fixture route in dispatch order."""
+    if path == "/api/motion/queue":
+        return envelope(
+            {"kind": "request_history", "items": state.history, "ack": state.ack}
+        )
+    return None
+
+
+def _fixture_service_graph(_state, path, _body):
+    """Handle the service graph fixture route in dispatch order."""
+    if path == "/api/services/graph":
+        return envelope(
+            {
+                "nodes": [
+                    {**row, "state": {"active": "active", "source": "demo"}}
+                    for row in CONTRACTS["catalog"]["units"]
+                ],
+                "edges": [],
+                "contract_version": 2,
+            },
+            "rider.service_graph",
+            2,
+        )
+    return None
+
+
+def _fixture_service_logs(_state, path, _body):
+    """Handle the service logs fixture route in dispatch order."""
+    if path.startswith("/api/services/") and path.endswith("/logs"):
+        return envelope(
+            {"lines": ["DEMO: no hardware service"], "source": "demo"},
+            "rider.services",
+            2,
+        )
+    return None
+
+
+def _fixture_gestures(state, path, body):
+    """Handle the gestures fixture route in dispatch order."""
+    if path == "/api/face-studio/gestures":
+        if body:
+            key = body.get("id") or uuid.uuid4().hex
+            gesture = {**body, "id": key, "builtin": False}
+            state.library["gestures"] = [
+                row for row in state.library["gestures"] if row["id"] != key
+            ] + [gesture]
+            state.library["revision"] += 1
+            return envelope(
+                {"id": key, "gesture": gesture, "actuation": False},
+                FACE_STUDIO_CONTRACT,
+            )
+        return envelope(state.library, FACE_STUDIO_CONTRACT)
+    return None
+
+
+def _fixture_delete_gesture(state, path, _body):
+    """Handle the delete gesture fixture route in dispatch order."""
+    if path.startswith("/api/face-studio/gestures/"):
+        key = path.split("/")[-1]
+        state.library["gestures"] = [
+            row for row in state.library["gestures"] if row["id"] != key
+        ]
+        return envelope({"actuation": False}, FACE_STUDIO_CONTRACT)
+    return None
+
+
+def _fixture_face_frame(state, path, body):
+    """Handle the face frame fixture route in dispatch order."""
+    if path == "/api/face-studio/frame":
+        return state.image(body)
+    return None
+
+
+def _fixture_face_runtime(state, path, body):
+    """Handle the face runtime fixture route in dispatch order."""
+    if path == "/api/face-studio/runtime":
+        if body:
+            expected = body.pop("if_revision", None)
+            if expected != state.library["settings_revision"]:
+                return envelope({"error": "face_settings_conflict"}, status=409)
+            state.library["settings"].update(body)
+            state.library["settings_revision"] = hashlib.sha256(
+                json.dumps(state.library["settings"], sort_keys=True).encode()
+            ).hexdigest()
+        return envelope(
+            {
+                "state": {
+                    "running": state.runtime["running"],
+                    "playing": state.runtime["running"],
+                    "sink": "lcd" if state.lcd_on else "file",
+                },
+                "actuation": False,
+                "settings": state.library["settings"],
+                "settings_revision": state.library["settings_revision"],
+                "descriptors": state.library["descriptors"],
+            },
+            FACE_CONTRACT,
+        )
+    return None
+
+
+def _fixture_face_play(state, path, body):
+    """Handle the face play fixture route in dispatch order."""
+    if path == "/api/face-studio/runtime/play":
+        state.runtime["running"] = True
+        state.lcd_on = body.get("sink") == "lcd"
+        return envelope({"running": True, "actuation": False}, FACE_CONTRACT)
+    return None
+
+
+def _fixture_face_stop(state, path, _body):
+    """Handle the face stop fixture route in dispatch order."""
+    if path == "/api/face-studio/runtime/stop":
+        state.runtime["running"] = False
+        state.lcd_on = False
+        return envelope({"running": False, "actuation": False}, FACE_CONTRACT)
+    return None
+
+
+def _fixture_face_event(_state, path, _body):
+    """Handle the face event fixture route in dispatch order."""
+    if path == "/api/face-studio/runtime/event":
+        return envelope({"accepted": True, "actuation": False}, FACE_CONTRACT)
+    return None
+
+
+def _fixture_runtime_frame(state, path, _body):
+    """Handle the runtime frame fixture route in dispatch order."""
+    if path == "/api/face-studio/runtime/frame":
+        return (
+            state.image()
+            if state.runtime["running"]
+            else envelope(
+                {"error": "face_not_running"},
+                status=404,
+            )
+        )
+    return None
+
+
+_FIXTURE_HANDLERS = (
+    (_fixture_control_state, False),
+    (_fixture_control_command, False),
+    (_fixture_calibration, False),
+    (_fixture_telemetry, False),
+    (_fixture_health, False),
+    (_fixture_system, False),
+    (_fixture_frame_service, False),
+    (_fixture_resource, False),
+    (_fixture_navigation_image, False),
+    (_fixture_camera_image, False),
+    (_fixture_catalog, False),
+    (_fixture_navigation_trial, True),
+    (_fixture_navigation_config, False),
+    (_fixture_navigation_goal, True),
+    (_fixture_logic_state, False),
+    (_fixture_goal, False),
+    (_fixture_history, False),
+    (_fixture_service_graph, False),
+    (_fixture_service_logs, False),
+    (_fixture_gestures, False),
+    (_fixture_delete_gesture, False),
+    (_fixture_face_frame, False),
+    (_fixture_face_runtime, False),
+    (_fixture_face_play, False),
+    (_fixture_face_stop, False),
+    (_fixture_face_event, False),
+    (_fixture_runtime_frame, False),
+)
+
+
+async def _dispatch_fixture(state, path, request):
+    """Dispatch parsed fixture requests in the established protocol order."""
+    path = "/" + path
+    body = (
+        await request.json()
+        if request.method == "POST"
+        and request.headers.get("content-type", "").startswith("application/json")
+        else {}
+    )
+    state.trace.append({"path": path, "method": request.method, "body": body})
+    state.trace = state.trace[-2000:]
+    if path == "/__demo__/trace":
+        return {
+            "items": state.trace,
+            "state": state.state,
+            "camera_on": state.camera_on,
+        }
+    if path == "/__demo__/fault":
+        state.offline = body.get("offline", False)
+        state.stale = body.get("stale", False)
+        return {"ok": True}
+    if state.offline:
+        return envelope({"error": "demo_offline"}, status=503)
+    from .demo_conversation import response as conversation_response
+
+    conversation_result = await conversation_response(
+        state, path, body, request, envelope
+    )
+    if conversation_result is not None:
+        return conversation_result
+    response = compute_response(state, path, body, envelope)
+    if response is not None:
+        return response
+    for handler, asynchronous in _FIXTURE_HANDLERS:
+        result = handler(state, path, body)
+        if asynchronous:
+            result = await result
+        if result is not None:
+            return result
+    return envelope({"error": "unknown_fixture_route"}, status=404)
+
 
 def create_app(pi: DemoPi | None = None):
+    """Build an in-process protocol fixture with no hardware drivers."""
     from contextlib import asynccontextmanager
 
     state = pi or DemoPi()
 
     @asynccontextmanager
     async def lifespan(_app):
+        """Release the optional fixture navigation loop on application shutdown."""
         yield
         if state.navigation:
             await state.navigation.close()
@@ -513,339 +1094,7 @@ def create_app(pi: DemoPi | None = None):
 
     @app.api_route("/{path:path}", methods=["GET", "HEAD", "POST", "DELETE"])
     async def dispatch(path: str, request: Request):
-        path = "/" + path
-        body = (
-            await request.json()
-            if request.method == "POST"
-            and request.headers.get("content-type", "").startswith("application/json")
-            else {}
-        )
-        state.trace.append({"path": path, "method": request.method, "body": body})
-        state.trace = state.trace[-2000:]
-        if path == "/__demo__/trace":
-            return {
-                "items": state.trace,
-                "state": state.state,
-                "camera_on": state.camera_on,
-            }
-        if path == "/__demo__/fault":
-            state.offline = body.get("offline", False)
-            state.stale = body.get("stale", False)
-            return {"ok": True}
-        if state.offline:
-            return envelope({"error": "demo_offline"}, status=503)
-        from .demo_conversation import response as conversation_response
-
-        conversation_result = await conversation_response(
-            state, path, body, request, envelope
-        )
-        if conversation_result is not None:
-            return conversation_result
-        response = compute_response(state, path, body, envelope)
-        if response is not None:
-            return response
-        if path == "/api/control/state":
-            return envelope(
-                {
-                    "server_time": time.time(),
-                    "safety": state.safety(),
-                    "ack": state.ack,
-                }
-            )
-        if path in {"/api/control", "/api/safety"}:
-            result = state.control(body)
-            if result.status_code < 400:
-                from .demo_conversation import manual
-
-                manual(state)
-            return result
-        if path == "/api/calibration/controls":
-            return (
-                state.settings(body)
-                if body
-                else envelope(copy.deepcopy(state.controls), "rider.calibration")
-            )
-        if path == "/state":
-            sensors = {
-                name: {
-                    "value": value,
-                    "unit": unit,
-                    "ready": True,
-                    "stale": state.stale,
-                    "observed_at": time.time(),
-                    "quality": "fixture",
-                }
-                for name, value, unit in (
-                    ("battery", 0.89, "ratio"),
-                    ("roll", -0.8, "sdk_raw"),
-                    ("pitch", -3.2, "sdk_raw"),
-                    ("yaw", 8.4, "sdk_raw"),
-                )
-            }
-            return envelope(
-                {
-                    "devices": {
-                        "xgo": {
-                            "source": "demo",
-                            "instance_id": state.instance,
-                            "sensor_quality": {"sensors": sensors, "ready": True},
-                            "fw": "DEMO",
-                            "observed_at": time.time(),
-                        }
-                    },
-                    "camera": state.resource("camera"),
-                },
-                "rider.telemetry",
-            )
-        if path == "/healthz":
-            return envelope(
-                {
-                    "ok": True,
-                    "uptime_s": 120,
-                    "bus": {"last_msg_age_s": 0.1, "last_heartbeat_age_s": 0.2},
-                    "camera": state.resource("camera"),
-                    "lcd": state.resource("lcd"),
-                },
-                "rider.health",
-            )
-        if path == "/sysinfo":
-            stamps = [time.time() - (29 - i) * 2 for i in range(30)]
-            cpu = [round(14 + 2 * math.sin(i), 1) for i in range(30)]
-            return envelope(
-                {
-                    "cpu_pct": cpu[-1],
-                    "cpu_peak_pct": 19,
-                    "mem_pct": 24,
-                    "mem_used_mb": 240,
-                    "mem_total_mb": 1000,
-                    "disk_used_gb": 8,
-                    "disk_total_gb": 32,
-                    "disk_pct": 25,
-                    "temp_c": 42,
-                    "load1": 0.3,
-                    "load5": 0.2,
-                    "load15": 0.2,
-                    "hist_ts": stamps,
-                    "hist_cpu": cpu,
-                    "hist_cpu_peak": [19] * 30,
-                    "hist_mem": [24] * 30,
-                    "sampling": {"period_s": 2},
-                    "os_release": "Demo Linux",
-                    "ts": time.time(),
-                },
-                "rider.system",
-            )
-        if path == "/svc/frame-distributor.service" and body.get("action") == "stop":
-            return envelope(
-                {"ok": True, "unit": "frame-distributor.service", "action": "stop"},
-                "rider.services",
-                2,
-            )
-        if path.startswith("/api/resource/"):
-            name = path.split("/")[-1]
-            if body:
-                on = body.get("action") == "on"
-                if name == "camera":
-                    state.camera_on = on
-                if name == "lcd":
-                    state.lcd_on = on
-            return envelope(state.resource(name), "rider.resources")
-        if path.startswith("/camera/") and state.camera_on and state.navigation:
-            return state.navigation.image()
-        if path.startswith("/camera/"):
-            return (
-                state.image(camera=True)
-                if state.camera_on
-                else envelope(
-                    {"error": "camera_off"},
-                    status=404,
-                )
-            )
-        if path == "/api/logic/catalog":
-            return envelope(
-                {
-                    "contract_version": 2,
-                    "units": CONTRACTS["catalog"]["units"],
-                    "features": [
-                        copy.deepcopy(row)
-                        for row in CONTRACTS["catalog"]["features"]
-                        if row["name"] in state.goals
-                    ]
-                    + goal_rows()
-                    + (state.navigation.rows() if state.navigation else []),
-                },
-                "rider.catalog",
-                2,
-            )
-        if path == "/api/navigation/trial":
-            if state.navigation is None:
-                return envelope({"error": "navigation_api_unavailable"}, status=503)
-            try:
-                result = await state.navigation.start_trial(body)
-                return envelope(result, "rider.navigation_loop")
-            except ValueError as exc:
-                return envelope(
-                    {"error": str(exc)}, "rider.navigation_loop", status=409
-                )
-        if state.navigation and path in {
-            "/api/navigation/config",
-            "/api/navigation/status",
-        }:
-            nav = state.navigation
-            if path.endswith("status"):
-                return envelope(nav.status, "rider.navigation_loop")
-            if body:
-                try:
-                    return envelope(
-                        {"ok": True, "persisted": False, "config": nav.configure(body)},
-                        "rider.navigation_loop",
-                    )
-                except ValueError as exc:
-                    return envelope(
-                        {"error": str(exc)}, "rider.navigation_loop", status=409
-                    )
-            return envelope(nav.policy, "rider.navigation_loop")
-        if (
-            state.navigation
-            and path.startswith("/api/logic/feature/")
-            and path.split("/")[-1] in state.navigation.state.goals
-            and path.split("/")[-1] in {"s14_venom_navigation", "s15_venom_perception"}
-        ):
-            name = path.split("/")[-1]
-            try:
-                if body.get("enabled") is True:
-                    await state.navigation.start(name)
-                else:
-                    state.navigation.halt("operator_loop_stop")
-                return envelope(
-                    {
-                        "name": name,
-                        "enabled": body.get("enabled"),
-                        "confirmed": True,
-                        "actuation": False,
-                    },
-                    "rider.tasks",
-                    2,
-                )
-            except ValueError as exc:
-                return envelope({"error": str(exc)}, "rider.tasks", 2, status=409)
-        if path == "/api/logic/state":
-            return envelope(
-                {
-                    "contract_version": 2,
-                    "features": {
-                        name: {
-                            "enabled": enabled,
-                            "state": "running" if enabled else "stopped",
-                        }
-                        for name, enabled in state.goals.items()
-                    },
-                },
-                "rider.tasks",
-                2,
-            )
-        if path.startswith("/api/logic/feature/"):
-            name = path.split("/")[-1]
-            if name not in state.goals:
-                return envelope({"error": "unknown_goal"}, status=404)
-            if name in GOALS and body["enabled"] and state.compute_executor is None:
-                return envelope({"error": "compute_executor_unavailable"}, status=503)
-            state.goals[name] = body["enabled"]
-            if name in {"s2_camera_preview", "s12_venom_vision"}:
-                state.camera_on = (
-                    state.goals["s2_camera_preview"]
-                    or state.goals["s12_venom_vision"]
-                    or bool(state.navigation and state.navigation.status["running"])
-                )
-            return envelope(
-                {"name": name, "enabled": body["enabled"]}, "rider.tasks", 2
-            )
-        if path == "/api/motion/queue":
-            return envelope(
-                {"kind": "request_history", "items": state.history, "ack": state.ack}
-            )
-        if path == "/api/services/graph":
-            return envelope(
-                {
-                    "nodes": [
-                        {**row, "state": {"active": "active", "source": "demo"}}
-                        for row in CONTRACTS["catalog"]["units"]
-                    ],
-                    "edges": [],
-                    "contract_version": 2,
-                },
-                "rider.service_graph",
-                2,
-            )
-        if path.startswith("/api/services/") and path.endswith("/logs"):
-            return envelope(
-                {"lines": ["DEMO: no hardware service"], "source": "demo"},
-                "rider.services",
-                2,
-            )
-        if path == "/api/face-studio/gestures":
-            if body:
-                key = body.get("id") or uuid.uuid4().hex
-                gesture = {**body, "id": key, "builtin": False}
-                state.library["gestures"] = [
-                    row for row in state.library["gestures"] if row["id"] != key
-                ] + [gesture]
-                state.library["revision"] += 1
-                return envelope(
-                    {"id": key, "gesture": gesture, "actuation": False},
-                    "rider.face_studio",
-                )
-            return envelope(state.library, "rider.face_studio")
-        if path.startswith("/api/face-studio/gestures/"):
-            key = path.split("/")[-1]
-            state.library["gestures"] = [
-                row for row in state.library["gestures"] if row["id"] != key
-            ]
-            return envelope({"actuation": False}, "rider.face_studio")
-        if path == "/api/face-studio/frame":
-            return state.image(body)
-        if path == "/api/face-studio/runtime":
-            if body:
-                expected = body.pop("if_revision", None)
-                if expected != state.library["settings_revision"]:
-                    return envelope({"error": "face_settings_conflict"}, status=409)
-                state.library["settings"].update(body)
-                state.library["settings_revision"] = hashlib.sha256(
-                    json.dumps(state.library["settings"], sort_keys=True).encode()
-                ).hexdigest()
-            return envelope(
-                {
-                    "state": {
-                        "running": state.runtime["running"],
-                        "playing": state.runtime["running"],
-                        "sink": "lcd" if state.lcd_on else "file",
-                    },
-                    "actuation": False,
-                    "settings": state.library["settings"],
-                    "settings_revision": state.library["settings_revision"],
-                    "descriptors": state.library["descriptors"],
-                },
-                "rider.face",
-            )
-        if path == "/api/face-studio/runtime/play":
-            state.runtime["running"] = True
-            state.lcd_on = body.get("sink") == "lcd"
-            return envelope({"running": True, "actuation": False}, "rider.face")
-        if path == "/api/face-studio/runtime/stop":
-            state.runtime["running"] = False
-            state.lcd_on = False
-            return envelope({"running": False, "actuation": False}, "rider.face")
-        if path == "/api/face-studio/runtime/event":
-            return envelope({"accepted": True, "actuation": False}, "rider.face")
-        if path == "/api/face-studio/runtime/frame":
-            return (
-                state.image()
-                if state.runtime["running"]
-                else envelope(
-                    {"error": "face_not_running"},
-                    status=404,
-                )
-            )
-        return envelope({"error": "unknown_fixture_route"}, status=404)
+        """Route requests to the fixture state captured by this application."""
+        return await _dispatch_fixture(state, path, request)
 
     return app

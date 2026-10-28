@@ -9,7 +9,7 @@ import logging
 import os
 import time
 from collections.abc import AsyncGenerator, Callable
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, NoReturn, cast
 from urllib.parse import urlsplit
 
 import httpx
@@ -17,6 +17,13 @@ import httpx
 from .config import Device, credential_transport_secure
 from .errors import RiderError
 from .transport_cleanup import finish_native_cleanup
+
+NAVIGATION_CONTRACT = "rider.navigation_loop"
+SAFETY_CONTRACT = "rider.safety"
+VOICE_PLAYBACK_PATH = "/api/voice/playback"
+NAVIGATION_TRIAL_PATH = "/api/navigation/trial"
+NAVIGATION_JOURNEY_PATH = "/api/navigation/journey"
+CAMERA_PIPELINE_PATH = "/api/resource/camera/pipeline"
 
 if TYPE_CHECKING:
     from .lan_transport import Generation
@@ -50,35 +57,36 @@ IMAGE_HEADERS = {
 
 
 def expected_contract(path: str):
+    """Resolve the expected versioned Pi contract for an approved request path."""
     path = path.split("?", 1)[0]
     exact = {
         "/state": ("rider.telemetry", 1),
         "/healthz": ("rider.health", 1),
         "/sysinfo": ("rider.system", 1),
-        "/api/control/state": ("rider.safety", 1),
-        "/api/control/agent/state": ("rider.safety", 1),
-        "/api/control/agent/pulse": ("rider.safety", 1),
-        "/api/stop": ("rider.safety", 1),
-        "/api/voice/playback": ("rider.audio", 1),
+        "/api/control/state": (SAFETY_CONTRACT, 1),
+        "/api/control/agent/state": (SAFETY_CONTRACT, 1),
+        "/api/control/agent/pulse": (SAFETY_CONTRACT, 1),
+        "/api/stop": (SAFETY_CONTRACT, 1),
+        VOICE_PLAYBACK_PATH: ("rider.audio", 1),
         "/api/voice/playback/cancel": ("rider.audio", 1),
-        "/api/control": ("rider.safety", 1),
-        "/api/safety": ("rider.safety", 1),
-        "/api/motion/queue": ("rider.safety", 1),
+        "/api/control": (SAFETY_CONTRACT, 1),
+        "/api/safety": (SAFETY_CONTRACT, 1),
+        "/api/motion/queue": (SAFETY_CONTRACT, 1),
         "/api/calibration/controls": ("rider.calibration", 1),
         "/api/logic/catalog": ("rider.catalog", 2),
         "/api/logic/state": ("rider.tasks", 2),
         "/api/services/graph": ("rider.service_graph", 2),
         "/svc/frame-distributor.service": ("rider.services", 2),
-        "/api/navigation/config": ("rider.navigation_loop", 1),
-        "/api/navigation/image-reference": ("rider.navigation_loop", 1),
-        "/api/navigation/model-selection": ("rider.navigation_loop", 1),
-        "/api/navigation/local-models": ("rider.navigation_loop", 1),
-        "/api/navigation/trial": ("rider.navigation_loop", 1),
-        "/api/navigation/journey": ("rider.navigation_loop", 1),
-        "/api/navigation/status": ("rider.navigation_loop", 1),
+        "/api/navigation/config": (NAVIGATION_CONTRACT, 1),
+        "/api/navigation/image-reference": (NAVIGATION_CONTRACT, 1),
+        "/api/navigation/model-selection": (NAVIGATION_CONTRACT, 1),
+        "/api/navigation/local-models": (NAVIGATION_CONTRACT, 1),
+        NAVIGATION_TRIAL_PATH: (NAVIGATION_CONTRACT, 1),
+        NAVIGATION_JOURNEY_PATH: (NAVIGATION_CONTRACT, 1),
+        "/api/navigation/status": (NAVIGATION_CONTRACT, 1),
         "/api/compute/config": ("rider.compute", 1),
         "/api/compute/status": ("rider.compute", 1),
-        "/api/resource/camera/pipeline": ("rider.camera_pipeline", 1),
+        CAMERA_PIPELINE_PATH: ("rider.camera_pipeline", 1),
     }
     if path in exact:
         return exact[path]
@@ -128,10 +136,11 @@ def trial_error_details(payload):
 
 
 def json_timeout(path: str, method: str, stop: bool) -> httpx.Timeout:
+    """Choose the existing per-operation timeout without retrying mutations."""
     duration = 1.5
     path = path.split("?", 1)[0]
     if not stop:
-        if path == "/api/voice/playback":
+        if path == VOICE_PLAYBACK_PATH:
             duration = 60.0
         if method in {"POST", "DELETE"} and path.startswith(
             (
@@ -143,8 +152,8 @@ def json_timeout(path: str, method: str, stop: bool) -> httpx.Timeout:
         ):
             duration = 20.0
         elif method == "POST" and path in {
-            "/api/navigation/trial",
-            "/api/navigation/journey",
+            NAVIGATION_TRIAL_PATH,
+            NAVIGATION_JOURNEY_PATH,
         }:
             # Pi bounds service preparation to 15 s, including at most 5 s
             # for the final start after ARM. Do not time out before its result.
@@ -327,22 +336,12 @@ class PiClient:
     async def _json(
         self, path: str, *, method="GET", body=None, stop=False, headers=None
     ) -> dict:
+        """Negotiate bounded JSON on the captured lane and validate its generation."""
         admitted = time.monotonic()
         client, generation = await self._lane("stop" if stop else "http", urgent=stop)
         if self.lan is not None and method != "GET":
             await self.lan.revalidate(generation, started=admitted, urgent=stop)
-        request_headers = {"Accept": ACCEPT, **(headers or {})}
-        if method != "GET" and path in {
-            "/api/control/agent/pulse",
-            "/api/voice/playback",
-            "/api/voice/playback/cancel",
-        }:
-            if not self.credential_transport_allowed:
-                raise RiderError("agent_transport_insecure", 503)
-            token = os.getenv(self.device.agent_token_env, "")
-            if not token:
-                raise RiderError("agent_credentials_unavailable", 503)
-            request_headers["Authorization"] = "Bearer " + token
+        request_headers = self._json_headers(path, method, headers)
         binary = body if isinstance(body, bytes) else None
         payload = None if isinstance(body, bytes) else body
         request_started_mono = time.monotonic()
@@ -355,112 +354,17 @@ class PiClient:
                 headers=request_headers,
                 timeout=json_timeout(path, method, stop),
             ) as response:
-                content = bytearray()
-                async for chunk in response.aiter_bytes():
-                    content.extend(chunk)
-                    if len(content) > MAX_JSON_BYTES:
-                        raise RiderError("pi_response_too_large", 502)
-                if response.is_redirect:
-                    raise RiderError("pi_redirect_refused", 502)
-                try:
-                    payload = json.loads(content, parse_constant=reject_constant)
-                except ValueError as exc:
-                    raise RiderError("invalid_pi_response", 502) from exc
-                if not isinstance(payload, dict):
-                    raise RiderError("invalid_pi_response", 502)
-                if response.status_code >= 400:
-                    error = payload.get("error")
-                    code = error.get("code") if isinstance(error, dict) else error
-                    raise RiderError(
-                        str(code or "pi_request_failed")[:128],
-                        response.status_code,
-                        trial_error_details(payload)
-                        if path in {"/api/navigation/trial", "/api/navigation/journey"}
-                        else payload,
-                    )
-                meta = payload.get("meta")
-                if (
-                    not isinstance(meta, dict)
-                    or type(meta.get("envelope_version")) is not int
-                    or meta.get("envelope_version") != 1
-                ):
-                    raise RiderError("unsupported_pi_contract", 502)
-                if not isinstance(payload.get("data"), dict):
-                    raise RiderError("invalid_pi_response", 502)
-                if (
-                    path == "/api/resource/camera/pipeline"
-                    and type(meta.get("contract_version")) is int
-                    and (
-                        meta.get("contract_id"),
-                        meta.get("contract_version"),
-                    )
-                    == ("rider.resources", 1)
-                ):
-                    # Legacy resource wildcard routes can return a generic
-                    # camera/resource response for an unknown subresource.
-                    # This is explicit lack of pipeline support, not success.
-                    raise RiderError("camera_pipeline_unsupported", 404)
-                expected = expected_contract(path)
-                if (
-                    type(meta.get("contract_version")) is not int
-                    or (meta.get("contract_id"), meta.get("contract_version"))
-                    != expected
-                ):
-                    raise RiderError("unsupported_pi_contract", 502)
-                data = payload["data"]
-                if path == "/api/calibration/controls" and (
-                    data.get("contract_id") != "rider.manual_settings"
-                    or data.get("contract_version") != 2
-                    or not isinstance(data.get("parameter_schema"), dict)
-                    or data["parameter_schema"].get("version") != 1
-                    or not isinstance(data.get("control_modes"), dict)
-                    or data["control_modes"].get("version") != 1
-                ):
-                    raise RiderError("unsupported_manual_settings", 502)
-                if (
-                    path == "/api/control/state"
-                    and (data.get("safety") or {}).get("contract_version") != 1
-                ):
-                    raise RiderError("unsupported_safety_contract", 502)
-                if path == "/api/navigation/status" and isinstance(
-                    data.get("preparation"), dict
-                ):
-                    payload = {
-                        **payload,
-                        "data": {
-                            **data,
-                            "preparation": preparation_identity(data["preparation"]),
-                        },
-                    }
-                if method == "GET" and path == "/api/resource/camera/pipeline":
-                    payload = {
-                        **payload,
-                        "_rider_request_started_mono": request_started_mono,
-                        "_rider_response_received_mono": time.monotonic(),
-                    }
+                payload = await self._read_json_response(response, path)
+                self._validate_json_contract(path, payload)
+                payload = self._annotate_json_response(
+                    path, method, payload, request_started_mono
+                )
                 self._check_generation(generation)
                 return payload
         except httpx.TimeoutException as exc:
-            self._log_lan_json_failure(path, method, generation, exc)
-            if not self._preserve_media_on_timeout(
-                generation,
-                exc,
-                passive=method == "GET"
-                and not stop
-                and body is None
-                and not any(
-                    name.lower() in {"authorization", "proxy-authorization"}
-                    for name in request_headers
-                ),
-            ):
-                await self._failed(generation, "pi_connection_timeout")
-            if method != "GET":
-                raise RiderError(
-                    "pi_operation_timeout", 504, {"outcome": "unknown"}
-                ) from exc
-            raise RiderError(
-                "pi_connection_timeout" if self.lan else "pi_unreachable", 503
-            ) from exc
+            await self._json_timeout_failure(
+                path, method, generation, exc, stop, body, request_headers
+            )
         except httpx.HTTPError as exc:
             self._log_lan_json_failure(path, method, generation, exc)
             await self._failed(generation, "pi_connect_failed")
@@ -469,6 +373,7 @@ class PiClient:
             ) from exc
 
     async def image(self, path: str, *, body=None) -> tuple[bytes, str, dict]:
+        """Read one image through the captured HTTP lane and generation."""
         admitted = time.monotonic()
         client, generation = await self._lane("http")
         if self.lan is not None and body is not None:
@@ -480,31 +385,7 @@ class PiClient:
                 json=body,
                 headers={"Accept": "image/png,image/jpeg"},
             ) as response:
-                if response.is_redirect:
-                    raise RiderError("pi_redirect_refused", 502)
-                if response.status_code >= 400:
-                    raise RiderError(
-                        "frame_unavailable"
-                        if response.status_code == 404
-                        else "frame_busy"
-                        if response.status_code == 429
-                        else "frame_failed",
-                        response.status_code,
-                    )
-                mime = response.headers.get("content-type", "").split(";")[0]
-                if mime not in {"image/png", "image/jpeg", "image/webp"}:
-                    raise RiderError("invalid_image_type", 502)
-                content = bytearray()
-                async for chunk in response.aiter_bytes():
-                    content.extend(chunk)
-                    if len(content) > MAX_IMAGE_BYTES:
-                        raise RiderError("image_too_large", 502)
-                headers = {
-                    key: value
-                    for key, value in response.headers.items()
-                    if key.lower() in IMAGE_HEADERS
-                }
-                headers["Cache-Control"] = "no-store"
+                content, mime, headers = await self._read_image_response(response)
                 self._check_generation(generation)
                 return bytes(content), mime, headers
         except httpx.HTTPError as exc:
@@ -515,9 +396,6 @@ class PiClient:
 
     async def mjpeg(self):
         """One persistent camera reader; opening it never starts the Pi camera."""
-        from pydantic import ValidationError
-
-        from .stream_contract import NativeFrame, SourceDescription
         from .stream_framing import MultipartJpegParser, boundary_from_type
 
         client, generation = await self._lane("media")
@@ -553,21 +431,10 @@ class PiClient:
                     except StopAsyncIteration:
                         break
                     reading = None
-                    for offset in range(0, len(incoming), 16384):
-                        chunk = incoming[offset : offset + 16384]
-                        for headers, payload in parser.feed(chunk):
-                            try:
-                                source = SourceDescription.model_validate_json(
-                                    headers.get("x-rider-source", "")
-                                )
-                            except (ValueError, ValidationError) as exc:
-                                raise RiderError("stream_invalid_source", 502) from exc
-                            frame = NativeFrame(source, payload, time.monotonic())
-                            frame.validate_payload()
-                            self._check_generation(generation)
-                            if self._media_token is token:
-                                self._media_frame = frame
-                            yield frame
+                    for frame in self._mjpeg_frames(
+                        parser, incoming, generation, token
+                    ):
+                        yield frame
                 parser.finish()
             finally:
                 if self._media_token is token:
@@ -603,3 +470,188 @@ class PiClient:
         await self.http.aclose()
         await self.stop_http.aclose()
         await self.media_http.aclose()
+
+    def _json_headers(self, path, method, headers):
+        """Attach agent credentials only to explicitly allowed secure requests."""
+        request_headers = {"Accept": ACCEPT, **(headers or {})}
+        if method != "GET" and path in {
+            "/api/control/agent/pulse",
+            VOICE_PLAYBACK_PATH,
+            "/api/voice/playback/cancel",
+        }:
+            if not self.credential_transport_allowed:
+                raise RiderError("agent_transport_insecure", 503)
+            token = os.getenv(self.device.agent_token_env, "")
+            if not token:
+                raise RiderError("agent_credentials_unavailable", 503)
+            request_headers["Authorization"] = "Bearer " + token
+        return request_headers
+
+    async def _read_json_response(self, response, path):
+        """Read bounded JSON and preserve HTTP error details before contract checks."""
+        content = bytearray()
+        async for chunk in response.aiter_bytes():
+            content.extend(chunk)
+            if len(content) > MAX_JSON_BYTES:
+                raise RiderError("pi_response_too_large", 502)
+        if response.is_redirect:
+            raise RiderError("pi_redirect_refused", 502)
+        try:
+            payload = json.loads(content, parse_constant=reject_constant)
+        except ValueError as exc:
+            raise RiderError("invalid_pi_response", 502) from exc
+        if not isinstance(payload, dict):
+            raise RiderError("invalid_pi_response", 502)
+        if response.status_code >= 400:
+            error = payload.get("error")
+            code = error.get("code") if isinstance(error, dict) else error
+            raise RiderError(
+                str(code or "pi_request_failed")[:128],
+                response.status_code,
+                trial_error_details(payload)
+                if path in {NAVIGATION_TRIAL_PATH, NAVIGATION_JOURNEY_PATH}
+                else payload,
+            )
+        return payload
+
+    def _validate_json_contract(self, path, payload):
+        """Validate negotiated envelopes and path-specific safety contracts."""
+        meta = payload.get("meta")
+        if (
+            not isinstance(meta, dict)
+            or type(meta.get("envelope_version")) is not int
+            or meta.get("envelope_version") != 1
+        ):
+            raise RiderError("unsupported_pi_contract", 502)
+        if not isinstance(payload.get("data"), dict):
+            raise RiderError("invalid_pi_response", 502)
+        if (
+            path == CAMERA_PIPELINE_PATH
+            and type(meta.get("contract_version")) is int
+            and (
+                meta.get("contract_id"),
+                meta.get("contract_version"),
+            )
+            == ("rider.resources", 1)
+        ):
+            # Legacy resource wildcard routes can return a generic
+            # camera/resource response for an unknown subresource.
+            # This is explicit lack of pipeline support, not success.
+            raise RiderError("camera_pipeline_unsupported", 404)
+        expected = expected_contract(path)
+        if (
+            type(meta.get("contract_version")) is not int
+            or (meta.get("contract_id"), meta.get("contract_version")) != expected
+        ):
+            raise RiderError("unsupported_pi_contract", 502)
+        data = payload["data"]
+        if path == "/api/calibration/controls" and (
+            data.get("contract_id") != "rider.manual_settings"
+            or data.get("contract_version") != 2
+            or not isinstance(data.get("parameter_schema"), dict)
+            or data["parameter_schema"].get("version") != 1
+            or not isinstance(data.get("control_modes"), dict)
+            or data["control_modes"].get("version") != 1
+        ):
+            raise RiderError("unsupported_manual_settings", 502)
+        if (
+            path == "/api/control/state"
+            and (data.get("safety") or {}).get("contract_version") != 1
+        ):
+            raise RiderError("unsupported_safety_contract", 502)
+
+    def _annotate_json_response(self, path, method, payload, request_started_mono):
+        """Attach correlation and request timing only after contract validation."""
+        data = payload["data"]
+        if path == "/api/navigation/status" and isinstance(
+            data.get("preparation"), dict
+        ):
+            payload = {
+                **payload,
+                "data": {
+                    **data,
+                    "preparation": preparation_identity(data["preparation"]),
+                },
+            }
+        if method == "GET" and path == CAMERA_PIPELINE_PATH:
+            payload = {
+                **payload,
+                "_rider_request_started_mono": request_started_mono,
+                "_rider_response_received_mono": time.monotonic(),
+            }
+        return payload
+
+    async def _read_image_response(self, response):
+        """Read one bounded negotiated image while refusing redirects."""
+        if response.is_redirect:
+            raise RiderError("pi_redirect_refused", 502)
+        if response.status_code >= 400:
+            if response.status_code == 404:
+                code = "frame_unavailable"
+            elif response.status_code == 429:
+                code = "frame_busy"
+            else:
+                code = "frame_failed"
+            raise RiderError(code, response.status_code)
+        mime = response.headers.get("content-type", "").split(";")[0]
+        if mime not in {"image/png", "image/jpeg", "image/webp"}:
+            raise RiderError("invalid_image_type", 502)
+        content = bytearray()
+        async for chunk in response.aiter_bytes():
+            content.extend(chunk)
+            if len(content) > MAX_IMAGE_BYTES:
+                raise RiderError("image_too_large", 502)
+        headers = {
+            key: value
+            for key, value in response.headers.items()
+            if key.lower() in IMAGE_HEADERS
+        }
+        headers["Cache-Control"] = "no-store"
+        return content, mime, headers
+
+    def _mjpeg_frames(self, parser, incoming, generation, token):
+        """Validate each chunk frame before publishing it to the current generation."""
+        from pydantic import ValidationError
+
+        from .stream_contract import NativeFrame, SourceDescription
+
+        for offset in range(0, len(incoming), 16384):
+            chunk = incoming[offset : offset + 16384]
+            for headers, payload in parser.feed(chunk):
+                try:
+                    source = SourceDescription.model_validate_json(
+                        headers.get("x-rider-source", "")
+                    )
+                except (ValueError, ValidationError) as exc:
+                    raise RiderError("stream_invalid_source", 502) from exc
+                frame = NativeFrame(source, payload, time.monotonic())
+                frame.validate_payload()
+                self._check_generation(generation)
+                if self._media_token is token:
+                    self._media_frame = frame
+                yield frame
+
+    async def _json_timeout_failure(
+        self, path, method, generation, exc, stop, body, request_headers
+    ) -> NoReturn:
+        """Invalidate failed lanes while retaining eligible passive media reads."""
+        self._log_lan_json_failure(path, method, generation, exc)
+        if not self._preserve_media_on_timeout(
+            generation,
+            exc,
+            passive=method == "GET"
+            and not stop
+            and body is None
+            and not any(
+                name.lower() in {"authorization", "proxy-authorization"}
+                for name in request_headers
+            ),
+        ):
+            await self._failed(generation, "pi_connection_timeout")
+        if method != "GET":
+            raise RiderError(
+                "pi_operation_timeout", 504, {"outcome": "unknown"}
+            ) from exc
+        raise RiderError(
+            "pi_connection_timeout" if self.lan else "pi_unreachable", 503
+        ) from exc
