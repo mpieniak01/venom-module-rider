@@ -13,6 +13,8 @@ except ImportError:  # Older supported Venom cores have no global release UI.
         return function
 
     def register_model_resource(*_args):
+        # Legacy cores have no registry; registration is intentionally a no-op.
+        """Accept registration as a no-op when legacy cores lack the registry."""
         pass
 
 

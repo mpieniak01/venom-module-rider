@@ -12,10 +12,14 @@ from pathlib import Path
 from .errors import RiderError
 from .samples_archive import SampleArchive, canonical, sha256_stream
 
+_FRAME_MANIFEST_FILENAME = "frames.jsonl"
+_CAPTURE_FILENAME = "capture.mjpeg"
+
+
 MAX_VIDEO_FRAMES = 10000
 MAX_INDEX_LINE = 65536
 MAX_SOURCE_BYTES = 128 * 1024**2
-VIDEO_FILES = {"capture.mjpeg", "frames.jsonl", "video.json"}
+VIDEO_FILES = {_CAPTURE_FILENAME, _FRAME_MANIFEST_FILENAME, "video.json"}
 
 
 def source_path(root, session_id, name):
@@ -115,9 +119,10 @@ class VideoInputs(Sequence):
             raise RiderError("analysis_video_source_limit", 413)
 
     def _index(self):
+        """Index ordered bounded frame entries without retaining video payloads."""
         offset = 0
         previous = None
-        with source_path(self.root, self.session_id, "frames.jsonl").open(
+        with source_path(self.root, self.session_id, _FRAME_MANIFEST_FILENAME).open(
             "rb"
         ) as stream:
             while True:
@@ -143,7 +148,7 @@ class VideoInputs(Sequence):
                 previous = received
         if (
             len(self.offsets) != self.source["frames"]
-            or offset != self.source["files"]["capture.mjpeg"]["bytes"]
+            or offset != self.source["files"][_CAPTURE_FILENAME]["bytes"]
         ):
             raise RiderError("analysis_video_index_invalid", 409)
 
@@ -175,11 +180,12 @@ class VideoInputs(Sequence):
         return len(self.offsets)
 
     def __getitem__(self, index):
+        """Read an indexed frame entry and verify its recorded identity."""
         if isinstance(index, slice):
             return [self[value] for value in range(*index.indices(len(self)))]
         if type(index) is not int or not 0 <= index < len(self):
             raise IndexError(index)
-        with source_path(self.root, self.session_id, "frames.jsonl").open(
+        with source_path(self.root, self.session_id, _FRAME_MANIFEST_FILENAME).open(
             "rb"
         ) as stream:
             stream.seek(self.offsets[index])
@@ -232,9 +238,10 @@ def input_at(root, context, index):
 
 
 def payload_for(root, sample):
+    """Read the payload associated with a validated analysis source entry."""
     raw = sample["raw"]
     if raw.get("kind") == "video-frame":
-        path = source_path(root, raw["session_id"], "capture.mjpeg")
+        path = source_path(root, raw["session_id"], _CAPTURE_FILENAME)
         with path.open("rb") as stream:
             stream.seek(raw["offset"])
             payload = stream.read(raw["bytes"])

@@ -14,6 +14,9 @@ from pathlib import Path
 
 from .errors import RiderError
 
+_MODEL_WEIGHTS_FILENAME = "model.safetensors"
+
+
 SEGFORMER = "segformer-b0-ade20k"
 DEPTH = "depth-anything-v2-indoor-small"
 FAST = "fast-scnn-floor"
@@ -121,15 +124,20 @@ class LiveCatalog:
         }
 
     def local_files(self, model_id):
+        """Validate model manifests and resolve an explicit operator override."""
         root = self.path(model_id)
         if model_id == DEPTH:
             metadata = json.loads((root / "manifest.json").read_text())
             files = metadata["files"]
-            required = {"config.json", "preprocessor_config.json", "model.safetensors"}
+            required = {
+                "config.json",
+                "preprocessor_config.json",
+                _MODEL_WEIGHTS_FILENAME,
+            }
             if (
                 set(files) != required
                 or metadata.get("revision") != SOURCES[DEPTH]["revision"]
-                or files["model.safetensors"] != SOURCES[DEPTH]["sha256"]
+                or files[_MODEL_WEIGHTS_FILENAME] != SOURCES[DEPTH]["sha256"]
             ):
                 raise ValueError("manifest")
             return files, "da2"
@@ -151,7 +159,7 @@ class LiveCatalog:
         ):
             raise ValueError("manifest")
         if model_id == SEGFORMER:
-            if files.get("model.safetensors") != SOURCES[model_id]["sha256"]:
+            if files.get(_MODEL_WEIGHTS_FILENAME) != SOURCES[model_id]["sha256"]:
                 raise ValueError("manifest")
             return files, "segformer_torch"
         if model_id == YOLO:

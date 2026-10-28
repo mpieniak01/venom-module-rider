@@ -11,6 +11,11 @@ import re
 from .errors import RiderError
 from .recording_metrics import RecordingMetrics
 
+_FRAME_MANIFEST_FILENAME = "frames.jsonl"
+_CAPTURE_FILENAME = "capture.mjpeg"
+_VIDEO_MANIFEST_FILENAME = "video.json"
+
+
 TARGET_FPS = 5
 
 
@@ -36,7 +41,12 @@ class SessionVideoStore:
         return path
 
     def path(self, session_id, name):
-        if name not in {"video.json", "capture.mjpeg", "frames.jsonl"}:
+        """Resolve a supported recording filename for a validated session."""
+        if name not in {
+            _VIDEO_MANIFEST_FILENAME,
+            _CAPTURE_FILENAME,
+            _FRAME_MANIFEST_FILENAME,
+        }:
             raise RiderError("samples_video_invalid", 400)
         path = self.folder(session_id) / name
         if path.is_symlink():
@@ -44,8 +54,9 @@ class SessionVideoStore:
         return path
 
     def summary(self, session_id):
+        """Read bounded recording metadata or report a corrupt recording."""
         try:
-            path = self.path(session_id, "video.json")
+            path = self.path(session_id, _VIDEO_MANIFEST_FILENAME)
             if not path.exists():
                 return None
             if path.stat().st_size > 65536:
@@ -123,7 +134,8 @@ class SessionVideoStore:
             return self._save_json(session_id, value)
 
     def _save_json(self, session_id, value):
-        path = self.path(session_id, "video.json")
+        """Replace recording metadata after flushing its temporary file."""
+        path = self.path(session_id, _VIDEO_MANIFEST_FILENAME)
         temporary = self.folder(session_id) / "video.json.tmp"
         if temporary.is_symlink():
             raise RiderError("samples_root_invalid", 400)
@@ -141,13 +153,14 @@ class SessionVideoStore:
         return value
 
     def start(self, session_id):
+        """Start an admitted recording session with immutable capture identity."""
         old = self.summary(session_id)
         if old is not None:
             return old
         self.store._space(4096)
         folder = self.folder(session_id)
         folder.mkdir(mode=0o700)
-        for name in ("capture.mjpeg", "frames.jsonl"):
+        for name in (_CAPTURE_FILENAME, _FRAME_MANIFEST_FILENAME):
             with self.path(session_id, name).open("xb") as stream:
                 os.chmod(stream.name, 0o600)
         return self._save(
@@ -190,6 +203,7 @@ class SessionVideoStore:
             return self._append(session_id, frame)
 
     def _append(self, session_id, frame):
+        """Append a captured frame and its matching bounded index entry."""
         row = self.summary(session_id)
         if row is None or row["state"] in {"complete", "interrupted", "error", "limit"}:
             return row
@@ -267,14 +281,14 @@ class SessionVideoStore:
                 self.store._space(extra + 4096)
             with (
                 self.metrics.track("video_fsync_ms"),
-                self.path(session_id, "capture.mjpeg").open("ab") as stream,
+                self.path(session_id, _CAPTURE_FILENAME).open("ab") as stream,
             ):
                 stream.write(frame.payload)
                 stream.flush()
                 os.fsync(stream.fileno())
             with (
                 self.metrics.track("index_fsync_ms"),
-                self.path(session_id, "frames.jsonl").open("ab") as stream,
+                self.path(session_id, _FRAME_MANIFEST_FILENAME).open("ab") as stream,
             ):
                 stream.write(encoded)
                 stream.flush()
@@ -354,8 +368,8 @@ class SessionVideoStore:
         gaps = 0
         try:
             with (
-                self.path(session_id, "capture.mjpeg").open("rb") as video,
-                self.path(session_id, "frames.jsonl").open("rb") as index,
+                self.path(session_id, _CAPTURE_FILENAME).open("rb") as video,
+                self.path(session_id, _FRAME_MANIFEST_FILENAME).open("rb") as index,
             ):
                 while line := index.readline(65537):
                     if len(line) > 65536 or not line.endswith(b"\n"):
@@ -398,13 +412,19 @@ class SessionVideoStore:
         }
 
     def size(self, session_id):
+        """Sum the retained metadata, capture and index bytes for a session."""
         return sum(
             path.stat().st_size
-            for name in ("video.json", "capture.mjpeg", "frames.jsonl")
+            for name in (
+                _VIDEO_MANIFEST_FILENAME,
+                _CAPTURE_FILENAME,
+                _FRAME_MANIFEST_FILENAME,
+            )
             if (path := self.path(session_id, name)).exists()
         )
 
     def download(self, session_id):
+        """Validate a completed capture before exposing its MJPEG artifact."""
         self.store.session(session_id)
         row = self.summary(session_id)
         if row is not None and row.get("corrupt"):
@@ -416,9 +436,10 @@ class SessionVideoStore:
         checked = self._scan(session_id)
         if checked["frames"] != row["frames"] or checked["bytes"] != row["bytes"]:
             raise RiderError("samples_video_invalid", 409)
-        return self.path(session_id, "capture.mjpeg")
+        return self.path(session_id, _CAPTURE_FILENAME)
 
     def artifacts(self, session_id):
+        """List validated recording files only after recording completion."""
         row = self.summary(session_id)
         if row is not None and row.get("corrupt"):
             raise RiderError("samples_video_invalid", 409)
@@ -431,5 +452,9 @@ class SessionVideoStore:
             raise RiderError("samples_video_invalid", 409)
         return [
             (name, self.path(session_id, name))
-            for name in ("video.json", "capture.mjpeg", "frames.jsonl")
+            for name in (
+                _VIDEO_MANIFEST_FILENAME,
+                _CAPTURE_FILENAME,
+                _FRAME_MANIFEST_FILENAME,
+            )
         ]

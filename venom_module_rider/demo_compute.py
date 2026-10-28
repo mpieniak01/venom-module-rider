@@ -4,6 +4,9 @@ import time
 
 from .compute_contract import TASKS
 
+_COMPUTE_CONTRACT = "rider.compute"
+
+
 GOALS = {
     "s12_venom_vision": (
         "Opis sceny w Venomie",
@@ -34,21 +37,22 @@ def goal_rows():
 
 
 def compute_response(state, path, body, envelope):
+    """Route the simulated compute contract and preserve session identity."""
     if path == "/api/compute/config":
         if body:
             if body.get("revision") != state.compute_revision:
                 return envelope(
                     {"error": "compute_configuration_conflict"},
-                    "rider.compute",
+                    _COMPUTE_CONTRACT,
                     status=409,
                 )
             if body.get("executor_id") not in {None, "venom"}:
                 return envelope(
-                    {"error": "compute_executor_unknown"}, "rider.compute", status=400
+                    {"error": "compute_executor_unknown"}, _COMPUTE_CONTRACT, status=400
                 )
             if any(state.goals[name] for name in GOALS):
                 return envelope(
-                    {"error": "compute_stop_goals_first"}, "rider.compute", status=409
+                    {"error": "compute_stop_goals_first"}, _COMPUTE_CONTRACT, status=409
                 )
             if body.get("executor_id") != state.compute_executor:
                 state.compute_revision += 1
@@ -64,7 +68,7 @@ def compute_response(state, path, body, envelope):
                     {"id": "venom", "tasks": list(TASKS), "credential_configured": True}
                 ],
             },
-            "rider.compute",
+            _COMPUTE_CONTRACT,
         )
     if path == "/api/compute/status":
         now = time.time()
@@ -87,6 +91,6 @@ def compute_response(state, path, body, envelope):
                     )
                 },
             },
-            "rider.compute",
+            _COMPUTE_CONTRACT,
         )
     return None

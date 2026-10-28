@@ -21,6 +21,11 @@ from .samples_archive import SampleArchive, canonical
 from .stream_contract import SourceDescription
 from .stream_framing import MultipartJpegParser, boundary_from_type
 
+_CAPTURE_FILENAME = "capture.mjpeg"
+_FRAME_MANIFEST_FILENAME = "frames.jsonl"
+_RECORDING_MANIFEST_FILENAME = "recording.json"
+
+
 PREFIX = "/api/v1/rider"
 MIN_FREE = 64 * 1024**2
 
@@ -70,10 +75,11 @@ class VideoWriter:
     """Append only complete received JPEGs; journal offsets allow exact extraction."""
 
     def __init__(self, root, binding, max_bytes):
+        """Open the committed capture and frame-index files for recording."""
         self.root, self.binding, self.max_bytes = root, binding, max_bytes
-        self.video = (root / "capture.mjpeg").open("xb")
-        self.journal = (root / "frames.jsonl").open("x", encoding="utf-8")
-        for name in ("capture.mjpeg", "frames.jsonl"):
+        self.video = (root / _CAPTURE_FILENAME).open("xb")
+        self.journal = (root / _FRAME_MANIFEST_FILENAME).open("x", encoding="utf-8")
+        for name in (_CAPTURE_FILENAME, _FRAME_MANIFEST_FILENAME):
             os.chmod(root / name, 0o600)
         self.count = self.size = self.gaps = self.duplicates = 0
         self.last = None
@@ -134,6 +140,7 @@ class VideoWriter:
 
 
 async def record(client, output, seconds=60, max_mib=128, study_session=None):
+    """Record bounded camera frames and their provenance using the local API."""
     if not 1 <= seconds <= 300 or not 1 <= max_mib <= 1024:
         raise ValueError("recording_limits")
     if study_session is not None and (
@@ -159,7 +166,7 @@ async def record(client, output, seconds=60, max_mib=128, study_session=None):
         "clock_scope": "source monotonic file publication; not sensor exposure",
         "transport_scope": "latest-only shared native hub; not lossless camera capture",
     }
-    save_json(root / "recording.json", meta)
+    save_json(root / _RECORDING_MANIFEST_FILENAME, meta)
     state, error = "interrupted", None
     try:
         async with asyncio.timeout(seconds):
@@ -194,19 +201,19 @@ async def record(client, output, seconds=60, max_mib=128, study_session=None):
             duplicates=writer.duplicates,
             elapsed_s=time.monotonic() - writer.start,
         )
-        save_json(root / "recording.json", meta)
+        save_json(root / _RECORDING_MANIFEST_FILENAME, meta)
     return root
 
 
 def extract(source, output):
     """Validate all committed bytes; build a standard historical sample import."""
     source = Path(source)
-    meta = json.loads((source / "recording.json").read_text())
+    meta = json.loads((source / _RECORDING_MANIFEST_FILENAME).read_text())
     if meta.get("kind") != "rider-test-video" or meta.get("schema_version") != 1:
         raise ValueError("recording_format")
     if meta.get("state") == "recording":
         raise ValueError("recording_still_active")
-    journal = source / "frames.jsonl"
+    journal = source / _FRAME_MANIFEST_FILENAME
     if journal.stat().st_size > 32 * 1024**2:
         raise ValueError("recording_journal_size")
     rows = [json.loads(line) for line in journal.read_text().splitlines()]
@@ -217,7 +224,7 @@ def extract(source, output):
     (root / "frames").mkdir()
     samples, replay, timeline = [], [], []
     offset, last = 0, None
-    with (source / "capture.mjpeg").open("rb") as video:
+    with (source / _CAPTURE_FILENAME).open("rb") as video:
         for i, row in enumerate(rows):
             if (
                 row["index"] != i
@@ -299,11 +306,12 @@ def extract(source, output):
     save_json(root / "manifest.json", manifest)
     save_json(root / "replay-manifest.json", replay)
     save_json(root / "transport.json", {"stream": timeline})
-    save_json(root / "recording.json", meta)
+    save_json(root / _RECORDING_MANIFEST_FILENAME, meta)
     return root
 
 
 async def run_record(args):
+    """Validate the loopback API origin before checking or recording video."""
     origin = local_api_origin(args.url)
     headers = {}
     token = os.getenv("RIDER_ACCESS_TOKEN")
@@ -327,7 +335,7 @@ async def run_record(args):
         )
         return {
             "output": str(root),
-            **json.loads((root / "recording.json").read_text()),
+            **json.loads((root / _RECORDING_MANIFEST_FILENAME).read_text()),
         }
 
 

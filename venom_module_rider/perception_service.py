@@ -11,6 +11,8 @@ from .perception_catalog import SOURCES, selected_identity
 from .perception_install import ModelInstaller
 from .perception_runtime import ModelRuntime
 
+_NAVIGATION_CONFIG_PATH = "/api/navigation/config"
+
 
 class PerceptionService:
     def __init__(self, loop, *, catalog=None, installer=None):
@@ -35,10 +37,11 @@ class PerceptionService:
             self.runtime.expected.pop(device, None)
 
     async def snapshot(self, domain):
+        """Describe selected perception settings and available model state."""
         selection, selection_error = None, None
         perception = None
         try:
-            policy = (await domain.read("/api/navigation/config", 0.2, force=True))[
+            policy = (await domain.read(_NAVIGATION_CONFIG_PATH, 0.2, force=True))[
                 "data"
             ]
             selection = selected_identity(policy)
@@ -112,6 +115,7 @@ class PerceptionService:
 
     @model_operation
     async def select(self, domain, body, session):
+        """Apply an explicit model selection within the current device session."""
         domain.check_session(session)
         if (
             not isinstance(body, dict)
@@ -174,7 +178,7 @@ class PerceptionService:
                 except RiderError:
                     # The commit may have succeeded before an ACK was lost.
                     config = (
-                        await domain.read("/api/navigation/config", 0.0, force=True)
+                        await domain.read(_NAVIGATION_CONFIG_PATH, 0.0, force=True)
                     )["data"]
                     selected = selected_identity(config)
                     if not (
@@ -232,9 +236,7 @@ class PerceptionService:
             pipeline = await domain.pipeline(force=True)
             if (pipeline.get("profile") or {}).get("analysis_location") != "venom":
                 return
-            policy = (await domain.read("/api/navigation/config", 0, force=True))[
-                "data"
-            ]
+            policy = (await domain.read(_NAVIGATION_CONFIG_PATH, 0, force=True))["data"]
             perception = policy.get("perception") or {}
             if not perception.get("model_id"):
                 return
@@ -274,7 +276,7 @@ class PerceptionService:
                 domain.check_session(session)
                 if domain.epoch != epoch or domain.transport().device.id != device:
                     raise RiderError("stale_device_session", 409)
-                current = (await domain.read("/api/navigation/config", 0, force=True))[
+                current = (await domain.read(_NAVIGATION_CONFIG_PATH, 0, force=True))[
                     "data"
                 ]
                 if selected_identity(current) != selected:

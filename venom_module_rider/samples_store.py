@@ -21,6 +21,8 @@ from .errors import RiderError
 from .sample_usage import tree_bytes
 from .samples_frame import MAX_CONTEXT_BYTES, CapturedFrame
 
+_BEGIN_WRITE_TRANSACTION = "BEGIN IMMEDIATE"
+
 
 def encode(value):
     try:
@@ -173,11 +175,12 @@ class SampleStore:
         return self.quota.admit(extra)
 
     def start(self, request_id, device_id, policy=None):
+        """Create or recover an idempotent sample session under a write lock."""
         identifier(request_id)
         identifier(device_id)
         policy_json = encode(policy or {"kind": "manual"})
         with self.db() as db:
-            db.execute("BEGIN IMMEDIATE")
+            db.execute(_BEGIN_WRITE_TRANSACTION)
             old = db.execute(
                 "SELECT * FROM sessions WHERE request_id=?", (request_id,)
             ).fetchone()
@@ -337,7 +340,7 @@ class SampleStore:
         ).hexdigest()
         admitted = self.wall() if admitted_at is None else admitted_at
         with self.db() as db:
-            db.execute("BEGIN IMMEDIATE")
+            db.execute(_BEGIN_WRITE_TRANSACTION)
             old = db.execute(
                 "SELECT * FROM requests WHERE id=?", (request_id,)
             ).fetchone()
@@ -573,6 +576,7 @@ class SampleStore:
         author_kind="operator",
         origin=None,
     ):
+        """Persist a validated sample label within a write transaction."""
         self.sample(sample_id)
         self._space(8192)
         from pydantic import ValidationError
@@ -592,7 +596,7 @@ class SampleStore:
         if origin is not None:
             body["import_origin"] = origin
         with self.db() as db:
-            db.execute("BEGIN IMMEDIATE")
+            db.execute(_BEGIN_WRITE_TRANSACTION)
             revision = db.execute(
                 "SELECT COALESCE(MAX(revision),0) FROM labels WHERE sample_id=?",
                 (sample_id,),

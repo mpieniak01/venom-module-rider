@@ -5,6 +5,9 @@ import json
 import subprocess
 from pathlib import Path
 
+_MODEL_WEIGHTS_FILENAME = "model.safetensors"
+
+
 MODELS = {
     "da3-small": (
         "depth-anything/DA3-SMALL",
@@ -82,6 +85,7 @@ class Candidate:
     """One model per benchmark process; official SDK network + input processor."""
 
     def __init__(self, name, path, device, resolution):
+        """Configure an explicit depth candidate without starting inference."""
         if device != "cuda":
             raise ValueError("vision_cuda_required")
         from .cuda_execution import require_cuda
@@ -100,7 +104,7 @@ class Candidate:
             "drive_supported": False,
             "files": {
                 n: file_hash(self.path / n)
-                for n in ("config.json", "model.safetensors")
+                for n in ("config.json", _MODEL_WEIGHTS_FILENAME)
             },
         }
         if name == "da2":
@@ -132,6 +136,7 @@ class Candidate:
         )
 
     def _load_da3(self):
+        """Load the selected DA3 artifact from its verified local configuration."""
         import depth_anything_3.registry as registry
         import torch
         from depth_anything_3.cfg import create_object, load_config
@@ -141,7 +146,10 @@ class Candidate:
 
         sdk = Path(registry.__file__).resolve().parents[2]
         verify_sdk(sdk)
-        if self.metadata["files"]["model.safetensors"] != CHECKPOINT_HASHES[self.name]:
+        if (
+            self.metadata["files"][_MODEL_WEIGHTS_FILENAME]
+            != CHECKPOINT_HASHES[self.name]
+        ):
             raise ValueError("checkpoint_hash_mismatch")
         config = json.loads((self.path / "config.json").read_text())
         if config["model_name"] != self.name:
@@ -151,7 +159,7 @@ class Candidate:
         # by safetensors. Strict state_dict loading would misreport these as missing.
         wrapper = torch.nn.Module()
         wrapper.add_module("model", self.model)
-        load_model(wrapper, str(self.path / "model.safetensors"), strict=True)
+        load_model(wrapper, str(self.path / _MODEL_WEIGHTS_FILENAME), strict=True)
         self.processor = InputProcessor()
         self.metadata.update(
             {

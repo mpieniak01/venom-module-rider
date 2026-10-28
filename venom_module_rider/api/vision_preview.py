@@ -11,6 +11,8 @@ from ..preview_metadata import analysis_header
 from ..vision_contract import VisionFrame
 from .vision_routes import loop_goals
 
+_JPEG_MIME = "image/jpeg"
+
 
 async def diagnostic_preview_allowed(domain, status, goals):
     """Retired navigation may show input during manual control, without actuation."""
@@ -71,6 +73,7 @@ async def diagnostic_preview_allowed(domain, status, goals):
 
 
 async def processed_camera(request: Request):
+    """Return a fresh compatible perception preview for the selected device."""
     domain = request.app.state.rider
     client = domain.transport()
     if hasattr(domain, "pipeline"):
@@ -88,7 +91,7 @@ async def processed_camera(request: Request):
                     _frame, image, headers = await processed_native(
                         request, connection, frame
                     )
-                    return Response(image, media_type="image/jpeg", headers=headers)
+                    return Response(image, media_type=_JPEG_MIME, headers=headers)
     corridor = (0.35, 0.80, 0.65, 0.95)
     revision = 0
     source = "diagnostic_default"
@@ -143,8 +146,9 @@ async def processed_camera(request: Request):
     if cached is None:
 
         async def produce():
+            """Capture and validate a raw frame before host perception processing."""
             payload, mime, raw_headers = await domain.camera("raw")
-            if mime not in {"image/jpeg", "image/png"}:
+            if mime not in {_JPEG_MIME, "image/png"}:
                 raise RiderError("vision_input_format", 415)
             normalized = {key.lower(): value for key, value in raw_headers.items()}
             if (
@@ -195,7 +199,7 @@ async def processed_camera(request: Request):
     age_ms = max(0.0, (loop.clock() - captured_at) * 1000)
     return Response(
         image,
-        media_type="image/jpeg",
+        media_type=_JPEG_MIME,
         headers={
             **(
                 {"x-rider-capture-key": result["capture_key"]}

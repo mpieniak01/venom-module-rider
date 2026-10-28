@@ -6,6 +6,8 @@ import os
 import time
 import uuid
 
+_AUDIO_CONTRACT = "rider.audio"
+
 
 def attach(state):
     state.agent_epoch = uuid.uuid4().hex
@@ -18,6 +20,7 @@ def manual(state):
 
 
 async def response(state, path, body, request, envelope):
+    """Route simulated audio and playback operations within the demo domain."""
     if path == "/api/control/agent/state":
         safety = state.safety()
         safety.update(agent_epoch=state.agent_epoch, agent_last_seq=state.agent_seq)
@@ -104,19 +107,21 @@ async def response(state, path, body, request, envelope):
         )
     if path.endswith("/cancel"):
         return envelope(
-            {"cancelled": True, "quality": {"simulated": True}}, "rider.audio"
+            {"cancelled": True, "quality": {"simulated": True}}, _AUDIO_CONTRACT
         )
     raw = await request.body()
     if (
         not 0 < len(raw) <= 2 * 1024 * 1024
         or request.headers.get("Content-Type") != "audio/wav"
     ):
-        return envelope({"error": "playback_input_invalid"}, "rider.audio", status=413)
+        return envelope(
+            {"error": "playback_input_invalid"}, _AUDIO_CONTRACT, status=413
+        )
     return envelope(
         {
             "state": "played",
             "quality": {"simulated": True},
             "playback_id": request.headers.get("X-Rider-Playback-Id"),
         },
-        "rider.audio",
+        _AUDIO_CONTRACT,
     )

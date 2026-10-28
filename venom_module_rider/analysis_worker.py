@@ -15,6 +15,9 @@ import time
 from pathlib import Path
 from typing import cast
 
+_PNG_MIME = "image/png"
+
+
 MAX_MESSAGE = 16 * 1024**2
 
 
@@ -242,7 +245,7 @@ def run(job, output, *, candidate_factory=None, semantic_factory=None):
                         semantic=True,
                         vector=True,
                     )
-                    artifacts.append(artifact(name, layer, "image/png"))
+                    artifacts.append(artifact(name, layer, _PNG_MIME))
                 else:
                     artifacts.append(
                         artifact(f"{index:04d}-overlay.jpg", overlay, "image/jpeg")
@@ -321,7 +324,7 @@ def run(job, output, *, candidate_factory=None, semantic_factory=None):
                     Image.fromarray(grey).save(stream, format="PNG")
                     artifacts += [
                         artifact(
-                            f"{index:04d}-depth.png", stream.getvalue(), "image/png"
+                            f"{index:04d}-depth.png", stream.getvalue(), _PNG_MIME
                         ),
                         artifact(f"{index:04d}-overlay.jpg", overlay, "image/jpeg"),
                     ]
@@ -336,7 +339,7 @@ def run(job, output, *, candidate_factory=None, semantic_factory=None):
                         raw["sha256"],
                         vector=True,
                     )
-                    artifacts.append(artifact(name, layer, "image/png"))
+                    artifacts.append(artifact(name, layer, _PNG_MIME))
                 timings["render"] = (time.perf_counter() - start) * 1000
         maps = assessment.pop("_navigation_maps", None)
         navigation_evidence = None
