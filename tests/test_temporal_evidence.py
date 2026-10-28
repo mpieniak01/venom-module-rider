@@ -724,3 +724,30 @@ def test_replay_hashes_exact_map_bytes_despite_replacement(
     row = json.loads(output.read_text())
     assert row["maps_sha256"] == expected_map
     assert summary["manifest_sha256"] == expected_manifest
+
+
+@pytest.mark.parametrize("kind", ["symlink", "fifo"])
+def test_replay_rejects_nonregular_manifest(tmp_path, kind):
+    import os
+
+    from scripts.replay_navigation_policy import replay
+
+    manifest = tmp_path / "manifest.jsonl"
+    if kind == "symlink":
+        target = tmp_path / "source.jsonl"
+        target.write_text("")
+        manifest.symlink_to(target)
+    else:
+        os.mkfifo(manifest)
+    with pytest.raises(ValueError, match="replay_manifest_path"):
+        replay(manifest, {}, tmp_path / "output.jsonl")
+    assert not (tmp_path / "output.jsonl").exists()
+
+
+def test_replay_bounds_manifest_lines_before_json_decode(tmp_path):
+    from scripts.replay_navigation_policy import replay
+
+    manifest = tmp_path / "manifest.jsonl"
+    manifest.write_bytes(b" " * (64 * 1024 + 1))
+    with pytest.raises(ValueError, match="replay_manifest_bounds"):
+        replay(manifest, {}, tmp_path / "output.jsonl")

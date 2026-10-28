@@ -246,3 +246,26 @@ def test_local_https_verifies_certificate_and_hostname_for_both_clients(
         server.shutdown()
         server.server_close()
         thread.join()
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "//remote.example/path",
+        "/../profiles",
+        "/%2e%2e/profiles",
+        "/%252e%252e/profiles",
+        "/runs/..%2fprofiles",
+        "/runs\\..",
+        "/profiles#fragment",
+        "/profiles\n",
+        "https://remote.example/",
+    ],
+)
+def test_analysis_rejects_unsafe_route_before_network(path, monkeypatch):
+    def no_network(*args):
+        pytest.fail("unsafe route reached network setup")
+
+    monkeypatch.setattr(analysis_cli, "local_api_opener", no_network)
+    with pytest.raises(ValueError, match="local_api_path_required"):
+        analysis_cli.request("http://127.0.0.1:8800", path)

@@ -77,6 +77,7 @@ class Scope:
     revision: int
     safety: dict
     task: asyncio.Task | None
+    operation: asyncio.Task | None = None
     used: bool = False
     playback_id: str | None = None
     playback_transport: PiClient | None = None
@@ -115,8 +116,12 @@ class RiderConversation:
         except RuntimeError:
             current = None
         for scope in tuple(self.scopes.values()):
-            if scope.task is not None and scope.task is not current:
-                scope.task.cancel()
+            if (
+                scope.operation is not None
+                and scope.operation is not current
+                and scope.task is not current
+            ):
+                scope.operation.cancel()
 
     def config(self):
         domain = self.domain
@@ -321,40 +326,48 @@ class RiderConversation:
             scope.call = call  # Same captured scope; no renewed safety permission.
         self.scopes[context.task_id] = scope
         try:
-            self._check(scope, stop=call.name == "stop")
-            if call.name == "move" and not scope.safety:
-                control = await self.domain.read(
-                    "/api/control/agent/state", 0, force=True
-                )
-                self._check(scope)
-                scope.safety = self.domain.data(control).get("safety") or {}
-            arguments = {
-                "move": (call.direction,),
-                "speak": (call.text,),
-                "face": (call.gesture,),
-            }.get(call.name, ())
-            return await getattr(self.skill, call.name)(*arguments)
+            scope.operation = asyncio.create_task(self._execute(scope, call))
+            return await scope.operation
         except RiderError as exc:
             return message("failed", language) + exc.code
         except asyncio.CancelledError:
+            current = asyncio.current_task()
+            if current is not None and current.cancelling():
+                raise
             if scope.revision != self.intent_epoch:
                 return message("expired", language)
             raise
         finally:
-            if scope.playback_id and scope.playback_transport:
-                try:
-                    await asyncio.wait_for(
-                        scope.playback_transport.json(
-                            "/api/voice/playback/cancel",
-                            method="POST",
-                            body={"playback_id": scope.playback_id},
-                            stop=True,
-                        ),
-                        timeout=1.5,
-                    )
-                except (TimeoutError, RiderError, asyncio.CancelledError):
-                    pass
-            self._drop(scope)
+            try:
+                if scope.playback_id and scope.playback_transport:
+                    try:
+                        await asyncio.wait_for(
+                            scope.playback_transport.json(
+                                "/api/voice/playback/cancel",
+                                method="POST",
+                                body={"playback_id": scope.playback_id},
+                                stop=True,
+                            ),
+                            timeout=1.5,
+                        )
+                    except (TimeoutError, RiderError):
+                        pass
+            finally:
+                self._drop(scope)
+
+    async def _execute(self, scope, call):
+        """Run the scoped tool separately from the caller's cancellation."""
+        self._check(scope, stop=call.name == "stop")
+        if call.name == "move" and not scope.safety:
+            control = await self.domain.read("/api/control/agent/state", 0, force=True)
+            self._check(scope)
+            scope.safety = self.domain.data(control).get("safety") or {}
+        arguments = {
+            "move": (call.direction,),
+            "speak": (call.text,),
+            "face": (call.gesture,),
+        }.get(call.name, ())
+        return await getattr(self.skill, call.name)(*arguments)
 
     async def invoke(self, call: ToolCall, context):
         scope = self.scopes.get(context.task_id)

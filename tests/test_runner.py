@@ -17,7 +17,9 @@ def test_demo_cannot_use_an_environment_device(monkeypatch):
         '[{"id":"robot","label":"Robot","url":"http://robot.invalid","mode":"device"}]',
     )
     devices, default, demo = runner.targets(None, None)
-    assert demo and default == "demo" and devices == []
+    assert demo
+    assert default == "demo"
+    assert devices == []
     with pytest.raises(ValueError):
         runner.targets(None, "robot")
 
@@ -38,7 +40,9 @@ def test_live_requires_explicit_validated_file(tmp_path, monkeypatch):
         )
     )
     devices, default, demo = runner.targets(path, None)
-    assert not demo and default == "" and devices[0]["id"] == "robot"
+    assert not demo
+    assert default == ""
+    assert devices[0]["id"] == "robot"
     assert runner.targets(path, "robot")[1] == "robot"
     with pytest.raises(ValueError):
         runner.targets(path, "missing")
@@ -92,7 +96,8 @@ def test_device_launcher_uses_builtin_demo_without_a_fixture_endpoint(
     }
     path.write_text(json.dumps([production]))
     devices, selected, isolated = runner.targets(path, "demo")
-    assert selected == "demo" and not isolated
+    assert selected == "demo"
+    assert not isolated
     assert [d["id"] for d in devices] == ["prod"]
     assert runner.targets(path, "prod")[1] == "prod"
     path.write_text(json.dumps([{**production, "id": "demo"}]))
@@ -184,3 +189,14 @@ def test_launcher_rejects_invalid_ports(value):
 
 def test_launcher_accepts_valid_loopback_port():
     assert runner.loopback_port("8800") == 8800
+
+
+def test_free_port_rejects_bound_port_without_connecting():
+    import socket
+
+    with socket.socket() as occupied:
+        occupied.bind(("127.0.0.1", 0))
+        port = occupied.getsockname()[1]
+        # A bound socket need not listen to make the port unavailable.
+        assert runner.free_port(port) is False
+    assert runner.free_port(port) is True

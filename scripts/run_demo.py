@@ -60,9 +60,17 @@ def loopback_port(value):
 
 
 def free_port(port):
+    """Check local bind availability without connecting to an existing service.
+
+    This is advisory: the child server still owns the final bind and may fail
+    if another process claims the port between this check and startup.
+    """
     with socket.socket() as connection:
-        connection.settimeout(0.2)
-        return connection.connect_ex(("127.0.0.1", port)) != 0
+        try:
+            connection.bind(("127.0.0.1", port))
+        except OSError:
+            return False
+        return True
 
 
 def resolve_audio_enabled(demo_only: bool, requested: bool = False) -> bool:

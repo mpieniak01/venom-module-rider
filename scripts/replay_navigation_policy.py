@@ -17,7 +17,9 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any
 
+from venom_module_rider.navigation_archive import _read_regular_file
 from venom_module_rider.navigation_maps import assess_evidence
+from venom_module_rider.secure_output import exclusive_file, output_directory
 from venom_module_rider.temporal_evidence import TemporalEvidence
 
 
@@ -36,8 +38,6 @@ def _asset(root: Path, value: Any) -> Path:
 
 def _read_maps(path: Path) -> tuple[dict[str, Any], str]:
     import numpy as np
-
-    from venom_module_rider.navigation_archive import _read_regular_file
 
     payload = _read_regular_file(path, 32 * 1024 * 1024, "replay_maps_path")
     # Check and load the same immutable bytes; never reopen a replaceable path.
@@ -137,16 +137,18 @@ def replay(
             "qualified": False,
             **({"perception": dict(perception)} if perception is not None else {}),
         }
-    output.parent.mkdir(parents=True, exist_ok=True)
+    # A bounded regular-file snapshot also rejects FIFOs and final symlink swaps.
+    manifest_bytes = _read_regular_file(manifest, 64 * 1024**2, "replay_manifest_path")
     with (
-        manifest.open("rb") as source,
-        output.open("x", encoding="utf-8") as target,
+        io.BytesIO(manifest_bytes) as source,
+        output_directory(output.parent, create=True) as directory,
+        exclusive_file(directory, output.name, binary=False) as target,
     ):
-        for raw_line in source:
+        while raw_line := source.readline(64 * 1024 + 1):
             manifest_digest.update(raw_line)
-            line = raw_line.decode("utf-8")
-            if len(line) > 64 * 1024:
+            if len(raw_line) > 64 * 1024:
                 raise ValueError("replay_manifest_bounds")
+            line = raw_line.decode("utf-8")
             if not line.strip():
                 continue
             row = json.loads(line)
@@ -304,7 +306,10 @@ def main(argv: list[str] | None = None) -> int:
     summary = replay(
         args.manifest, params, args.output, behavior=behavior, perception=perception
     )
-    with summary_path.open("x", encoding="utf-8") as stream:
+    with (
+        output_directory(summary_path.parent) as directory,
+        exclusive_file(directory, summary_path.name, binary=False) as stream,
+    ):
         stream.write(json.dumps(summary, indent=2, allow_nan=False) + "\n")
     print(json.dumps(summary, indent=2, allow_nan=False))
     return 0

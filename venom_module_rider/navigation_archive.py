@@ -14,6 +14,13 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from .secure_output import (
+    exclusive_file,
+    new_directory,
+    output_directory,
+    verify_directory,
+)
+
 MAX_EVIDENCE_BYTES = 4 * 1024**2
 MAX_EXPORT_BYTES = 256 * 1024**2
 _GEOMETRY = (
@@ -452,51 +459,48 @@ def export_evidence(
     reserve = len(json.dumps(summary, indent=2, allow_nan=False).encode()) + 8192
     if reserve > maximum:
         raise ValueError("analysis_navigation_export_budget")
-    output.mkdir(mode=0o700)
-    (output / "maps").mkdir(mode=0o700)
+    with (
+        output_directory(output.parent) as parent,
+        new_directory(parent, output.name) as directory,
+        new_directory(directory, "maps") as maps_directory,
+    ):
+        _write_export(directory, maps_directory, prepared, summary, maximum, reserve)
+        verify_directory(output, directory)
+    return summary
+
+
+def _write_export(directory, maps_directory, prepared, summary, maximum, reserve):
+    """Write validated artifacts and their byte-exact manifest to pinned handles."""
+    manifest_digest = hashlib.sha256()
     used = 0
     copied: set[str] = set()
     try:
-        with (output / "manifest.jsonl").open("xb") as manifest:
-            for item, line_bytes, path, evidence in prepared:
-                payload = _read_regular_file(
-                    path, MAX_EVIDENCE_BYTES, "analysis_navigation_export_artifact"
-                )
-                digest = hashlib.sha256(payload).hexdigest()
-                if digest != evidence["sha256"]:
-                    raise ValueError("analysis_navigation_export_hash")
-                values = decode_evidence(payload)
-                height, width = values["gray"].shape
-                if (
-                    type(evidence.get("width")) is not int
-                    or evidence["width"] != width
-                    or type(evidence.get("height")) is not int
-                    or evidence["height"] != height
-                    or type(evidence.get("valid")) is not bool
-                    or evidence["valid"] != values["valid"]
-                ):
-                    raise ValueError("analysis_navigation_export_evidence")
+        with exclusive_file(directory, "manifest.jsonl") as manifest:
+            for _item, line_bytes, path, evidence in prepared:
+                payload, digest = _validated_export_payload(path, evidence)
                 additional = len(payload) if digest not in copied else 0
                 if used + additional + len(line_bytes) + reserve > maximum:
                     summary.update(status="partial", reason="byte_limit")
                     break
                 if digest not in copied:
-                    with (output / item["maps"]).open("xb") as target:
+                    with exclusive_file(maps_directory, digest + ".npz") as target:
                         target.write(payload)
                     copied.add(digest)
                     summary["artifact_bytes"] += len(payload)
                 manifest.write(line_bytes)
+                manifest_digest.update(line_bytes)
                 used += additional + len(line_bytes)
                 summary["exported_frames"] += 1
     except (ValueError, OSError) as exc:
         summary.update(status="failed", reason="invalid_or_unreadable_evidence")
-        summary["skipped_frames"] = len(rows) - summary["exported_frames"]
-        (output / "EXPORT.json").write_text(json.dumps(summary, indent=2) + "\n")
+        summary["skipped_frames"] = (
+            summary["requested_frames"] - summary["exported_frames"]
+        )
+        with exclusive_file(directory, "EXPORT.json", binary=False) as stream:
+            stream.write(json.dumps(summary, indent=2) + "\n")
         raise ValueError("analysis_navigation_export_failed") from exc
-    summary["skipped_frames"] = len(rows) - summary["exported_frames"]
-    summary["manifest_sha256"] = hashlib.sha256(
-        (output / "manifest.jsonl").read_bytes()
-    ).hexdigest()
+    summary["skipped_frames"] = summary["requested_frames"] - summary["exported_frames"]
+    summary["manifest_sha256"] = manifest_digest.hexdigest()
     summary["total_bytes"] = used
     while True:
         encoded_summary = (
@@ -508,6 +512,29 @@ def export_evidence(
         summary["total_bytes"] = total
     if total > maximum:
         raise ValueError("analysis_navigation_export_budget")
-    with (output / "EXPORT.json").open("xb") as stream:
+    with exclusive_file(directory, "EXPORT.json") as stream:
         stream.write(encoded_summary)
-    return summary
+
+
+def _validated_export_payload(path, evidence):
+    """Bind exported bytes and metadata to the recorded artifact digest."""
+    payload = _read_regular_file(
+        path,
+        MAX_EVIDENCE_BYTES,
+        "analysis_navigation_export_artifact",
+    )
+    digest = hashlib.sha256(payload).hexdigest()
+    if digest != evidence["sha256"]:
+        raise ValueError("analysis_navigation_export_hash")
+    values = decode_evidence(payload)
+    height, width = values["gray"].shape
+    if (
+        type(evidence.get("width")) is not int
+        or evidence["width"] != width
+        or type(evidence.get("height")) is not int
+        or evidence["height"] != height
+        or type(evidence.get("valid")) is not bool
+        or evidence["valid"] != values["valid"]
+    ):
+        raise ValueError("analysis_navigation_export_evidence")
+    return payload, digest
