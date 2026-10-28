@@ -60,14 +60,7 @@ async def prepare(app, data, metadata, language):
     _, call = parse_request(text, addressed=True)
     urgent = bool(call and call.name == "stop")
     if not audio_input and not urgent:
-        turn = metadata.get("conversation_turn")
-        if not isinstance(turn, PreparedTurn):
-            raise EngineError("conversation_input_scope_required", 409)
-        if turn.revision != provider.intent_epoch:
-            raise EngineError("conversation_intent_expired", 409)
-        if turn.transcript != text.strip():
-            raise EngineError("conversation_transcript_mismatch", 409)
-        return turn
+        return _captured_turn(metadata, provider, text)
     if urgent:
         captured_turn = metadata.get("conversation_turn")
         if isinstance(captured_turn, PreparedTurn):
@@ -89,6 +82,20 @@ async def prepare(app, data, metadata, language):
         await registry.finish(context)
         raise
     return PreparedTurn(context, revision, urgent)
+
+
+def _captured_turn(metadata, provider, text):
+    """Validate the original voice scope without capturing renewed permission."""
+    from .engines import EngineError
+
+    turn = metadata.get("conversation_turn")
+    if not isinstance(turn, PreparedTurn):
+        raise EngineError("conversation_input_scope_required", 409)
+    if turn.revision != provider.intent_epoch:
+        raise EngineError("conversation_intent_expired", 409)
+    if turn.transcript != text.strip():
+        raise EngineError("conversation_transcript_mismatch", 409)
+    return turn
 
 
 async def finish(app, turn):

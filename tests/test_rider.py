@@ -326,8 +326,9 @@ async def test_no_replay_after_device_session_change():
     old = service.session
     await service.select(None, old)
     await service.select("demo", service.session)
+    body = command(pi, "move")
     with pytest.raises(RiderError, match="stale_device_session"):
-        await service.control(command(pi, "move"), old)
+        await service.control(body, old)
     assert not any(row["method"] == "POST" for row in pi.trace)
     await service.close()
 
@@ -345,8 +346,9 @@ async def test_no_replay_after_device_session_change():
 async def test_invalid_envelope_does_not_reach_actuator(field, value, code):
     service, pi = domain()
     await service.select("demo", service.session)
+    body = command(pi, "arm", **{field: value})
     with pytest.raises(RiderError, match=code):
-        await service.control(command(pi, "arm", **{field: value}), service.session)
+        await service.control(body, service.session)
     # Shape errors stop at the gateway; valid-shaped stale requests are
     # forwarded and rejected by the simulated robot authority.
     assert any(row["method"] == "POST" for row in pi.trace) == (
@@ -359,13 +361,13 @@ async def test_invalid_envelope_does_not_reach_actuator(field, value, code):
 async def test_disarmed_and_settings_revision_refuse_movement():
     service, pi = domain()
     await service.select("demo", service.session)
+    move_body = command(pi, "move")
     with pytest.raises(RiderError, match="motion_not_armed"):
-        await service.control(command(pi, "move"), service.session)
+        await service.control(move_body, service.session)
     await arm(service, pi)
+    height_body = command(pi, "height", height=95, settings_revision=999)
     with pytest.raises(RiderError, match="manual_settings_stale"):
-        await service.control(
-            command(pi, "height", height=95, settings_revision=999), service.session
-        )
+        await service.control(height_body, service.session)
     await service.close()
 
 
@@ -656,8 +658,9 @@ def test_demo_only_configuration_cannot_select_real_mode(monkeypatch):
     "url", ["http://[", "http://localhost:noport", "http://localhost:0"]
 )
 def test_malformed_ports_are_configuration_errors(url):
+    raw = json.dumps([{"id": "a", "label": "A", "url": url}])
     with pytest.raises(RiderError, match="invalid_device_configuration"):
-        configured_devices(json.dumps([{"id": "a", "label": "A", "url": url}]))
+        configured_devices(raw)
 
 
 def test_all_readonly_and_mutation_routes_use_the_same_fixture(monkeypatch):
@@ -874,12 +877,9 @@ async def test_moving_goal_requires_matching_operator_owner_and_fresh_intent():
     with pytest.raises(RiderError):
         await service.goal("fixture_move", {"enabled": True}, service.session)
     await arm(service, pi)
+    goal_body = command(pi, "arm", enabled=True, source="navigation")
     with pytest.raises(RiderError, match="operator_motion_permission_required"):
-        await service.goal(
-            "fixture_move",
-            command(pi, "arm", enabled=True, source="navigation"),
-            service.session,
-        )
+        await service.goal("fixture_move", goal_body, service.session)
     assert not forwarded
     navigation_owner = True
     service.cache.clear()

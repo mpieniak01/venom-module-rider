@@ -47,6 +47,27 @@ def parse_request(text: str, *, addressed=False) -> tuple[bool, ToolCall | None]
         raise RiderError("conversation_input_size", 413)
     message = match.group(1) if match else text
     value = normalized(message)
+    simple = _simple_call(value)
+    if simple is not None:
+        return True, simple
+    direction = _direction_call(value)
+    if direction is not None:
+        return True, direction
+    recognized, call = _argument_call(message, value)
+    if recognized:
+        return True, call
+    if match or re.search(
+        r"\b(jedz|skrec|przod|przodu|tyl|tylu|lewo|prawo|move|turn|forward|"
+        r"backward|left|right|vorwarts|ruckwarts|links|rechts|arm|uzbroj|"
+        r"shell|gpio|reset|height|wysokosc|balance|balans|action|home)\b",
+        value,
+    ):
+        return True, None
+    return False, None
+
+
+def _simple_call(value):
+    """Match the fixed STOP, status and observation aliases in their original order."""
     if value in {
         "stop",
         "zatrzymaj",
@@ -55,7 +76,7 @@ def parse_request(text: str, *, addressed=False) -> tuple[bool, ToolCall | None]
         "halt",
         "anhalten",
     }:
-        return True, ToolCall(name="stop")
+        return ToolCall(name="stop")
     if value in {
         "status",
         "stan",
@@ -65,7 +86,7 @@ def parse_request(text: str, *, addressed=False) -> tuple[bool, ToolCall | None]
         "zustand",
         "batterie",
     }:
-        return True, ToolCall(name="status")
+        return ToolCall(name="status")
     if value in {
         "obserwuj",
         "opisz scene",
@@ -75,7 +96,12 @@ def parse_request(text: str, *, addressed=False) -> tuple[bool, ToolCall | None]
         "what do you see",
         "beschreibe die szene",
     }:
-        return True, ToolCall(name="observe")
+        return ToolCall(name="observe")
+    return None
+
+
+def _direction_call(value):
+    """Recognize only a single explicit direction from the bounded vocabulary."""
     directions = {
         "forward": {
             "przod",
@@ -100,35 +126,36 @@ def parse_request(text: str, *, addressed=False) -> tuple[bool, ToolCall | None]
     }
     for direction, choices in directions.items():
         if value in choices:
-            return True, ToolCall.model_validate(
-                {"name": "move", "direction": direction}
-            )
+            return ToolCall.model_validate({"name": "move", "direction": direction})
+    return None
+
+
+def _argument_call(message, value):
+    """Keep recognized invalid arguments distinct from unaddressed text."""
     for prefixes, name in [
         (("powiedz ", "say ", "sage "), "speak"),
         (("buzka ", "gest ", "face ", "gesture ", "gesicht "), "face"),
     ]:
         for prefix in prefixes:
             if value.startswith(prefix):
-                argument = message.strip()[len(prefix) :].strip()
-                if name == "face":
-                    argument = argument.rstrip(" .!?")
-                try:
-                    return True, ToolCall.model_validate(
-                        {
-                            "name": name,
-                            "text" if name == "speak" else "gesture": argument,
-                        }
-                    )
-                except ValueError:
-                    return True, None
-    if match or re.search(
-        r"\b(jedz|skrec|przod|przodu|tyl|tylu|lewo|prawo|move|turn|forward|"
-        r"backward|left|right|vorwarts|ruckwarts|links|rechts|arm|uzbroj|"
-        r"shell|gpio|reset|height|wysokosc|balance|balans|action|home)\b",
-        value,
-    ):
-        return True, None
+                return True, _argument_value(message, prefix, name)
     return False, None
+
+
+def _argument_value(message, prefix, name):
+    """Validate the raw argument slice without expanding the accepted vocabulary."""
+    argument = message.strip()[len(prefix) :].strip()
+    if name == "face":
+        argument = argument.rstrip(" .!?")
+    try:
+        return ToolCall.model_validate(
+            {
+                "name": name,
+                "text" if name == "speak" else "gesture": argument,
+            }
+        )
+    except ValueError:
+        return None
 
 
 class RiderSkill:
