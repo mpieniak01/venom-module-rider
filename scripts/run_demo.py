@@ -66,6 +66,7 @@ def free_port(port):
     if another process claims the port between this check and startup.
     """
     with socket.socket() as connection:
+        connection.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             connection.bind(("127.0.0.1", port))
         except OSError:

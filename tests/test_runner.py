@@ -200,3 +200,19 @@ def test_free_port_rejects_bound_port_without_connecting():
         # A bound socket need not listen to make the port unavailable.
         assert runner.free_port(port) is False
     assert runner.free_port(port) is True
+
+
+def test_free_port_allows_time_wait_but_rejects_active_reusable_listener():
+    import socket
+
+    with socket.socket() as listener:
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        port = listener.getsockname()[1]
+        assert runner.free_port(port) is False
+        with socket.create_connection(("127.0.0.1", port), timeout=1) as peer:
+            accepted, _ = listener.accept()
+            accepted.close()  # Server performs the active close, entering TIME_WAIT.
+            assert peer.recv(1) == b""
+    assert runner.free_port(port) is True
