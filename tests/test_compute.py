@@ -690,7 +690,8 @@ async def test_worker_cancellation_waits_for_inference_and_cancels_pending():
         worker = service.worker
         worker.cancel()
         await asyncio.wait_for(engines.cancelling.wait(), 2)
-        assert service.inference is not None and not service.inference.done()
+        assert service.inference is not None
+        assert not service.inference.done()
         assert service.jobs["job"].state == "cancelled"
         assert service.jobs["queued"].state == "cancelled"
         assert not service.pending

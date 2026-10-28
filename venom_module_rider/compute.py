@@ -503,6 +503,14 @@ class ComputeService:
             raise RiderError("compute_output_unavailable", 409)
         return job.output, job.output_mime or "audio/wav"
 
+    def _cancel_pending(self):
+        while self.pending:
+            queued = self.jobs.get(self.pending[0])
+            if queued is None:
+                self.pending.popleft()
+            else:
+                self._cancel_job(queued, "cancelled", "compute_cancelled")
+
     async def _run(self):
         try:
             await self._run_jobs()
@@ -512,10 +520,7 @@ class ComputeService:
             running = self.jobs.get(self.running) if self.running else None
             if running is not None and running.state not in TERMINAL:
                 self._cancel_job(running, "cancelled", "compute_cancelled")
-            for job_id in list(self.pending):
-                queued = self.jobs.get(job_id)
-                if queued is not None:
-                    self._cancel_job(queued, "cancelled", "compute_cancelled")
+            self._cancel_pending()
             if self.inference is not None:
                 if not self.inference.done() and not self.inference.cancelling():
                     self.inference.cancel()
@@ -596,10 +601,7 @@ class ComputeService:
                 current = asyncio.current_task()
                 if current is not None and current.cancelling():
                     self._cancel_job(job, "cancelled", "compute_cancelled")
-                    for job_id in list(self.pending):
-                        queued = self.jobs.get(job_id)
-                        if queued is not None:
-                            self._cancel_job(queued, "cancelled", "compute_cancelled")
+                    self._cancel_pending()
                     if self.inference is not None:
                         await asyncio.gather(self.inference, return_exceptions=True)
                     raise
