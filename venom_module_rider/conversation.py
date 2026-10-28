@@ -20,6 +20,8 @@ from .client import PiClient
 from .conversation_tools import RiderSkill, ToolCall, parse_request
 from .errors import RiderError
 
+AGENT_STATE_PATH = "/api/control/agent/state"
+
 MESSAGES = {
     "off": (
         "Polecenia Rider w rozmowach są wyłączone.",
@@ -247,7 +249,7 @@ class RiderConversation:
         self.scopes[context.task_id] = scope
         try:
             self._check(scope)
-            control = await self.domain.read("/api/control/agent/state", 0, force=True)
+            control = await self.domain.read(AGENT_STATE_PATH, 0, force=True)
             self._check(scope)
             scope.safety = self.domain.data(control).get("safety") or {}
         except RiderError as exc:
@@ -293,19 +295,18 @@ class RiderConversation:
             return await self.handle(text, context)
         return None
 
-    async def handle(self, text, context):
-        addressed, call = parse_request(
-            text, addressed=context.target_device_id is not None
-        )
-        if not addressed:
-            return None
-        language = context.language
+    def _request_refusal(self, call, context, language):
+        """Refuse retired, ambiguous or disabled requests before preparing a scope."""
         if context.task_id in self.retired:
             return message("expired", language)
         if call is None:
             return message("ambiguous", language)
         if call.name != "stop" and not self.config()["enabled"]:
             return message("off", language)
+        return None
+
+    async def _request_scope(self, text, call, context, language):
+        """Reuse the captured scope without renewing its safety permission."""
         scope = self.scopes.get(context.task_id)
         if scope is not None and scope.context is not context:
             return message("failed", language) + "conversation_context_conflict"
@@ -323,8 +324,28 @@ class RiderConversation:
             return message("failed", language) + "conversation_busy"
         scope.task = asyncio.current_task()
         if scope.call is None:
-            scope.call = call  # Same captured scope; no renewed safety permission.
+            scope.call = call
         self.scopes[context.task_id] = scope
+        return scope
+
+    async def handle(self, text, context):
+        """Bind an addressed request and preserve the caller cancellation boundary."""
+        addressed, call = parse_request(
+            text, addressed=context.target_device_id is not None
+        )
+        if not addressed:
+            return None
+        language = context.language
+        refusal = self._request_refusal(call, context, language)
+        if refusal is not None:
+            return refusal
+        scope = await self._request_scope(text, call, context, language)
+        if isinstance(scope, str):
+            return scope
+        return await self._run_scope(scope, call, language)
+
+    async def _run_scope(self, scope, call, language):
+        """Translate child invalidation while propagating caller cancellation."""
         try:
             scope.operation = asyncio.create_task(self._execute(scope, call))
             return await scope.operation
@@ -339,27 +360,32 @@ class RiderConversation:
             raise
         finally:
             try:
-                if scope.playback_id and scope.playback_transport:
-                    try:
-                        await asyncio.wait_for(
-                            scope.playback_transport.json(
-                                "/api/voice/playback/cancel",
-                                method="POST",
-                                body={"playback_id": scope.playback_id},
-                                stop=True,
-                            ),
-                            timeout=1.5,
-                        )
-                    except (TimeoutError, RiderError):
-                        pass
+                await self._cancel_playback(scope)
             finally:
                 self._drop(scope)
+
+    async def _cancel_playback(self, scope):
+        """Cancel unfinished playback; caller cancellation must still propagate."""
+        if not scope.playback_id or not scope.playback_transport:
+            return
+        try:
+            await asyncio.wait_for(
+                scope.playback_transport.json(
+                    "/api/voice/playback/cancel",
+                    method="POST",
+                    body={"playback_id": scope.playback_id},
+                    stop=True,
+                ),
+                timeout=1.5,
+            )
+        except (TimeoutError, RiderError):
+            pass
 
     async def _execute(self, scope, call):
         """Run the scoped tool separately from the caller's cancellation."""
         self._check(scope, stop=call.name == "stop")
         if call.name == "move" and not scope.safety:
-            control = await self.domain.read("/api/control/agent/state", 0, force=True)
+            control = await self.domain.read(AGENT_STATE_PATH, 0, force=True)
             self._check(scope)
             scope.safety = self.domain.data(control).get("safety") or {}
         arguments = {
@@ -370,6 +396,7 @@ class RiderConversation:
         return await getattr(self.skill, call.name)(*arguments)
 
     async def invoke(self, call: ToolCall, context):
+        """Execute a single-use scoped tool and retain the bounded result history."""
         scope = self.scopes.get(context.task_id)
         if (
             scope is None
@@ -381,194 +408,10 @@ class RiderConversation:
         self._check(scope, stop=call.name == "stop")
         scope.used = True
         domain = self.domain
-        if call.name != "status" and call.name != "stop":
-            try:
-                ensure_module_mutation_allowed(
-                    module_id="rider", operation_name="conversation:" + call.name
-                )
-            except PermissionError as exc:
-                raise RiderError("environment_read_only", 403) from exc
-        result = {}
-        speech_played = False
-        if call.name == "status":
-            result = await domain.status("overview")
-            safety = (result.get("control") or {}).get("safety") or {}
-            telemetry = result.get("telemetry") or {}
-            xgo = (telemetry.get("devices") or {}).get("xgo") or {}
-            battery = ((xgo.get("sensor_quality") or {}).get("sensors") or {}).get(
-                "battery"
-            ) or {}
-            value = battery.get("value")
-            if (
-                isinstance(value, (int, float))
-                and not isinstance(value, bool)
-                and math.isfinite(value)
-                and battery.get("stale") is not True
-                and battery.get("ready") is True
-            ):
-                percent = (
-                    value * 100
-                    if battery.get("unit") == "ratio"
-                    else value
-                    if battery.get("unit") in {"%", "percent"}
-                    else None
-                )
-                reading = (
-                    f"{percent:.0f}%"
-                    if percent is not None and 0 <= percent <= 100
-                    else "—"
-                )
-            else:
-                reading = "—"
-            reply = (
-                f"{result['connection']['label']}: {result['connection']['status']} · "
-                f"{safety.get('state', 'unknown')} · "
-                f"{message('battery', context.language)}: {reading}"
-            )
-        elif call.name == "stop":
-            result = await domain.control(
-                {
-                    "action": "stop",
-                    "source": "agent",
-                    "execution_context": "agent",
-                    "channel": context.actor,
-                    "request_id": uuid.uuid4().hex,
-                },
-                scope.session,
-            )
-            reply = message("stop", context.language)
-        elif call.name == "move":
-            safety = scope.safety
-            if safety.get("unavailable_error"):
-                raise RiderError(safety["unavailable_error"], 503)
-            if (
-                safety.get("can_move") is not True
-                or safety.get("panel_motion_enabled") is not True
-            ):
-                raise RiderError("motion_not_armed")
-            if (
-                safety.get("owner") != "manual"
-                or safety.get("execution_context") != "panel"
-                or safety.get("arming_mode") != "operator"
-            ):
-                raise RiderError("operator_motion_permission_required", 403)
-            if (
-                not safety.get("agent_epoch")
-                or type(safety.get("agent_last_seq")) is not int
-            ):
-                raise RiderError("unsupported_agent_contract", 502)
-            control = await domain.read("/api/control/agent/state", 0, force=True)
-            self._check(scope)
-            current = domain.data(control).get("safety") or {}
-            if (current.get("generation"), current.get("agent_epoch")) != (
-                safety.get("generation"),
-                safety.get("agent_epoch"),
-            ):
-                raise RiderError("conversation_intent_expired", 409)
-            body = {
-                "generation": safety["generation"],
-                "agent_epoch": safety["agent_epoch"],
-                "seq": current["agent_last_seq"] + 1,
-                "ts": control["meta"]["server_time"],
-                "ttl_ms": 500,
-                "settings_revision": (safety.get("manual_settings") or {}).get(
-                    "revision"
-                ),
-                "request_id": uuid.uuid4().hex,
-                "intent_id": context.task_id,
-                "channel": context.actor,
-                "direction": call.direction,
-            }
-            result = await domain.transport().json(
-                "/api/control/agent/pulse", method="POST", body=body
-            )
-            reply = message("move", context.language)
-        elif call.name == "face":
-            library = domain.data(await domain.read("/api/face-studio/gestures", 5))
-            gestures = library.get("gestures") or {}
-            gesture = (
-                next(
-                    (
-                        row
-                        for row in gestures
-                        if isinstance(row, dict)
-                        and (row.get("id") or row.get("key")) == call.gesture
-                    ),
-                    None,
-                )
-                if isinstance(gestures, list)
-                else gestures.get(call.gesture)
-                if isinstance(gestures, dict)
-                else None
-            )
-            if not isinstance(gesture, dict):
-                raise RiderError("unknown_gesture", 404)
-            self._check(scope)
-            result = await domain.mutate(
-                "/api/face-studio/runtime/play",
-                {
-                    "gesture_id": call.gesture,
-                    "expr": gesture.get("expr", "neutral"),
-                    "sink": "lcd",
-                },
-                scope.session,
-            )
-            reply = message("face", context.language)
-        elif call.name == "observe":
-            payload, mime, headers = await domain.camera("raw")
-            self._check(scope)
-            if (
-                headers.get("x-rider-placeholder") == "true"
-                or headers.get("x-rider-stale") == "true"
-            ):
-                raise RiderError("camera_frame_stale", 409)
-            engine = self.app.state.rider_compute.engines
-            observation = await engine.execute(
-                "vision.describe",
-                {"language": context.language},
-                payload,
-                {"content_type": mime},
-            )
-            self._check(scope)
-            result = {
-                "data": observation.data,
-                "runtime": observation.runtime,
-                "quality": observation.quality,
-                "source": headers,
-            }
-            reply = str(observation.data.get("text", ""))
-        else:
-            engine = self.app.state.rider_compute.engines
-            observation = await engine.execute(
-                "audio.synthesize",
-                {"language": context.language},
-                call.text.encode(),
-                {},
-            )
-            self._check(scope)
-            if not observation.binary:
-                raise RiderError("compute_output_unavailable", 503)
-            scope.playback_id = uuid.uuid4().hex
-            scope.playback_transport = domain.transport()
-            ttl = min(60000, int((context.deadline - time.monotonic()) * 1000))
-            if ttl <= 0:
-                raise RiderError("conversation_intent_expired", 409)
-            result = await scope.playback_transport.json(
-                "/api/voice/playback",
-                method="POST",
-                body=observation.binary,
-                headers={
-                    "Content-Type": "audio/wav",
-                    "X-Rider-Playback-Id": scope.playback_id,
-                    "X-Rider-Playback-TTL-Ms": str(ttl),
-                },
-            )
-            self._check(scope)
-            if (result.get("data") or {}).get("state") != "played":
-                raise RiderError("playback_not_completed", 502)
-            scope.playback_id = None
-            speech_played = True
-            reply = message("speak", context.language)
+        self._require_mutation(call)
+        result, reply, speech_played = await self._invoke_call(
+            domain, scope, call, context
+        )
         if call.name != "stop":
             self._check(scope)
         self.completed[context.task_id] = {
@@ -583,6 +426,228 @@ class RiderConversation:
         while len(self.completed) > 16:
             self.completed.popitem(last=False)
         return reply
+
+    @staticmethod
+    def _require_mutation(call):
+        if call.name in {"status", "stop"}:
+            return
+        try:
+            ensure_module_mutation_allowed(
+                module_id="rider", operation_name="conversation:" + call.name
+            )
+        except PermissionError as exc:
+            raise RiderError("environment_read_only", 403) from exc
+
+    async def _invoke_call(self, domain, scope, call, context):
+        """Dispatch the tool while retaining the established speech fallback."""
+        speech_played = False
+        if call.name == "status":
+            result, reply = await self._invoke_status(domain, context)
+        elif call.name == "stop":
+            result, reply = await self._invoke_stop(domain, scope, context)
+        elif call.name == "move":
+            result, reply = await self._invoke_move(domain, scope, call, context)
+        elif call.name == "face":
+            result, reply = await self._invoke_face(domain, scope, call, context)
+        elif call.name == "observe":
+            result, reply = await self._invoke_observe(domain, scope, context)
+        else:
+            result, reply = await self._invoke_speak(domain, scope, call, context)
+            speech_played = True
+        return result, reply, speech_played
+
+    async def _invoke_status(self, domain, context):
+        result = await domain.status("overview")
+        safety = (result.get("control") or {}).get("safety") or {}
+        reading = self._battery_reading(result)
+        reply = (
+            f"{result['connection']['label']}: {result['connection']['status']} · "
+            f"{safety.get('state', 'unknown')} · "
+            f"{message('battery', context.language)}: {reading}"
+        )
+        return result, reply
+
+    @staticmethod
+    def _battery_reading(result):
+        telemetry = result.get("telemetry") or {}
+        xgo = (telemetry.get("devices") or {}).get("xgo") or {}
+        battery = ((xgo.get("sensor_quality") or {}).get("sensors") or {}).get(
+            "battery"
+        ) or {}
+        value = battery.get("value")
+        if not (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(value)
+            and battery.get("stale") is not True
+            and battery.get("ready") is True
+        ):
+            return "—"
+        if battery.get("unit") == "ratio":
+            percent = value * 100
+        elif battery.get("unit") in {"%", "percent"}:
+            percent = value
+        else:
+            return "—"
+        if 0 <= percent <= 100:
+            return f"{percent:.0f}%"
+        return "—"
+
+    async def _invoke_stop(self, domain, scope, context):
+        result = await domain.control(
+            {
+                "action": "stop",
+                "source": "agent",
+                "execution_context": "agent",
+                "channel": context.actor,
+                "request_id": uuid.uuid4().hex,
+            },
+            scope.session,
+        )
+        reply = message("stop", context.language)
+        return result, reply
+
+    @staticmethod
+    def _motion_safety(scope):
+        safety = scope.safety
+        if safety.get("unavailable_error"):
+            raise RiderError(safety["unavailable_error"], 503)
+        if (
+            safety.get("can_move") is not True
+            or safety.get("panel_motion_enabled") is not True
+        ):
+            raise RiderError("motion_not_armed")
+        if (
+            safety.get("owner") != "manual"
+            or safety.get("execution_context") != "panel"
+            or safety.get("arming_mode") != "operator"
+        ):
+            raise RiderError("operator_motion_permission_required", 403)
+        if (
+            not safety.get("agent_epoch")
+            or type(safety.get("agent_last_seq")) is not int
+        ):
+            raise RiderError("unsupported_agent_contract", 502)
+        return safety
+
+    async def _invoke_move(self, domain, scope, call, context):
+        safety = self._motion_safety(scope)
+        control = await domain.read(AGENT_STATE_PATH, 0, force=True)
+        self._check(scope)
+        current = domain.data(control).get("safety") or {}
+        if (current.get("generation"), current.get("agent_epoch")) != (
+            safety.get("generation"),
+            safety.get("agent_epoch"),
+        ):
+            raise RiderError("conversation_intent_expired", 409)
+        body = {
+            "generation": safety["generation"],
+            "agent_epoch": safety["agent_epoch"],
+            "seq": current["agent_last_seq"] + 1,
+            "ts": control["meta"]["server_time"],
+            "ttl_ms": 500,
+            "settings_revision": (safety.get("manual_settings") or {}).get("revision"),
+            "request_id": uuid.uuid4().hex,
+            "intent_id": context.task_id,
+            "channel": context.actor,
+            "direction": call.direction,
+        }
+        result = await domain.transport().json(
+            "/api/control/agent/pulse", method="POST", body=body
+        )
+        reply = message("move", context.language)
+        return result, reply
+
+    @staticmethod
+    def _find_gesture(library, gesture_id):
+        gestures = library.get("gestures") or {}
+        if isinstance(gestures, list):
+            for row in gestures:
+                if (
+                    isinstance(row, dict)
+                    and (row.get("id") or row.get("key")) == gesture_id
+                ):
+                    return row
+            return None
+        if isinstance(gestures, dict):
+            return gestures.get(gesture_id)
+        return None
+
+    async def _invoke_face(self, domain, scope, call, context):
+        library = domain.data(await domain.read("/api/face-studio/gestures", 5))
+        gesture = self._find_gesture(library, call.gesture)
+        if not isinstance(gesture, dict):
+            raise RiderError("unknown_gesture", 404)
+        self._check(scope)
+        result = await domain.mutate(
+            "/api/face-studio/runtime/play",
+            {
+                "gesture_id": call.gesture,
+                "expr": gesture.get("expr", "neutral"),
+                "sink": "lcd",
+            },
+            scope.session,
+        )
+        reply = message("face", context.language)
+        return result, reply
+
+    async def _invoke_observe(self, domain, scope, context):
+        payload, mime, headers = await domain.camera("raw")
+        self._check(scope)
+        if (
+            headers.get("x-rider-placeholder") == "true"
+            or headers.get("x-rider-stale") == "true"
+        ):
+            raise RiderError("camera_frame_stale", 409)
+        engine = self.app.state.rider_compute.engines
+        observation = await engine.execute(
+            "vision.describe",
+            {"language": context.language},
+            payload,
+            {"content_type": mime},
+        )
+        self._check(scope)
+        result = {
+            "data": observation.data,
+            "runtime": observation.runtime,
+            "quality": observation.quality,
+            "source": headers,
+        }
+        reply = str(observation.data.get("text", ""))
+        return result, reply
+
+    async def _invoke_speak(self, domain, scope, call, context):
+        engine = self.app.state.rider_compute.engines
+        observation = await engine.execute(
+            "audio.synthesize",
+            {"language": context.language},
+            call.text.encode(),
+            {},
+        )
+        self._check(scope)
+        if not observation.binary:
+            raise RiderError("compute_output_unavailable", 503)
+        scope.playback_id = uuid.uuid4().hex
+        scope.playback_transport = domain.transport()
+        ttl = min(60000, int((context.deadline - time.monotonic()) * 1000))
+        if ttl <= 0:
+            raise RiderError("conversation_intent_expired", 409)
+        result = await scope.playback_transport.json(
+            "/api/voice/playback",
+            method="POST",
+            body=observation.binary,
+            headers={
+                "Content-Type": "audio/wav",
+                "X-Rider-Playback-Id": scope.playback_id,
+                "X-Rider-Playback-TTL-Ms": str(ttl),
+            },
+        )
+        self._check(scope)
+        if (result.get("data") or {}).get("state") != "played":
+            raise RiderError("playback_not_completed", 502)
+        scope.playback_id = None
+        reply = message("speak", context.language)
+        return result, reply
 
     async def close(self):
         self.enabled, self.closed = False, True

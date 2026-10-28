@@ -1160,3 +1160,38 @@ async def test_external_cancellation_is_not_misreported_as_device_change(
     assert not service.operations
     assert service.native_admission_mutating == 0
     await service.close()
+
+
+@pytest.mark.parametrize(
+    "original_action,changed_action,expected_path",
+    [("arm", "move", "/api/safety"), ("move", "arm", "/api/control")],
+)
+async def test_control_route_uses_action_captured_before_intent_validation(
+    monkeypatch, original_action, changed_action, expected_path
+):
+    service, pi = domain()
+    await service.select("demo", service.session)
+    body = command(pi, original_action)
+    entered, resume = asyncio.Event(), asyncio.Event()
+    calls = []
+
+    async def validate(payload, session):
+        entered.set()
+        await resume.wait()
+        return {"generation": payload["generation"]}
+
+    async def record(path, **kwargs):
+        calls.append(path)
+        return {"data": {}, "meta": {}}
+
+    monkeypatch.setattr(service, "validate_intent", validate)
+    monkeypatch.setattr(service.client, "json", record)
+    try:
+        task = asyncio.create_task(service._control(body, service.session))
+        await asyncio.wait_for(entered.wait(), 1)
+        body["action"] = changed_action
+        resume.set()
+        await asyncio.wait_for(task, 1)
+        assert calls == [expected_path]
+    finally:
+        await service.close()
