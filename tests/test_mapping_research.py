@@ -296,3 +296,58 @@ def test_make_pose_uses_research_runtime_and_features_do_not_require_it(tmp_path
             assert report["pose"]["error"] == "mapping_pose_views"
         else:
             assert report["pose"]["state"] == "not_requested"
+
+
+def test_publish_rejects_directory_symlink_swap(tmp_path, monkeypatch):
+    import os
+
+    if not hasattr(os, "O_NOFOLLOW"):
+        pytest.skip("requires O_NOFOLLOW")
+    parent = tmp_path / "parent"
+    parent.mkdir()
+    selected = parent / "selected"
+    selected.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    original_open = os.open
+    swapped = False
+
+    def swap(path, flags, *args, **kwargs):
+        nonlocal swapped
+        if path == "selected" and kwargs.get("dir_fd") is not None and not swapped:
+            swapped = True
+            selected.rename(parent / "saved")
+            selected.symlink_to(outside, target_is_directory=True)
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(research.os, "open", swap)
+    with pytest.raises(ValueError, match="mapping_output"):
+        research.publish(selected / "report.json", {"kind": "fixture"})
+    assert swapped
+    assert not (outside / "report.json").exists()
+
+
+def test_publish_does_not_redirect_after_directory_open(tmp_path, monkeypatch):
+    parent = tmp_path / "parent"
+    parent.mkdir()
+    selected = parent / "selected"
+    selected.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    real_link = research.os.link
+
+    def swap(*args, **kwargs):
+        selected.rename(parent / "saved")
+        selected.symlink_to(outside, target_is_directory=True)
+        return real_link(*args, **kwargs)
+
+    monkeypatch.setattr(research.os, "link", swap)
+    with pytest.raises(ValueError, match="mapping_output_directory_changed"):
+        research.publish(selected / "report.json", {"kind": "fixture"})
+    assert not (outside / "report.json").exists()
+
+
+def test_publish_refuses_to_create_git_metadata_directory(tmp_path):
+    with pytest.raises(ValueError, match="mapping_output"):
+        research.publish(tmp_path / ".git" / "report.json", {"kind": "fixture"})
+    assert not (tmp_path / ".git").exists()
