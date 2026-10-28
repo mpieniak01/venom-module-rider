@@ -40,7 +40,8 @@ def test_preview_contains_actual_route_near_guard_and_boundary_with_source_scali
     danger = render_evidence(jpeg((100, 100)), row)
     with Image.open(io.BytesIO(danger)) as image:
         r, g, b = image.getpixel((50, 66))
-        assert r > g + 50 and r > b + 50
+        assert r > g + 50
+        assert r > b + 50
 
 
 def test_invalid_evidence_and_bad_preview_never_create_geometry():

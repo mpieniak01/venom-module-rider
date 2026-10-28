@@ -26,7 +26,8 @@ async def test_live_inference_does_not_use_shared_application_executor(monkeypat
     try:
         result = await loop.decide("pi", frame(), b"fixture")
         assert result["state"] == "clear"
-        assert names and names[0].startswith("rider-vision")
+        assert names
+        assert names[0].startswith("rider-vision")
     finally:
         await loop.close()
 

@@ -74,7 +74,8 @@ async def test_cancelled_preview_does_not_cancel_shared_pi_inference_or_arm_it()
         await diagnostic
     release.set()
     result = await control
-    assert detector.calls == 1 and result["action"] == "stop"
+    assert detector.calls == 1
+    assert result["action"] == "stop"
     assert result["clear_count"] == 1
     await loop.close()
 
@@ -125,7 +126,8 @@ async def test_different_input_while_model_busy_is_rejected_without_a_backlog():
     assert ("pi", "second") not in loop.runs
     release.set()
     await active
-    assert detector.calls == 1 and len(loop.inference_cache) == 1
+    assert detector.calls == 1
+    assert len(loop.inference_cache) == 1
     await loop.close()
 
 
@@ -136,9 +138,11 @@ async def test_shared_cache_is_bounded_and_shutdown_removes_source_results():
         await loop.decide(
             "pi", frame("run", sequence=index), str(index).encode(), source_key=index
         )
-    assert len(loop.inference_cache) == 8 and detector.calls == 12
+    assert len(loop.inference_cache) == 8
+    assert detector.calls == 12
     await loop.close()
-    assert not loop.inference_cache and not loop.previews
+    assert not loop.inference_cache
+    assert not loop.previews
 
 
 async def test_pi_handoff_waits_for_diagnostic_without_another_preview_jumping_ahead():
@@ -167,8 +171,10 @@ async def test_pi_handoff_waits_for_diagnostic_without_another_preview_jumping_a
         release.set()
         await diagnostic
         result = await control
-        assert result["run_id"] == "new-control" and result["action"] == "stop"
-        assert detector.calls == 2 and result["clear_count"] == 1
+        assert result["run_id"] == "new-control"
+        assert result["action"] == "stop"
+        assert detector.calls == 2
+        assert result["clear_count"] == 1
     finally:
         release.set()
         await asyncio.gather(
@@ -193,7 +199,8 @@ async def test_waiting_for_diagnostic_never_renews_the_pi_capture_budget():
                 b"new",
                 source_key="new",
             )
-        assert detector.calls == 1 and ("pi", "expired") not in loop.runs
+        assert detector.calls == 1
+        assert ("pi", "expired") not in loop.runs
     finally:
         release.set()
         await diagnostic
@@ -222,7 +229,8 @@ async def test_cancelled_waiter_does_not_cancel_diagnostic_or_leave_priority_res
         result = await loop.decide(
             "pi", frame("next-preview"), b"next", source_key="next", with_preview=True
         )
-        assert result["run_id"] == "next-preview" and detector.calls == 2
+        assert result["run_id"] == "next-preview"
+        assert detector.calls == 2
     finally:
         release.set()
         await asyncio.gather(

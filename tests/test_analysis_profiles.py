@@ -56,15 +56,14 @@ def test_retained_profiles_share_config_and_model_presence_is_not_inference(
     assert profile.describe()["error"] == "analysis_model_unavailable"
     da2(profile)
     presence = profile.describe()
-    assert (
-        presence["installed"]
-        and not presence["loaded"]
-        and not presence["content_verified"]
-    )
+    assert presence["installed"]
+    assert not presence["loaded"]
+    assert not presence["content_verified"]
     assert presence["resolution"] == "production_preprocessor"
     assert str(tmp_path) not in json.dumps(presence)
     qualified = profile.qualify()
-    assert qualified["content_verified"] and qualified["device"] == "cuda"
+    assert qualified["content_verified"]
+    assert qualified["device"] == "cuda"
     assert qualified["drive_supported"] is False
     assert len(qualified["fingerprint"]) == 64
     assert configured.resolve("da3-small-280").describe()["windows"] == [1, 3, 5]

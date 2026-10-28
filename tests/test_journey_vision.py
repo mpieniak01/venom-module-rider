@@ -62,7 +62,8 @@ async def test_two_obstacles_get_separate_pi_approved_correction_budgets(vision)
     loop, detector, _ = vision
     for seq in range(1, 4):
         first = await decide(vision, seq)
-    assert first["action"] == "steer_right" and first["turn_count"] == 1
+    assert first["action"] == "steer_right"
+    assert first["turn_count"] == 1
     waiting = await decide(vision, 4, motion_phase="steer_wait")
     assert waiting["action"] == "stop"
     detector.result = {**obstacle(), "state": "clear"}
@@ -73,7 +74,8 @@ async def test_two_obstacles_get_separate_pi_approved_correction_budgets(vision)
     detector.result = obstacle("right")
     for seq in range(10, 13):
         second = await decide(vision, seq, epoch=1)
-    assert second["action"] == "steer_left" and second["turn_count"] == 1
+    assert second["action"] == "steer_left"
+    assert second["turn_count"] == 1
     assert second["journey"] == {"version": 1, "id": "mission", "maneuver_epoch": 1}
     assert second["host_session"] == first["host_session"] == loop.host_session
 
@@ -87,7 +89,8 @@ async def test_clear_without_pi_transition_does_not_replenish_budget(vision):
         await decide(vision, seq)
     detector.result = obstacle()
     result = await decide(vision, 7)
-    assert result["action"] == "steer_right" and result["turn_count"] == 2
+    assert result["action"] == "steer_right"
+    assert result["turn_count"] == 2
     for seq in range(8, 10):
         result = await decide(vision, seq)
         assert result["turn_count"] == 2
@@ -164,9 +167,11 @@ async def test_long_clear_sequence_preserves_session_and_bounded_storage(vision)
     detector.result = {**obstacle(), "state": "clear"}
     for seq in range(1, 202):
         result = await decide(vision, seq)
-    assert now[0] > 10 and result["action"] == "go"
+    assert now[0] > 10
+    assert result["action"] == "go"
     assert result["valid_for_ms"] <= 300
-    assert len(loop.runs) == 1 and len(loop.previews) == 0
+    assert len(loop.runs) == 1
+    assert len(loop.previews) == 0
     assert loop.status()["navigation_journey_version"] == 1
     another = VisionLoop(Detector())
     assert another.host_session != loop.host_session
@@ -250,7 +255,8 @@ async def test_actual_pi_lease_and_host_planner_pass_two_obstacles_then_stop(vis
     clear = {**obstacle(), "state": "clear"}
     for _ in range(160):
         await cycle(clear)
-    assert now[0] > 10 and not lease.latched
+    assert now[0] > 10
+    assert not lease.latched
     for side, expected_epoch in (("left", 1), ("right", 2)):
         count = len([x for x in outputs if x[0] == "steer"])
         for _ in range(3):
@@ -261,7 +267,8 @@ async def test_actual_pi_lease_and_host_planner_pass_two_obstacles_then_stop(vis
             if lease.journey.context["maneuver_epoch"] == expected_epoch:
                 break
         assert lease.journey.context["maneuver_epoch"] == expected_epoch
-        assert lease.turn_count == 0 and not lease.latched
+        assert lease.turn_count == 0
+        assert not lease.latched
     # A current-looking frame with the preceding host epoch is still obsolete.
     sequence += 1
     f = frame(sequence, epoch=1)
@@ -281,7 +288,8 @@ async def test_actual_pi_lease_and_host_planner_pass_two_obstacles_then_stop(vis
     }
     before = len([x for x in outputs if x[0] == "go"])
     assert not lease.accept(rejected, f.frame_id, sequence, now[0])
-    assert lease.latched and lease.reason == "navigation_journey_identity_mismatch"
+    assert lease.latched
+    assert lease.reason == "navigation_journey_identity_mismatch"
     assert outputs[-1] == ("halt",)
     assert len([x for x in outputs if x[0] == "go"]) == before
     assert [x[1] for x in outputs if x[0] == "steer"] == ["right", "left"]

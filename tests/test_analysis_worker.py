@@ -107,7 +107,8 @@ def test_real_geometry_raw_depth_overlay_and_measured_stage_association(
         for p in store.blobs.glob("*")
     }
     messages, report = execute(source, monkeypatch)
-    assert PlaneModel.loaded == 1 and report["summary"]["frames"] == 3
+    assert PlaneModel.loaded == 1
+    assert report["summary"]["frames"] == 3
     assert report["summary"]["false_go"] is None
     assert [row["state"] for row in report["rows"]] == ["clear"] * 3
     assert report["summary"]["temporal_pairs"] == 2
@@ -118,7 +119,8 @@ def test_real_geometry_raw_depth_overlay_and_measured_stage_association(
         assert row["sample_id"] in [
             sample["sample_id"] for sample in source["context"]["inputs"]
         ]
-        assert row["drive_supported"] is False and row["actual_window"] == 1
+        assert row["drive_supported"] is False
+        assert row["actual_window"] == 1
         assert len(message["artifacts"]) == 3
         for artifact in message["artifacts"]:
             raw = base64.b64decode(artifact["data"])
@@ -144,11 +146,13 @@ def test_real_geometry_raw_depth_overlay_and_measured_stage_association(
 def test_quality_gate_does_not_load_model_and_probe_is_explicit(tmp_path, monkeypatch):
     source, _store = job(tmp_path, monkeypatch, dark=True)
     _messages, report = execute(source, monkeypatch)
-    assert PlaneModel.loaded == 0 and report["model_load_ms"] is None
+    assert PlaneModel.loaded == 0
+    assert report["model_load_ms"] is None
     assert report["summary"]["rejected_inputs"] == 3
     source["context"]["spec"]["quality_mode"] = "model_probe"
     _messages, report = execute(source, monkeypatch)
-    assert PlaneModel.loaded == 1 and report["summary"]["rejected_inputs"] == 0
+    assert PlaneModel.loaded == 1
+    assert report["summary"]["rejected_inputs"] == 0
     assert all(not row["image_quality_passed"] for row in report["rows"])
     assert all(not row["drive_supported"] for row in report["rows"])
 

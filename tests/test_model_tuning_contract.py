@@ -41,12 +41,15 @@ def test_defaults_and_surface_are_independent_from_profile():
     assert active_model_id(old) == SEG
     assert not has_semantic_tuning(old)
     raw = semantic_parameters(old)
-    assert raw["traversable_labels"] == [3] and raw["pixel_confidence"] == 0.8
-    assert raw["min_floor_fraction"] == 1 and raw["min_region_fraction"] == 0
+    assert raw["traversable_labels"] == [3]
+    assert raw["pixel_confidence"] == 0.8
+    assert raw["min_floor_fraction"] == 1
+    assert raw["min_region_fraction"] == 0
     fluid = {**DEFAULT_BEHAVIOR, "profile_id": "fluid"}
     tuned = semantic_parameters(perception(), fluid)
     assert tuned["traversable_labels"] == [3, 28]
-    assert tuned["pixel_confidence"] == 0.7 and tuned["min_floor_fraction"] == 0.92
+    assert tuned["pixel_confidence"] == 0.7
+    assert tuned["min_floor_fraction"] == 0.92
 
 
 def test_per_model_overrides_and_inheritance():
@@ -59,8 +62,10 @@ def test_per_model_overrides_and_inheritance():
     behavior = {**DEFAULT_BEHAVIOR, "profile_id": "balanced"}
     seg = semantic_parameters(policy, behavior)
     yolo = semantic_parameters(policy, behavior, YOLO)
-    assert seg["pixel_confidence"] == 0.63 and seg["min_floor_fraction"] == 0.95
-    assert yolo["pixel_confidence"] == 0.87 and yolo["traversable_labels"] == [3]
+    assert seg["pixel_confidence"] == 0.63
+    assert seg["min_floor_fraction"] == 0.95
+    assert yolo["pixel_confidence"] == 0.87
+    assert yolo["traversable_labels"] == [3]
     assert policy["semantic_models"][SEG]["surface"] == "floor_rug"
 
 

@@ -41,7 +41,8 @@ async def test_cli_end_to_end_http_submit_recover_report_compare_and_errors(
 
             assert (await command("profiles"))[0] == 0
             code, text = await command("submit", session, "--request-id", "cli")
-            assert code == 0 and '"request_id": "cli"' in text
+            assert code == 0
+            assert '"request_id": "cli"' in text
             row = manager.store.by_request("cli")
             assert (await finish(manager, row["id"]))["state"] == "succeeded"
             for args in [
@@ -53,13 +54,16 @@ async def test_cli_end_to_end_http_submit_recover_report_compare_and_errors(
                 ("cancel", row["id"]),
             ]:
                 code, text = await command(*args)
-                assert code == 0 and row["id"] in text
+                assert code == 0
+                assert row["id"] in text
             code, text = await command("recover", "unknown")
-            assert code == 1 and '"status": 404' in text
+            assert code == 1
+            assert '"status": 404' in text
             invalid = tmp_path / "invalid.json"
             invalid.write_text("not JSON")
             code, text = await command("submit", session, "--spec", str(invalid))
-            assert code == 1 and "analysis_cli_failed" in text
+            assert code == 1
+            assert "analysis_cli_failed" in text
             assert len(manager.store.list()) == 1
         finally:
             server.should_exit = True

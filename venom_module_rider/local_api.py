@@ -4,7 +4,7 @@ import os
 import ssl
 import urllib.error
 import urllib.request
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -49,3 +49,25 @@ def local_api_origin(value: str) -> str:
     # certificates must therefore cover the actual numeric loopback address.
     host = "[::1]" if parsed.hostname == "::1" else "127.0.0.1"
     return parsed.scheme + "://" + host + (f":{port}" if port is not None else "")
+
+
+def local_api_path(path: str) -> str:
+    """Keep credentials on a relative API route, including after URL decoding."""
+    if (
+        not isinstance(path, str)
+        or not path.startswith("/")
+        or path.startswith("//")
+        or any(ord(c) <= 32 or ord(c) == 127 for c in path)
+        or "#" in path
+    ):
+        raise ValueError("local_api_path_required")
+    route = path.partition("?")[0]
+    # Reject encoded traversal too; query values remain opaque data.
+    for _ in range(len(route) + 1):
+        if "\\" in route or any(part in {".", ".."} for part in route.split("/")):
+            raise ValueError("local_api_path_required")
+        decoded = unquote(route)
+        if decoded == route:
+            return path
+        route = decoded
+    raise ValueError("local_api_path_required")

@@ -24,7 +24,8 @@ def record():
 def test_original_clock_and_quality_survive_canonical_validation():
     row = validate_evidence(record())
     assert row["source_clock_domain"] == "device-wall-unsynchronised"
-    assert row["source_observed_at"] == 10 and row["received_mono"] == 20
+    assert row["source_observed_at"] == 10
+    assert row["received_mono"] == 20
     assert row["quality"]["physical_validation"] == "unverified"
 
 

@@ -50,12 +50,16 @@ async def test_switch_stops_old_motion_and_loops_then_restores_without_activatio
     service.cache["old"] = (1, {})
     service.sequences["old"] = 20
     result = await service.select("prod", old)
-    assert result["device_id"] == "prod" and result["session"] != old
-    assert pis["demo"].state == "DISARMED" and not pis["demo"].safety()["moving"]
+    assert result["device_id"] == "prod"
+    assert result["session"] != old
+    assert pis["demo"].state == "DISARMED"
+    assert not pis["demo"].safety()["moving"]
     assert not pis["demo"].goals["s14_venom_navigation"]
     assert not pis["demo"].goals["s15_venom_perception"]
-    assert pis["prod"].trace == [] and pis["prod"].state == "DISARMED"
-    assert not service.cache and not service.sequences
+    assert pis["prod"].trace == []
+    assert pis["prod"].state == "DISARMED"
+    assert not service.cache
+    assert not service.sequences
     with pytest.raises(RiderError, match="stale_device_session"):
         await service.mutate("/api/resource/camera", {"enabled": True}, old)
     assert json.loads(path.read_text()) == {"version": 1, "device_id": "prod"}
@@ -165,6 +169,7 @@ async def test_unknown_device_does_not_change_or_persist_selection(tmp_path):
     await service.restore("demo")
     with pytest.raises(RiderError, match="unknown_device"):
         await service.select("missing", service.session)
-    assert service.device.id == "demo" and not path.exists()
+    assert service.device.id == "demo"
+    assert not path.exists()
     assert pis["demo"].trace == []
     await service.close()

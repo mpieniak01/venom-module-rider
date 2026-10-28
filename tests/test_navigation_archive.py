@@ -640,3 +640,79 @@ def test_export_artifact_rejects_symlink_swapped_before_read(tmp_path, monkeypat
     monkeypatch.setattr(archive.os, "open", swap)
     with pytest.raises(ValueError, match="analysis_navigation_export_failed"):
         archive.export_evidence(report, artifacts, timeline, tmp_path / "out")
+
+
+def test_export_directory_swap_cannot_redirect_output(tmp_path, monkeypatch):
+    report, artifacts, timeline, _, _ = fixture_export(tmp_path)
+    output = tmp_path / "export"
+    moved = tmp_path / "pinned"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    original = archive.exclusive_file
+
+    def swapped(directory, name, **kwargs):
+        if name == "manifest.jsonl":
+            output.rename(moved)
+            output.symlink_to(outside, target_is_directory=True)
+        return original(directory, name, **kwargs)
+
+    monkeypatch.setattr(archive, "exclusive_file", swapped)
+    with pytest.raises(ValueError, match="secure_output_directory_changed"):
+        archive.export_evidence(report, artifacts, timeline, output)
+    assert list(outside.iterdir()) == []
+    assert (moved / "manifest.jsonl").is_file()
+    assert (moved / "EXPORT.json").is_file()
+
+
+def test_export_rejects_symlink_output_parent(tmp_path):
+    report, artifacts, timeline, _, _ = fixture_export(tmp_path)
+    parent = tmp_path / "alias"
+    actual = tmp_path / "actual"
+    actual.mkdir()
+    parent.symlink_to(actual, target_is_directory=True)
+    with pytest.raises(OSError):
+        archive.export_evidence(report, artifacts, timeline, parent / "out")
+    assert list(actual.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "name", ["", ".", "..", "nested/result.json", "/absolute.json"]
+)
+def test_secure_output_rejects_nonlocal_filename(tmp_path, name):
+    from venom_module_rider.secure_output import exclusive_file, output_directory
+
+    with output_directory(tmp_path) as descriptor:
+        with pytest.raises(ValueError, match="secure_output_name"):
+            exclusive_file(descriptor, name)
+
+
+def test_secure_output_exclusive_creation_preserves_existing_content(tmp_path):
+    from venom_module_rider.secure_output import exclusive_file, output_directory
+
+    target = tmp_path / "existing.json"
+    target.write_text("original")
+    with output_directory(tmp_path) as descriptor:
+        with pytest.raises(FileExistsError):
+            exclusive_file(descriptor, target.name)
+    assert target.read_text() == "original"
+
+
+def test_secure_output_closes_descriptor_when_stream_creation_fails(
+    tmp_path, monkeypatch
+):
+    import os
+
+    from venom_module_rider import secure_output
+
+    captured = []
+
+    def failed(descriptor, *args, **kwargs):
+        captured.append(descriptor)
+        raise RuntimeError("stream failure")
+
+    with secure_output.output_directory(tmp_path) as directory:
+        monkeypatch.setattr(secure_output.os, "fdopen", failed)
+        with pytest.raises(RuntimeError, match="stream failure"):
+            secure_output.exclusive_file(directory, "output.json")
+        with pytest.raises(OSError):
+            os.fstat(captured[0])

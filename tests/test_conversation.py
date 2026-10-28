@@ -889,6 +889,69 @@ async def test_external_chat_cancellation_propagates_and_releases_scope(
     turn = context()
     task = asyncio.create_task(rig.registry.handle("Rider powiedz hello", turn))
     await asyncio.wait_for(entered.wait(), 2)
+    provider_task = next(iter(rig.provider.scopes.values())).task
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    # The registry intentionally bounds cancellation without awaiting cleanup.
+    outcome = await asyncio.wait_for(
+        asyncio.gather(provider_task, return_exceptions=True), 2
+    )
+    assert isinstance(outcome[0], asyncio.CancelledError)
+    assert not rig.provider.scopes
+
+
+@pytest.mark.parametrize("invalidate_first", [True, False])
+async def test_external_cancel_wins_concurrent_manual_invalidation(
+    rig, monkeypatch, invalidate_first
+):
+    enable(rig)
+    entered = asyncio.Event()
+
+    async def blocked(*args):
+        entered.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(rig.provider.skill, "speak", blocked)
+    turn = context()
+    with conversation_turn(turn):
+        task = asyncio.create_task(rig.provider.handle("Rider powiedz hello", turn))
+    await asyncio.wait_for(entered.wait(), 2)
+    if invalidate_first:
+        rig.provider.invalidate()
+        task.cancel()
+    else:
+        task.cancel()
+        rig.provider.invalidate()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert not rig.provider.scopes
+
+
+async def test_cancel_during_playback_cleanup_propagates_and_releases_scope(
+    rig, monkeypatch
+):
+    enable(rig)
+    client = rig.domain.transport()
+    entered, cleanup = asyncio.Event(), asyncio.Event()
+    original = client.json
+
+    async def playback(path, **kwargs):
+        if path == "/api/voice/playback":
+            entered.set()
+            await asyncio.Event().wait()
+        if path.endswith("/playback/cancel"):
+            cleanup.set()
+            await asyncio.Event().wait()
+        return await original(path, **kwargs)
+
+    monkeypatch.setattr(client, "json", playback)
+    turn = context()
+    with conversation_turn(turn):
+        task = asyncio.create_task(rig.provider.handle("Rider say hello", turn))
+    await asyncio.wait_for(entered.wait(), 2)
+    rig.provider.invalidate()
+    await asyncio.wait_for(cleanup.wait(), 2)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task

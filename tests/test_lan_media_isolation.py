@@ -116,20 +116,21 @@ async def test_passive_timeout_preserves_fresh_verified_stream_without_retry(
             pool.is_closed
             for pool in (generation.http, generation.stop, generation.media)
         )
-        assert not f.invalidations and not f.stream_closed.is_set()
-        assert (
-            f.client.lan.retry_at == 0
-            and f.client.transport_status()["state"] == "online"
-        )
+        assert not f.invalidations
+        assert not f.stream_closed.is_set()
+        assert f.client.lan.retry_at == 0
+        assert f.client.transport_status()["state"] == "online"
         assert len([r for r in f.calls if r.url.path == "/state"]) == 1
         failed = next(r for r in f.calls if r.url.path == "/state")
         assert failed.extensions["timeout"]["connect"] == 0.5
         next_frame = await admit(f, connection, native(2))
-        assert next_frame.source.sequence == 2 and connection.reconnects == 0
+        assert next_frame.source.sequence == 2
+        assert connection.reconnects == 0
         f.failure[0] = None
         await f.client.json("/healthz")
         assert f.client.lan.number == 1
-    assert f.client._media_valid_until == 0 and f.stream_closed.is_set()
+    assert f.client._media_valid_until == 0
+    assert f.stream_closed.is_set()
 
 
 async def test_raw_frames_without_hub_age_and_authority_admission_are_not_evidence(
@@ -145,7 +146,8 @@ async def test_raw_frames_without_hub_age_and_authority_admission_are_not_eviden
         f.failure[0] = httpx.ConnectTimeout
         with pytest.raises(RiderError, match="pi_connection_timeout"):
             await f.client.json("/state")
-        assert f.client.lan.current is None and len(f.invalidations) == 1
+        assert f.client.lan.current is None
+        assert len(f.invalidations) == 1
         assert all(
             pool.is_closed for pool in (previous.http, previous.stop, previous.media)
         )
@@ -167,7 +169,8 @@ async def test_age_derived_evidence_expires_without_any_further_hub_poll(live_me
         f.failure[0] = httpx.ReadTimeout
         with pytest.raises(RiderError, match="pi_connection_timeout"):
             await f.client.json("/state")
-        assert f.client.lan.current is None and len(f.invalidations) == 1
+        assert f.client.lan.current is None
+        assert len(f.invalidations) == 1
 
 
 async def test_replayed_sequence_cannot_renew_media_health(live_media):
@@ -178,7 +181,8 @@ async def test_replayed_sequence_cannot_renew_media_health(live_media):
         await f.queue.put(f.first)
         for _ in range(6):
             await asyncio.sleep(0)
-        assert connection.received == 1 and connection.rejected == 1
+        assert connection.received == 1
+        assert connection.rejected == 1
         assert f.client._media_valid_until <= deadline
 
 
@@ -192,7 +196,8 @@ async def test_other_network_failures_retire_even_with_fresh_media(live_media, e
         f.failure[0] = error
         with pytest.raises(RiderError):
             await f.client.json("/state")
-        assert f.client.lan.current is None and len(f.invalidations) == 1
+        assert f.client.lan.current is None
+        assert len(f.invalidations) == 1
 
 
 @pytest.mark.parametrize("stop", [False, True])
@@ -207,7 +212,8 @@ async def test_mutation_timeout_still_unknown_never_replayed_and_stop_can_revali
         with pytest.raises(RiderError, match="pi_operation_timeout") as caught:
             await f.client.json(path, method="POST", body={"action": "stop"}, stop=stop)
         assert caught.value.details == {"outcome": "unknown"}
-        assert f.client.lan.current is None and len(f.invalidations) == 1
+        assert f.client.lan.current is None
+        assert len(f.invalidations) == 1
         assert len([r for r in f.calls if r.method == "POST"]) == 1
         f.client.lan.retry_at += 30
         f.failure[0] = None
@@ -230,7 +236,8 @@ async def test_peer_change_still_blocks_credentials_while_old_media_is_fresh(
         f.peer[0] = "replacement-peer"
         with pytest.raises(RiderError, match="pi_identity_mismatch"):
             await f.client.json("/api/voice/playback/cancel", method="POST", body={})
-        assert f.client.lan.current is None and len(f.invalidations) == 1
+        assert f.client.lan.current is None
+        assert len(f.invalidations) == 1
         assert all(
             r.method == "GET" and "authorization" not in r.headers for r in f.calls
         )
@@ -247,7 +254,8 @@ async def test_media_eof_or_failure_discards_proof_and_retires_generation(
         await asyncio.wait_for(f.stream_closed.wait(), 0.2)
         for _ in range(8):
             await asyncio.sleep(0)
-        assert f.client._media_valid_until == 0 and f.client.lan.current is None
+        assert f.client._media_valid_until == 0
+        assert f.client.lan.current is None
         assert len(f.invalidations) == 1
 
 
@@ -257,7 +265,8 @@ async def test_refresh_retires_fresh_stream_generation(live_media):
         await admit(f, connection)
         previous = f.client.lan.current
         await f.client.reconnect()
-        assert f.client.lan.current is None and len(f.invalidations) == 1
+        assert f.client.lan.current is None
+        assert len(f.invalidations) == 1
         assert all(
             pool.is_closed for pool in (previous.http, previous.stop, previous.media)
         )
@@ -281,4 +290,5 @@ async def test_invalid_source_cannot_supply_transport_health(live_media, invalid
         f.failure[0] = httpx.ConnectTimeout
         with pytest.raises(RiderError, match="pi_connection_timeout"):
             await f.client.json("/state")
-        assert f.client.lan.current is None and len(f.invalidations) == 1
+        assert f.client.lan.current is None
+        assert len(f.invalidations) == 1

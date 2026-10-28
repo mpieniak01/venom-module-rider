@@ -159,7 +159,8 @@ def test_neural_negative_outlier_is_not_independently_confirmed_critical():
     errors[60, 48] = 0.07
     signed[60, 48] = -0.07
     maps = depth_maps(errors, signed, 0.06, valid=True)
-    assert maps["obstacle"][60, 48] and maps["negative_support"][60, 48]
+    assert maps["obstacle"][60, 48]
+    assert maps["negative_support"][60, 48]
     assert not maps["critical"].any()
 
 

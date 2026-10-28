@@ -9,11 +9,12 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-from .local_api import local_api_opener, local_api_origin
+from .local_api import local_api_opener, local_api_origin, local_api_path
 
 
 def request(base, path, body=None):
     origin = local_api_origin(base)
+    path = local_api_path(path)
     headers = {"Accept": "application/json"}
     token = os.getenv("RIDER_ACCESS_TOKEN")
     if token:

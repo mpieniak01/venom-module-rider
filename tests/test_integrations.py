@@ -69,15 +69,22 @@ async def test_two_devices_keep_unselected_unobserved_and_never_change_domain(se
     ):
         setattr(service, method, Mock(side_effect=AssertionError(method)))
     first, second = (await observe_integration(app_for(service)))["resources"]
-    assert first["id"] == "one" and first["selected"]
-    assert first["state"] == "connected" and first["reason_code"] == "device_online"
-    assert first["source"] == "device_cache" and first["configuration"] == "configured"
-    assert second["state"] == "unverified" and not second["selected"]
-    assert second["source"] == "configuration" and second["observed_at"] is None
+    assert first["id"] == "one"
+    assert first["selected"]
+    assert first["state"] == "connected"
+    assert first["reason_code"] == "device_online"
+    assert first["source"] == "device_cache"
+    assert first["configuration"] == "configured"
+    assert second["state"] == "unverified"
+    assert not second["selected"]
+    assert second["source"] == "configuration"
+    assert second["observed_at"] is None
     assert second["reason_code"] == "device_not_selected"
     assert before == (service.device, service.session, service.cache, service.epoch)
     assert not service.factory.called
-    assert not service.inflight and not service.commands and not service.stops
+    assert not service.inflight
+    assert not service.commands
+    assert not service.stops
 
 
 @pytest.mark.parametrize(
@@ -98,7 +105,8 @@ async def test_cached_connectivity_uses_actual_evidence(
     result = await observe_integration(app_for(service))
     validated = IntegrationObservation.model_validate(result)
     row = validated.resources[0]
-    assert row.state == state and row.reason_code == reason
+    assert row.state == state
+    assert row.reason_code == reason
     assert validated.connectivity.value == connectivity
     assert (
         abs(
@@ -134,7 +142,8 @@ async def test_empty_configuration_is_complete_zero(monkeypatch, service_present
     monkeypatch.setenv("RIDER_DEVICES_JSON", "[]")
     app = app_for(RiderService(()) if service_present else None)
     result = await observe_integration(app)
-    assert result["resources"] == [] and result["resources_complete"]
+    assert result["resources"] == []
+    assert result["resources_complete"]
     assert result["configuration"] == "unconfigured"
     assert result["reason_code"] == "device_not_configured"
     assert result["connectivity"] == "unknown"
@@ -154,7 +163,8 @@ async def test_bad_configuration_has_no_fabricated_robot(monkeypatch, raw):
     monkeypatch.setenv("RIDER_DEVICES_JSON", raw)
     app = app_for()
     result = await observe_integration(app)
-    assert result["resources"] == [] and not result["resources_complete"]
+    assert result["resources"] == []
+    assert not result["resources_complete"]
     assert result["reason_code"] == "device_configuration_invalid"
     assert result["configuration"] == "unknown"
     assert not hasattr(app.state, "rider")
@@ -174,9 +184,11 @@ async def test_idle_configuration_is_read_without_constructing_service(monkeypat
     )
     app = app_for()
     result = await observe_integration(app)
-    assert result["resources_complete"] and result["configuration"] == "configured"
+    assert result["resources_complete"]
+    assert result["configuration"] == "configured"
     row = result["resources"][0]
-    assert not row["selected"] and row["state"] == "unverified"
+    assert not row["selected"]
+    assert row["state"] == "unverified"
     assert row["observed_at"] is None
     assert not hasattr(app.state, "rider")
     assert "private.invalid" not in json.dumps(result)
@@ -186,8 +198,10 @@ async def test_selected_without_contact_is_unknown_even_when_last_seen_is_set(se
     service.last_seen = time.time()
     result = await observe_integration(app_for(service))
     row = result["resources"][0]
-    assert row["state"] == "unverified" and row["reason_code"] == "not_observed"
-    assert row["observed_at"] is None and result["connectivity"] == "unknown"
+    assert row["state"] == "unverified"
+    assert row["reason_code"] == "not_observed"
+    assert row["observed_at"] is None
+    assert result["connectivity"] == "unknown"
 
 
 async def test_demo_is_explicit_and_not_motion_admission(service):
@@ -206,7 +220,8 @@ async def test_inactive_service_does_not_reuse_connectivity(service, field):
     observe(service)
     setattr(service, field, True)
     row = (await observe_integration(app_for(service)))["resources"][0]
-    assert row["state"] == "unverified" and row["observed_at"] is None
+    assert row["state"] == "unverified"
+    assert row["observed_at"] is None
 
 
 async def test_inventory_is_bounded_and_does_not_claim_complete_total(service):
@@ -214,7 +229,8 @@ async def test_inventory_is_bounded_and_does_not_claim_complete_total(service):
         str(i): Device(str(i), "Robot", "https://private.invalid") for i in range(65)
     }
     result = await observe_integration(app_for(service))
-    assert len(result["resources"]) == 64 and not result["resources_complete"]
+    assert len(result["resources"]) == 64
+    assert not result["resources_complete"]
     IntegrationObservation.model_validate(result)
 
 
@@ -222,7 +238,8 @@ async def test_inventory_is_bounded_and_does_not_claim_complete_total(service):
 async def test_invalid_contact_timestamp_never_looks_connected(service, wall):
     service.connection_observation = (time.monotonic(), wall, "online")
     row = (await observe_integration(app_for(service)))["resources"][0]
-    assert row["state"] == "unverified" and row["observed_at"] is None
+    assert row["state"] == "unverified"
+    assert row["observed_at"] is None
 
 
 async def test_capabilities_need_fresh_explicit_cache_and_do_not_grant_action(service):
@@ -260,9 +277,8 @@ async def test_capabilities_need_fresh_explicit_cache_and_do_not_grant_action(se
         "camera",
     ]
     assert result["resources"][0]["available_capabilities"] is None
-    assert "ARMED" not in json.dumps(result) and "never-export" not in json.dumps(
-        result
-    )
+    assert "ARMED" not in json.dumps(result)
+    assert "never-export" not in json.dumps(result)
     for path, (_, payload) in list(service.cache.items()):
         service.cache[path] = (now - MAX_OBSERVATION_AGE_S - 1, payload)
     assert (await observe_integration(app_for(service)))["resources"][0][
@@ -364,7 +380,8 @@ async def test_selection_and_close_retire_previous_device_observations(service):
     observe(service)
     service.read_observations["/healthz"] = (time.monotonic(), time.time(), True)
     await service.select(None, service.session)
-    assert service.connection_observation is None and not service.read_observations
+    assert service.connection_observation is None
+    assert not service.read_observations
     assert all(
         row["state"] == "unverified"
         for row in (await observe_integration(app_for(service)))["resources"]
@@ -372,7 +389,8 @@ async def test_selection_and_close_retire_previous_device_observations(service):
     observe(service)
     service.read_observations["/healthz"] = (time.monotonic(), time.time(), True)
     await service.close()
-    assert service.connection_observation is None and not service.read_observations
+    assert service.connection_observation is None
+    assert not service.read_observations
 
 
 async def test_new_core_loader_normalizes_resource_identity_and_preserves_metadata(
@@ -393,16 +411,15 @@ async def test_new_core_loader_normalizes_resource_identity_and_preserves_metada
         id="module:rider", label="Rider-Pi", scope="external", kind="module"
     )
     await apply_module_observations(app, [item])
-    assert item.resources_complete and item.resource_count == 2
-    assert item.active_resource_count is None and item.connectivity.value == "down"
+    assert item.resources_complete
+    assert item.resource_count == 2
+    assert item.active_resource_count is None
+    assert item.connectivity.value == "down"
     assert item.resources[0].id.startswith("module:rider:")
-    assert (
-        item.resources[0].selected and item.resources[0].configuration == "configured"
-    )
-    assert (
-        item.resources[0].mode == "device"
-        and item.resources[0].source == "device_cache"
-    )
+    assert item.resources[0].selected
+    assert item.resources[0].configuration == "configured"
+    assert item.resources[0].mode == "device"
+    assert item.resources[0].source == "device_cache"
 
 
 async def test_failed_fresh_read_is_not_hidden_by_successful_cache_hits(service):
@@ -545,7 +562,8 @@ def test_manifest_hook_is_opt_in_and_router_import_does_not_load_it():
 async def test_unknown_cached_connection_state_never_looks_connected(service):
     service.connection_observation = (time.monotonic(), time.time(), "unexpected")
     row = (await observe_integration(app_for(service)))["resources"][0]
-    assert row["state"] == "unverified" and row["observed_at"] is None
+    assert row["state"] == "unverified"
+    assert row["observed_at"] is None
 
 
 async def test_direct_failed_read_invalidates_previous_online_without_status(service):

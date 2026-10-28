@@ -133,7 +133,8 @@ async def test_real_vision_loop_hook_retains_decision_and_exact_source(tmp_path)
     loop = VisionLoop(Detector("obstacle"), samples=reg, source_session=lambda: "host")
     try:
         result = await loop.decide("robot", frame(), png())
-        assert result["action"] == "stop" and result["state"] == "obstacle"
+        assert result["action"] == "stop"
+        assert result["state"] == "obstacle"
         await drain(reg)
         assert reg.automatic.status()["saved"] == 1
         sample = reg.store.samples(sid)[0]
@@ -222,7 +223,8 @@ async def test_bounded_auto_admission_leaves_manual_capacity_and_stop_barrier(
         reg.capture(sid, "manual", next(reversed(reg.frames.frames)))
         stopping = asyncio.create_task(reg.automatic.stop())
         await asyncio.sleep(0.01)
-        assert reg.automatic.current is None and not stopping.done()
+        assert reg.automatic.current is None
+        assert not stopping.done()
         # No disk lock is held by the event loop.
         tick = asyncio.Event()
         asyncio.get_running_loop().call_soon(tick.set)
@@ -342,7 +344,8 @@ async def test_profile_idempotency_and_collection_boundaries(tmp_path):
             await auto.start(sid, "other", "robot", "host", profile)
         await auto.stop()
         old = await auto.start(sid, "enable", "robot", "host", profile)
-        assert old["id"] == same["id"] and old["state"] == "off"
+        assert old["id"] == same["id"]
+        assert old["state"] == "off"
         await auto.start(sid, "second", "robot", "host", profile)
         await reg.end(sid)
         assert auto.status()["reason"] == "auto_collection_ended"
@@ -379,7 +382,9 @@ async def test_api_explicit_start_selection_guard_stop_and_no_actuator_posts(tmp
         assert (await client.post(BASE + "/samples/automatic/stop", json={})).json()[
             "state"
         ] == "off"
-        assert pi.trace == trace and not pi.camera_on and pi.state == "DISARMED"
+        assert pi.trace == trace
+        assert not pi.camera_on
+        assert pi.state == "DISARMED"
     finally:
         await client.aclose()
         await app.state.rider_vision.close()
@@ -484,7 +489,8 @@ async def test_annotation_failure_keeps_sample_but_never_claims_complete(
         offer(reg, clock)
         await drain(reg)
         row = reg.automatic.store.page(reg.automatic.status()["id"])["events"][0]
-        assert row["state"] == "failed" and row["sample_id"]
+        assert row["state"] == "failed"
+        assert row["sample_id"]
         assert reg.store.sample(row["sample_id"])["labels"] == []
         assert reg.automatic.status()["saved"] == 0
     finally:

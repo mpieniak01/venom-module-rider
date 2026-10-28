@@ -93,7 +93,8 @@ def test_capture_is_exact_immutable_and_fully_correlated(recorder, monkeypatch, 
     metadata_input = assessment()
     payload = bytearray(PAYLOAD)
     trace_id = recorder.submit(payload, source, metadata_input, CORRIDOR, SETTINGS)
-    assert trace_id is not None and started.wait(2)
+    assert trace_id is not None
+    assert started.wait(2)
     source[:] = 0
     payload[:] = b"x" * len(payload)
     metadata_input["run_id"] = "changed-after-submit"
@@ -229,11 +230,13 @@ def test_queue_is_bounded_alarm_preempts_pending_capture(recorder, monkeypatch):
     alarm = recorder.submit(
         PAYLOAD, np.ones((48, 64)), assessment("obstacle"), CORRIDOR, SETTINGS
     )
-    assert alarm and recorder._queue.qsize() == 2
+    assert alarm
+    assert recorder._queue.qsize() == 2
     release.set()
     recorder.close()
     ids = {load_capture(p)[0]["trace_id"] for p in recorder.directory.glob("*.zip")}
-    assert alarm in ids and first in ids
+    assert alarm in ids
+    assert first in ids
     assert len(ids) == 3
 
 
@@ -266,7 +269,8 @@ def test_writer_error_isolated_and_later_capture_survives(recorder, monkeypatch)
         PAYLOAD, np.ones((48, 64)), assessment("obstacle"), CORRIDOR, SETTINGS
     )
     recorder._queue.join()
-    assert recorder.failures == 1 and recorder.last_error == "OSError"
+    assert recorder.failures == 1
+    assert recorder.last_error == "OSError"
     monkeypatch.setattr(recorder, "_persist", original)
     assert recorder.submit(
         PAYLOAD, np.ones((48, 64)), assessment("obstacle"), CORRIDOR, SETTINGS
@@ -299,7 +303,8 @@ def test_archive_limit_is_enforced_before_filesystem_write(recorder, monkeypatch
         PAYLOAD, np.ones((48, 64)), assessment("obstacle"), CORRIDOR, SETTINGS
     )
     recorder.close()
-    assert recorder.failures == 1 and recorder.last_error == "ValueError"
+    assert recorder.failures == 1
+    assert recorder.last_error == "ValueError"
     assert list(recorder.directory.iterdir()) == []
 
 
@@ -341,5 +346,6 @@ def test_alarm_eviction_preserves_queued_alarm_ahead_of_clear(recorder, monkeypa
     release.set()
     recorder.close()
     ids = {load_capture(p)[0]["trace_id"] for p in recorder.directory.glob("*.zip")}
-    assert first_alarm in ids and next_alarm in ids
+    assert first_alarm in ids
+    assert next_alarm in ids
     assert dropped_clear not in ids

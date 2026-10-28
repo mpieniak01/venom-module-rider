@@ -114,9 +114,11 @@ def test_transient_is_uncertain_not_new_floor_and_persistent_near_region_stops()
     original = maps()
     snapshot = original["floor"].copy()
     first, info = apply(detector, original, 1)
-    assert not first["obstacle"].any() and first["uncertain"].sum() == 6
+    assert not first["obstacle"].any()
+    assert first["uncertain"].sum() == 6
     assert np.array_equal(first["floor"], snapshot)
-    assert original["obstacle"].sum() == 6 and not original["uncertain"].any()
+    assert original["obstacle"].sum() == 6
+    assert not original["uncertain"].any()
     assert info["suppression_is_floor_evidence"] is False
     second, _ = apply(detector, original, 2)
     assert second["obstacle"].sum() == 6
@@ -146,7 +148,8 @@ def test_critical_and_geometry_evidence_are_independent_of_component_filter():
     detector.motion = FixedMotion()
     first, _ = apply(detector, maps(critical=True), 1)
     spatial = assess_evidence(first, (0.0, 0.0, 1.0, 1.0), parameters(behavior()))
-    assert spatial["hard_stop"] and spatial["candidate"] == "obstacle"
+    assert spatial["hard_stop"]
+    assert spatial["candidate"] == "obstacle"
     first["critical"][:] = False
     first["geometry_collision"] = True
     assert (
@@ -162,11 +165,13 @@ def test_missing_tracking_or_invalid_reference_does_not_suppress_raw_obstacle():
     data = maps()
     del data["gray"]
     result, info = apply(detector, data, 1)
-    assert result is data and info["state"] == "tracking_unavailable"
+    assert result is data
+    assert info["state"] == "tracking_unavailable"
     data = maps()
     data["valid"] = False
     result, info = apply(detector, data, 2)
-    assert result is data and info["state"] == "reset"
+    assert result is data
+    assert info["state"] == "reset"
 
 
 def test_object_diagnostics_are_bounded_and_do_not_change_decision():
@@ -184,7 +189,8 @@ def test_object_diagnostics_are_bounded_and_do_not_change_decision():
         captured_s=0.06,
         params=options,
     )
-    assert first["diagnostic_only"] and np.array_equal(data["obstacle"], untouched)
+    assert first["diagnostic_only"]
+    assert np.array_equal(data["obstacle"], untouched)
     json.dumps(first, allow_nan=False)
     ordinary = TemporalEvidence()
     diagnostic = TemporalEvidence()
@@ -311,7 +317,8 @@ def test_object_identity_handles_skipped_sequences_and_mask_jump():
         )
         assert len(result["objects"]) == 1
         ids.append(result["objects"][0]["id"])
-    assert len(set(ids)) == 1 and result["objects"][0]["approaching_candidate"]
+    assert len(set(ids)) == 1
+    assert result["objects"][0]["approaching_candidate"]
     assert result["objects"][0]["route_pixels"] == 0
     data["obstacle"][:] = True
     data["floor"][:] = False

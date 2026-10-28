@@ -99,7 +99,8 @@ async def test_journey_stale_tab_never_reaches_pi(monkeypatch):
             json=intent(),
             headers={"X-Rider-Session": "old-tab"},
         )
-        assert response.status_code == 409 and calls == []
+        assert response.status_code == 409
+        assert calls == []
     finally:
         await client.aclose()
         await service.close()
@@ -131,7 +132,8 @@ async def test_failed_preparation_is_returned_once_without_trial_fallback(monkey
         detail = response.json()["detail"]
         assert detail["code"] == "navigation_journey_not_supported"
         assert detail["details"]["preparation"]["stage"] == "capability"
-        assert len(calls) == 1 and calls[0].url.path == "/api/navigation/journey"
+        assert len(calls) == 1
+        assert calls[0].url.path == "/api/navigation/journey"
     finally:
         await client.aclose()
         await service.close()

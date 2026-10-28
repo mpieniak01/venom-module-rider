@@ -149,7 +149,8 @@ async def test_rejected_and_unknown_results_are_explicit(tmp_path):
             for row in rows
             if row["kind"] == "command" and row["host"]["phase"] == "result"
         ]
-        assert len(results) == 1 and results[0]["outcome"] in {"rejected", "unknown"}
+        assert len(results) == 1
+        assert results[0]["outcome"] in {"rejected", "unknown"}
     finally:
         await registry.close()
         await service.close()
@@ -176,7 +177,8 @@ async def test_allowlist_drops_secret_body_and_deduplicates_profiles(tmp_path):
         await registry.end(sid)
         manifest = await snapshot(registry, sid)
         encoded = json.dumps(manifest)
-        assert "never-store-this" not in encoded and "private-address" not in encoded
+        assert "never-store-this" not in encoded
+        assert "private-address" not in encoded
         assert (
             sum(row["kind"] == "profile" for row in manifest["evidence"]["records"])
             == 1

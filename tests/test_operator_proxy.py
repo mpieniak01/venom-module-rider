@@ -202,13 +202,19 @@ async def test_demo_warm_pause_and_resume_retain_worker_camera_and_original_leas
         assert pi.safety()["operator_control"]["state"] == "qualifying"
         response = pi.control(command(pi, "navigation_pause", panel_id="panel-one"))
         assert response.status_code == 200
-        assert nav.operator_state == "paused" and pi.owner == "manual"
-        assert nav.task is task and not task.done() and pi.camera_on
+        assert nav.operator_state == "paused"
+        assert pi.owner == "manual"
+        assert nav.task is task
+        assert not task.done()
+        assert pi.camera_on
         assert pi.arming_deadline == deadline
         response = pi.control(command(pi, "navigation_resume", panel_id="panel-one"))
         assert response.status_code == 200
-        assert nav.operator_state == "qualifying" and pi.owner == "navigation"
-        assert nav.task is task and pi.camera_on and pi.arming_deadline == deadline
+        assert nav.operator_state == "qualifying"
+        assert pi.owner == "navigation"
+        assert nav.task is task
+        assert pi.camera_on
+        assert pi.arming_deadline == deadline
         pi.control({"action": "stop"})
         refused = pi.control(command(pi, "navigation_resume", panel_id="panel-one"))
         assert refused.status_code == 409
@@ -283,12 +289,16 @@ async def test_demo_late_go_does_not_overwrite_operator_or_restart_producer():
         manual_generation = pi.generation
         release.set()
         await asyncio.sleep(0.03)
-        assert pi.generation == manual_generation and pi.owner == "manual"
+        assert pi.generation == manual_generation
+        assert pi.owner == "manual"
         assert accepted == []
-        assert nav.task is task and pi.camera_on and nav.operator_state == "paused"
+        assert nav.task is task
+        assert pi.camera_on
+        assert nav.operator_state == "paused"
         pi.control(command(pi, "navigation_resume", panel_id="panel-one"))
         await asyncio.sleep(0.25)
-        assert nav.task is task and nav.status["run_id"] != first_run
+        assert nav.task is task
+        assert nav.status["run_id"] != first_run
         assert frames[-1]["run_id"] != frames[0]["run_id"]
     finally:
         release.set()
@@ -358,10 +368,14 @@ async def test_demo_expired_lease_keeps_observation_without_rearming():
         await asyncio.sleep(0.03)
         assert frames[-1]["mode"] == "observe"
         assert frames[-1]["run_id"] != first_run
-        assert nav.task is task and not task.done() and pi.camera_on
-        assert pi.state == "DISARMED" and nav.operator_state == "paused"
+        assert nav.task is task
+        assert not task.done()
+        assert pi.camera_on
+        assert pi.state == "DISARMED"
+        assert nav.operator_state == "paused"
         refused = pi.control(command(pi, "navigation_resume", panel_id="panel-one"))
-        assert refused.status_code == 409 and pi.state == "DISARMED"
+        assert refused.status_code == 409
+        assert pi.state == "DISARMED"
     finally:
         await nav.close()
 
@@ -386,7 +400,8 @@ async def test_proxy_preserves_exact_superseded_resume_identifier(monkeypatch):
             headers={"X-Rider-Session": service.session},
         )
         assert response.status_code == 200
-        assert len(seen) == 1 and json.loads(seen[0].content) == original
+        assert len(seen) == 1
+        assert json.loads(seen[0].content) == original
     finally:
         await client.aclose()
         await service.close()
@@ -453,12 +468,14 @@ async def test_demo_exact_pending_resume_can_be_interrupted_before_browser_ack(a
             ),
         )
         bad = pi.control(correction | {"supersedes_operation_id": "another-operation"})
-        assert bad.status_code == 409 and pi.generation == pending_generation
+        assert bad.status_code == 409
+        assert pi.generation == pending_generation
         # New navigation sequence numbers do not invalidate the original panel lane.
         pi.seq += 20
         accepted = pi.control(correction)
         assert accepted.status_code == 200
-        assert pi.owner == "manual" and nav.operator_state == "paused"
+        assert pi.owner == "manual"
+        assert nav.operator_state == "paused"
         assert pi.generation != pending_generation
         repeated = pi.control(correction)
         assert repeated.status_code == 409
@@ -505,8 +522,10 @@ async def test_demo_optin_arm_requires_explicit_bounded_navigation_consent(chang
         )
         rejected = pi.control(request)
         assert rejected.status_code == 409
-        assert pi.state == "DISARMED" and pi.owner is None
-        assert pi.arming_deadline is None and not nav.operator_mode
+        assert pi.state == "DISARMED"
+        assert pi.owner is None
+        assert pi.arming_deadline is None
+        assert not nav.operator_mode
     finally:
         await nav.close()
 
@@ -532,8 +551,10 @@ async def test_demo_optin_accepts_valid_bounded_navigation_lease(lease):
         )
         accepted = pi.control(request)
         assert accepted.status_code == 200
-        assert pi.state == "ARMED" and pi.owner == "navigation"
-        assert pi.arming_mode == "timed" and nav.operator_mode
+        assert pi.state == "ARMED"
+        assert pi.owner == "navigation"
+        assert pi.arming_mode == "timed"
+        assert nav.operator_mode
         assert 0 < pi.arming_deadline - time.monotonic() <= lease
         assert 0 < pi.safety()["lease_remaining_s"] <= lease
     finally:
@@ -555,14 +576,16 @@ async def test_demo_plain_manual_arm_does_not_enable_navigation_resume():
             operator_plan="Manual only",
         )
         assert pi.control(arm).status_code == 200
-        assert pi.arming_deadline is None and not nav.operator_mode
+        assert pi.arming_deadline is None
+        assert not nav.operator_mode
         assert (
             pi.control(
                 command(pi, "navigation_resume", panel_id="panel-one")
             ).status_code
             == 409
         )
-        assert pi.state == "ARMED" and pi.owner == "manual"
+        assert pi.state == "ARMED"
+        assert pi.owner == "manual"
         assert (
             pi.control(
                 command(
@@ -598,7 +621,8 @@ async def test_demo_current_generation_can_target_initial_and_resumed_operation(
             )
         )
         first_id = pi.safety()["operator_control"]["operation_id"]
-        assert isinstance(first_id, str) and first_id
+        assert isinstance(first_id, str)
+        assert first_id
         assert (
             pi.control(
                 command(
@@ -629,7 +653,8 @@ async def test_demo_current_generation_can_target_initial_and_resumed_operation(
         )
         pi.seq += 20
         assert pi.control(request).status_code == 200
-        assert pi.owner == "manual" and nav.operator_state == "paused"
+        assert pi.owner == "manual"
+        assert nav.operator_state == "paused"
     finally:
         await nav.close()
 
@@ -663,7 +688,8 @@ async def test_versioned_intervention_is_forwarded_once(monkeypatch):
             headers={"X-Rider-Session": service.session},
         )
         assert response.status_code == 200
-        assert len(received) == 1 and json.loads(received[0].content) == original
+        assert len(received) == 1
+        assert json.loads(received[0].content) == original
     finally:
         await client.aclose()
         await service.close()
@@ -728,8 +754,10 @@ async def test_scoped_release_bypasses_pending_priority_request_without_global_e
             supersedes_operation_id="takeover-a",
         )
         result = await asyncio.wait_for(service.control(release, service.session), 1)
-        assert result["data"] == {"safety": {}} and service.epoch == epoch
-        assert cancelled.is_set() and received[-1] == release
+        assert result["data"] == {"safety": {}}
+        assert service.epoch == epoch
+        assert cancelled.is_set()
+        assert received[-1] == release
         with pytest.raises(RiderError, match="command_superseded"):
             await pending
         assert not service.client.operator_lane.locked()
@@ -771,7 +799,8 @@ async def test_old_scoped_release_does_not_cancel_newer_intervention(monkeypatch
             supersedes_operation_id="takeover-a",
         )
         await asyncio.wait_for(service.control(release, service.session), 1)
-        assert not pending.done() and service.epoch == epoch
+        assert not pending.done()
+        assert service.epoch == epoch
         finish.set()
         assert (await pending)["data"] == {"safety": {}}
     finally:
@@ -815,13 +844,15 @@ async def test_scoped_release_remains_available_when_environment_becomes_readonl
         assert (
             await client.post("/api/v1/rider/control", json=release, headers=headers)
         ).status_code == 200
-        assert len(received) == 1 and json.loads(received[0].content) == release
+        assert len(received) == 1
+        assert json.loads(received[0].content) == release
         refused = await client.post(
             "/api/v1/rider/control",
             json=release | {"operator_consent": True},
             headers=headers,
         )
-        assert refused.status_code == 422 and len(received) == 1
+        assert refused.status_code == 422
+        assert len(received) == 1
     finally:
         await client.aclose()
         await service.close()

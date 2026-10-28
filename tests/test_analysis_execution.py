@@ -71,14 +71,16 @@ async def test_real_worker_quality_report_idempotency_and_host_task_no_pi(
         row = await manager.submit("analysis", session, spec)
         final = await finish(manager, row["id"])
         assert final["state"] == "succeeded", final
-        assert not manager.children and not manager.registry.writer_owners
+        assert not manager.children
+        assert not manager.registry.writer_owners
         assert manager.registry.lease is None
         task = host.state.get_task(UUID(final["host_task_id"]))
         assert task.status == TaskStatus.COMPLETED
         report = json.loads(manager.store.artifact(row["id"], "report.json")[0])
         assert report["summary"]["rejected_inputs"] == 1
         assert report["summary"]["false_go"] is None
-        assert report["model"] is None and report["model_load_ms"] is None
+        assert report["model"] is None
+        assert report["model_load_ms"] is None
         assert report["rows"][0]["reason"] == "vision_image_quality"
         assert "inference" not in report["rows"][0]["timings_ms"]
         assert report["rows"][0]["timings_ms"]["persistence"] >= 0
@@ -88,7 +90,8 @@ async def test_real_worker_quality_report_idempotency_and_host_task_no_pi(
             "model.safetensors"
         ).unlink()
         again = await manager.submit("analysis", session, spec)
-        assert again["id"] == row["id"] and again["state"] == "succeeded"
+        assert again["id"] == row["id"]
+        assert again["state"] == "succeeded"
         assert len(manager.store.list()) == 1
         with pytest.raises(RiderError, match="analysis_request_conflict"):
             await manager.submit("analysis", session, {**spec, "count": 1})
@@ -125,7 +128,8 @@ async def test_queue_pause_cancel_and_simultaneous_source_collection(
             await other.close()
         await manager.cancel(row["id"])
         assert (await finish(manager, row["id"]))["state"] == "cancelled"
-        assert not manager.children and manager.registry.lease is None
+        assert not manager.children
+        assert manager.registry.lease is None
         assert host.queue.active_tasks == {}
     finally:
         await close(manager, host)
@@ -173,7 +177,8 @@ async def test_worker_source_corruption_fails_without_replacing_original_or_old_
             "second", session, AnalysisSpec().model_dump(mode="json")
         )
         final = await finish(manager, second["id"])
-        assert final["state"] == "failed" and final["error"] == "samples_source_corrupt"
+        assert final["state"] == "failed"
+        assert final["error"] == "samples_source_corrupt"
         assert (
             path.read_bytes() == b"corrupt external source"
         )  # never silently repaired
@@ -215,10 +220,8 @@ async def test_analysis_api_offline_recovery_compare_cancel_and_guards(
             report = await client.get(
                 BASE + "/runs/" + identity + "/artifacts/report.json"
             )
-            assert (
-                report.status_code == 200
-                and report.headers["cache-control"] == "no-store"
-            )
+            assert report.status_code == 200
+            assert report.headers["cache-control"] == "no-store"
             assert (
                 await client.post(BASE + "/runs/" + identity + "/cancel", json={})
             ).json()["state"] == "succeeded"
@@ -247,8 +250,10 @@ async def test_analysis_api_offline_recovery_compare_cancel_and_guards(
                     headers={"Origin": "http://foreign.invalid"},
                 )
             ).status_code == 403
-            assert pi.trace == initial_trace and service.client is None
-            assert pi.state == "DISARMED" and not pi.camera_on
+            assert pi.trace == initial_trace
+            assert service.client is None
+            assert pi.state == "DISARMED"
+            assert not pi.camera_on
         finally:
             await service.close()
             await close(manager, host)
@@ -274,7 +279,8 @@ async def test_host_abort_stops_actual_child_and_keeps_sources(tmp_path, monkeyp
         assert result["success"]
         final = await finish(manager, row["id"])
         assert final["state"] == "cancelled"
-        assert child.returncode is not None and not manager.children
+        assert child.returncode is not None
+        assert not manager.children
         assert manager.registry.store.original(
             final["context"]["inputs"][0]["sample_id"]
         )[0]
@@ -338,7 +344,8 @@ async def test_lost_http_cancellation_keeps_one_server_owned_admission(
         same = await manager.submit(
             "lost", session, AnalysisSpec().model_dump(mode="json")
         )
-        assert same["id"] == row["id"] and len(manager.store.list()) == 1
+        assert same["id"] == row["id"]
+        assert len(manager.store.list()) == 1
     finally:
         release.set()
         await close(manager, host)
@@ -356,10 +363,10 @@ async def test_resource_limit_ends_owned_child_without_unloading_models(
             "resource", session, AnalysisSpec().model_dump(mode="json")
         )
         final = await finish(manager, row["id"])
-        assert (
-            final["state"] == "failed" and final["error"] == "analysis_resource_limit"
-        )
-        assert not manager.children and manager.registry.lease is None
+        assert final["state"] == "failed"
+        assert final["error"] == "analysis_resource_limit"
+        assert not manager.children
+        assert manager.registry.lease is None
     finally:
         await close(manager, host)
 
@@ -381,7 +388,8 @@ async def test_full_disk_preserves_previous_report_and_raw(tmp_path, monkeypatch
             "full", session, AnalysisSpec().model_dump(mode="json")
         )
         final = await finish(manager, second["id"])
-        assert final["state"] == "failed" and final["error"] == "samples_disk_full"
+        assert final["state"] == "failed"
+        assert final["error"] == "samples_disk_full"
         assert manager.store.artifact(first["id"], "report.json")[0] == proof
         assert manager.registry.store.original(
             final["context"]["inputs"][0]["sample_id"]
@@ -402,11 +410,11 @@ async def test_startup_recovery_marks_lost_runs_without_starting_a_model(
         manager.store.running(row["id"])
         assert await manager.initialize()
         recovered = manager.store.get(row["id"])
-        assert (
-            recovered["state"] == "failed"
-            and recovered["error"] == "analysis_interrupted"
-        )
-        assert manager.recovered and not manager.children and not manager.tasks
+        assert recovered["state"] == "failed"
+        assert recovered["error"] == "analysis_interrupted"
+        assert manager.recovered
+        assert not manager.children
+        assert not manager.tasks
         competitor = AnalysisManager(
             manager.registry, catalog=manager.catalog, host_tasks=host
         )

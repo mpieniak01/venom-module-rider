@@ -91,7 +91,8 @@ def test_central_box_never_becomes_ground(pitch, height):
 
 def test_missing_calibration_is_explicit_and_not_an_invented_focal_length():
     row = assess(scene(), (0.35, 0.8, 0.65, 0.95), SETTINGS, GroundGeometry())
-    assert row["state"] == "unknown" and row["reason"] == "geometry_calibration_missing"
+    assert row["state"] == "unknown"
+    assert row["reason"] == "geometry_calibration_missing"
 
 
 def test_vertical_plane_cannot_be_selected_as_ground():
@@ -155,8 +156,10 @@ def test_stagnation_is_measured_and_stops_before_the_hard_turn_budget():
         terminal = rest[-1]
         if terminal:
             break
-    assert terminal and reason == "avoidance_no_progress"
-    assert state["stalled"] == 2 and state["turns"] == 2
+    assert terminal
+    assert reason == "avoidance_no_progress"
+    assert state["stalled"] == 2
+    assert state["turns"] == 2
 
 
 def test_pose_change_does_not_count_as_improvement_or_restore_turn_budget():
@@ -173,7 +176,8 @@ def test_pose_change_does_not_count_as_improvement_or_restore_turn_budget():
         "ready",
         True,
     )
-    assert state["turns"] == 2 and "progress_delta" not in state
+    assert state["turns"] == 2
+    assert "progress_delta" not in state
     assert state["pose_resets"] == 1
 
 
@@ -189,7 +193,8 @@ def test_improvement_is_measured_on_a_fresh_comparable_ground_reference():
     _, _, state, *_ = plan(
         row, old, AvoidanceSettings(enabled=True, sweep_verified=True), "ready", True
     )
-    assert state["progress_delta"] == pytest.approx(0.6) and state["stalled"] == 0
+    assert state["progress_delta"] == pytest.approx(0.6)
+    assert state["stalled"] == 0
 
 
 @pytest.mark.parametrize("roll", [-8.0, 0.0, 8.0])
@@ -211,7 +216,8 @@ def test_actual_projected_gap_selects_opposite_side(side, expected):
         CAMERA,
     )
     assert row["state"] == "obstacle"
-    assert row["gaps"] and row["paths"]["guard"]["state"] == "clear"
+    assert row["gaps"]
+    assert row["paths"]["guard"]["state"] == "clear"
     state = None
     for _ in range(3):
         action, _, state, *_ = plan(
@@ -305,7 +311,8 @@ def test_detector_ground_uses_one_inference_and_renders_current_projection(calib
         SETTINGS,
         CAMERA if calibrated else GroundGeometry(),
     )
-    assert calls == ["infer"] and "_path_overlay" not in row
+    assert calls == ["infer"]
+    assert "_path_overlay" not in row
     assert row["state"] == ("clear" if calibrated else "unknown")
     assert Image.open(io.BytesIO(row["_preview"])).size == (128, 96)
 
@@ -321,7 +328,8 @@ def test_thin_recess_between_sampled_rays_stays_a_recess_not_a_steer():
     depth = scene()
     depth[66, 64] *= 1.5
     row = assess(depth, (0.35, 0.8, 0.65, 0.95), SETTINGS, CAMERA)
-    assert row["state"] == "obstacle" and row["farther_outlier_pixels"] > 0
+    assert row["state"] == "obstacle"
+    assert row["farther_outlier_pixels"] > 0
     state = None
     for _ in range(3):
         action, reason, state, *_ = plan(
@@ -331,7 +339,8 @@ def test_thin_recess_between_sampled_rays_stays_a_recess_not_a_steer():
             "ready",
             True,
         )
-    assert action == "stop" and reason == "avoidance_recess"
+    assert action == "stop"
+    assert reason == "avoidance_recess"
 
 
 @pytest.mark.parametrize(

@@ -160,7 +160,8 @@ def test_rejected_policy_cancels_other_metadata_read_without_inference(monkeypat
         )
         assert response.status_code == 409
         assert response.json()["detail"]["code"] == "model_selection_conflict"
-        assert cancelled == [True] and detector.calls == 0
+        assert cancelled == [True]
+        assert detector.calls == 0
         assert all(method == "GET" for method, _, _ in pi.calls)
 
 
@@ -220,5 +221,6 @@ def test_reference_timeout_keeps_inflight_phase_evidence(monkeypatch):
         assert timing["failed_stage"] == "canonical"
         assert timing["canonical_ms"] > 0
         assert timing["remaining_ms"] == 0
-        assert "runtime_state" in timing and "model_busy" in timing
+        assert "runtime_state" in timing
+        assert "model_busy" in timing
         assert detector.calls == 0

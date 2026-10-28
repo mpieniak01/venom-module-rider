@@ -107,15 +107,18 @@ def test_full_video_exceeds_old_limits_without_extraction_or_large_snapshot(tmp_
         "changed",
         perception={"engine": "depth_plane", "residual_limit": 0.08},
     )
-    assert first["total"] == 1301 and second["total"] == 1301
+    assert first["total"] == 1301
+    assert second["total"] == 1301
     assert first["id"] != second["id"]
     assert first["context"]["input_digest"] == second["context"]["input_digest"]
     assert "inputs" not in first["context"]
     assert len(canonical(first["context"])) < 15000
     inputs = inputs_for(store.root, first["context"])
-    assert isinstance(inputs, VideoInputs) and len(inputs) == 1301
+    assert isinstance(inputs, VideoInputs)
+    assert len(inputs) == 1301
     sample = inputs[1200]
-    assert sample["source_index"] == 1200 and sample["source_time_s"] == 240
+    assert sample["source_index"] == 1200
+    assert sample["source_time_s"] == 240
     assert sample["sequence"] == sample["source_sequence"] == 1201
     assert payload_for(store.root, sample) == payload
     assert list(store.blobs.iterdir()) == []
@@ -211,7 +214,8 @@ def test_whole_film_mock_replay_streams_all_rows_and_compact_report(
     store, sid, _ = video_fixture(tmp_path, count=257)
     row = create(store, sid)
     frames, chunks, report = run_mock(row, store, monkeypatch)
-    assert len(frames) == 257 and list(map(len, chunks)) == [128, 128, 1]
+    assert len(frames) == 257
+    assert list(map(len, chunks)) == [128, 128, 1]
     assert report["rows"] == []
     assert report["row_chunks"] == [
         "rows-00000.json",
@@ -230,7 +234,8 @@ def test_whole_film_mock_replay_streams_all_rows_and_compact_report(
     assert chunks[-1][0]["source_index"] == 256
     assert chunks[-1][0]["source_received_at"] == 1051.2
     assert all(not message["artifacts"] for message in frames)
-    assert len(canonical(report)) < 20000 and list(store.blobs.iterdir()) == []
+    assert len(canonical(report)) < 20000
+    assert list(store.blobs.iterdir()) == []
 
 
 def test_video_model_outputs_only_classification_layer_no_raw_or_depth_copies(

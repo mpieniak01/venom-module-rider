@@ -84,7 +84,9 @@ def test_absent_projection_cannot_create_a_fake_region():
 def test_invalid_or_empty_visible_image_region_draws_no_boundary():
     draw = Drawing()
     draw_sectors(draw, (320, 240), {"left": {"corridor": (1.1, 0.8, 1.3, 0.9)}})
-    assert draw.labels == [] and draw.lines == [] and draw.rectangles == []
+    assert draw.labels == []
+    assert draw.lines == []
+    assert draw.rectangles == []
 
 
 def test_preview_metadata_is_small_and_does_not_publish_planner_grids():
@@ -130,7 +132,8 @@ def test_font_fallback_is_bounded_and_cached(monkeypatch):
     monkeypatch.setattr(ImageFont, "load_default", lambda: calls.append(1) or marker)
     _font.cache_clear()
     try:
-        assert _font(13) is marker and _font(13) is marker
+        assert _font(13) is marker
+        assert _font(13) is marker
         assert calls == [1]
     finally:
         _font.cache_clear()
@@ -182,7 +185,8 @@ async def test_preview_keeps_image_sides_when_the_command_planner_mirrors_them(
     assert result["action"] == "stop"
     assert result["sectors"]["left"]["state"] == "clear"  # Command mapping.
     cached = loop.preview("fixture", run_id="run")
-    assert cached is not None and cached[1] == b"exact-jpeg"
+    assert cached is not None
+    assert cached[1] == b"exact-jpeg"
     assert cached[2]["sectors"]["left"]["state"] == "obstacle"  # Image mapping.
     assert cached[2]["sector_space"] == "image"
     assert cached[2]["frame_id"] == "capture-7"
@@ -207,7 +211,8 @@ def test_quality_rejection_still_labels_unknown_regions_without_loading_model(gr
     result = detector._detect(
         stream.getvalue(), ROI, PerceptionSettings(engine="depth_plane"), geometry
     )
-    assert result["state"] == "unknown" and result["reason"] == "vision_image_quality"
+    assert result["state"] == "unknown"
+    assert result["reason"] == "vision_image_quality"
     assert all(row["state"] == "unknown" for row in result["sectors"].values())
     preview = np.asarray(Image.open(io.BytesIO(result["_preview"])))
     assert preview.max() < 10  # Geometry no longer burns into the JPEG.
@@ -283,7 +288,8 @@ async def test_projected_metadata_remains_small_in_the_real_preview_response():
     row = json.loads(header)
     assert row["sector_space"] == "projected_paths"
     assert set(row["sectors"]) == {"left", "center", "right"}
-    assert "_path_overlay" not in row and "heading_candidates" not in row
+    assert "_path_overlay" not in row
+    assert "heading_candidates" not in row
 
 
 def test_projected_labels_do_not_hide_each_other_for_near_parallel_candidates():
@@ -380,7 +386,9 @@ def test_native_preview_delivers_identical_annotated_pixels_and_source_sectors(
         assert analysis["sectors"]["center"]["corridor"] == list(ROI)
         assert first.headers["x-rider-frame-id"] == current["frame_id"]
         assert analysis["source"] == current
-        assert len(calls) == 1 and pi.opened == 1 and pi.snapshot_requests == 0
+        assert len(calls) == 1
+        assert pi.opened == 1
+        assert pi.snapshot_requests == 0
         assert all(method == "GET" for method, _path, _body in pi.calls)
 
 

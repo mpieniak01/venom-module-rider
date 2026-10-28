@@ -195,7 +195,8 @@ async def test_failed_writes_and_ram_bounds_are_visible(tmp_path, monkeypatch):
             await drain(registry)
         status = registry.evidence.status()
         assert status["failed"] == 70
-        assert status["ram_records"] <= 64 and status["ram_bytes"] <= 65536
+        assert status["ram_records"] <= 64
+        assert status["ram_bytes"] <= 65536
         await registry.end(sid)
         assert registry.store.session(sid)["evidence"]["failed"] == 70
     finally:
@@ -216,9 +217,11 @@ async def test_telemetry_only_roundtrip_revision_and_tamper(tmp_path):
         await registry.end(sid)
         path, _ = SampleArchive(registry.store).export(sid)
         manifest = SampleArchive.validate_zip(path, registry.store.limits.session_bytes)
-        assert manifest["samples"] == [] and len(manifest["evidence"]["records"]) == 2
+        assert manifest["samples"] == []
+        assert len(manifest["evidence"]["records"]) == 2
         imported = await SampleImporter(target).run(path, "import")
-        assert imported["evidence"]["saved"] == 2 and imported["state"] == "closed"
+        assert imported["evidence"]["saved"] == 2
+        assert imported["state"] == "closed"
         assert (
             snapshot(target, imported["session_id"])["evidence"]["records"]
             == manifest["evidence"]["records"]
@@ -590,8 +593,10 @@ async def test_optional_evidence_status_failure_does_not_prevent_session_end(
         result = await registry.end(sid)
         assert result["state"] == "closed"
         assert registry.store.session(sid)["state"] == "closed"
-        assert sid not in registry.active and sid not in registry.closing
-        assert sid not in registry.deadlines and sid not in registry.evidence.sessions
+        assert sid not in registry.active
+        assert sid not in registry.closing
+        assert sid not in registry.deadlines
+        assert sid not in registry.evidence.sessions
         assert registry.lease is None
         assert registry.failures == 1
     finally:
@@ -618,8 +623,10 @@ async def test_optional_evidence_status_failure_does_not_skip_close_recovery(
         await registry.close()
         assert registry.store.session(first)["state"] == "interrupted"
         assert registry.store.session(second)["state"] == "interrupted"
-        assert registry.closed and registry.lease is None
-        assert not registry.active and not registry.evidence.sessions
+        assert registry.closed
+        assert registry.lease is None
+        assert not registry.active
+        assert not registry.evidence.sessions
         assert not registry.deadlines
         assert registry.failures == 2
 
@@ -648,7 +655,8 @@ async def test_ending_one_collection_preserves_other_live_evidence_associations(
             row["record_id"]
             for row in snapshot(registry, second)["evidence"]["records"]
         }
-        assert archived_ids and registry.evidence.status()["ram_records"] == 1
+        assert archived_ids
+        assert registry.evidence.status()["ram_records"] == 1
 
         await registry.end(first)
         source = frame()

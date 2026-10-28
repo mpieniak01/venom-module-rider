@@ -430,9 +430,8 @@ async def test_old_pi_configuration_returns_specific_error():
     req = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(rider=Domain())))
     with pytest.raises(RiderError) as error:
         await configuration(req)
-    assert (
-        error.value.code == "navigation_api_unavailable" and error.value.status == 503
-    )
+    assert error.value.code == "navigation_api_unavailable"
+    assert error.value.status == 503
 
 
 @pytest.mark.parametrize(
@@ -631,7 +630,8 @@ def test_depth_detector_local_manifest_lazy_load_preview_and_bounds(
     (tmp_path / "manifest.json").write_text(json.dumps({"files": files}))
     detector = DepthDetector()
     detector.path = tmp_path
-    assert detector.status()["configured"] and not detector.status()["loaded"]
+    assert detector.status()["configured"]
+    assert not detector.status()["loaded"]
     y, x = np.mgrid[0:64, 0:64]
     depth = 1 / np.maximum(0.05, 0.2 + 3 * (y / 64 - 0.55))
 
@@ -692,7 +692,8 @@ def test_depth_detector_local_manifest_lazy_load_preview_and_bounds(
     )
     detector._load()
     detector._load()
-    assert detector.status()["loaded"] and len(detector.digest) == 64
+    assert detector.status()["loaded"]
+    assert len(detector.digest) == 64
     image = io.BytesIO()
     Image.fromarray(
         np.random.default_rng(42).integers(30, 220, (64, 64, 3), dtype=np.uint8)
@@ -700,7 +701,8 @@ def test_depth_detector_local_manifest_lazy_load_preview_and_bounds(
     result = detector.detect(
         image.getvalue(), (0.35, 0.65, 0.65, 0.95), PerceptionSettings()
     )
-    assert result["state"] == "clear" and result["_preview"].startswith(b"\xff\xd8")
+    assert result["state"] == "clear"
+    assert result["_preview"].startswith(b"\xff\xd8")
     dark = io.BytesIO()
     Image.new("RGB", (64, 64)).save(dark, format="PNG")
     assert (

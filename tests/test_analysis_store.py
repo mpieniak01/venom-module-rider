@@ -67,7 +67,8 @@ def test_runs_freeze_labels_sources_and_intent_across_retries(tmp_path):
 def test_input_window_is_explicit_and_empty_window_does_not_create_run(tmp_path):
     _samples, session, store = rig(tmp_path)
     row = create(store, session, offset=1, count=1)
-    assert row["total"] == 1 and row["context"]["source_sample_count"] == 2
+    assert row["total"] == 1
+    assert row["context"]["source_sample_count"] == 2
     assert row["context"]["inputs"][0]["frame_id"] == "second"
     with pytest.raises(RiderError, match="analysis_empty_window"):
         create(store, session, "empty", offset=2)
@@ -81,7 +82,8 @@ def test_cancel_is_requested_until_executor_stops_and_cannot_start_cancelled_job
     row = create(store, session)
     identity = row["id"]
     stopped = store.cancel(identity)
-    assert stopped["state"] == "queued" and stopped["cancel_requested"]
+    assert stopped["state"] == "queued"
+    assert stopped["cancel_requested"]
     assert not store.running(identity)
     final = store.finish(identity, "cancelled")
     assert final["state"] == "cancelled"
@@ -96,7 +98,8 @@ def test_success_requires_complete_committed_matching_report(tmp_path):
     with pytest.raises(RiderError, match="analysis_artifact_not_found"):
         store.finish(row["id"], "succeeded")
     done = complete(store, row)
-    assert done["state"] == "succeeded" and done["result"]["frames"] == 2
+    assert done["state"] == "succeeded"
+    assert done["result"]["frames"] == 2
     assert store.cancel(row["id"])["state"] == "succeeded"
     assert store.artifact(row["id"], "report.json")[1] == "application/json"
     assert store.artifacts(row["id"])[0]["name"] == "report.json"
@@ -214,7 +217,8 @@ def test_analysis_quotas_preserve_sources_and_no_uncommitted_run_appears(
     samples.limits = replace(samples.limits, total_bytes=1)
     with pytest.raises(RiderError, match="samples_quota_reached"):
         create(store, session, "full")
-    assert len(store.list()) == 1 and len(samples.samples(session)) == 2
+    assert len(store.list()) == 1
+    assert len(samples.samples(session)) == 2
 
 
 @pytest.mark.parametrize(
@@ -251,7 +255,8 @@ def test_artifact_format_size_and_run_count_limits_are_explicit(tmp_path, monkey
         store.write(row["id"], "large.png", b"more than two bytes", "image/png")
     with pytest.raises(RiderError, match="analysis_artifact_format"):
         store.write(row["id"], "html", b"x", "text/html")
-    assert store.artifacts(row["id"]) == [] and len(samples.samples(session)) == 2
+    assert store.artifacts(row["id"]) == []
+    assert len(samples.samples(session)) == 2
 
 
 @pytest.mark.parametrize("field", ["input_digest", "summary"])

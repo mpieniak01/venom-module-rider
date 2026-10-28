@@ -76,7 +76,8 @@ async def test_single_post_preserves_original_intent_and_pi_response(monkeypatch
         )
         assert response.status_code == 200
         assert response.json()["data"] == expected
-        assert len(calls) == 1 and calls[0].url.path == "/api/navigation/trial"
+        assert len(calls) == 1
+        assert calls[0].url.path == "/api/navigation/trial"
         assert json.loads(calls[0].content) == original
         assert calls[0].extensions["timeout"]["read"] == 18.0
     finally:
@@ -200,7 +201,8 @@ async def test_demo_pi_supports_same_one_start_and_rejects_replayed_identifier()
         response = await client.post("/api/navigation/trial", json=request)
         assert response.status_code == 200
         result = response.json()["data"]
-        assert result["status"]["running"] and result["status"]["run_id"]
+        assert result["status"]["running"]
+        assert result["status"]["run_id"]
         assert result["config"]["mode"] == "drive"
         assert result["authority"]["owner"] == "navigation"
         assert pi.camera_on
@@ -222,7 +224,8 @@ async def test_demo_scoped_stop_preserves_new_manual_generation():
     pi.state, pi.owner = "ARMED", "manual"
     response = pi.control({"action": "stop", "expected_generation": before})
     assert response.status_code == 409
-    assert pi.state == "ARMED" and pi.owner == "manual"
+    assert pi.state == "ARMED"
+    assert pi.owner == "manual"
 
 
 async def test_failed_demo_trial_revokes_its_own_arm():
@@ -238,7 +241,8 @@ async def test_failed_demo_trial_revokes_its_own_arm():
                     settings_revision=pi.controls["revision"],
                 )
             )
-        assert pi.state == "DISARMED" and not pi.safety()["moving"]
+        assert pi.state == "DISARMED"
+        assert not pi.safety()["moving"]
     finally:
         await nav.close()
 

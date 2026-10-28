@@ -170,7 +170,9 @@ async def test_selection_commits_cas_clears_old_masks_without_start(catalog, ack
             "model_id": SEGFORMER,
             "artifact_sha256": artifact["sha256"],
         }
-        assert not loop.previews and not loop.inference_cache and not loop.runs
+        assert not loop.previews
+        assert not loop.inference_cache
+        assert not loop.runs
         assert service.runtime.generation == 1
         assert domain.posts[0][0] == "/api/navigation/model-selection"
         assert len(domain.posts) == 1
@@ -196,7 +198,8 @@ async def test_reject_stale_or_local_provider_before_mutating(catalog):
             await service.select(
                 domain, {"revision": 2, "model_id": SEGFORMER}, "fixture"
             )
-        assert not domain.posts and not service.switching
+        assert not domain.posts
+        assert not service.switching
         with pytest.raises(RiderError, match="model_selection_invalid"):
             await service.select(
                 domain, {"revision": True, "model_id": SEGFORMER}, "fixture"
@@ -235,7 +238,8 @@ async def test_switch_waits_for_native_work(catalog):
             if service.switching:
                 break
             await asyncio.sleep(0.001)
-        assert service.switching and not domain.posts
+        assert service.switching
+        assert not domain.posts
         with pytest.raises(RiderError, match="model_busy"):
             await service.select(
                 domain, {"revision": 2, "model_id": SEGFORMER}, "fixture"
@@ -307,9 +311,12 @@ async def test_explicit_observation_reloads_released_selection_without_policy_wr
         service.runtime.reset()
         await service.prepare_observation(domain, "fixture")
         assert calls == [model, model]
-        assert domain.policy == original and not domain.posts
+        assert domain.policy == original
+        assert not domain.posts
         assert not hasattr(loop, "resources_suspended")
-        assert not service.switching and loop.busy is None and loop.depth_busy is None
+        assert not service.switching
+        assert loop.busy is None
+        assert loop.depth_busy is None
     finally:
         await service.close()
         await loop.close()
@@ -335,8 +342,10 @@ async def test_observation_load_failure_does_not_change_policy_or_hide_retry(
             await service.prepare_observation(domain, "old")
         with pytest.raises(RiderError, match="vision_cuda_unavailable"):
             await service.prepare_observation(domain, "fixture")
-        assert not domain.posts and not service.switching
-        assert loop.busy is None and loop.depth_busy is None
+        assert not domain.posts
+        assert not service.switching
+        assert loop.busy is None
+        assert loop.depth_busy is None
         monkeypatch.setattr(service.runtime, "warm", lambda _perception: None)
         await service.prepare_observation(domain, "fixture")
     finally:
@@ -360,7 +369,8 @@ async def test_observation_does_not_resume_after_policy_changes_during_warmup(
     try:
         with pytest.raises(RiderError, match="model_selection_conflict"):
             await service.prepare_observation(domain, "fixture")
-        assert not domain.posts and not service.switching
+        assert not domain.posts
+        assert not service.switching
     finally:
         await service.close()
         await loop.close()
@@ -381,7 +391,8 @@ async def test_goal_prepares_model_only_for_explicit_observation_start(enabled):
 
     async def mutate(path, body, session):
         assert path == "/api/logic/feature/s15_venom_perception"
-        assert body == {"enabled": enabled} and session == domain.session
+        assert body == {"enabled": enabled}
+        assert session == domain.session
         events.append("goal")
         return {"data": {"ok": True}}
 
@@ -467,7 +478,8 @@ async def test_analysis_prepare_route_only_restarts_failed_observation(
         result = await client.post(
             "/perception/prepare", headers={"X-Rider-Session": "fixture-session"}
         )
-        assert result.status_code == 200 and result.json() == {"ok": True}
+        assert result.status_code == 200
+        assert result.json() == {"ok": True}
         app.state.rider_models.prepare_observation.assert_awaited_once_with(
             domain, "fixture-session"
         )

@@ -69,15 +69,17 @@ async def test_two_panels_share_one_camera_reader_and_cancel_only_their_lease():
             await emit(client, incoming)
             observed = await a
             assert await b is observed
-            assert (
-                observed.source == incoming.source
-                and observed.payload == incoming.payload
-            )
-            assert client.opened == 1 and first.readers == 2
-        assert not first.closed and first.readers == 1
+            assert observed.source == incoming.source
+            assert observed.payload == incoming.payload
+            assert client.opened == 1
+            assert first.readers == 2
+        assert not first.closed
+        assert first.readers == 1
         await emit(client, native(2))
         assert (await hub.frame(first)).source.sequence == 2
-    assert first.closed and not first.frames and hub.connection is None
+    assert first.closed
+    assert not first.frames
+    assert hub.connection is None
     assert client.closed == 1
     await hub.close()
 
@@ -87,9 +89,11 @@ async def test_reference_warmup_expires_without_an_eternal_background_collector(
     async with hub.lease(domain, profile, keepalive=True) as connection:
         await emit(client, native())
         assert (await hub.frame(connection)).source.sequence == 1
-    assert not connection.closed and connection.readers == 0
+    assert not connection.closed
+    assert connection.readers == 0
     await asyncio.sleep(0.06)
-    assert connection.closed and hub.connection is None
+    assert connection.closed
+    assert hub.connection is None
     assert client.closed == client.opened == 1
     await hub.close()
 
@@ -109,7 +113,8 @@ async def test_recent_reference_ring_has_no_backlog_and_duplicates_do_not_rejuve
             )
         received = connection.received
         await emit(client, frames[-1], frames[-2])
-        assert connection.received == received and connection.rejected == 2
+        assert connection.received == received
+        assert connection.rejected == 2
         now[0] += 0.5
         assert hub.status(connection)["ready"] is False
         assert not connection.frames
@@ -129,7 +134,8 @@ async def test_reconnect_discards_old_input_and_does_not_accept_replayed_sequenc
         await asyncio.sleep(0.12)
         await emit(client, one, native(2))
         assert (await hub.frame(connection)).source.sequence == 2
-        assert client.opened == 2 and connection.reconnects == 1
+        assert client.opened == 2
+        assert connection.reconnects == 1
         assert connection.rejected >= 1
     await hub.close()
 
@@ -146,11 +152,13 @@ async def test_old_epoch_is_rejected_and_new_profile_retires_all_old_consumers()
         ).source.model_dump(mode="json")
         new_profile["_age_anchor"] = age_anchor(new_profile, hub.clock(), hub.clock())
         async with hub.lease(domain, new_profile) as current:
-            assert old.closed and not old.frames
+            assert old.closed
+            assert not old.frames
             with pytest.raises(RiderError, match="stream_unavailable"):
                 await waiting
             await emit(client, native(2))  # Late packet from the retired producer.
-            assert current.error == "stream_epoch_changed" and not current.frames
+            assert current.error == "stream_epoch_changed"
+            assert not current.frames
             assert hub.status(current)["ready"] is False
     await hub.close()
 
@@ -202,9 +210,11 @@ async def test_canonical_image_transform_is_shared_between_browsers(monkeypatch)
             hub.canonical_frame(connection, frame),
             hub.canonical_frame(connection, frame),
         )
-        assert a == b == b"canonical-image" and len(calls) == 1
+        assert a == b == b"canonical-image"
+        assert len(calls) == 1
         await hub.close()
-        assert connection.closed and not connection.canonical
+        assert connection.closed
+        assert not connection.canonical
 
 
 @pytest.mark.parametrize(
@@ -240,8 +250,10 @@ async def test_failed_peer_reconnect_backoff_is_bounded_and_cancellable(monkeypa
         if len(attempts) == 3:
             assert attempts[2] - attempts[1] >= 0.18
         reader, reaper = connection.reader, connection.reaper
-        assert not connection.frames and hub.status(connection)["ready"] is False
-    assert reader.done() and reaper.done()
+        assert not connection.frames
+        assert hub.status(connection)["ready"] is False
+    assert reader.done()
+    assert reaper.done()
     count = len(attempts)
     await asyncio.sleep(0.12)
     assert len(attempts) == count
@@ -293,7 +305,8 @@ async def test_slow_canonical_jobs_remain_bounded_across_expiry_cancel_and_retir
             assert len(connection.canonical_jobs) == MAX_REFERENCES
             now[0] += 0.6
             hub._purge(connection)
-            assert not connection.frames and not connection.canonical
+            assert not connection.frames
+            assert not connection.canonical
 
             # TTL/LRU churn cannot free admission slots for unfinished work.
             for sequence in range(MAX_REFERENCES + 1, MAX_REFERENCES * 3 + 1):
@@ -309,21 +322,23 @@ async def test_slow_canonical_jobs_remain_bounded_across_expiry_cancel_and_retir
             # shares its existing job instead of creating a ninth decoder.
             shared = asyncio.create_task(hub.canonical_frame(connection, first))
             await asyncio.sleep(0)
-            assert (
-                not shared.done() and len(connection.canonical_jobs) == MAX_REFERENCES
-            )
+            assert not shared.done()
+            assert len(connection.canonical_jobs) == MAX_REFERENCES
             changed = connection.changed
             retiring = asyncio.create_task(hub.invalidate())
             await asyncio.wait_for(changed.wait(), 1)
-            assert connection.closed and not retiring.done()
+            assert connection.closed
+            assert not retiring.done()
             with pytest.raises(RiderError, match="stream_unavailable"):
                 await hub.canonical_frame(connection, frame)
 
             gate.set()
             await asyncio.wait_for(retiring, 1)
             assert await asyncio.wait_for(shared, 1) == jpeg()
-            assert not connection.canonical_jobs and not connection.canonical
-            assert hub.connection is None and client.closed == client.opened
+            assert not connection.canonical_jobs
+            assert not connection.canonical
+            assert hub.connection is None
+            assert client.closed == client.opened
             assert sorted(decoded) == list(range(1, MAX_REFERENCES + 1))
     finally:
         gate.set()

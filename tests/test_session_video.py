@@ -85,7 +85,8 @@ def test_no_frames_never_claims_success_and_download_is_unavailable(tmp_path):
     sid = collection(store)
     store.video.note(sid, "samples_video_camera_off")
     result = store.video.finish(sid)
-    assert result["frames"] == 0 and result["state"] == "error"
+    assert result["frames"] == 0
+    assert result["state"] == "error"
     assert result["error"] == "samples_video_no_frames"
     with pytest.raises(RiderError, match="samples_video_unavailable"):
         store.video.download(sid)
@@ -99,10 +100,13 @@ def test_duplicates_rate_bound_source_change_and_real_gap_are_reported(tmp_path)
     store.video.append(sid, first)
     store.video.append(sid, jpeg(1, 0.05))
     row = store.video.append(sid, jpeg(2, 1))
-    assert row["frames"] == 2 and row["duplicates"] == 1
-    assert row["gaps"] == 1 and row["duration_s"] == 1
+    assert row["frames"] == 2
+    assert row["duplicates"] == 1
+    assert row["gaps"] == 1
+    assert row["duration_s"] == 1
     row = store.video.append(sid, jpeg(3, 1.3, "other-camera"))
-    assert row["state"] == "error" and row["error"] == "samples_video_source_changed"
+    assert row["state"] == "error"
+    assert row["error"] == "samples_video_source_changed"
     assert store.video.append(sid, jpeg(4, 2))["frames"] == 2
 
 
@@ -111,7 +115,8 @@ def test_limit_and_disk_failure_preserve_previous_bytes(tmp_path, monkeypatch):
     sid = collection(store)
     for sequence in range(20):
         row = store.video.append(sid, jpeg(sequence, sequence / 4))
-    assert row["state"] == "limit" and 0 < row["frames"] < 20
+    assert row["state"] == "limit"
+    assert 0 < row["frames"] < 20
     preserved = store.video.path(sid, "capture.mjpeg").read_bytes()
     assert len(preserved) == row["bytes"]
     other = collection(store, "second")
@@ -121,7 +126,8 @@ def test_limit_and_disk_failure_preserve_previous_bytes(tmp_path, monkeypatch):
 
     monkeypatch.setattr(store, "_space", full)
     result = store.video.append(other, jpeg())
-    assert result["state"] == "error" and result["error"] == "samples_disk_full"
+    assert result["state"] == "error"
+    assert result["error"] == "samples_disk_full"
     assert store.video.path(sid, "capture.mjpeg").read_bytes() == preserved
 
 
@@ -268,7 +274,8 @@ def test_backwards_receipt_time_is_reported_instead_of_rate_limited(tmp_path):
     sid = collection(store)
     store.video.append(sid, jpeg(1, 2))
     result = store.video.append(sid, jpeg(2, 1))
-    assert result["state"] == "error" and result["error"] == "samples_video_source_time"
+    assert result["state"] == "error"
+    assert result["error"] == "samples_video_source_time"
 
 
 def test_corrupt_metadata_does_not_hide_other_sessions_or_modify_source(tmp_path):

@@ -35,7 +35,8 @@ async def test_exact_ticket_saves_and_retry_survives_eviction_and_close(tmp_path
         source = frame(context={"frame_id": "floor"})
         key = instance.offer("robot", source.payload, source.mime, source.context())
         queued = instance.capture(session, "request", key)
-        assert queued["state"] == "queued" and queued["saved_at"] is None
+        assert queued["state"] == "queued"
+        assert queued["saved_at"] is None
         saved = await settled(instance, "request")
         assert saved["state"] == "saved"
         assert await instance.read(instance.store.original, saved["sample_id"]) == (

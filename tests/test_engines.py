@@ -45,7 +45,9 @@ def adapter(tmp_path, monkeypatch):
     )
 
     async def transcribe(pcm, language, sample_rate):
-        assert pcm.dtype == np.int16 and sample_rate == 16000 and language == "pl"
+        assert pcm.dtype == np.int16
+        assert sample_rate == 16000
+        assert language == "pl"
         return "Cześć"
 
     async def speak(text):
@@ -97,14 +99,16 @@ async def test_status_reads_are_cached_and_do_not_load_models(adapter, monkeypat
     monkeypatch.setattr(engine, "_probe", probe)
     audio.whisper.model = audio.voice.voice = None
     first, second = await asyncio.gather(engine.capabilities(), engine.capabilities())
-    assert first == second and calls == ["scene-model"]
+    assert first == second
+    assert calls == ["scene-model"]
     assert set(first["tasks"]) == set(engines.TASKS)
     for task in engines.TASKS:
         assert first["tasks"][task]["available"] is (task != "conversation.respond")
         assert not first["tasks"][task]["ready"]
         assert not first["tasks"][task]["quality"]["simulated"]
         assert first["tasks"][task]["runtime"]["config_revision"]
-    assert audio.whisper.model is None and audio.voice.voice is None
+    assert audio.whisper.model is None
+    assert audio.voice.voice is None
     assert "local.invalid" not in json.dumps(first)
     runtime.config_hash = "runtime-two"
     assert (await engine.capabilities())["config_revision"] != first["config_revision"]
@@ -220,9 +224,12 @@ async def test_text_reuses_simple_service_without_tools(adapter, monkeypatch):
     assert result.runtime["model"] == "scene-model"
     assert result.runtime["config_revision"] == await engine.revision()
     assert not result.quality["simulated"]
-    assert requests[0].tools is None and requests[0].tool_choice is None
-    assert requests[0].session_id == "session" and requests[0].stream is False
-    assert requests[0].max_tokens == 512 and "German" in requests[0].content
+    assert requests[0].tools is None
+    assert requests[0].tool_choice is None
+    assert requests[0].session_id == "session"
+    assert requests[0].stream is False
+    assert requests[0].max_tokens == 512
+    assert "German" in requests[0].content
     assert requests[0].model == "scene-model"
 
 
@@ -307,7 +314,8 @@ async def test_transcription_preserves_silence_and_actual_format(adapter):
 
     audio.transcribe_checked = silence
     result = await engine.execute("audio.transcribe", {}, wav_bytes(), {})
-    assert result.data["text"] == "" and result.quality["silence"]
+    assert result.data["text"] == ""
+    assert result.quality["silence"]
 
     async def failed(*args, **kwargs):
         raise RuntimeError("private model error")
@@ -339,11 +347,13 @@ async def test_invalid_audio_format_is_rejected(adapter, data):
 async def test_tts_outputs_real_sample_rate_pcm16_wav_without_playback(adapter):
     engine, audio, _ = adapter
     result = await engine.execute("audio.synthesize", {}, "Cześć".encode(), {})
-    assert result.content_type == "audio/wav" and result.binary is not None
+    assert result.content_type == "audio/wav"
+    assert result.binary is not None
     assert result.data == {"sample_rate": 22050, "channels": 1, "sample_width": 2}
     with wave.open(io.BytesIO(result.binary), "rb") as output:
         assert output.getframerate() == audio.voice.output_sample_rate
-        assert output.getsampwidth() == 2 and output.getnchannels() == 1
+        assert output.getsampwidth() == 2
+        assert output.getnchannels() == 1
         assert (
             output.readframes(4) == np.array([0, 100, -100, 0], dtype="<i2").tobytes()
         )
@@ -418,11 +428,13 @@ async def test_cancelled_audio_drains_before_second_inference_and_close(adapter)
     )
     close = asyncio.create_task(engine.close())
     await asyncio.sleep(0)
-    assert not second_started.is_set() and not close.done()
+    assert not second_started.is_set()
+    assert not close.done()
     finish.set()
     await close
     assert (await second).data["text"] == "result"
-    assert second_started.is_set() and not engine._audio_lock.locked()
+    assert second_started.is_set()
+    assert not engine._audio_lock.locked()
 
 
 async def test_cancelled_drain_does_not_cancel_still_running_audio(adapter):
@@ -449,7 +461,8 @@ async def test_cancelled_drain_does_not_cancel_still_running_audio(adapter):
     assert all(not work.cancelled() for work in engine._draining)
     finish.set()
     await engine.close()
-    assert not engine._draining and not engine._audio_lock.locked()
+    assert not engine._draining
+    assert not engine._audio_lock.locked()
 
 
 class JsonResponse:
@@ -546,7 +559,9 @@ async def test_probe_missing_model_and_compatible_model_metadata(adapter, monkey
         calls,
     )
     snapshot = await VenomEngines._probe(engine, runtime)
-    assert snapshot["installed"] and snapshot["ready"] and snapshot["vision"]
+    assert snapshot["installed"]
+    assert snapshot["ready"]
+    assert snapshot["vision"]
     assert calls[-2][1] == "http://local.invalid/v1/models"
 
 
@@ -686,7 +701,8 @@ async def test_vision_refuses_absent_capability_and_huge_runtime_response(
 
 def test_utility_bounds_and_errors(tmp_path, monkeypatch):
     error = EngineUnavailable("offline")
-    assert error.code == "offline" and error.status_code == 503
+    assert error.code == "offline"
+    assert error.status_code == 503
     assert EngineResult(data={}).runtime == {}
     monkeypatch.setattr(engines.importlib.util, "find_spec", lambda _: None)
     assert not engines._installed("fake")
