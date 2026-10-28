@@ -58,6 +58,14 @@ jobs:
           name: rider-python-coverage
           path: host/modules/venom-module-rider/test-results/coverage.xml
           if-no-files-found: error
+      - name: Verify SonarCloud credentials
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          if [ -z "$SONAR_TOKEN" ]; then
+            echo "::error::SONAR_TOKEN is unavailable. Fork PRs require an approved trusted scan; the quality gate cannot pass without analysis."
+            exit 1
+          fi
       - name: SonarCloud analysis and quality gate
         uses: SonarSource/sonarqube-scan-action@a31c9398be7ace6bbfaf30c0bd5d415f843d45e9
         with:
