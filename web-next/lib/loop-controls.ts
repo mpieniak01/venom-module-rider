@@ -151,20 +151,24 @@ export function freshPolicyFrame(frame: (Parameters<typeof freshAnalysisFrame>[0
   return calibrationFrameBlock(frame,stream,state,policy)==="";
 }
 
+/** Accept only protocol string reasons; malformed metadata uses the established fallback. */
+function diagnosticReason(value:unknown):string {
+  return typeof value==="string"?value:"waiting_for_decision";
+}
 /** Resolve image-only reasoning without changing the decision's freshness. */
 function decisionImageReason(current:boolean, decision:JsonRecord, count:number, required:number):string {
   if(!current)return decision.state?"analysis_not_current":"waiting_for_decision";
-  if(decision.state!=="clear")return String(decision.reason??"waiting_for_decision");
+  if(decision.state!=="clear")return diagnosticReason(decision.reason);
   return count<required?"clear_frames_pending":"clear_frames_ready";
 }
 /** Preserve the device motion reason ahead of the diagnostic fallback. */
 function decisionMotionReason(current:boolean,state:JsonRecord,decision:JsonRecord,count:number,required:number):string {
-  if(!current)return String(state.stop_reason??"waiting_for_decision");
-  if(decision.motion_reason!==null&&decision.motion_reason!==undefined)return String(decision.motion_reason);
-  if(decision.state!=="clear")return String(decision.reason??"waiting_for_decision");
+  if(!current)return diagnosticReason(state.stop_reason);
+  if(decision.motion_reason!==null&&decision.motion_reason!==undefined)return diagnosticReason(decision.motion_reason);
+  if(decision.state!=="clear")return diagnosticReason(decision.reason);
   if(count<required)return "clear_frames_pending";
   if(state.mode==="observe")return "observe_only";
-  return String(decision.reason??"waiting_for_decision");
+  return diagnosticReason(decision.reason);
 }
 /** Describe the current model decision without granting motion authority. */
 export function decisionView(state: JsonRecord, detector: JsonRecord) {
@@ -287,7 +291,7 @@ export function motionPermission(state:JsonRecord, goals:JsonRecord, policy:Json
 /** Resolve only already-granted action headlines. */
 function grantedExecutionHeadline(action:unknown):string {
   const labels:Record<string,string>={slow:"permissionVenomSlow",steer_left:"permissionVenomSteerLeft",steer_right:"permissionVenomSteerRight",turn_left:"permissionVenomTurnLeft",turn_right:"permissionVenomTurnRight"};
-  return typeof action==="string"&&Object.prototype.hasOwnProperty.call(labels,action)?labels[action]:"permissionVenomYes";
+  return typeof action==="string"&&Object.hasOwn(labels,action)?labels[action]:"permissionVenomYes";
 }
 /** Describe confirmed executor output before model intent or observation. */
 export function executionHeadline(state:JsonRecord,goals:JsonRecord,status:RiderStatus|null,permission:{venom:boolean|null}):string {

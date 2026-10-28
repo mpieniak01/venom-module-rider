@@ -679,3 +679,21 @@ test("STOP or session changes during a successful or failed post-Start GET still
   await assert.rejects(refreshStartedNavigation(async()=>{current=false;if(failed)throw new Error("read_failed");},()=>current),/navigation_trial_cancelled/);
  }
 });
+
+
+test("diagnostic reasons accept protocol strings and never stringify malformed metadata",()=>{
+ const malformed=[{},[],["vision_clear"],17,false];
+ for(const value of malformed){
+  const decision={state:"unknown",reason:value,motion_reason:value};
+  const current=decisionView({running:true,stale:false,decision},{});
+  assert.equal(current.imageReason,"waiting_for_decision");
+  assert.equal(current.reason,"waiting_for_decision");
+  assert.equal(decisionView({running:false,stop_reason:value,decision},{}).reason,"waiting_for_decision");
+ }
+ const exact=decisionView({running:true,decision:{state:"unknown",reason:"vision_low_confidence",motion_reason:"observe_only"}},{});
+ assert.equal(exact.imageReason,"vision_low_confidence");
+ assert.equal(exact.reason,"observe_only");
+ const empty=decisionView({running:true,decision:{state:"unknown",reason:"",motion_reason:""}},{});
+ assert.equal(empty.imageReason,"");
+ assert.equal(empty.reason,"");
+});

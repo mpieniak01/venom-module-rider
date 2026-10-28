@@ -385,7 +385,12 @@ export function useRider(section: Section) {
       if (session !== sessionRef.current && path !== "/config") throw new Error("session_changed");
       if (!quiet) setNotice({ key: path === "/conversation/config" ? "conversationConfigured" : "saved", tone: "success" });
       return data(response);
-    } catch (error) { if (!quiet) setNotice({ key: mutationFailureKey(errorCode(error)), code: errorCode(error), tone: "error" }); throw error; }
+    } catch (error) {
+      if (!quiet) {
+        setNotice({ key: mutationFailureKey(errorCode(error)), code: errorCode(error), tone: "error" });
+      }
+      throw error;
+    }
   }, [isConnected]);
   const invalidatePipelineMedia = useCallback(() => {
     cameraTransitionEpoch.current += 1; replaceFrame("camera", null);
@@ -531,7 +536,13 @@ export function useRider(section: Section) {
     setBusy(key);
     const epoch = motionEpoch.current;
     try { if ((key === "arm" || key === "clear_estop") && !clockRef.current) await poll("control", true); const response = await sendControl(body, () => true, !quiet); if (key !== "move") await poll(undefined, key === "navigation_resume" || key === "navigation_pause"); return response; }
-    catch (error) { commandFailure(error,epoch,key); if (throwOnError) throw error; return null; }
+    catch (error) {
+      commandFailure(error,epoch,key);
+      if (throwOnError) {
+        throw error;
+      }
+      return null;
+    }
     finally { if (safetyAction) motionBlocked.current = Math.max(0, motionBlocked.current - 1); setBusy(value => value === key ? null : value); }
   }, [commandFailure, hold, poll, sendControl]);
   const stopManual = useCallback(async () => {

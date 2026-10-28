@@ -347,7 +347,7 @@
 .operatorPanel .pad { grid-template-columns:repeat(3,68px); grid-template-rows:repeat(3,60px); gap:6px; margin:0; }
 .operatorConsole .arrow, .operatorConsole .padStop { transition:background-color .15s,border-color .15s,color .15s; }
 .manualReadout { display:flex; flex-direction:column; gap:4px; min-width:0; font-size:12px; color:var(--ui-muted); }
-.manualReadout > div:first-child { display:flex; align-items:center; flex-wrap:wrap; gap:6px; min-height:28px; }
+.manualReadout > output:first-child { display:flex; align-items:center; flex-wrap:wrap; gap:6px; min-height:28px; }
 .operatorStatus { display:grid; gap:10px; padding-top:8px; border-top:1px solid var(--r-border); font-size:12px; font-variant-numeric:tabular-nums; }
 .operatorBattery { display:flex; align-items:center; gap:8px; }
 .operatorBattery > strong { margin-left:auto; font-size:22px; line-height:28px; color:var(--text-heading); }

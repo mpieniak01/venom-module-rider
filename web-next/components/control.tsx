@@ -11,7 +11,7 @@ import { perceptionFrameCurrent } from "../lib/perception";
 import { useEffect, useId, useState, type ReactNode, type Dispatch, type SetStateAction } from "react";
 import { displayedPreview, previewLifetime } from "../lib/preview-media";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, RotateCcw, RotateCw, Camera, Eye, EyeOff, CirclePause, CircleStop } from "lucide-react";
-import { actuatorState, displayValue, finite, formatTime, record, safetyOf, settingsOf, type Direction, type NumericDescriptor, type JsonRecord } from "../lib/model";
+import { actuatorState, displayValue, finite, formatTime, record, safetyOf, settingsOf, str, type Direction, type NumericDescriptor, type JsonRecord } from "../lib/model";
 import type { Translator } from "../lib/i18n";
 import type { Frame, RiderClient } from "../lib/use-rider";
 import { Button, Empty, Field, Panel, Pill, Range, Select } from "./primitives";
@@ -109,7 +109,7 @@ type ManualFeedbackProps={client:RiderClient;t:Translator;minimal:boolean;contin
 /** Render the same compact or detailed manual readout outside gesture setup. */
 function ManualPadFeedback({client,t,minimal,continuous,safety,feedback,helpId,children}:ManualFeedbackProps){
   if(minimal)return <div className={styles.manualReadout} data-testid="manual-feedback">
-      <div role="status"><Pill tone={safety.state==="ARMED"?"good":"warning"}>{t(safetyLabel(safety.state))}</Pill>{client.activeDirection&&<span>{t(client.activeDirection)}</span>}</div>
+      <output aria-live="polite"><Pill tone={safety.state==="ARMED"?"good":"warning"}>{t(safetyLabel(safety.state))}</Pill>{client.activeDirection&&<span>{t(client.activeDirection)}</span>}</output>
       {children}
     </div>;
   return <div className={styles.padDetails}>
@@ -196,7 +196,12 @@ function cameraStreams(client:RiderClient,compact:boolean):readonly CameraStream
 type CameraViewContext={client:RiderClient;t:Translator;compact:boolean;selected:CameraStream;modelDetails:string;modelLabel:string;streams:readonly CameraStream[];chooseStream:(stream:CameraStream|null)=>Promise<void>;previewBusy:boolean;imageReference:ReturnType<typeof useImageReference>;imageSize:[number,number];power:RiderClient["pipeline"]["status"];cameraOn:boolean;cameraButtonName:string;cameraButtonLabel:string;changePower:()=>Promise<void>};
 /** Keep stream labels stable across the compact/full layouts. */
 function streamLabel(stream:CameraStream,compact:boolean):string {
-  if(compact){if(stream==="raw")return "workspace.raw";return stream==="venom"?"workspace.analysis":"visionPi";}
+  if(compact){
+    if(stream==="raw"){
+      return "workspace.raw";
+    }
+    return stream==="venom"?"workspace.analysis":"visionPi";
+  }
   if(stream==="venom")return "visionVenom";
   return stream==="proc"?"visionPi":stream;
 }
@@ -224,10 +229,13 @@ function cameraToolbar(context:CameraViewContext){
 }
 /** Describe model interpretation separately from the actual visible frame. */
 function cameraResultMetadata(visible:Frame|null,sourceIdentity:JsonRecord|undefined,selected:CameraStream,t:Translator){
+  const modelId=str(visible?.analysis?.model_id);
+  const modelLabel=modelId||(visible?.analysis?.perception_engine==="depth_plane"?"Depth Anything V2":"SegFormer-B0");
+  const geometry=visible?.analysis?.perception_engine==="depth_plane"||modelId.startsWith("depth-anything");
   return <div hidden={selected!=="venom"} className={styles.perceptionPreviewMeta} data-testid="perception-preview-result" aria-live="polite">
-      <strong>{visible?.analysis ? String(visible.analysis.model_id || (visible.analysis.perception_engine === "depth_plane" ? "Depth Anything V2" : "SegFormer-B0")) : t("perception.previewWaiting")}</strong>
+      <strong>{visible?.analysis ? modelLabel : t("perception.previewWaiting")}</strong>
       {visible?.analysis && <span>{t("frameSequence")}: {String(sourceIdentity?.sequence)} · {String(sourceIdentity?.frame_id).slice(0,12)} · {Math.round(frameAge(visible) ?? 0)} ms · {t("perception.inference")}: {visible.inferenceMs || "N/A"} ms · r{String(visible.analysis.config_revision)}</span>}
-      <span title={t(visible?.analysis?.perception_engine === "depth_plane" || String(visible?.analysis?.model_id ?? "").startsWith("depth-anything") ? "perception.geometryLegend" : "perception.semanticLegend")}>{t(visible?.analysis?.perception_engine === "depth_plane" || String(visible?.analysis?.model_id ?? "").startsWith("depth-anything") ? "perception.geometryLegendShort" : "perception.semanticLegendShort")}</span>
+      <span title={t(geometry ? "perception.geometryLegend" : "perception.semanticLegend")}>{t(geometry ? "perception.geometryLegendShort" : "perception.semanticLegendShort")}</span>
     </div>;
 }
 type CameraSurfaceContext={client:RiderClient;t:Translator;candidate:Frame|null;visible:Frame|null;notice:string|null;transitioning:boolean;selected:CameraStream;imageReference:ReturnType<typeof useImageReference>;imageSize:[number,number];setImageSize:Dispatch<SetStateAction<[number,number]>>;setDisplayed:Dispatch<SetStateAction<Frame|null>>;editor?:CorridorEditorProps;modelPreview:boolean;onObservation?:()=>void;observationDisabled:boolean};
@@ -241,7 +249,7 @@ function emptyPreviewKey(context:CameraSurfaceContext):string {
 /** Render a decoded candidate and keep captured identity checks in its handlers. */
 function cameraSurface(context:CameraSurfaceContext){
   const {client,t,candidate,visible,notice,transitioning,selected,imageReference,imageSize,setImageSize,setDisplayed,editor,onObservation,observationDisabled}=context;
-  return <div className={styles.camera} data-testid="camera-surface">{candidate&&notice&&<div className={transitioning?styles.cameraPaused+" "+styles.cameraTransition:styles.cameraPaused} role="status" data-testid="vision-preview-paused">{t(notice!)}</div>}{candidate ? <><img data-capture-key={candidate.captureKey} src={candidate.url} alt={t("cameraAlt")} onLoad={event=>{const {naturalWidth,naturalHeight}=event.currentTarget;setImageSize(previous=>previous[0]===naturalWidth&&previous[1]===naturalHeight?previous:[naturalWidth,naturalHeight]);client.markCameraDecoded(event.currentTarget.currentSrc,true);if(candidate&&event.currentTarget.currentSrc===candidate.url)setDisplayed(candidate);}} onError={event=>{client.markCameraDecoded(event.currentTarget.currentSrc,false);setDisplayed(null);}} />{(selected==="venom"||imageReference.editing)&&<ImageReferenceOverlay reference={imageReference} size={imageSize} t={t} geometry={visible?.analysis?.overlay_geometry}/>}
+  return <div className={styles.camera} data-testid="camera-surface">{candidate&&notice&&<output className={transitioning?styles.cameraPaused+" "+styles.cameraTransition:styles.cameraPaused} aria-live="polite" data-testid="vision-preview-paused">{t(notice!)}</output>}{candidate ? <><img data-capture-key={candidate.captureKey} src={candidate.url} alt={t("cameraAlt")} onLoad={event=>{const {naturalWidth,naturalHeight}=event.currentTarget;setImageSize(previous=>previous[0]===naturalWidth&&previous[1]===naturalHeight?previous:[naturalWidth,naturalHeight]);client.markCameraDecoded(event.currentTarget.currentSrc,true);if(candidate&&event.currentTarget.currentSrc===candidate.url)setDisplayed(candidate);}} onError={event=>{client.markCameraDecoded(event.currentTarget.currentSrc,false);setDisplayed(null);}} />{(selected==="venom"||imageReference.editing)&&<ImageReferenceOverlay reference={imageReference} size={imageSize} t={t} geometry={visible?.analysis?.overlay_geometry}/>}
 {editor&&<CorridorOverlay editor={editor} size={imageSize} t={t}/>}</> : <Empty><Camera size={32} />{t(emptyPreviewKey(context))}{onObservation&&<><p className={styles.hint}>{t("loopPreviewHelp")}</p><Button tone="primary" disabled={observationDisabled} onClick={onObservation}>{t("loopPreparePreview")}</Button></>}</Empty>}</div>;
 }
 /** Read the pipeline power label without inferring an unacknowledged stop. */
@@ -257,7 +265,7 @@ function analysisSource(visible:Frame|null):JsonRecord|undefined {
 }
 /** Resolve the model label from the accepted result before the selected draft. */
 function previewModelLabel(visible:Frame|null,client:RiderClient,t:Translator):string {
-  return String(visible?.analysis?.model_id||client.perceptionSelection?.model_id||t("perception.previewWaiting"));
+  return str(visible?.analysis?.model_id)||str(client.perceptionSelection?.model_id)||t("perception.previewWaiting");
 }
 /** Describe the local processed stream without treating a missing frame as a result. */
 function localPreviewDetails(selected:CameraStream,candidate:Frame|null,client:RiderClient,t:Translator){
