@@ -180,7 +180,7 @@ export function decisionView(state: JsonRecord, detector: JsonRecord) {
     current, required, count,
     imageReason:decisionImageReason(current,decision,count,required),
     vision:current?vision:"none",
-    reply:current&&["go","slow","stop","turn_left","turn_right","steer_left","steer_right"].includes(String(decision.action))?String(decision.action):"none",
+    reply:current&&["go","slow","stop","turn_left","turn_right","steer_left","steer_right"].includes(str(decision.action))?str(decision.action):"none",
     reason:decisionMotionReason(current,state,decision,count,required),
     floor:typeof decision.floor_fraction==="number"?decision.floor_fraction:null,
     confidence:typeof decision.confidence_fraction==="number"?decision.confidence_fraction:null,
@@ -222,8 +222,8 @@ export function trialBlock(policy: JsonRecord|null, runtime:JsonRecord, detector
 /** A turning display requires all Pi-confirmed clear-path evidence. */
 function turningDecision(decision:JsonRecord,current:boolean,policy:JsonRecord|null,side:string):boolean {
   if(!current)return false;
-  const supported=decision.protocol_version===2&&["turn_left","turn_right"].includes(String(decision.action))
-    ||decision.protocol_version===3&&["steer_left","steer_right"].includes(String(decision.action))
+  const supported=decision.protocol_version===2&&["turn_left","turn_right"].includes(str(decision.action))
+    ||decision.protocol_version===3&&["steer_left","steer_right"].includes(str(decision.action))
       &&["guard",side].every(k=>record(record(decision.paths)[k]).state==="clear"&&record(record(decision.paths)[k]).coverage_complete===true);
   return supported&&decision.state==="obstacle"&&record(policy?.avoidance).enabled===true
     &&record(policy?.avoidance).sweep_verified===true&&record(record(decision.sectors)[side]).state==="clear"
@@ -275,7 +275,7 @@ function grantedPermissionReason(slow:boolean,turning:boolean,side:string):strin
 export function motionPermission(state:JsonRecord, goals:JsonRecord, policy:JsonRecord|null, detector:JsonRecord, status:RiderStatus|null) {
   const safety=safetyOf(status), view=decisionView(state,detector);
   const known=!!status?.connection.configured&&["online","degraded"].includes(status.connection.status)&&!status.errors.control&&safety.stale!==true&&!!str(safety.generation)&&["ARMED","DISARMED","ESTOP"].includes(str(safety.state));
-  const decision=record(state.decision),side=["turn_left","steer_left"].includes(String(decision.action))?"left":"right";
+  const decision=record(state.decision),side=["turn_left","steer_left"].includes(str(decision.action))?"left":"right";
   const turning=turningDecision(decision,view.current,policy,side);
   const slow=slowLeaseFactor(state,policy,safety)!==null;
   const ready=safety.ready!==false&&record(record(safety.capabilities).move).available===true&&!record(safety.execution).inhibit;

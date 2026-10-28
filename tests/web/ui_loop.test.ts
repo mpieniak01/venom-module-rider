@@ -697,3 +697,23 @@ test("diagnostic reasons accept protocol strings and never stringify malformed m
  assert.equal(empty.imageReason,"");
  assert.equal(empty.reason,"");
 });
+
+
+for(const action of ["go","turn_left","steer_left"]){
+ test(`only the string enum ${action} can supply a navigation reply or permission`,()=>{
+  const decision=action==="go"?{...permissionLoop.decision,action}:{
+   ...permissionLoop.decision,action,protocol_version:action==="steer_left"?3:2,state:"obstacle",vision_action:"stop",
+   sectors:{left:{state:"clear",coverage_complete:true}},
+   paths:{left:{state:"clear",coverage_complete:true},guard:{state:"clear",coverage_complete:true}},
+  };
+  const state={...permissionLoop,decision};
+  const policy={...permissionPolicy,avoidance:{enabled:true,sweep_verified:true,protocol_version:3}};
+  assert.equal(decisionView(state,permissionDetector).reply,action);
+  assert.equal(motionPermission(state,{drive:true},policy,permissionDetector,permissionStatus()).venom,true);
+  for(const malformed of [[action],{action},{toString:()=>action},null,17,true]){
+   const invalid={...state,decision:{...decision,action:malformed}};
+   assert.equal(decisionView(invalid,permissionDetector).reply,"none");
+   assert.equal(motionPermission(invalid,{drive:true},policy,permissionDetector,permissionStatus()).venom,false);
+  }
+ });
+}

@@ -28,6 +28,9 @@ export const record = (value: unknown): JsonRecord => value && typeof value === 
 export const rows = (value: unknown): JsonRecord[] => Array.isArray(value) ? value.map(record) : [];
 export const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
 export const str = (value: unknown): string => typeof value === "string" ? value : "";
+/** Format JSON scalar metadata without coercing objects; validate protocol enums with str. */
+export const scalarText = (value: unknown, fallback = ""): string =>
+  typeof value === "string" || typeof value === "boolean" || finite(value) ? String(value) : fallback;
 export const data = (value: unknown): JsonRecord => { const row = record(value); return row.meta && row.data ? record(row.data) : row; };
 export const safetyOf = (status: RiderStatus | null): JsonRecord => record(data(status?.control).safety);
 export const actuatorState = (status: RiderStatus | null): JsonRecord => record(safetyOf(status).actuators);

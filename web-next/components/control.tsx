@@ -11,7 +11,7 @@ import { perceptionFrameCurrent } from "../lib/perception";
 import { useEffect, useId, useState, type ReactNode, type Dispatch, type SetStateAction } from "react";
 import { displayedPreview, previewLifetime } from "../lib/preview-media";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, RotateCcw, RotateCw, Camera, Eye, EyeOff, CirclePause, CircleStop } from "lucide-react";
-import { actuatorState, displayValue, finite, formatTime, record, safetyOf, settingsOf, str, type Direction, type NumericDescriptor, type JsonRecord } from "../lib/model";
+import { actuatorState, displayValue, finite, formatTime, record, safetyOf, scalarText, settingsOf, str, type Direction, type NumericDescriptor, type JsonRecord } from "../lib/model";
 import type { Translator } from "../lib/i18n";
 import type { Frame, RiderClient } from "../lib/use-rider";
 import { Button, Empty, Field, Panel, Pill, Range, Select } from "./primitives";
@@ -234,7 +234,7 @@ function cameraResultMetadata(visible:Frame|null,sourceIdentity:JsonRecord|undef
   const geometry=visible?.analysis?.perception_engine==="depth_plane"||modelId.startsWith("depth-anything");
   return <div hidden={selected!=="venom"} className={styles.perceptionPreviewMeta} data-testid="perception-preview-result" aria-live="polite">
       <strong>{visible?.analysis ? modelLabel : t("perception.previewWaiting")}</strong>
-      {visible?.analysis && <span>{t("frameSequence")}: {String(sourceIdentity?.sequence)} · {String(sourceIdentity?.frame_id).slice(0,12)} · {Math.round(frameAge(visible) ?? 0)} ms · {t("perception.inference")}: {visible.inferenceMs || "N/A"} ms · r{String(visible.analysis.config_revision)}</span>}
+      {visible?.analysis && <span>{t("frameSequence")}: {scalarText(sourceIdentity?.sequence,"—")} · {scalarText(sourceIdentity?.frame_id,"—").slice(0,12)} · {Math.round(frameAge(visible) ?? 0)} ms · {t("perception.inference")}: {visible.inferenceMs || "N/A"} ms · r{scalarText(visible.analysis.config_revision,"—")}</span>}
       <span title={t(geometry ? "perception.geometryLegend" : "perception.semanticLegend")}>{t(geometry ? "perception.geometryLegendShort" : "perception.semanticLegendShort")}</span>
     </div>;
 }
@@ -339,7 +339,7 @@ export function CameraPanel({ client, t, language, compact = false, showTools = 
 
 /** Render immutable frame provenance without inferring runtime authority. */
 function frameIdentity(visible:Frame,sourceIdentity:JsonRecord|undefined,t:Translator){
-  return <p className={styles.small} data-testid="frame-identity">{t("frameSequence")}: {String(sourceIdentity?.sequence)} · {String(sourceIdentity?.frame_id).slice(0,12)} · {t("frameRelativeAge")}: {Math.round(frameAge(visible)??0)} ms · r{String(visible.analysis?.config_revision)}</p>;
+  return <p className={styles.small} data-testid="frame-identity">{t("frameSequence")}: {scalarText(sourceIdentity?.sequence,"—")} · {scalarText(sourceIdentity?.frame_id,"—").slice(0,12)} · {t("frameRelativeAge")}: {Math.round(frameAge(visible)??0)} ms · r{scalarText(visible.analysis?.config_revision,"—")}</p>;
 }
 /** Show accepted frame provenance and its model interpretation details. */
 export function CameraDetails({client,t,language}:{client:RiderClient;t:Translator;language:string}) {

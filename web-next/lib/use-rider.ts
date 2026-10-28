@@ -16,7 +16,7 @@ import { configForConnection } from "./device-session";
 import { adoptIntervention } from "./operator-control";
 import {heightAvailable, heightInterventionAvailable, heightInterventionSupported, balanceAvailable, balanceInterventionSupported} from "./posture";
 import { HoldController, readHoldTiming, type MovementIntent } from "./hold-controller";
-import { canRequestArm, commandAccepted, controlIdentity, data, errorCode, faceRunning, featureRows, finite, frameRequested, record, safetyOf, settingsOf, str, type DeviceConfig, type Direction, type JsonRecord, type RiderStatus, type Section } from "./model";
+import { canRequestArm, commandAccepted, controlIdentity, data, errorCode, faceRunning, featureRows, finite, frameRequested, record, safetyOf, settingsOf, str, scalarText, type DeviceConfig, type Direction, type JsonRecord, type RiderStatus, type Section } from "./model";
 
 /** Keep the STOP exception and short-circuit connection probe in their original order. */
 function mutationUnavailable(session:string,path:string,body:JsonRecord,connected:()=>boolean):boolean {
@@ -60,7 +60,7 @@ function atomicTakeover(body:JsonRecord,action:string,heightIntervention:boolean
 /** Preserve the operator plan text used by the intervention protocol. */
 function takeoverPlan(body:JsonRecord,action:string,heightIntervention:boolean):string {
   if(!heightIntervention)return `manual ${str(body.direction)}`;
-  return action==="height"?`height ${String(body.height)} SDK`:`balance ${String(body.enabled)}`;
+  return action==="height"?`height ${scalarText(body.height)} SDK`:`balance ${scalarText(body.enabled)}`;
 }
 /** Assemble the captured intervention flags before makeEnvelope assigns identity. */
 function interventionBody(body:JsonRecord,action:string,intervene:boolean,atomic:boolean,heightIntervention:boolean,superseding:PendingOperation):JsonRecord {
@@ -802,12 +802,12 @@ export function useRider(section: Section) {
       if (signal.aborted || !current()) { URL.revokeObjectURL(url); return false; }
       const expired = (previewLifetime({ageMs, receivedAt}) ?? 0) <= 0;
       replaceFrame("camera", {
-        cameraSource: source, pipelineIdentity: [source.pipeline_revision, source.transport_epoch, source.camera_session].join(":"),
+        cameraSource: source, pipelineIdentity: [source.pipeline_revision, source.transport_epoch, source.camera_session].map(value=>scalarText(value)).join(":"),
         url, decoded: true, stale: expired, knownFreshness: !expired, ageMs, receivedAt,
         ageSource: headers.get("X-Rider-Frame-Age-Source") ?? undefined,
         captureKey: headers.get("X-Rider-Capture-Key") ?? undefined,
         analysis,
-        source: headers.get("X-Rider-Source") ?? "", id: String(source.frame_id),
+        source: headers.get("X-Rider-Source") ?? "", id: str(source.frame_id),
         fileAt: headers.get("X-Rider-File-Observed-At") ?? "",
         visionState: headers.get("X-Rider-Vision-State") ?? "",
         visionReason: headers.get("X-Rider-Vision-Reason") ?? "",
