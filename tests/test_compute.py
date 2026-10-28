@@ -136,6 +136,7 @@ async def test_abrupt_goal_restart_replaces_lease_and_old_off_cannot_cancel_new(
 
 
 async def test_duplicate_order_identity_and_cross_device_read_are_rejected():
+    """Reject duplicate or stale admissions and cross-device result access."""
     service = ComputeService(DemoEngines())
     job = request(service)
     await service.submit("pi", job, b"a", "text/plain")
@@ -179,6 +180,7 @@ def test_demo_configuration_with_omitted_executor_is_controlled():
 
 
 async def test_saturation_is_explicit_and_does_not_change_manual_state():
+    """Report queue saturation without changing operator control state."""
     engines = BlockingEngines()
     service = ComputeService(engines)
     await service.submit("pi", request(service), b"a", "text/plain")
@@ -350,6 +352,7 @@ async def test_engine_failure_is_not_mock_success():
     ],
 )
 def test_invalid_binary_inputs_are_bounded(task, data, mime):
+    """Reject malformed or oversized media at the input contract boundary."""
     service = ComputeService(DemoEngines())
     job = request(service, task=task)
     with pytest.raises(RiderError):
@@ -453,6 +456,7 @@ def test_http_contract_authentication_and_no_browser_device_job(monkeypatch):
 
 
 def test_private_compute_token_reference_not_in_public_configuration():
+    """Keep token references private and reject token values in configuration."""
     configured = configured_devices(
         json.dumps(
             [
@@ -769,6 +773,7 @@ async def test_worker_cancelled_during_drain_cancels_waiting_jobs():
 async def test_captured_turn_cleanup_survives_failed_or_cancelled_preparation(
     monkeypatch, cancel_caller
 ):
+    """Release a captured turn once when preparation fails or is cancelled."""
     engines = DemoEngines()
     service = ComputeService(engines)
     job = request(service, client="voice", task="conversation.respond")
@@ -779,12 +784,14 @@ async def test_captured_turn_cleanup_survives_failed_or_cancelled_preparation(
     finished = []
 
     async def prepare(payload, metadata, language):
+        """Hold preparation at an observable boundary before simulating failure."""
         assert metadata["conversation_turn"] is turn
         entered.set()
         await release.wait()
         raise RiderError("fixture_prepare_failed", 409)
 
     async def cleanup(captured):
+        """Record each released turn to detect missing or duplicate cleanup."""
         finished.append(captured)
 
     monkeypatch.setattr(engines, "prepare_conversation", prepare)

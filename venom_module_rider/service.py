@@ -154,6 +154,7 @@ class RiderService:
                 self.samples.failures += 1
 
     async def select(self, device_id, session, *, persist=True):
+        """Switch devices under the selection lock and retire the previous transport."""
         self.check_session(session)
         if device_id is not None and device_id not in self.devices:
             raise RiderError("unknown_device", 404)
@@ -287,6 +288,7 @@ class RiderService:
         return data
 
     async def status(self, section="overview"):
+        """Collect section reads and update connection evidence for the same session."""
         started = time.monotonic()
         if section not in SECTIONS:
             raise RiderError("unknown_section", 400)
@@ -368,6 +370,7 @@ class RiderService:
         return await self.status("navigation")
 
     async def _refresh_connection(self, session):
+        """Recover the selected transport while holding the selection lock."""
         from .connection_recovery import recover_connection
 
         async with self._selection_lock:
@@ -476,6 +479,7 @@ class RiderService:
             self.interventions.pop(task, None)
 
     async def mutate(self, path, body, session, *, method="POST"):
+        """Track a session-bound write and invalidate admission and cached state."""
         self.check_session(session)
         epoch = self.epoch
         self._retire_mutation_samples(path, body)
@@ -517,11 +521,13 @@ class RiderService:
             self._clear_mutation_cache(session)
 
     async def settings(self, body, session):
+        """Apply calibration settings through the shared session-bound mutation path."""
         result = await self.mutate(CALIBRATION_CONTROLS_PATH, body, session)
         self.cache[CALIBRATION_CONTROLS_PATH] = (time.monotonic(), result)
         return result
 
     async def goal(self, name, body, session):
+        """Admit a goal with current authority and retain failure diagnostics."""
         catalog = self.data(await self.read(LOGIC_CATALOG_PATH, 30))
         feature = next(
             (row for row in catalog.get("features", []) if row.get("name") == name),
@@ -563,6 +569,7 @@ class RiderService:
         }
 
     async def pipeline(self, *, force=False):
+        """Read supported camera pipeline state with bounded legacy fallback."""
         if not force and time.monotonic() < self.pipeline_unavailable_until:
             return self.unsupported_pipeline()
         try:
@@ -595,6 +602,7 @@ class RiderService:
         return result
 
     async def configure_pipeline(self, body, session):
+        """Update camera pipeline settings through the native mutation boundary."""
         self.check_session(session)
         if body.get("action") == "stop":
             # Retire host requests before awaiting preview cleanup. Pi performs
@@ -642,6 +650,7 @@ class RiderService:
         return {"camera": camera, "feed": feed}
 
     async def camera(self, stream):
+        """Read a fresh selected-camera frame and attach permitted capture metadata."""
         if stream not in {"raw", "proc"}:
             raise RiderError("unknown_stream", 404)
         client = self.transport()

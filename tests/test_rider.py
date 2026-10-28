@@ -321,6 +321,7 @@ async def test_camera_instance_logs_use_valid_systemd_names():
 
 
 async def test_no_replay_after_device_session_change():
+    """Reject an old session after switching away from and back to a device."""
     service, pi = domain()
     await service.select("demo", service.session)
     old = service.session
@@ -344,6 +345,7 @@ async def test_no_replay_after_device_session_change():
     ],
 )
 async def test_invalid_envelope_does_not_reach_actuator(field, value, code):
+    """Reject malformed envelopes before forwarding an actuator mutation."""
     service, pi = domain()
     await service.select("demo", service.session)
     body = command(pi, "arm", **{field: value})
@@ -359,6 +361,7 @@ async def test_invalid_envelope_does_not_reach_actuator(field, value, code):
 
 
 async def test_disarmed_and_settings_revision_refuse_movement():
+    """Refuse disarmed movement and stale calibrated settings revisions."""
     service, pi = domain()
     await service.select("demo", service.session)
     move_body = command(pi, "move")
@@ -658,6 +661,7 @@ def test_demo_only_configuration_cannot_select_real_mode(monkeypatch):
     "url", ["http://[", "http://localhost:noport", "http://localhost:0"]
 )
 def test_malformed_ports_are_configuration_errors(url):
+    """Expose malformed device ports as configuration errors."""
     raw = json.dumps([{"id": "a", "label": "A", "url": url}])
     with pytest.raises(RiderError, match="invalid_device_configuration"):
         configured_devices(raw)
@@ -838,6 +842,7 @@ async def test_pending_ack_is_preserved_as_pending_not_physical_success():
 
 
 async def test_moving_goal_requires_matching_operator_owner_and_fresh_intent():
+    """Require current operator authority before admitting a moving goal."""
     pi = DemoPi()
     asgi = httpx.ASGITransport(app=create_app(pi))
     forwarded = []
@@ -1169,6 +1174,7 @@ async def test_external_cancellation_is_not_misreported_as_device_change(
 async def test_control_route_uses_action_captured_before_intent_validation(
     monkeypatch, original_action, changed_action, expected_path
 ):
+    """Retain the original control route across asynchronous intent validation."""
     service, pi = domain()
     await service.select("demo", service.session)
     body = command(pi, original_action)
@@ -1176,11 +1182,13 @@ async def test_control_route_uses_action_captured_before_intent_validation(
     calls = []
 
     async def validate(payload, session):
+        """Suspend validation so the caller can change the shared envelope."""
         entered.set()
         await resume.wait()
         return {"generation": payload["generation"]}
 
     async def record(path, **kwargs):
+        """Capture the selected route without contacting a physical device."""
         calls.append(path)
         return {"data": {}, "meta": {}}
 

@@ -229,6 +229,7 @@ class RiderConversation:
             raise RiderError("conversation_intent_expired", 409)
 
     async def prepare(self, text, context):
+        """Capture the selected device and safety scope before queued tool execution."""
         addressed, call = parse_request(
             text, addressed=context.target_device_id is not None
         )
@@ -429,6 +430,7 @@ class RiderConversation:
 
     @staticmethod
     def _require_mutation(call):
+        """Require module mutation permission except for status and explicit STOP."""
         if call.name in {"status", "stop"}:
             return
         try:
@@ -457,6 +459,7 @@ class RiderConversation:
         return result, reply, speech_played
 
     async def _invoke_status(self, domain, context):
+        """Describe connection, safety and a validated battery reading."""
         result = await domain.status("overview")
         safety = (result.get("control") or {}).get("safety") or {}
         reading = self._battery_reading(result)
@@ -469,6 +472,7 @@ class RiderConversation:
 
     @staticmethod
     def _battery_reading(result):
+        """Format a fresh finite battery value only when its unit is supported."""
         telemetry = result.get("telemetry") or {}
         xgo = (telemetry.get("devices") or {}).get("xgo") or {}
         battery = ((xgo.get("sensor_quality") or {}).get("sensors") or {}).get(
@@ -494,6 +498,7 @@ class RiderConversation:
         return "—"
 
     async def _invoke_stop(self, domain, scope, context):
+        """Send an explicit STOP with the captured session and actor provenance."""
         result = await domain.control(
             {
                 "action": "stop",
@@ -509,6 +514,7 @@ class RiderConversation:
 
     @staticmethod
     def _motion_safety(scope):
+        """Require manual operator authority and the supported agent contract."""
         safety = scope.safety
         if safety.get("unavailable_error"):
             raise RiderError(safety["unavailable_error"], 503)
@@ -531,6 +537,7 @@ class RiderConversation:
         return safety
 
     async def _invoke_move(self, domain, scope, call, context):
+        """Revalidate captured safety identity before one bounded agent pulse."""
         safety = self._motion_safety(scope)
         control = await domain.read(AGENT_STATE_PATH, 0, force=True)
         self._check(scope)
@@ -560,6 +567,7 @@ class RiderConversation:
 
     @staticmethod
     def _find_gesture(library, gesture_id):
+        """Resolve an existing gesture from a list or identifier-indexed library."""
         gestures = library.get("gestures") or {}
         if isinstance(gestures, list):
             for row in gestures:
@@ -574,6 +582,7 @@ class RiderConversation:
         return None
 
     async def _invoke_face(self, domain, scope, call, context):
+        """Play a validated gesture through the existing display domain."""
         library = domain.data(await domain.read("/api/face-studio/gestures", 5))
         gesture = self._find_gesture(library, call.gesture)
         if not isinstance(gesture, dict):
@@ -592,6 +601,7 @@ class RiderConversation:
         return result, reply
 
     async def _invoke_observe(self, domain, scope, context):
+        """Describe a fresh camera frame using shared compute and the same scope."""
         payload, mime, headers = await domain.camera("raw")
         self._check(scope)
         if (
@@ -617,6 +627,7 @@ class RiderConversation:
         return result, reply
 
     async def _invoke_speak(self, domain, scope, call, context):
+        """Synthesize and play speech within the captured deadline and transport."""
         engine = self.app.state.rider_compute.engines
         observation = await engine.execute(
             "audio.synthesize",

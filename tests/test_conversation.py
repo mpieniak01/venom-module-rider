@@ -81,6 +81,7 @@ def enable(rig):
     ],
 )
 def test_explicit_direction_vocabulary(text, direction):
+    """Map supported direction words to a single typed movement request."""
     addressed, call = parse_request(text)
     assert addressed
     assert call.name == "move"
@@ -103,6 +104,7 @@ def test_ambiguous_or_unbounded_motion_is_not_a_plan(text):
 
 
 async def test_normal_chat_is_untouched_and_option_does_not_arm(rig):
+    """Leave unrelated chat and the current arming state unchanged."""
     assert await rig.registry.handle("Opowiedz żart", context()) is None
     assert "wyłączone" in await rig.registry.handle("Rider stan", context())
     before = rig.pi.safety()
@@ -123,6 +125,7 @@ async def test_normal_chat_is_untouched_and_option_does_not_arm(rig):
 
 
 async def test_disarmed_refusal_and_actor_provenance(rig):
+    """Refuse disarmed movement while retaining the requesting actor identity."""
     enable(rig)
     assert "motion_not_armed" in await rig.registry.handle("Rider forward", context())
     rig.pi.state = "ARMED"  # Fixture only; no actuator call or actual arming.
@@ -155,6 +158,7 @@ async def test_disabled_and_cached_skill_have_no_access(rig):
 
 
 async def test_stop_works_when_option_off_and_uses_stop_lane(rig):
+    """Allow explicit STOP through the independent lane while chat is disabled."""
     rig.pi.state = "ARMED"
     reply = await rig.registry.handle("/rider stop", context())
     assert "STOP" in reply
@@ -173,6 +177,7 @@ async def test_target_and_session_changes_reject_old_conversation(rig):
 
 
 async def test_camera_off_does_not_start_capture(rig):
+    """Refuse observation from an off camera without starting capture."""
     enable(rig)
     reply = await rig.registry.handle("Rider opisz scenę", context())
     assert "camera_off" in reply
@@ -192,6 +197,7 @@ async def test_speak_uses_binary_shared_engines_and_no_duplicate_playback(rig):
 
 
 async def test_unknown_face_is_rejected_without_lcd_start(rig):
+    """Reject an unknown gesture without activating the display."""
     enable(rig)
     reply = await rig.registry.handle("Rider buźka nonexistent", context())
     assert "unknown_gesture" in reply
@@ -199,6 +205,7 @@ async def test_unknown_face_is_rejected_without_lcd_start(rig):
 
 
 async def test_api_config_is_revision_checked_session_scoped_and_guarded(rig):
+    """Require current revisions, sessions and permissions for configuration."""
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=rig.app), base_url="http://host"
     ) as client:
@@ -256,6 +263,7 @@ def test_arguments_do_not_accept_identity_or_consent():
     "text", ["Rider buźka friendly.", "Gesicht friendly!?", "face friendly!"]
 )
 def test_voice_gesture_strips_terminal_punctuation_only(text):
+    """Trim terminal punctuation without changing the gesture identifier."""
     _, call = parse_request(text, addressed=True)
     assert call is not None
     assert call.gesture == "friendly"
@@ -283,6 +291,7 @@ async def test_manual_control_keeps_configuration_revision_and_off_accepts_old_r
 async def test_conversation_stop_cancels_pending_manual_actuator_request(
     rig, monkeypatch, action
 ):
+    """Let conversation STOP supersede a blocked manual actuator request."""
     from test_rider import command
 
     rig.pi.state = "ARMED"
@@ -324,6 +333,7 @@ async def test_unrelated_expired_chat_falls_through_without_extending_robot_dead
 
 @pytest.mark.parametrize("mode", ["device", "demo"])
 async def test_agent_credentials_are_not_sent_over_plain_remote_http(monkeypatch, mode):
+    """Prevent agent credentials from reaching an untrusted remote HTTP target."""
     monkeypatch.setenv("RIDER_AGENT_TOKEN", "fixture-only-agent")
     sent = []
 
@@ -374,6 +384,7 @@ async def test_agent_credentials_are_not_sent_over_plain_remote_http(monkeypatch
 async def test_secure_agent_transport_accepts_tls_and_literal_loopback(
     monkeypatch, url
 ):
+    """Permit verified TLS and the explicit literal-loopback transport contract."""
     monkeypatch.setenv("RIDER_AGENT_TOKEN", "fixture-only-agent")
     sent = []
 
@@ -403,6 +414,7 @@ async def test_secure_agent_transport_accepts_tls_and_literal_loopback(
 
 
 async def test_urgent_demo_unhandled_result_is_typed_error(monkeypatch):
+    """Return a typed failure when the urgent demo provider declines a request."""
     from venom_module_rider import conversation_engine
     from venom_module_rider.engines import EngineError
 
@@ -505,6 +517,7 @@ async def voice_input(rig, request, text="forward"):
 
 
 async def test_voice_stop_releases_each_captured_asr_scope(rig):
+    """Release captured transcription scopes when an urgent voice STOP arrives."""
     enable(rig)
     service = rig.app.state.rider_compute
     for index in range(20):
@@ -542,6 +555,7 @@ async def test_voice_stop_releases_each_captured_asr_scope(rig):
     ],
 )
 async def test_agent_fixture_malformed_values_return_400(rig, field, value):
+    """Reject malformed simulated agent commands at the request boundary."""
     body = {
         "generation": rig.pi.generation,
         "agent_epoch": rig.pi.agent_epoch,
@@ -570,6 +584,7 @@ def test_long_ordinary_chat_and_friendly_pi_voice_fall_through():
 
 
 async def test_prepare_binds_intent_before_classifier_and_manual_takeover(rig):
+    """Bind intent before classification so manual takeover invalidates it."""
     enable(rig)
     rig.pi.state = "ARMED"
     turn = context()
@@ -616,6 +631,7 @@ async def test_queued_voice_never_refreshes_epoch_after_manual_takeover(
 async def test_voice_stop_bypasses_saturated_queue_and_disabled_option(
     rig, monkeypatch
 ):
+    """Keep voice STOP available despite saturation and a disabled chat option."""
     rig.pi.state = "ARMED"
     release = await blocked_model(rig, monkeypatch)
     service = rig.app.state.rider_compute
@@ -649,6 +665,7 @@ async def test_voice_stop_bypasses_saturated_queue_and_disabled_option(
 async def test_queued_cancel_releases_prepared_context_without_touching_arm(
     rig, monkeypatch
 ):
+    """Release a cancelled queued context without changing arming state."""
     enable(rig)
     request = job(rig)
     await voice_input(rig, request)
@@ -668,6 +685,7 @@ async def test_queued_cancel_releases_prepared_context_without_touching_arm(
 
 
 async def test_authenticated_target_cannot_stop_another_selected_robot(rig):
+    """Prevent an authenticated request from targeting another selected robot."""
     rig.pi.state = "ARMED"
     reply = await rig.registry.urgent(
         "stop", context("voice", target_device_id="other")
@@ -678,6 +696,7 @@ async def test_authenticated_target_cannot_stop_another_selected_robot(rig):
 
 
 async def test_conversation_compute_actor_and_context_are_not_body_arguments(rig):
+    """Derive actor and scope from trusted admission rather than request data."""
     enable(rig)
     service = rig.app.state.rider_compute
     panel_request = job(rig, client="panel")
@@ -713,6 +732,7 @@ async def test_playback_pending_is_not_reported_as_spoken(rig, monkeypatch):
 
 
 async def test_known_face_and_scene_use_existing_domain_and_shared_compute(rig):
+    """Use existing gestures and shared vision without altering device settings."""
     enable(rig)
     rig.pi.library["gestures"] = [{"id": "friendly", "expr": "happy"}]
     original = dict(rig.pi.library["settings"])
@@ -726,6 +746,7 @@ async def test_known_face_and_scene_use_existing_domain_and_shared_compute(rig):
 
 
 async def test_key_identified_gesture_ignores_malformed_library_rows(rig):
+    """Find a key-identified gesture while ignoring malformed library entries."""
     enable(rig)
     rig.pi.library["gestures"] = [None, "broken", {"key": "friendly", "expr": "happy"}]
     turn = context()
@@ -801,6 +822,7 @@ async def test_conflicting_context_cannot_remove_or_rebind_older_safety_scope(ri
 
 
 async def test_voice_response_requires_original_successful_asr_identity(rig):
+    """Require the response to match its original successful transcription."""
     enable(rig)
     request = job(rig)
     await voice_input(rig, request, "stan")
@@ -823,6 +845,7 @@ async def test_voice_response_requires_original_successful_asr_identity(rig):
 async def test_selection_cancels_playback_on_old_transport_before_close(
     rig, monkeypatch
 ):
+    """Cancel playback on the captured old transport before closing it."""
     enable(rig)
     client = rig.domain.transport()
     original_json, original_close = client.json, client.close

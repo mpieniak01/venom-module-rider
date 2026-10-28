@@ -183,6 +183,7 @@ class ComputeService:
         return lease
 
     def _finish(self, job: Job, state: str, error: str | None = None):
+        """Finalize job state and transfer or release its captured conversation turn."""
         if job.state in TERMINAL:
             return
         job.state, job.error = state, error
@@ -235,6 +236,7 @@ class ComputeService:
         return job.observation()
 
     def _cancel_job(self, job: Job, state: str, error: str):
+        """Cancel job work and retire any matching captured transcription scope."""
         if job.request.task == AUDIO_TRANSCRIBE:
             lease = self.leases.get((job.device_id, "voice"))
             if lease and lease.session_id == job.request.session_id:
@@ -276,6 +278,7 @@ class ComputeService:
         self._trim_terminal_jobs(now)
 
     def _expire_voice_turns(self, now):
+        """Release expired turns from snapshots of each lease's entries."""
         for lease in self.leases.values():
             for key, turn in list(lease.voice_turns.items()):
                 if now >= turn.context.deadline:
@@ -283,6 +286,7 @@ class ComputeService:
                     self._release_turn(turn)
 
     def _expire_jobs(self, now):
+        """Expire unfinished or retained successful jobs against the captured clock."""
         for job in self.jobs.values():
             if now > job.deadline and (
                 job.state not in TERMINAL or job.state == "succeeded"
@@ -290,6 +294,7 @@ class ComputeService:
                 self._cancel_job(job, "expired", "compute_deadline")
 
     def _trim_terminal_jobs(self, now):
+        """Bound terminal history by age and retained job count."""
         terminal = sorted(
             (job for job in self.jobs.values() if job.state in TERMINAL),
             key=lambda item: item.finished or 0,
@@ -301,6 +306,7 @@ class ComputeService:
     async def submit(
         self, device_id: str, request: JobRequest, payload: bytes, mime: str
     ):
+        """Prepare voice context and retain cleanup ownership until job admission."""
         self._available()
         self._prune()
         received, received_at = time.monotonic(), time.time()
@@ -343,6 +349,7 @@ class ComputeService:
     async def _submit(
         self, device_id, request, payload, mime, received, received_at, turn
     ):
+        """Repeat identity and order checks across await before admitting a job."""
         self._available()
         self._prune()
         lease = self._submission_lease(device_id, request)
@@ -449,6 +456,7 @@ class ComputeService:
         return capabilities, capability
 
     def _check_worker_admission(self, urgent):
+        """Refuse ordinary work while the existing worker is being cancelled."""
         if (
             not urgent
             and self.worker is not None
@@ -458,6 +466,7 @@ class ComputeService:
             raise RiderError("compute_worker_stopping", 503)
 
     def _supersede_frames(self, device_id, request):
+        """Retire older active vision jobs for the same device and stream."""
         if request.task == "vision.describe":
             for job in list(self.jobs.values()):
                 if (
@@ -554,6 +563,7 @@ class ComputeService:
             raise
 
     async def _execute_job(self, job: Job):
+        """Execute an admitted job with its captured input and runtime metadata."""
         if job.revision != await self.engines.revision():
             self._finish(job, "expired", "compute_runtime_changed")
             return
