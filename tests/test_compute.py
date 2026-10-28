@@ -3,6 +3,7 @@ import io
 import json
 import time
 import wave
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -135,6 +136,7 @@ async def test_abrupt_goal_restart_replaces_lease_and_old_off_cannot_cancel_new(
 
 
 async def test_duplicate_order_identity_and_cross_device_read_are_rejected():
+    """Reject duplicate or stale admissions and cross-device result access."""
     service = ComputeService(DemoEngines())
     job = request(service)
     await service.submit("pi", job, b"a", "text/plain")
@@ -143,10 +145,9 @@ async def test_duplicate_order_identity_and_cross_device_read_are_rejected():
         ({"job_id": "older"}, "compute_out_of_order"),
         ({"executor_session": "old"}, "compute_stale_session"),
     ]:
+        candidate = job.model_copy(update=changes)
         with pytest.raises(RiderError, match=code):
-            await service.submit(
-                "pi", job.model_copy(update=changes), b"a", "text/plain"
-            )
+            await service.submit("pi", candidate, b"a", "text/plain")
     with pytest.raises(RiderError, match="compute_job_missing"):
         await service.observe("other", "job")
     await service.close()
@@ -179,6 +180,7 @@ def test_demo_configuration_with_omitted_executor_is_controlled():
 
 
 async def test_saturation_is_explicit_and_does_not_change_manual_state():
+    """Report queue saturation without changing operator control state."""
     engines = BlockingEngines()
     service = ComputeService(engines)
     await service.submit("pi", request(service), b"a", "text/plain")
@@ -187,10 +189,9 @@ async def test_saturation_is_explicit_and_does_not_change_manual_state():
         await service.submit(
             "pi", request(service, job_id=f"j{i}", sequence=i), b"a", "text/plain"
         )
+    last_request = request(service, job_id="last", sequence=5)
     with pytest.raises(RiderError, match="compute_saturated") as error:
-        await service.submit(
-            "pi", request(service, job_id="last", sequence=5), b"a", "text/plain"
-        )
+        await service.submit("pi", last_request, b"a", "text/plain")
     assert error.value.status == 429
     assert service.counters["rejected"] == 1
     assert len(service.pending) == 4
@@ -351,9 +352,11 @@ async def test_engine_failure_is_not_mock_success():
     ],
 )
 def test_invalid_binary_inputs_are_bounded(task, data, mime):
+    """Reject malformed or oversized media at the input contract boundary."""
     service = ComputeService(DemoEngines())
+    job = request(service, task=task)
     with pytest.raises(RiderError):
-        validate_media(request(service, task=task), data, mime)
+        validate_media(job, data, mime)
 
 
 async def test_audio_transcribe_and_tts_return_pcm16_wav():
@@ -453,6 +456,7 @@ def test_http_contract_authentication_and_no_browser_device_job(monkeypatch):
 
 
 def test_private_compute_token_reference_not_in_public_configuration():
+    """Keep token references private and reject token values in configuration."""
     configured = configured_devices(
         json.dumps(
             [
@@ -467,18 +471,18 @@ def test_private_compute_token_reference_not_in_public_configuration():
     )
     assert configured[0].compute_token_env == "PI_TOKEN"
     assert "compute_token_env" not in configured[0].public()
+    public_device = configured[0].public()
+    encoded = json.dumps(
+        [
+            {
+                **public_device,
+                "url": "http://localhost",
+                "compute_token_env": "secret value",
+            }
+        ]
+    )
     with pytest.raises(RiderError):
-        configured_devices(
-            json.dumps(
-                [
-                    {
-                        **configured[0].public(),
-                        "url": "http://localhost",
-                        "compute_token_env": "secret value",
-                    }
-                ]
-            )
-        )
+        configured_devices(encoded)
 
 
 def test_http_job_observation_output_cancel_and_invalid_inputs(monkeypatch):
@@ -762,4 +766,52 @@ async def test_worker_cancelled_during_drain_cancels_waiting_jobs():
         assert service.running is None
     finally:
         engines.release.set()
+        await service.close()
+
+
+@pytest.mark.parametrize("cancel_caller", [False, True])
+async def test_captured_turn_cleanup_survives_failed_or_cancelled_preparation(
+    monkeypatch, cancel_caller
+):
+    """Release a captured turn once when preparation fails or is cancelled."""
+    engines = DemoEngines()
+    service = ComputeService(engines)
+    job = request(service, client="voice", task="conversation.respond")
+    lease = service.lease("pi", job.session_id)
+    turn = SimpleNamespace(context=SimpleNamespace(deadline=time.monotonic() + 30))
+    lease.voice_turns[service._voice_key(job)] = turn
+    entered, release = asyncio.Event(), asyncio.Event()
+    finished = []
+
+    async def prepare(payload, metadata, language):
+        """Hold preparation at an observable boundary before simulating failure."""
+        assert metadata["conversation_turn"] is turn
+        entered.set()
+        await release.wait()
+        raise RiderError("fixture_prepare_failed", 409)
+
+    async def cleanup(captured):
+        """Record each released turn to detect missing or duplicate cleanup."""
+        finished.append(captured)
+
+    monkeypatch.setattr(engines, "prepare_conversation", prepare)
+    monkeypatch.setattr(engines, "finish_conversation", cleanup)
+    task = asyncio.create_task(service.submit("pi", job, b"hello", "text/plain"))
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        assert not lease.voice_turns
+        assert finished == []
+        if cancel_caller:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        else:
+            release.set()
+            with pytest.raises(RiderError, match="fixture_prepare_failed"):
+                await task
+        assert finished == [turn]
+        assert not service.jobs
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
         await service.close()

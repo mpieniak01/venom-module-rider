@@ -82,48 +82,62 @@ def validate_media(job: JobRequest, payload: bytes, mime: str) -> None:
     if not payload or len(payload) > MAX_INPUT:
         raise RiderError("compute_input_size", 413)
     if job.task in {"text.respond", "audio.synthesize", "conversation.respond"}:
-        if mime != "text/plain" or len(payload) > LIMITS["max_text_bytes"]:
-            raise RiderError("compute_input_format", 415)
-        try:
-            text = payload.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise RiderError("compute_input_format", 415) from exc
-        if not text.strip():
-            raise RiderError("compute_empty_input", 400)
+        _validate_text(payload, mime)
     elif job.task == "audio.transcribe":
-        if mime not in {"audio/wav", "audio/x-wav"}:
-            raise RiderError("compute_input_format", 415)
-        try:
-            with wave.open(io.BytesIO(payload)) as audio:
-                if (
-                    audio.getnchannels() != 1
-                    or audio.getsampwidth() != 2
-                    or audio.getcomptype() != "NONE"
-                    or not 8000 <= audio.getframerate() <= 48000
-                    or not 0 < audio.getnframes() <= audio.getframerate() * 15
-                    or len(audio.readframes(audio.getnframes()))
-                    != audio.getnframes() * 2
-                ):
-                    raise ValueError("invalid WAV")
-        except (wave.Error, EOFError, ValueError) as exc:
-            raise RiderError("compute_input_format", 415) from exc
+        _validate_wav(payload, mime)
     else:
-        if mime not in {"image/jpeg", "image/png"}:
-            raise RiderError("compute_input_format", 415)
-        from PIL import Image
-
-        try:
-            with Image.open(io.BytesIO(payload)) as image:
-                if (
-                    image.format != ("JPEG" if mime == "image/jpeg" else "PNG")
-                    or image.width > 1920
-                    or image.height > 1080
-                    or image.width < 1
-                    or image.height < 1
-                ):
-                    raise ValueError("invalid image")
-                image.verify()
-        except (OSError, ValueError, Image.DecompressionBombError) as exc:
-            raise RiderError("compute_input_format", 415) from exc
+        _validate_image(payload, mime)
     if job.task != "vision.describe" and job.params.prompt:
         raise RiderError("compute_invalid_parameters", 400)
+
+
+def _validate_text(payload: bytes, mime: str) -> None:
+    """Validate bounded UTF-8 text without changing the error precedence."""
+    if mime != "text/plain" or len(payload) > LIMITS["max_text_bytes"]:
+        raise RiderError("compute_input_format", 415)
+    try:
+        text = payload.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise RiderError("compute_input_format", 415) from exc
+    if not text.strip():
+        raise RiderError("compute_empty_input", 400)
+
+
+def _validate_wav(payload: bytes, mime: str) -> None:
+    """Validate PCM16 mono WAV, including declared and actual frame bounds."""
+    if mime not in {"audio/wav", "audio/x-wav"}:
+        raise RiderError("compute_input_format", 415)
+    try:
+        with wave.open(io.BytesIO(payload)) as audio:
+            if (
+                audio.getnchannels() != 1
+                or audio.getsampwidth() != 2
+                or audio.getcomptype() != "NONE"
+                or not 8000 <= audio.getframerate() <= 48000
+                or not 0 < audio.getnframes() <= audio.getframerate() * 15
+                or len(audio.readframes(audio.getnframes())) != audio.getnframes() * 2
+            ):
+                raise ValueError("invalid WAV")
+    except (wave.Error, EOFError, ValueError) as exc:
+        raise RiderError("compute_input_format", 415) from exc
+
+
+def _validate_image(payload: bytes, mime: str) -> None:
+    """Verify a bounded JPEG/PNG without retaining decoded pixels."""
+    if mime not in {"image/jpeg", "image/png"}:
+        raise RiderError("compute_input_format", 415)
+    from PIL import Image
+
+    try:
+        with Image.open(io.BytesIO(payload)) as image:
+            if (
+                image.format != ("JPEG" if mime == "image/jpeg" else "PNG")
+                or image.width > 1920
+                or image.height > 1080
+                or image.width < 1
+                or image.height < 1
+            ):
+                raise ValueError("invalid image")
+            image.verify()
+    except (OSError, ValueError, Image.DecompressionBombError) as exc:
+        raise RiderError("compute_input_format", 415) from exc

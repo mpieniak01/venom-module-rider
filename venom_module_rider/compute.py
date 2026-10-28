@@ -14,6 +14,9 @@ from typing import Any
 from .compute_contract import LIMITS, MAX_OUTPUT, JobRequest, validate_media
 from .errors import RiderError
 
+AUDIO_TRANSCRIBE = "audio.transcribe"
+CONVERSATION_RESPOND = "conversation.respond"
+
 TERMINAL = {"succeeded", "failed", "cancelled", "expired", "superseded"}
 
 
@@ -180,6 +183,7 @@ class ComputeService:
         return lease
 
     def _finish(self, job: Job, state: str, error: str | None = None):
+        """Finalize job state and transfer or release its captured conversation turn."""
         if job.state in TERMINAL:
             return
         job.state, job.error = state, error
@@ -190,7 +194,7 @@ class ComputeService:
         if (
             turn is not None
             and state == "succeeded"
-            and job.request.task == "audio.transcribe"
+            and job.request.task == AUDIO_TRANSCRIBE
         ):
             lease = self.leases.get((job.device_id, "voice"))
             transcript = job.data.get("text")
@@ -232,7 +236,8 @@ class ComputeService:
         return job.observation()
 
     def _cancel_job(self, job: Job, state: str, error: str):
-        if job.request.task == "audio.transcribe":
+        """Cancel job work and retire any matching captured transcription scope."""
+        if job.request.task == AUDIO_TRANSCRIBE:
             lease = self.leases.get((job.device_id, "voice"))
             if lease and lease.session_id == job.request.session_id:
                 turn = lease.voice_turns.pop(self._voice_key(job.request), None)
@@ -266,17 +271,30 @@ class ComputeService:
         return {"protocol_version": 1, "closed": True}
 
     def _prune(self):
+        """Expire captured turns and jobs using one retention clock snapshot."""
         now = time.monotonic()
+        self._expire_voice_turns(now)
+        self._expire_jobs(now)
+        self._trim_terminal_jobs(now)
+
+    def _expire_voice_turns(self, now):
+        """Release expired turns from snapshots of each lease's entries."""
         for lease in self.leases.values():
             for key, turn in list(lease.voice_turns.items()):
                 if now >= turn.context.deadline:
                     lease.voice_turns.pop(key)
                     self._release_turn(turn)
+
+    def _expire_jobs(self, now):
+        """Expire unfinished or retained successful jobs against the captured clock."""
         for job in self.jobs.values():
             if now > job.deadline and (
                 job.state not in TERMINAL or job.state == "succeeded"
             ):
                 self._cancel_job(job, "expired", "compute_deadline")
+
+    def _trim_terminal_jobs(self, now):
+        """Bound terminal history by age and retained job count."""
         terminal = sorted(
             (job for job in self.jobs.values() if job.state in TERMINAL),
             key=lambda item: item.finished or 0,
@@ -288,39 +306,18 @@ class ComputeService:
     async def submit(
         self, device_id: str, request: JobRequest, payload: bytes, mime: str
     ):
+        """Prepare voice context and retain cleanup ownership until job admission."""
         self._available()
         self._prune()
         received, received_at = time.monotonic(), time.time()
         turn = None
         try:
-            if request.task in {"audio.transcribe", "conversation.respond"}:
-                lease = self.lease(device_id, request.session_id)
-                if (
-                    request.task == "conversation.respond"
-                    and lease.client_id != "voice"
-                ):
-                    raise RiderError("conversation_actor_invalid", 403)
-                if (
-                    request.executor_session != self.executor_session
-                    or request.device_session != lease.device_session
-                ):
-                    raise RiderError("compute_stale_session", 409)
-                validate_media(request, payload, mime)
-                prepare = getattr(self.engines, "prepare_conversation", None)
-                if prepare is None and request.task == "conversation.respond":
-                    raise RiderError("conversation_disabled", 503)
-                if prepare is not None and lease.client_id == "voice":
-                    if (
-                        request.task == "audio.transcribe"
-                        and len(lease.voice_turns) >= 16
-                    ):
-                        raise RiderError("conversation_busy", 429)
-                    captured_turn = (
-                        lease.voice_turns.pop(self._voice_key(request), None)
-                        if request.task == "conversation.respond"
-                        else None
-                    )
-                    turn = captured_turn
+            if request.task in {AUDIO_TRANSCRIBE, CONVERSATION_RESPOND}:
+                prepare, lease, turn = self._voice_preparation(
+                    device_id, request, payload, mime
+                )
+                # Cleanup ownership must be visible before preparation can fail.
+                if prepare is not None:
                     turn = await prepare(
                         payload,
                         {
@@ -329,7 +326,7 @@ class ComputeService:
                             "client_id": lease.client_id,
                             "received_monotonic": received,
                             "deadline_monotonic": received + request.ttl_ms / 1000,
-                            "conversation_turn": captured_turn,
+                            "conversation_turn": turn,
                         },
                         request.params.language,
                     )
@@ -352,75 +349,24 @@ class ComputeService:
     async def _submit(
         self, device_id, request, payload, mime, received, received_at, turn
     ):
+        """Repeat identity and order checks across await before admitting a job."""
         self._available()
         self._prune()
-        lease = self.lease(device_id, request.session_id)
-        if request.task == "conversation.respond" and lease.client_id != "voice":
-            raise RiderError("conversation_actor_invalid", 403)
-        if (
-            request.executor_session != self.executor_session
-            or request.device_session != lease.device_session
-        ):
-            raise RiderError("compute_stale_session", 409)
-        if request.job_id in self.jobs or request.job_id in lease.seen:
-            raise RiderError("compute_duplicate_job", 409)
+        lease = self._submission_lease(device_id, request)
         key = (request.task, request.stream_id)
-        if request.sequence <= lease.sequences.get(key, -1):
-            raise RiderError("compute_out_of_order", 409)
-        if (
-            len(lease.seen) >= 4096
-            or len(lease.sequences) >= 32
-            and key not in lease.sequences
-        ):
-            raise RiderError("compute_session_limit", 429)
+        self._check_submission_order(lease, request, key)
         validate_media(request, payload, mime)
         urgent = turn is not None and turn.urgent
-        if urgent:
-            capabilities = {
-                "config_revision": await self.engines.revision(),
-                "tasks": {request.task: {"available": True}},
-            }
-        else:
-            capabilities = await self.engines.capabilities()
-        capability = capabilities.get("tasks", {}).get(request.task, {})
-        if capability.get("available") is not True:
-            raise RiderError(
-                "compute_engine_unavailable",
-                503,
-                {"task": request.task, "reason": capability.get("reason")},
-            )
+        capabilities, capability = await self._submission_capabilities(request, urgent)
         # Re-check after the asynchronous capability probe and discard new work
         # if OFF/restart changed the lease while the probe was in flight.
         if self.lease(device_id, request.session_id) is not lease:
             raise RiderError("compute_stale_session", 409)
         if time.monotonic() - received >= request.ttl_ms / 1000:
             raise RiderError("compute_deadline", 408)
-        if request.job_id in self.jobs or request.job_id in lease.seen:
-            raise RiderError("compute_duplicate_job", 409)
-        if request.sequence <= lease.sequences.get(key, -1):
-            raise RiderError("compute_out_of_order", 409)
-        if (
-            len(lease.seen) >= 4096
-            or len(lease.sequences) >= 32
-            and key not in lease.sequences
-        ):
-            raise RiderError("compute_session_limit", 429)
-        if (
-            not urgent
-            and self.worker is not None
-            and not self.worker.done()
-            and self.worker.cancelling()
-        ):
-            raise RiderError("compute_worker_stopping", 503)
-        if request.task == "vision.describe":
-            for job in list(self.jobs.values()):
-                if (
-                    job.device_id == device_id
-                    and job.request.task == request.task
-                    and job.request.stream_id == request.stream_id
-                    and job.state not in TERMINAL
-                ):
-                    self._cancel_job(job, "superseded", "compute_newer_frame")
+        self._check_submission_order(lease, request, key)
+        self._check_worker_admission(urgent)
+        self._supersede_frames(device_id, request)
         if not urgent and len(self.pending) >= LIMITS["max_pending"]:
             self.counters["rejected"] += 1
             raise RiderError("compute_saturated", 429)
@@ -442,39 +388,124 @@ class ComputeService:
         lease.sequences[key] = request.sequence
         self.counters["submitted"] += 1
         if urgent:
-            # STOP uses the host's safety provider, not the occupied inference slot.
-            job.state, job.started = "running", time.monotonic()
-            try:
-                result = await asyncio.wait_for(
-                    self.engines.urgent_conversation(
-                        payload,
-                        {
-                            "conversation_turn": turn,
-                            "client_id": lease.client_id,
-                        },
-                        request.params.language,
-                    ),
-                    timeout=max(0, job.deadline - time.monotonic()),
-                )
-                job.data, job.runtime, job.quality = (
-                    result.data,
-                    result.runtime,
-                    result.quality,
-                )
-                self._finish(job, "succeeded")
-            except TimeoutError:
-                self._finish(job, "expired", "compute_deadline")
-            except asyncio.CancelledError:
-                self._finish(job, "cancelled", "compute_cancelled")
-                raise
-            except Exception as exc:
-                self._finish(
-                    job, "failed", getattr(exc, "code", "compute_engine_error")
-                )
-            return job.observation()
+            return await self._run_urgent(job, lease, request, payload, turn)
         self.pending.append(request.job_id)
         if self.worker is None or self.worker.done():
             self.worker = asyncio.create_task(self._run())
+        return job.observation()
+
+    def _submission_lease(self, device_id, request):
+        """Check actor and captured executor/device identities before admission."""
+        lease = self.lease(device_id, request.session_id)
+        if request.task == CONVERSATION_RESPOND and lease.client_id != "voice":
+            raise RiderError("conversation_actor_invalid", 403)
+        if (
+            request.executor_session != self.executor_session
+            or request.device_session != lease.device_session
+        ):
+            raise RiderError("compute_stale_session", 409)
+        return lease
+
+    def _voice_preparation(self, device_id, request, payload, mime):
+        """Transfer a captured turn to submit before awaiting provider preparation."""
+        lease = self._submission_lease(device_id, request)
+        validate_media(request, payload, mime)
+        prepare = getattr(self.engines, "prepare_conversation", None)
+        if prepare is None and request.task == CONVERSATION_RESPOND:
+            raise RiderError("conversation_disabled", 503)
+        if prepare is None or lease.client_id != "voice":
+            return None, lease, None
+        if request.task == AUDIO_TRANSCRIBE and len(lease.voice_turns) >= 16:
+            raise RiderError("conversation_busy", 429)
+        turn = (
+            lease.voice_turns.pop(self._voice_key(request), None)
+            if request.task == CONVERSATION_RESPOND
+            else None
+        )
+        return prepare, lease, turn
+
+    def _check_submission_order(self, lease, request, key):
+        """Check duplicate, ordering and bounds both before and after awaits."""
+        if request.job_id in self.jobs or request.job_id in lease.seen:
+            raise RiderError("compute_duplicate_job", 409)
+        if request.sequence <= lease.sequences.get(key, -1):
+            raise RiderError("compute_out_of_order", 409)
+        if (
+            len(lease.seen) >= 4096
+            or len(lease.sequences) >= 32
+            and key not in lease.sequences
+        ):
+            raise RiderError("compute_session_limit", 429)
+
+    async def _submission_capabilities(self, request, urgent):
+        """Urgent STOP uses only the revision probe, bypassing model capability I/O."""
+        if urgent:
+            capabilities = {
+                "config_revision": await self.engines.revision(),
+                "tasks": {request.task: {"available": True}},
+            }
+        else:
+            capabilities = await self.engines.capabilities()
+        capability = capabilities.get("tasks", {}).get(request.task, {})
+        if capability.get("available") is not True:
+            raise RiderError(
+                "compute_engine_unavailable",
+                503,
+                {"task": request.task, "reason": capability.get("reason")},
+            )
+        return capabilities, capability
+
+    def _check_worker_admission(self, urgent):
+        """Refuse ordinary work while the existing worker is being cancelled."""
+        if (
+            not urgent
+            and self.worker is not None
+            and not self.worker.done()
+            and self.worker.cancelling()
+        ):
+            raise RiderError("compute_worker_stopping", 503)
+
+    def _supersede_frames(self, device_id, request):
+        """Retire older active vision jobs for the same device and stream."""
+        if request.task == "vision.describe":
+            for job in list(self.jobs.values()):
+                if (
+                    job.device_id == device_id
+                    and job.request.task == request.task
+                    and job.request.stream_id == request.stream_id
+                    and job.state not in TERMINAL
+                ):
+                    self._cancel_job(job, "superseded", "compute_newer_frame")
+
+    async def _run_urgent(self, job, lease, request, payload, turn):
+        """Complete STOP through the safety provider outside the inference slot."""
+        # STOP uses the host's safety provider, not the occupied inference slot.
+        job.state, job.started = "running", time.monotonic()
+        try:
+            result = await asyncio.wait_for(
+                self.engines.urgent_conversation(
+                    payload,
+                    {
+                        "conversation_turn": turn,
+                        "client_id": lease.client_id,
+                    },
+                    request.params.language,
+                ),
+                timeout=max(0, job.deadline - time.monotonic()),
+            )
+            job.data, job.runtime, job.quality = (
+                result.data,
+                result.runtime,
+                result.quality,
+            )
+            self._finish(job, "succeeded")
+        except TimeoutError:
+            self._finish(job, "expired", "compute_deadline")
+        except asyncio.CancelledError:
+            self._finish(job, "cancelled", "compute_cancelled")
+            raise
+        except Exception as exc:
+            self._finish(job, "failed", getattr(exc, "code", "compute_engine_error"))
         return job.observation()
 
     def owned_job(self, device_id: str, job_id: str) -> Job:
@@ -532,6 +563,7 @@ class ComputeService:
             raise
 
     async def _execute_job(self, job: Job):
+        """Execute an admitted job with its captured input and runtime metadata."""
         if job.revision != await self.engines.revision():
             self._finish(job, "expired", "compute_runtime_changed")
             return
@@ -548,7 +580,7 @@ class ComputeService:
         job.state, job.started = "running", time.monotonic()
         metadata = job.request.model_dump()
         metadata.update(device_id=job.device_id, content_type=job.mime)
-        if job.request.task == "conversation.respond":
+        if job.request.task == CONVERSATION_RESPOND:
             lease = self.lease(job.device_id, job.request.session_id)
             metadata.update(
                 client_id=lease.client_id,

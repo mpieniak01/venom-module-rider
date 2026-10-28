@@ -321,13 +321,15 @@ async def test_camera_instance_logs_use_valid_systemd_names():
 
 
 async def test_no_replay_after_device_session_change():
+    """Reject an old session after switching away from and back to a device."""
     service, pi = domain()
     await service.select("demo", service.session)
     old = service.session
     await service.select(None, old)
     await service.select("demo", service.session)
+    body = command(pi, "move")
     with pytest.raises(RiderError, match="stale_device_session"):
-        await service.control(command(pi, "move"), old)
+        await service.control(body, old)
     assert not any(row["method"] == "POST" for row in pi.trace)
     await service.close()
 
@@ -343,10 +345,12 @@ async def test_no_replay_after_device_session_change():
     ],
 )
 async def test_invalid_envelope_does_not_reach_actuator(field, value, code):
+    """Reject malformed envelopes before forwarding an actuator mutation."""
     service, pi = domain()
     await service.select("demo", service.session)
+    body = command(pi, "arm", **{field: value})
     with pytest.raises(RiderError, match=code):
-        await service.control(command(pi, "arm", **{field: value}), service.session)
+        await service.control(body, service.session)
     # Shape errors stop at the gateway; valid-shaped stale requests are
     # forwarded and rejected by the simulated robot authority.
     assert any(row["method"] == "POST" for row in pi.trace) == (
@@ -357,15 +361,16 @@ async def test_invalid_envelope_does_not_reach_actuator(field, value, code):
 
 
 async def test_disarmed_and_settings_revision_refuse_movement():
+    """Refuse disarmed movement and stale calibrated settings revisions."""
     service, pi = domain()
     await service.select("demo", service.session)
+    move_body = command(pi, "move")
     with pytest.raises(RiderError, match="motion_not_armed"):
-        await service.control(command(pi, "move"), service.session)
+        await service.control(move_body, service.session)
     await arm(service, pi)
+    height_body = command(pi, "height", height=95, settings_revision=999)
     with pytest.raises(RiderError, match="manual_settings_stale"):
-        await service.control(
-            command(pi, "height", height=95, settings_revision=999), service.session
-        )
+        await service.control(height_body, service.session)
     await service.close()
 
 
@@ -656,8 +661,10 @@ def test_demo_only_configuration_cannot_select_real_mode(monkeypatch):
     "url", ["http://[", "http://localhost:noport", "http://localhost:0"]
 )
 def test_malformed_ports_are_configuration_errors(url):
+    """Expose malformed device ports as configuration errors."""
+    raw = json.dumps([{"id": "a", "label": "A", "url": url}])
     with pytest.raises(RiderError, match="invalid_device_configuration"):
-        configured_devices(json.dumps([{"id": "a", "label": "A", "url": url}]))
+        configured_devices(raw)
 
 
 def test_all_readonly_and_mutation_routes_use_the_same_fixture(monkeypatch):
@@ -835,6 +842,7 @@ async def test_pending_ack_is_preserved_as_pending_not_physical_success():
 
 
 async def test_moving_goal_requires_matching_operator_owner_and_fresh_intent():
+    """Require current operator authority before admitting a moving goal."""
     pi = DemoPi()
     asgi = httpx.ASGITransport(app=create_app(pi))
     forwarded = []
@@ -874,12 +882,9 @@ async def test_moving_goal_requires_matching_operator_owner_and_fresh_intent():
     with pytest.raises(RiderError):
         await service.goal("fixture_move", {"enabled": True}, service.session)
     await arm(service, pi)
+    goal_body = command(pi, "arm", enabled=True, source="navigation")
     with pytest.raises(RiderError, match="operator_motion_permission_required"):
-        await service.goal(
-            "fixture_move",
-            command(pi, "arm", enabled=True, source="navigation"),
-            service.session,
-        )
+        await service.goal("fixture_move", goal_body, service.session)
     assert not forwarded
     navigation_owner = True
     service.cache.clear()
@@ -1160,3 +1165,41 @@ async def test_external_cancellation_is_not_misreported_as_device_change(
     assert not service.operations
     assert service.native_admission_mutating == 0
     await service.close()
+
+
+@pytest.mark.parametrize(
+    "original_action,changed_action,expected_path",
+    [("arm", "move", "/api/safety"), ("move", "arm", "/api/control")],
+)
+async def test_control_route_uses_action_captured_before_intent_validation(
+    monkeypatch, original_action, changed_action, expected_path
+):
+    """Retain the original control route across asynchronous intent validation."""
+    service, pi = domain()
+    await service.select("demo", service.session)
+    body = command(pi, original_action)
+    entered, resume = asyncio.Event(), asyncio.Event()
+    calls = []
+
+    async def validate(payload, session):
+        """Suspend validation so the caller can change the shared envelope."""
+        entered.set()
+        await resume.wait()
+        return {"generation": payload["generation"]}
+
+    async def record(path, **kwargs):
+        """Capture the selected route without contacting a physical device."""
+        calls.append(path)
+        return {"data": {}, "meta": {}}
+
+    monkeypatch.setattr(service, "validate_intent", validate)
+    monkeypatch.setattr(service.client, "json", record)
+    try:
+        task = asyncio.create_task(service._control(body, service.session))
+        await asyncio.wait_for(entered.wait(), 1)
+        body["action"] = changed_action
+        resume.set()
+        await asyncio.wait_for(task, 1)
+        assert calls == [expected_path]
+    finally:
+        await service.close()
