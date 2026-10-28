@@ -69,7 +69,7 @@ for(const name of new Set(cases.map(value=>value.fixture))){
 }
 // Never discover git through PATH: a writable earlier entry can replace the binary.
 // An explicit absolute override supports installations outside the standard location.
-const gitExecutable=process.env.RIDER_GIT_EXECUTABLE??(process.platform==="win32"?"C:\\Program Files\\Git\\cmd\\git.exe":"/usr/bin/git");
+const gitExecutable=process.env.RIDER_GIT_EXECUTABLE??(process.platform==="win32"?String.raw`C:\Program Files\Git\cmd\git.exe`:"/usr/bin/git");
 if(!path.isAbsolute(gitExecutable))throw new Error("RIDER_GIT_EXECUTABLE must be an absolute path to a trusted git executable");
 const gitOptions={cwd:root,encoding:"utf8"};
 const report={head:execFileSync(gitExecutable,["rev-parse","HEAD"],gitOptions).trim(),worktree_dirty:!!execFileSync(gitExecutable,["-c","core.fsmonitor=false","status","--porcelain"],gitOptions).trim(),playwright:require("playwright/package.json").version,browser:"",isolation:false,cases:[]};

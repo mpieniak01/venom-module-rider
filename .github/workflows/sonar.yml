@@ -135,7 +135,8 @@ jobs:
         run: |
           PYTHONPATH=../..:. ../../.venv/bin/python -m pytest -q \
             --cov=scripts --cov-report=xml:test-results/scripts-coverage.xml \
-            tests/test_runner.py tests/test_depth_candidates.py tests/test_depth_video.py
+            tests/test_runner.py tests/test_depth_candidates.py tests/test_depth_video.py \
+            tests/test_temporal_evidence.py
       - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@v4
