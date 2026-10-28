@@ -70,13 +70,59 @@ def _dashed(draw, start, end, color, width):
         )
 
 
+def _projected_sector(draw, size, outlines, side, label, color, line_width):
+    """Draw only observed projected strokes and return their availability label."""
+    width, height = size
+    points = (outlines or {}).get(side, [])
+    visible = [point for point in points if point is not None]
+    previous = None
+    for point in points:
+        current = (point[0] * width, point[1] * height) if point is not None else None
+        if previous is not None and current is not None:
+            draw.line((previous, current), fill=color, width=line_width)
+        previous = current
+    if visible:
+        point = min(visible, key=lambda value: value[1])
+        return side, (point[0] * width, point[1] * height), label, color
+    position = {"left": 12, "center": width / 2, "right": width - 12}[side]
+    return side, (position, 22), label.rstrip("?") + "?", color
+
+
+def _bounded_sector(draw, size, row, side, label, color, line_width):
+    """Draw a scored image rectangle without inventing projected geometry."""
+    w, h = size
+    bounds = row.get("corridor")
+    if not bounds:
+        return
+    x0, y0, x1, y1 = bounds
+    left, top = max(0, math.ceil(x0 * w)), max(0, math.ceil(y0 * h))
+    right, bottom = (
+        min(w - 1, math.ceil(x1 * w) - 1),
+        min(h - 1, math.ceil(y1 * h) - 1),
+    )
+    if left > right or top > bottom:
+        return
+    # The central STOP border is drawn separately outside its scored pixels.
+    if side != "center":
+        if row.get("coverage_complete") is True:
+            draw.rectangle((left, top, right, bottom), outline=color, width=line_width)
+        else:
+            for start, end in (
+                ((left, top), (right, top)),
+                ((right, top), (right, bottom)),
+                ((right, bottom), (left, bottom)),
+                ((left, bottom), (left, top)),
+            ):
+                _dashed(draw, start, end, color, line_width)
+    _label(draw, size, (left + 3, top), label, color)
+
+
 def draw_sectors(draw, size, sectors, *, outlines=None, projected=False):
     """Geometry comes from this assessment, before camera-to-command mirroring.
 
     L/C/R identify the analysis side. A question mark means unknown/incomplete,
     or that the actual projection is unavailable. Never invent a projected ROI.
     """
-    w, h = size
     line_width = max(1, round(min(size) / 160))
     labels = []
     for side, code, color in SIDES:
@@ -87,54 +133,11 @@ def draw_sectors(draw, size, sectors, *, outlines=None, projected=False):
         )
         label = code + ("?" if uncertain else "")
         if projected:
-            points = (outlines or {}).get(side, [])
-            visible = [p for p in points if p is not None]
-            previous = None
-            for point in points:
-                current = (point[0] * w, point[1] * h) if point is not None else None
-                if previous is not None and current is not None:
-                    draw.line((previous, current), fill=color, width=line_width)
-                previous = current
-            if visible:
-                point = min(visible, key=lambda p: p[1])
-                labels.append((side, (point[0] * w, point[1] * h), label, color))
-            else:
-                # This is an availability badge, not an invented region boundary.
-                labels.append(
-                    (
-                        side,
-                        ({"left": 12, "center": w / 2, "right": w - 12}[side], 22),
-                        code + "?",
-                        color,
-                    )
-                )
+            labels.append(
+                _projected_sector(draw, size, outlines, side, label, color, line_width)
+            )
             continue
-        bounds = row.get("corridor")
-        if not bounds:
-            continue
-        x0, y0, x1, y1 = bounds
-        left, top = max(0, math.ceil(x0 * w)), max(0, math.ceil(y0 * h))
-        right, bottom = (
-            min(w - 1, math.ceil(x1 * w) - 1),
-            min(h - 1, math.ceil(y1 * h) - 1),
-        )
-        if left > right or top > bottom:
-            continue
-        # The central STOP border is drawn separately outside its scored pixels.
-        if side != "center":
-            if row.get("coverage_complete") is True:
-                draw.rectangle(
-                    (left, top, right, bottom), outline=color, width=line_width
-                )
-            else:
-                for start, end in (
-                    ((left, top), (right, top)),
-                    ((right, top), (right, bottom)),
-                    ((right, bottom), (left, bottom)),
-                    ((left, bottom), (left, top)),
-                ):
-                    _dashed(draw, start, end, color, line_width)
-        _label(draw, size, (left + 3, top), label, color)
+        _bounded_sector(draw, size, row, side, label, color, line_width)
     occupied: list[tuple[int, int, int, int]] = []
     for _side, point, label, color in sorted(
         labels, key=lambda entry: entry[0] != "center"

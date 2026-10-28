@@ -100,6 +100,70 @@ def _model_identity(row: Mapping[str, Any], perception: Mapping[str, Any]) -> No
         raise ValueError("replay_model_artifact")
 
 
+def _validate_replay_maps(maps, perception):
+    """Require paired semantic maps and the selected engine's own evidence kind."""
+    if ("labels" in maps) != ("confidence" in maps):
+        raise ValueError("replay_semantic_pair")
+    if perception is not None:
+        semantic = perception.get("engine") == "segformer"
+        if semantic and not {"labels", "confidence"}.issubset(maps):
+            raise ValueError("replay_semantic_maps_required")
+        if not semantic and (
+            "labels" in maps or not {"floor", "obstacle", "uncertain"}.issubset(maps)
+        ):
+            raise ValueError("replay_depth_maps_required")
+
+
+def _replay_spatial(maps, corridor, params, row):
+    """Apply recorded validity and source-gap flags after spatial assessment."""
+    spatial = assess_evidence(maps, corridor, params, raw_reason=row.get("raw_reason"))
+    for key in ("valid", "source_gap"):
+        if key in row:
+            spatial[key] = row[key]
+    if row.get("valid") is False:
+        spatial["reason"] = row.get("reason", "navigation_invalid_evidence")
+    return spatial
+
+
+def _replay_raw_state(row, spatial):
+    """Reconstruct only an absent baseline; never infer ground-truth labels."""
+    reconstructed = row.get("raw_state") is None
+    state = row.get("raw_state")
+    if reconstructed:
+        if spatial["uncertain_fraction"] > 0.01:
+            state = "unknown"
+        elif (
+            spatial["counts"]["obstacle_pixels"]
+            + spatial["counts"]["ignored_obstacle_pixels"]
+        ):
+            state = "obstacle"
+        elif spatial["floor_fraction"] < 1:
+            state = "unknown"
+        else:
+            state = "clear"
+    if state not in {"clear", "unknown", "obstacle"}:
+        raise ValueError("replay_raw_state")
+    return state, reconstructed
+
+
+def _replay_profile(behavior, perception):
+    """Freeze only the explicitly requested research behavior and perception."""
+    profile: dict[str, Any] = {"id": "research", "qualified": False}
+    if behavior is not None:
+        from venom_module_rider.navigation_profiles import policy_digest
+
+        profile = {
+            "id": behavior["profile_id"],
+            "behavior": dict(behavior),
+            "effective_policy_sha256": policy_digest(
+                dict(behavior), dict(perception) if perception is not None else None
+            ),
+            "qualified": False,
+            **({"perception": dict(perception)} if perception is not None else {}),
+        }
+    return profile
+
+
 def replay(
     manifest: Path,
     params: Mapping[str, Any],
@@ -124,19 +188,7 @@ def replay(
     maps_digest = sha256()
     manifest_digest = sha256()
     dimensions: set[tuple[int, int]] = set()
-    profile: dict[str, Any] = {"id": "research", "qualified": False}
-    if behavior is not None:
-        from venom_module_rider.navigation_profiles import policy_digest
-
-        profile = {
-            "id": behavior["profile_id"],
-            "behavior": dict(behavior),
-            "effective_policy_sha256": policy_digest(
-                dict(behavior), dict(perception) if perception is not None else None
-            ),
-            "qualified": False,
-            **({"perception": dict(perception)} if perception is not None else {}),
-        }
+    profile = _replay_profile(behavior, perception)
     # A bounded regular-file snapshot also rejects FIFOs and final symlink swaps.
     manifest_bytes = _read_regular_file(manifest, 64 * 1024**2, "replay_manifest_path")
     with (
@@ -156,30 +208,13 @@ def replay(
                 _model_identity(row, perception)
             path = _asset(manifest.parent, row["maps"])
             maps, map_sha256 = _read_maps(path)
-            if ("labels" in maps) != ("confidence" in maps):
-                raise ValueError("replay_semantic_pair")
-            if perception is not None:
-                semantic = perception.get("engine") == "segformer"
-                if semantic and not {"labels", "confidence"}.issubset(maps):
-                    raise ValueError("replay_semantic_maps_required")
-                if not semantic and (
-                    "labels" in maps
-                    or not {"floor", "obstacle", "uncertain"}.issubset(maps)
-                ):
-                    raise ValueError("replay_depth_maps_required")
+            _validate_replay_maps(maps, perception)
             maps_digest.update(map_sha256.encode())
             shape = maps["floor"].shape if "floor" in maps else maps["labels"].shape
             dimensions.add(tuple(shape))
             corridor = row.get("corridor", [0.35, 0.65, 0.65, 0.95])
             started = perf_counter()
-            spatial = assess_evidence(
-                maps, corridor, params, raw_reason=row.get("raw_reason")
-            )
-            for key in ("valid", "source_gap"):
-                if key in row:
-                    spatial[key] = row[key]
-            if row.get("valid") is False:
-                spatial["reason"] = row.get("reason", "navigation_invalid_evidence")
+            spatial = _replay_spatial(maps, corridor, params, row)
             temporal = evaluator.update(
                 spatial,
                 maps.get("gray"),
@@ -191,22 +226,7 @@ def replay(
             )
             duration = (perf_counter() - started) * 1000
             durations.append(duration)
-            reconstructed = row.get("raw_state") is None
-            state = row.get("raw_state")
-            if reconstructed:
-                if spatial["uncertain_fraction"] > 0.01:
-                    state = "unknown"
-                elif (
-                    spatial["counts"]["obstacle_pixels"]
-                    + spatial["counts"]["ignored_obstacle_pixels"]
-                ):
-                    state = "obstacle"
-                elif spatial["floor_fraction"] < 1:
-                    state = "unknown"
-                else:
-                    state = "clear"
-            if state not in {"clear", "unknown", "obstacle"}:
-                raise ValueError("replay_raw_state")
+            state, reconstructed = _replay_raw_state(row, spatial)
             result = {
                 "frame_id": row["frame_id"],
                 "sequence": row["sequence"],

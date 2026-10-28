@@ -75,7 +75,48 @@ class ModelInstaller:
             self.handles[job["id"]].cancel()
         return dict(job) if job else None
 
+    async def _admit_installation(self, tasks, host_id):
+        """Wait for the existing admission policy before creating any worker."""
+        while not self.closed:
+            available = self.priority is None or self.priority.available()
+            if available and await tasks.admit(host_id, asyncio.current_task()):
+                break
+            await asyncio.sleep(0.5)
+        if self.closed:
+            raise asyncio.CancelledError
+
+    def _worker_environment(self):
+        """Construct the bounded worker environment without changing global state."""
+        environment = dict(os.environ)
+        environment.update(
+            HF_HUB_DISABLE_PROGRESS_BARS="1",
+            TOKENIZERS_PARALLELISM="false",
+            OMP_NUM_THREADS="2",
+            MKL_NUM_THREADS="2",
+            OPENBLAS_NUM_THREADS="2",
+        )
+        root = Path(__file__).resolve().parent.parent
+        environment["PYTHONPATH"] = (
+            str(root) + os.pathsep + environment.get("PYTHONPATH", "")
+        )
+        return environment, root
+
+    async def _terminate_installation(self, child, job):
+        """Terminate an owned child and escalate to kill after the existing timeout."""
+        if child is not None and child.returncode is None:
+            job["state"] = "cancelling"
+            with suppress(ProcessLookupError):
+                child.terminate()
+            try:
+                await asyncio.wait_for(child.wait(), 5)
+            except TimeoutError:
+                with suppress(ProcessLookupError):
+                    child.kill()
+                await child.wait()
+
+    # Lifecycle cleanup remains in finally even when cancellation propagates.
     async def _run(self, job):
+        """Own one installation task, subprocess and unconditional cleanup."""
         host_id, tasks, child = None, None, None
         outcome: tuple[str, str | None] | None = None
         try:
@@ -92,25 +133,8 @@ class ModelInstaller:
                 }
             )
             job["task_id"] = str(host_id)
-            while not self.closed:
-                available = self.priority is None or self.priority.available()
-                if available and await tasks.admit(host_id, asyncio.current_task()):
-                    break
-                await asyncio.sleep(0.5)
-            if self.closed:
-                raise asyncio.CancelledError
-            environment = dict(os.environ)
-            environment.update(
-                HF_HUB_DISABLE_PROGRESS_BARS="1",
-                TOKENIZERS_PARALLELISM="false",
-                OMP_NUM_THREADS="2",
-                MKL_NUM_THREADS="2",
-                OPENBLAS_NUM_THREADS="2",
-            )
-            root = Path(__file__).resolve().parent.parent
-            environment["PYTHONPATH"] = (
-                str(root) + os.pathsep + environment.get("PYTHONPATH", "")
-            )
+            await self._admit_installation(tasks, host_id)
+            environment, root = self._worker_environment()
             child = await asyncio.create_subprocess_exec(
                 sys.executable,
                 "-m",
@@ -137,16 +161,7 @@ class ModelInstaller:
         except Exception:
             outcome = ("failed", "model_install_failed")
         finally:
-            if child is not None and child.returncode is None:
-                job["state"] = "cancelling"
-                with suppress(ProcessLookupError):
-                    child.terminate()
-                try:
-                    await asyncio.wait_for(child.wait(), 5)
-                except TimeoutError:
-                    with suppress(ProcessLookupError):
-                        child.kill()
-                    await child.wait()
+            await self._terminate_installation(child, job)
             self.children.pop(job["id"], None)
             if outcome is not None:
                 job.update(state=outcome[0], error=outcome[1])
@@ -158,36 +173,43 @@ class ModelInstaller:
                 )
             self.handles.pop(job["id"], None)
 
+    def _check_worker_memory(self, child):
+        """Apply the existing worker RSS ceiling during a silent stdout interval."""
+        # The worker is bounded by the same RAM policy as offline replay.
+        rss = Path(f"/proc/{child.pid}/status")
+        if rss.exists():
+            for row in rss.read_text().splitlines():
+                if row.startswith("VmRSS:") and int(row.split()[1]) > 2560 * 1024:
+                    raise RiderError("model_resource_limit", 409) from None
+
+    def _accept_install_progress(self, job, message):
+        """Validate progress before publishing it; ready still awaits child exit."""
+        if message.get("state") not in {"downloading", "verifying", "ready"}:
+            raise RiderError("model_install_protocol", 409)
+        progress = message.get("progress")
+        if type(progress) is not int or not 0 <= progress <= 100:
+            raise RiderError("model_install_protocol", 409)
+        reported_ready = message["state"] == "ready"
+        job.update(
+            state="verifying" if reported_ready else message["state"],
+            progress=progress,
+        )
+        return reported_ready
+
     async def _observe(self, child, job):
+        """Observe bounded progress and confirm successful worker termination."""
         assert child.stdout is not None
         reported_ready = False
         while True:
             try:
                 line = await asyncio.wait_for(child.stdout.readline(), 0.5)
             except TimeoutError:
-                # The worker is bounded by the same RAM policy as offline replay.
-                rss = Path(f"/proc/{child.pid}/status")
-                if rss.exists():
-                    for row in rss.read_text().splitlines():
-                        if (
-                            row.startswith("VmRSS:")
-                            and int(row.split()[1]) > 2560 * 1024
-                        ):
-                            raise RiderError("model_resource_limit", 409) from None
+                self._check_worker_memory(child)
                 continue
             if not line:
                 break
             message = json.loads(line)
-            if message.get("state") not in {"downloading", "verifying", "ready"}:
-                raise RiderError("model_install_protocol", 409)
-            progress = message.get("progress")
-            if type(progress) is not int or not 0 <= progress <= 100:
-                raise RiderError("model_install_protocol", 409)
-            reported_ready = message["state"] == "ready"
-            job.update(
-                state="verifying" if reported_ready else message["state"],
-                progress=progress,
-            )
+            reported_ready = self._accept_install_progress(job, message)
         await child.wait()
         if reported_ready and child.returncode == 0:
             job["state"] = "ready"

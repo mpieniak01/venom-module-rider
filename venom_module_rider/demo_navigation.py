@@ -139,8 +139,8 @@ class ReplayNavigation:
             )
         )
 
-    def operator_command(self, body):
-        """In-memory copy of the negotiated Pi boundary; never calls hardware."""
+    def _validate_operator_command(self, body):
+        """Validate negotiated operator authority before changing simulated state."""
         if not self.operator_mode or not self.status.get("running"):
             raise ValueError("operator_control_not_available")
         if "supersedes_operation_id" in body and not self.supersedes_operation(body):
@@ -161,6 +161,11 @@ class ReplayNavigation:
             raise ValueError("operator_timed_consent_required")
         if resume and self.operator_state in {"active", "qualifying"}:
             raise ValueError("navigation_already_active")
+        return resume
+
+    def operator_command(self, body):
+        """In-memory copy of the negotiated Pi boundary; never calls hardware."""
+        resume = self._validate_operator_command(body)
         self.operation_origin_generation = self.state.generation if resume else None
         self.operation_origin_sequence = body["seq"] if resume else -1
         self.state.deadline = 0.0
@@ -487,6 +492,65 @@ class ReplayNavigation:
                 return
             await asyncio.sleep(0.01)
 
+    def _operator_drive(self, safety):
+        """Retain the replay producer while synchronizing operator motion state."""
+        drive = (
+            self.operator_state in {"qualifying", "active"}
+            and safety["state"] == "ARMED"
+            and safety["owner"] == "navigation"
+        )
+        if not drive and self.operator_state in {"qualifying", "active"}:
+            self.pause_operator("motion_disarmed")
+        if not drive and self.operator_state in {"qualifying", "active"}:
+            self.pause_operator("motion_disarmed")
+        return drive
+
+    def _operator_generation(self, policy, run, generation, drive, previous_drive):
+        """Replace a lease only when its captured generation or drive mode changes."""
+        if generation != self.motion_generation or drive != previous_drive:
+            previous_drive = drive
+            run = uuid.uuid4().hex
+            self.motion_generation = generation
+            self.lease = self.lease_factory(
+                policy,
+                run,
+                self.drive,
+                self.brake,
+                self.clock,
+                pause=lambda duration: self.drive(0.0, duration),
+            )
+            self.status.update(run_id=run, generation=generation)
+        return run, previous_drive
+
+    async def _request_operator_frame(self, meta, drive):
+        """Pause simulated motion after a failed request without retrying old intent."""
+        try:
+            if self.drop_link:
+                raise TimeoutError("replay_link_dropped")
+            decision = await self.request(meta.model_dump(), self.payload)
+            return True, decision
+        except Exception:
+            if drive:
+                self.lease.halt("replay_transport_failed")
+            self.operator_state = "paused"
+            self.operator_reason = "replay_transport_failed"
+            self.status.update(paused=True, simulated_moving=False)
+            await asyncio.sleep(0.2)
+            return False, None
+
+    def _accept_operator_decision(self, decision, frame_id, sequence, capture, drive):
+        """Update operator phase only after this generation accepts evidence."""
+        accepted = (
+            self.lease.accept(decision, frame_id, sequence, capture) if drive else False
+        )
+        if drive and not self.lease.latched and accepted:
+            self.operator_state = "active"
+            self.operator_reason = "clear_frames_ready"
+        elif drive and self.lease.latched:
+            self.operator_state = "paused"
+            self.operator_reason = self.lease.reason
+        return accepted
+
     async def run_operator(self, policy, run):
         """Keep one replay producer alive while motion authorization changes."""
         sequence = 0
@@ -495,28 +559,10 @@ class ReplayNavigation:
             while self.status["running"]:
                 safety = self.state.safety()
                 generation = safety["generation"]
-                drive = (
-                    self.operator_state in {"qualifying", "active"}
-                    and safety["state"] == "ARMED"
-                    and safety["owner"] == "navigation"
+                drive = self._operator_drive(safety)
+                run, previous_drive = self._operator_generation(
+                    policy, run, generation, drive, previous_drive
                 )
-                if not drive and self.operator_state in {"qualifying", "active"}:
-                    self.pause_operator("motion_disarmed")
-                if not drive and self.operator_state in {"qualifying", "active"}:
-                    self.pause_operator("motion_disarmed")
-                if generation != self.motion_generation or drive != previous_drive:
-                    previous_drive = drive
-                    run = uuid.uuid4().hex
-                    self.motion_generation = generation
-                    self.lease = self.lease_factory(
-                        policy,
-                        run,
-                        self.drive,
-                        self.brake,
-                        self.clock,
-                        pause=lambda duration: self.drive(0.0, duration),
-                    )
-                    self.status.update(run_id=run, generation=generation)
                 sequence += 1
                 capture = self.clock()
                 frame_id = hashlib.sha256(
@@ -542,32 +588,15 @@ class ReplayNavigation:
                         )
                     },
                 )
-                try:
-                    if self.drop_link:
-                        raise TimeoutError("replay_link_dropped")
-                    decision = await self.request(meta.model_dump(), self.payload)
-                except Exception:
-                    if drive:
-                        self.lease.halt("replay_transport_failed")
-                    self.operator_state = "paused"
-                    self.operator_reason = "replay_transport_failed"
-                    self.status.update(paused=True, simulated_moving=False)
-                    await asyncio.sleep(0.2)
+                received, decision = await self._request_operator_frame(meta, drive)
+                if not received:
                     continue
                 # An old asynchronous result cannot seize new manual authority.
                 if generation != self.state.generation:
                     continue
-                accepted = (
-                    self.lease.accept(decision, frame_id, sequence, capture)
-                    if drive
-                    else False
+                accepted = self._accept_operator_decision(
+                    decision, frame_id, sequence, capture, drive
                 )
-                if drive and not self.lease.latched and accepted:
-                    self.operator_state = "active"
-                    self.operator_reason = "clear_frames_ready"
-                elif drive and self.lease.latched:
-                    self.operator_state = "paused"
-                    self.operator_reason = self.lease.reason
                 self.status.update(
                     decision=decision,
                     observed_at=time.time(),
@@ -579,7 +608,33 @@ class ReplayNavigation:
         except asyncio.CancelledError:
             raise
 
+    async def _request_replay_frame(self, frame, policy):
+        """Retry observation faults only; drive faults retain the outer halt path."""
+        try:
+            decision = await self.request(frame.model_dump(), self.payload)
+            return True, decision
+        except (httpx.HTTPStatusError, httpx.TransportError) as exc:
+            retryable = not isinstance(
+                exc, httpx.HTTPStatusError
+            ) or exc.response.status_code in {408, 429, 500, 502, 503, 504}
+            if policy["mode"] != "observe" or not retryable:
+                raise
+            self.status.update(
+                decision={
+                    "state": "unknown",
+                    "action": "stop",
+                    "vision_action": "stop",
+                    "reason": "vision_inference_unavailable",
+                    "clear_count": 0,
+                },
+                observed_at=time.time(),
+                simulated_moving=False,
+            )
+            await asyncio.sleep(0.2)
+            return False, None
+
     async def run(self, policy, run):
+        """Replay the captured policy without renewing any stale motion authority."""
         sequence = 0
         try:
             while self.status["running"]:
@@ -615,26 +670,8 @@ class ReplayNavigation:
                 if self.drop_link:
                     await asyncio.sleep(policy["decision_budget_ms"] / 1000)
                     raise TimeoutError("replay_link_dropped")
-                try:
-                    decision = await self.request(frame.model_dump(), self.payload)
-                except (httpx.HTTPStatusError, httpx.TransportError) as exc:
-                    retryable = not isinstance(
-                        exc, httpx.HTTPStatusError
-                    ) or exc.response.status_code in {408, 429, 500, 502, 503, 504}
-                    if policy["mode"] != "observe" or not retryable:
-                        raise
-                    self.status.update(
-                        decision={
-                            "state": "unknown",
-                            "action": "stop",
-                            "vision_action": "stop",
-                            "reason": "vision_inference_unavailable",
-                            "clear_count": 0,
-                        },
-                        observed_at=time.time(),
-                        simulated_moving=False,
-                    )
-                    await asyncio.sleep(0.2)
+                received, decision = await self._request_replay_frame(frame, policy)
+                if not received:
                     continue
                 accepted = (
                     self.lease.accept(decision, frame_id, sequence, capture)
