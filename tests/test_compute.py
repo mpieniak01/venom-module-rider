@@ -660,3 +660,90 @@ async def test_external_worker_cancellation_propagates_after_job_cleanup():
         assert service.inference is None
     finally:
         await service.close()
+
+
+async def test_worker_cancellation_waits_for_inference_and_cancels_pending():
+    class DelayedCancellation(BlockingEngines):
+        def __init__(self):
+            super().__init__()
+            self.cancelling = asyncio.Event()
+            self.cleanup_release = asyncio.Event()
+
+        async def execute(self, *args):
+            self.entered.set()
+            try:
+                await self.release.wait()
+            except asyncio.CancelledError:
+                self.cancelling.set()
+                await self.cleanup_release.wait()
+                raise
+
+    engines = DelayedCancellation()
+    service = ComputeService(engines)
+    shutdown = None
+    try:
+        await service.submit("pi", request(service), b"one", "text/plain")
+        await asyncio.wait_for(engines.entered.wait(), 2)
+        await service.submit(
+            "pi", request(service, job_id="queued", sequence=1), b"two", "text/plain"
+        )
+        worker = service.worker
+        worker.cancel()
+        await asyncio.wait_for(engines.cancelling.wait(), 2)
+        assert service.inference is not None and not service.inference.done()
+        assert service.jobs["job"].state == "cancelled"
+        assert service.jobs["queued"].state == "cancelled"
+        assert not service.pending
+        later = request(service, job_id="later", sequence=2)
+        with pytest.raises(RiderError, match="compute_worker_stopping"):
+            await service.submit("pi", later, b"x", "text/plain")
+        shutdown = asyncio.create_task(service.close())
+        await asyncio.sleep(0)
+        assert not shutdown.done()
+        engines.cleanup_release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await worker
+        await shutdown
+        assert service.inference is None
+        assert service.running is None
+    finally:
+        engines.cleanup_release.set()
+        if shutdown is not None:
+            await shutdown
+        elif not service.closed:
+            await service.close()
+
+
+async def test_worker_cancelled_during_drain_cancels_waiting_jobs():
+    class DrainingEngines(DemoEngines):
+        def __init__(self):
+            self.entered = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def drain(self):
+            self.entered.set()
+            await self.release.wait()
+
+    engines = DrainingEngines()
+    service = ComputeService(engines)
+    try:
+        await service.submit("pi", request(service), b"one", "text/plain")
+        await asyncio.wait_for(engines.entered.wait(), 2)
+        await service.submit(
+            "pi", request(service, job_id="queued", sequence=1), b"two", "text/plain"
+        )
+        worker = service.worker
+        worker.cancel()
+        await asyncio.sleep(0)
+        assert service.jobs["job"].state == "succeeded"
+        assert service.jobs["queued"].state == "cancelled"
+        assert not service.pending
+        assert not worker.done()
+        engines.release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await worker
+        assert service.inference is None
+        assert service.running is None
+    finally:
+        engines.release.set()
+        await service.close()

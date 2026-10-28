@@ -545,3 +545,22 @@ async def test_replay_uses_session_token_and_local_api_only(monkeypatch):
     for url in ("https://remote.invalid", "http://127.0.0.1@remote.invalid"):
         with pytest.raises(ValueError, match="replay_requires_loopback"):
             ReplayNavigation(b"fixture", PermitFixture, api_url=url)
+
+
+async def test_replay_omits_authorization_when_token_is_empty(monkeypatch):
+    monkeypatch.delenv("RIDER_COMPUTE_TOKEN", raising=False)
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(200, json={"action": "stop"})
+
+    nav = ReplayNavigation(b"fixture", PermitFixture, token="")
+    DemoPi(navigation=nav)
+    await nav.http.aclose()
+    nav.http = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+    try:
+        await nav._request({"sequence": 1}, b"jpg")
+        assert "Authorization" not in requests[0].headers
+    finally:
+        await nav.close()

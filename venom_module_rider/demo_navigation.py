@@ -300,7 +300,7 @@ class ReplayNavigation:
             headers={
                 "Content-Type": "image/jpeg",
                 "X-Rider-Device": "demo",
-                "Authorization": "Bearer " + self.token,
+                **({"Authorization": "Bearer " + self.token} if self.token else {}),
                 "X-Rider-Vision": json.dumps(meta),
             },
             timeout=max(1.0, self.policy["decision_budget_ms"] / 1000)

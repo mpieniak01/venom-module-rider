@@ -450,3 +450,40 @@ def test_depth_report_does_not_follow_dangling_output_symlink(tmp_path, monkeypa
     with pytest.raises(FileExistsError):
         compare.main()
     assert not target.exists()
+
+
+@pytest.mark.parametrize("replace_output", [False, True])
+def test_interrupted_benchmark_removes_only_its_own_report(
+    tmp_path, monkeypatch, replace_output
+):
+    from scripts import compare_depth_models as compare
+
+    output = tmp_path / "report.json"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "compare",
+            "--backend",
+            "da2",
+            "--model",
+            str(tmp_path / "model"),
+            "--manifest",
+            str(tmp_path / "manifest"),
+            "--output",
+            str(output),
+        ],
+    )
+
+    def interrupt(_args):
+        if replace_output:
+            output.unlink()
+            output.write_text("replacement")
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(compare, "benchmark", interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        compare.main()
+    if replace_output:
+        assert output.read_text() == "replacement"
+    else:
+        assert not output.exists()
