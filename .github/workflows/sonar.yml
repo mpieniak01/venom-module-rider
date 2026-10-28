@@ -1,0 +1,68 @@
+name: Rider module SonarCloud
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pull-requests: read
+concurrency:
+  group: rider-sonar-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  sonar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      FEATURE_RIDER: "false"
+      NEXT_PUBLIC_FEATURE_RIDER: "false"
+      API_OPTIONAL_MODULES: ""
+      ENV_FILE: /dev/null
+      CUDA_VISIBLE_DEVICES: "-1"
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          repository: mpieniak01/Venom
+          ref: 3144d5c9edf451d79ed093b116a4f49dd5bbce28
+          path: host
+          persist-credentials: false
+      - uses: actions/checkout@v5
+        with:
+          path: host/modules/venom-module-rider
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14.8"
+      - name: Install CPU test dependencies
+        working-directory: host
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install -r requirements-ci-lite.txt
+          .venv/bin/python -m pip install opencv-python-headless==4.11.0.86 safetensors==0.8.0 onnxruntime==1.27.0
+          .venv/bin/python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.13.0
+      - name: Run isolated module tests and create coverage
+        working-directory: host/modules/venom-module-rider
+        run: |
+          # These cases launch the real CUDA-only analysis worker; see README.
+          export PYTEST_ADDOPTS="--deselect=tests/test_analysis_cli.py::test_cli_end_to_end_http_submit_recover_report_compare_and_errors --deselect=tests/test_analysis_cli.py::test_llm_off_reuses_host_state_and_existing_queue_classes --deselect=tests/test_analysis_execution.py::test_real_worker_quality_report_idempotency_and_host_task_no_pi --deselect=tests/test_analysis_execution.py::test_worker_source_corruption_fails_without_replacing_original_or_old_report --deselect=tests/test_analysis_execution.py::test_analysis_api_offline_recovery_compare_cancel_and_guards --deselect=tests/test_analysis_execution.py::test_lost_http_cancellation_keeps_one_server_owned_admission --deselect=tests/test_analysis_execution.py::test_full_disk_preserves_previous_report_and_raw --deselect=tests/test_analysis_worker.py::test_paused_worker_dies_with_parent_and_is_reaped_by_owned_harness"
+          make check-python
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rider-python-coverage
+          path: host/modules/venom-module-rider/test-results/coverage.xml
+          if-no-files-found: error
+      - name: SonarCloud analysis and quality gate
+        uses: SonarSource/sonarqube-scan-action@a31c9398be7ace6bbfaf30c0bd5d415f843d45e9
+        with:
+          projectBaseDir: host/modules/venom-module-rider
+          args: -Dsonar.qualitygate.wait=true
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
