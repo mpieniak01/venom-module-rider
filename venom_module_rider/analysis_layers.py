@@ -48,38 +48,9 @@ def classification_layer(
         raise ValueError("analysis_layer_invalid")
     labels = np.zeros((height, width), dtype=np.uint8)
     if semantic:
-        maps = assessment.pop("_navigation_maps", None)
-        if not isinstance(maps, dict):
-            raise ValueError("analysis_layer_unavailable")
-        floor, obstacle = maps.get("floor"), maps.get("obstacle")
-        if (
-            not isinstance(floor, np.ndarray)
-            or not isinstance(obstacle, np.ndarray)
-            or floor.shape != (height, width)
-            or obstacle.shape != (height, width)
-            or floor.dtype != np.bool_
-            or obstacle.dtype != np.bool_
-            or np.any(floor & obstacle)
-        ):
-            raise ValueError("analysis_layer_invalid")
-        labels[floor] = 1
-        labels[obstacle] = 2
-        source_labels = maps.get("labels")
-        if isinstance(source_labels, np.ndarray) and source_labels.shape == (
-            height,
-            width,
-        ):
-            from .floor_detector import UNSUPPORTED_GROUND_LABELS
-
-            labels[obstacle & np.isin(source_labels, UNSUPPORTED_GROUND_LABELS)] = 3
+        _semantic_labels(assessment, labels, height, width)
     else:
-        errors = assessment.pop("_errors", None)
-        if not isinstance(errors, np.ndarray) or errors.shape != (height, width):
-            raise ValueError("analysis_layer_unavailable")
-        finite = np.isfinite(errors)
-        if assessment["state"] != "unknown":
-            labels[finite & (errors <= settings.residual_limit)] = 1
-            labels[finite & (errors > settings.residual_limit)] = 2
+        _depth_labels(assessment, labels, height, width, settings)
     layer = Image.frombytes("P", (width, height), labels.tobytes())
     layer.putpalette(
         [channel for color in PALETTE for channel in color]
@@ -90,45 +61,7 @@ def classification_layer(
 
         validate_geometry(assessment.get("overlay_geometry"), size)
     else:
-        draw = ImageDraw.Draw(layer)
-        outlines = assessment.pop("_path_overlay", None)
-        projected = assessment.get("geometry") == "ground_capsule"
-        draw_sectors(
-            draw,
-            (width, height),
-            assessment.get("sectors", {}),
-            outlines=outlines,
-            projected=projected,
-        )
-        x0, y0, x1, y1 = corridor
-        if semantic:
-            draw.rectangle(
-                (
-                    int(x0 * (width - 1)),
-                    int(y0 * (height - 1)),
-                    int(x1 * (width - 1)),
-                    int(y1 * (height - 1)),
-                ),
-                outline="white",
-                width=3,
-            )
-        elif not projected:
-            reference_y0 = assessment.get("plane_reference_corridor", corridor)[1]
-            if reference_y0 < y0:
-                left, right = int(x0 * (width - 1)), int(x1 * (width - 1))
-                top, bottom = int(reference_y0 * (height - 1)), int(y0 * (height - 1))
-                for pos in range(left, right, 10):
-                    draw.line(
-                        (pos, top, min(pos + 5, right), top), fill=PALETTE[7], width=2
-                    )
-                for side in (left, right):
-                    for pos in range(top, bottom, 10):
-                        draw.line(
-                            (side, pos, side, min(pos + 5, bottom)),
-                            fill=PALETTE[7],
-                            width=2,
-                        )
-            draw_stop_border(draw, (height, width), corridor)
+        _draw_layer_geometry(layer, assessment, corridor, semantic, width, height)
     if any(layer.histogram()[len(PALETTE) :]):
         raise ValueError("analysis_layer_palette")
     stream = io.BytesIO()
@@ -209,3 +142,88 @@ def validate_video_layer(row, artifacts, index, raw_sha256):
                 raise ValueError("classification alpha")
     except (ValueError, TypeError, KeyError, OSError) as exc:
         raise RiderError("analysis_worker_protocol", 500) from exc
+
+
+def _semantic_labels(assessment, labels, height, width):
+    """Consume validated private semantic maps into palette indices."""
+    maps = assessment.pop("_navigation_maps", None)
+    if not isinstance(maps, dict):
+        raise ValueError("analysis_layer_unavailable")
+    floor, obstacle = maps.get("floor"), maps.get("obstacle")
+    if (
+        not isinstance(floor, np.ndarray)
+        or not isinstance(obstacle, np.ndarray)
+        or floor.shape != (height, width)
+        or obstacle.shape != (height, width)
+        or floor.dtype != np.bool_
+        or obstacle.dtype != np.bool_
+        or np.any(floor & obstacle)
+    ):
+        raise ValueError("analysis_layer_invalid")
+    labels[floor] = 1
+    labels[obstacle] = 2
+    source_labels = maps.get("labels")
+    if isinstance(source_labels, np.ndarray) and source_labels.shape == (
+        height,
+        width,
+    ):
+        from .floor_detector import UNSUPPORTED_GROUND_LABELS
+
+        labels[obstacle & np.isin(source_labels, UNSUPPORTED_GROUND_LABELS)] = 3
+
+
+def _depth_labels(assessment, labels, height, width, settings):
+    """Consume depth residuals without changing unknown-state pixels."""
+    errors = assessment.pop("_errors", None)
+    if not isinstance(errors, np.ndarray) or errors.shape != (height, width):
+        raise ValueError("analysis_layer_unavailable")
+    finite = np.isfinite(errors)
+    if assessment["state"] != "unknown":
+        labels[finite & (errors <= settings.residual_limit)] = 1
+        labels[finite & (errors > settings.residual_limit)] = 2
+
+
+def _draw_layer_geometry(layer, assessment, corridor, semantic, width, height):
+    """Draw frozen semantic or depth reference geometry on the palette layer."""
+    draw = ImageDraw.Draw(layer)
+    outlines = assessment.pop("_path_overlay", None)
+    projected = assessment.get("geometry") == "ground_capsule"
+    draw_sectors(
+        draw,
+        (width, height),
+        assessment.get("sectors", {}),
+        outlines=outlines,
+        projected=projected,
+    )
+    x0, y0, x1, y1 = corridor
+    if semantic:
+        draw.rectangle(
+            (
+                int(x0 * (width - 1)),
+                int(y0 * (height - 1)),
+                int(x1 * (width - 1)),
+                int(y1 * (height - 1)),
+            ),
+            outline="white",
+            width=3,
+        )
+    elif not projected:
+        _draw_depth_reference(draw, assessment, corridor, width, height, x0, y0, x1)
+
+
+def _draw_depth_reference(draw, assessment, corridor, width, height, x0, y0, x1):
+    """Draw the optional extended reference and the unchanged stop border."""
+    reference_y0 = assessment.get("plane_reference_corridor", corridor)[1]
+    if reference_y0 < y0:
+        left, right = int(x0 * (width - 1)), int(x1 * (width - 1))
+        top, bottom = int(reference_y0 * (height - 1)), int(y0 * (height - 1))
+        for pos in range(left, right, 10):
+            draw.line((pos, top, min(pos + 5, right), top), fill=PALETTE[7], width=2)
+        for side in (left, right):
+            for pos in range(top, bottom, 10):
+                draw.line(
+                    (side, pos, side, min(pos + 5, bottom)),
+                    fill=PALETTE[7],
+                    width=2,
+                )
+    draw_stop_border(draw, (height, width), corridor)

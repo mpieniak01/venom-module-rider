@@ -141,6 +141,9 @@ class SamplesRegistry:
         return await self.originals.get(sample_id)
 
     async def start(self, request_id, device_id, policy=None):
+        """Admit and activate one bounded collection under the existing
+        operations lock.
+        """
         values = CollectionPolicy.model_validate(policy or {}).model_dump()
         async with self.operations:
             self._open()
@@ -156,48 +159,9 @@ class SamplesRegistry:
                     self.store.start, request_id, device_id, values
                 )
                 if session["state"] == "collecting":
-                    if values["record_video"]:
-                        try:
-                            session["video"] = await self.read(
-                                self.store.video.start, session["session_id"]
-                            )
-                        except Exception:
-                            await self.read(
-                                self.store.end, session["session_id"], incomplete=True
-                            )
-                            raise
-                        self.study_videos.setdefault(
-                            session["session_id"], {"device": device_id}
-                        )
-                    self.active.add(session["session_id"])
-                    self.evidence.start(session)
-                    if (
-                        values["record_images"]
-                        and values["kind"] == "manual"
-                        and values["scene_group"].startswith("motion-study-v1:")
-                    ):
-                        self.study_images.setdefault(
-                            session["session_id"],
-                            {
-                                "device": device_id,
-                                "count": 0,
-                                "last": None,
-                                "limit": values["max_frames"],
-                            },
-                        )
-                    self.session_requests[request_id] = session["session_id"]
-                    if values["kind"] == "sequence":
-                        self._sequence(session)
-                    elif (
-                        values["kind"] == "manual"
-                        and session["session_id"] not in self.deadlines
-                    ):
-                        self.deadlines[session["session_id"]] = (
-                            asyncio.get_running_loop().call_later(
-                                self.store.limits.session_seconds,
-                                lambda: self._expire_manual(session["session_id"]),
-                            )
-                        )
+                    await _activate_collection(
+                        self, session, values, device_id, request_id
+                    )
                 return session
             except Exception:
                 if not self.active and not self.writer_owners:
@@ -301,6 +265,7 @@ class SamplesRegistry:
         }
 
     def capture(self, session_id, request_id, frame_key, *, allow_historical=False):
+        """Capture immutable admission values before dispatching an idempotent write."""
         self._open()
         identifier(request_id)
         fingerprint = hashlib.sha256(
@@ -331,44 +296,10 @@ class SamplesRegistry:
         }
 
         def persist():
-            try:
-                # Saved requests can be queried/retried after the collection ends.
-                if not writable:
-                    result = self.store.request(request_id)
-                    if result["fingerprint"] != fingerprint:
-                        raise RiderError("samples_request_conflict", 409)
-                else:
-                    result = self.store.capture(
-                        session_id,
-                        request_id,
-                        frame_key,
-                        frame,
-                        admitted_at=admitted,
-                        allow_historical=allow_historical,
-                        receipt_age_ms=age,
-                    )
-            except Exception as exc:
-                result = {
-                    **row,
-                    "state": "failed",
-                    "error": exc.code
-                    if isinstance(exc, RiderError)
-                    else "samples_write_failed",
-                }
-            with self.lock:
-                self.pending[request_id] = {**row, **result}
-                while len(self.pending) > 256:
-                    old_key = next(
-                        (
-                            key
-                            for key, value in self.pending.items()
-                            if value["state"] not in {"queued", "running"}
-                        ),
-                        None,
-                    )
-                    if old_key is None:
-                        break
-                    del self.pending[old_key]
+            """Persist the captured admission without rereading mutable UI state."""
+            _persist_capture(
+                self, row, (frame_key, frame, admitted, allow_historical, age, writable)
+            )
 
         with self.lock:
             self.pending[request_id] = row
@@ -407,6 +338,7 @@ class SamplesRegistry:
         self.evidence.retire(reason)
 
     def offer(self, device_id, payload, mime, context=None):
+        """Enrich and retain a frame before offering it to active sequences."""
         if self.closed:
             return None
         try:
@@ -419,26 +351,7 @@ class SamplesRegistry:
         if key is None or self.closed:
             return key
         now = self.frames.clock()
-        for session_id, row in tuple(self.sequences.items()):
-            if row["device"] != device_id or session_id in self.closing:
-                continue
-            if now >= row["end"] or row["count"] >= row["policy"]["max_frames"]:
-                self._finish_sequence(session_id)
-                continue
-            last = row["last"]
-            if last is not None and (now - last) * 1000 < row["policy"]["interval_ms"]:
-                continue
-            if (now - (last if last is not None else row["start"])) * 1000 > row[
-                "policy"
-            ]["interval_ms"] * 3:
-                row["incomplete"] = True
-            try:
-                self.capture(session_id, f"sequence-{session_id}-{row['count']}", key)
-                row["count"] += 1
-                row["last"] = now
-            except RiderError:
-                row["incomplete"] = True
-                self.failures += 1
+        _offer_sequences(self, device_id, key, now)
         return key
 
     async def status(self):
@@ -504,3 +417,124 @@ class SamplesRegistry:
                 self.failures += 1
             finally:
                 self.io.shutdown(wait=False)
+
+
+def _offer_sequences(self, device_id, key, now):
+    """Offer a receipt to active sequences while preserving
+    missed-interval accounting.
+    """
+    for session_id, row in tuple(self.sequences.items()):
+        _offer_sequence(self, session_id, row, device_id, key, now)
+
+
+async def _activate_collection(self, session, values, device_id, request_id):
+    """Register a collecting session only after any video initialization succeeds."""
+    await _activate_video(self, session, values, device_id)
+    self.active.add(session["session_id"])
+    self.evidence.start(session)
+    if (
+        values["record_images"]
+        and values["kind"] == "manual"
+        and values["scene_group"].startswith("motion-study-v1:")
+    ):
+        self.study_images.setdefault(
+            session["session_id"],
+            {
+                "device": device_id,
+                "count": 0,
+                "last": None,
+                "limit": values["max_frames"],
+            },
+        )
+    self.session_requests[request_id] = session["session_id"]
+    if values["kind"] == "sequence":
+        self._sequence(session)
+    elif values["kind"] == "manual" and session["session_id"] not in self.deadlines:
+        self.deadlines[session["session_id"]] = asyncio.get_running_loop().call_later(
+            self.store.limits.session_seconds,
+            lambda: self._expire_manual(session["session_id"]),
+        )
+
+
+async def _activate_video(self, session, values, device_id):
+    """End an admitted session on video initialization failure before propagating it."""
+    if values["record_video"]:
+        try:
+            session["video"] = await self.read(
+                self.store.video.start, session["session_id"]
+            )
+        except Exception:
+            await self.read(self.store.end, session["session_id"], incomplete=True)
+            raise
+        self.study_videos.setdefault(session["session_id"], {"device": device_id})
+
+
+def _persist_capture(self, row, admission):
+    """Resolve idempotency and retire bounded pending entries on the writer lane."""
+    frame_key, frame, admitted, allow_historical, age, writable = admission
+    request_id, fingerprint, session_id = (
+        row["id"],
+        row["fingerprint"],
+        row["session_id"],
+    )
+    try:
+        # Saved requests can be queried/retried after the collection ends.
+        if not writable:
+            result = self.store.request(request_id)
+            if result["fingerprint"] != fingerprint:
+                raise RiderError("samples_request_conflict", 409)
+        else:
+            result = self.store.capture(
+                session_id,
+                request_id,
+                frame_key,
+                frame,
+                admitted_at=admitted,
+                allow_historical=allow_historical,
+                receipt_age_ms=age,
+            )
+    except Exception as exc:
+        result = {
+            **row,
+            "state": "failed",
+            "error": exc.code
+            if isinstance(exc, RiderError)
+            else "samples_write_failed",
+        }
+    with self.lock:
+        self.pending[request_id] = {**row, **result}
+        while len(self.pending) > 256:
+            old_key = next(
+                (
+                    key
+                    for key, value in self.pending.items()
+                    if value["state"] not in {"queued", "running"}
+                ),
+                None,
+            )
+            if old_key is None:
+                break
+            del self.pending[old_key]
+
+
+def _offer_sequence(self, session_id, row, device_id, key, now):
+    """Advance one eligible sequence with the original missed-interval rules."""
+    if row["device"] != device_id or session_id in self.closing:
+        return
+    if now >= row["end"] or row["count"] >= row["policy"]["max_frames"]:
+        self._finish_sequence(session_id)
+        return
+    last = row["last"]
+    if last is not None and (now - last) * 1000 < row["policy"]["interval_ms"]:
+        return
+    if (now - (last if last is not None else row["start"])) * 1000 > row["policy"][
+        "interval_ms"
+    ] * 3:
+        row["incomplete"] = True
+    try:
+        self.capture(session_id, f"sequence-{session_id}-{row['count']}", key)
+        row["count"] += 1
+        row["last"] = now
+    except RiderError:
+        row["incomplete"] = True
+        self.failures += 1

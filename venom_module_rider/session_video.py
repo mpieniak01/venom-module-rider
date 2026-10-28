@@ -213,7 +213,7 @@ class SessionVideoStore:
         with self.metrics.track("quality_ms"):
             self.store.quality(frame)
         age = context.get("source_age_ms")
-        if isinstance(age, (int, float)) and (not math.isfinite(age) or age > 1000):
+        if _source_age_stale(age):
             return self.note(session_id, "samples_video_source_stale")
         native = context.get("source_identity")
         native = native if isinstance(native, dict) else {}
@@ -233,94 +233,26 @@ class SessionVideoStore:
             return self._save(session_id, row)
         previous = row["last_received_mono"]
         elapsed = None if previous is None else frame.received_mono - previous
-        if elapsed is not None and elapsed <= 0:
+        if _video_time_invalid(elapsed):
             return self.note(session_id, "samples_video_source_time", terminal=True)
         if elapsed is not None and elapsed < 1 / TARGET_FPS - 0.005:
             return row
         sequence = context.get("sequence")
         last_sequence = row["last_sequence"]
-        if (
-            isinstance(sequence, (int, float))
-            and isinstance(last_sequence, (int, float))
-            and sequence <= last_sequence
-        ):
+        if _sequence_repeated(sequence, last_sequence):
             return self.note(session_id, "samples_video_source_time", terminal=True)
-        sequence_gap = (
-            max(0, sequence - last_sequence - 1)
-            if isinstance(sequence, (int, float))
-            and isinstance(last_sequence, (int, float))
-            else None
+        sequence_gap = _video_sequence_gap(sequence, last_sequence)
+        return _append_committed_video(
+            self,
+            session_id,
+            frame,
+            row,
+            context,
+            binding,
+            elapsed,
+            sequence,
+            sequence_gap,
         )
-        entry = {
-            "index": row["frames"],
-            "offset": row["bytes"],
-            "bytes": len(frame.payload),
-            "sha256": hashlib.sha256(frame.payload).hexdigest(),
-            "received_at": frame.received_at,
-            "received_monotonic_s": frame.received_mono,
-            "gap_before_s": elapsed,
-            "sequence_gap": sequence_gap,
-            "capture_key": frame.key,
-            "context": context,
-        }
-        encoded = (
-            json.dumps(entry, allow_nan=False, separators=(",", ":")) + "\n"
-        ).encode()
-        extra = len(frame.payload) + len(encoded)
-        with self.store.db() as db:
-            samples = db.execute(
-                "SELECT COALESCE(SUM(bytes),0) FROM samples WHERE session_id=?",
-                (session_id,),
-            ).fetchone()[0]
-            evidence = self.store.evidence.size(db, session_id)
-        if self.size(session_id) + samples + evidence + extra > row["max_bytes"]:
-            row.update(state="limit", error="samples_video_size_limit")
-            return self._save(session_id, row)
-        try:
-            with self.metrics.track("quota_ms"):
-                self.store._space(extra + 4096)
-            with (
-                self.metrics.track("video_fsync_ms"),
-                self.path(session_id, _CAPTURE_FILENAME).open("ab") as stream,
-            ):
-                stream.write(frame.payload)
-                stream.flush()
-                os.fsync(stream.fileno())
-            with (
-                self.metrics.track("index_fsync_ms"),
-                self.path(session_id, _FRAME_MANIFEST_FILENAME).open("ab") as stream,
-            ):
-                stream.write(encoded)
-                stream.flush()
-                os.fsync(stream.fileno())
-        except (OSError, RiderError) as exc:
-            return self.note(
-                session_id,
-                exc.code
-                if isinstance(exc, RiderError)
-                else "samples_video_write_failed",
-                terminal=True,
-            )
-        first = (
-            frame.received_mono
-            if row["first_received_mono"] is None
-            else row["first_received_mono"]
-        )
-        row.update(
-            state="recording",
-            error=None,
-            binding=binding,
-            frames=row["frames"] + 1,
-            bytes=row["bytes"] + len(frame.payload),
-            index_bytes=row["index_bytes"] + len(encoded),
-            last_key=frame.key,
-            first_received_mono=first,
-            last_received_mono=frame.received_mono,
-            last_sequence=sequence,
-            duration_s=max(0, frame.received_mono - first),
-            gaps=row["gaps"] + int(elapsed is not None and elapsed > 0.6),
-        )
-        return self._save(session_id, row)
 
     def finish(self, session_id, *, interrupted=False):
         row = self.summary(session_id)
@@ -372,25 +304,7 @@ class SessionVideoStore:
                 self.path(session_id, _FRAME_MANIFEST_FILENAME).open("rb") as index,
             ):
                 while line := index.readline(65537):
-                    if len(line) > 65536 or not line.endswith(b"\n"):
-                        raise ValueError("incomplete index")
-                    entry = json.loads(line)
-                    size = entry.get("bytes")
-                    received = entry.get("received_monotonic_s")
-                    if (
-                        entry.get("index") != count
-                        or entry.get("offset") != offset
-                        or type(size) is not int
-                        or not 0 < size <= 512 * 1024
-                        or not isinstance(received, (int, float))
-                        or not math.isfinite(received)
-                    ):
-                        raise ValueError("invalid index")
-                    payload = video.read(size)
-                    if len(payload) != size or hashlib.sha256(
-                        payload
-                    ).hexdigest() != entry.get("sha256"):
-                        raise ValueError("corrupt video")
+                    size, received = _scan_video_entry(line, count, offset, video)
                     if last is not None and received <= last:
                         raise ValueError("invalid timing")
                     gaps += int(last is not None and received - last > 0.6)
@@ -458,3 +372,130 @@ class SessionVideoStore:
                 _FRAME_MANIFEST_FILENAME,
             )
         ]
+
+
+def _scan_video_entry(line, count, offset, video):
+    """Validate one committed index entry and its exact payload hash."""
+    if len(line) > 65536 or not line.endswith(b"\n"):
+        raise ValueError("incomplete index")
+    entry = json.loads(line)
+    size = entry.get("bytes")
+    received = entry.get("received_monotonic_s")
+    if (
+        entry.get("index") != count
+        or entry.get("offset") != offset
+        or type(size) is not int
+        or not 0 < size <= 512 * 1024
+        or not isinstance(received, (int, float))
+        or not math.isfinite(received)
+    ):
+        raise ValueError("invalid index")
+    payload = video.read(size)
+    if len(payload) != size or hashlib.sha256(payload).hexdigest() != entry.get(
+        "sha256"
+    ):
+        raise ValueError("corrupt video")
+    return size, received
+
+
+def _append_committed_video(
+    self, session_id, frame, row, context, binding, elapsed, sequence, sequence_gap
+):
+    """Write payload then index with fsync before advancing the durable summary."""
+    entry = {
+        "index": row["frames"],
+        "offset": row["bytes"],
+        "bytes": len(frame.payload),
+        "sha256": hashlib.sha256(frame.payload).hexdigest(),
+        "received_at": frame.received_at,
+        "received_monotonic_s": frame.received_mono,
+        "gap_before_s": elapsed,
+        "sequence_gap": sequence_gap,
+        "capture_key": frame.key,
+        "context": context,
+    }
+    encoded = (
+        json.dumps(entry, allow_nan=False, separators=(",", ":")) + "\n"
+    ).encode()
+    extra = len(frame.payload) + len(encoded)
+    with self.store.db() as db:
+        samples = db.execute(
+            "SELECT COALESCE(SUM(bytes),0) FROM samples WHERE session_id=?",
+            (session_id,),
+        ).fetchone()[0]
+        evidence = self.store.evidence.size(db, session_id)
+    if self.size(session_id) + samples + evidence + extra > row["max_bytes"]:
+        row.update(state="limit", error="samples_video_size_limit")
+        return self._save(session_id, row)
+    try:
+        with self.metrics.track("quota_ms"):
+            self.store._space(extra + 4096)
+        with (
+            self.metrics.track("video_fsync_ms"),
+            self.path(session_id, _CAPTURE_FILENAME).open("ab") as stream,
+        ):
+            stream.write(frame.payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        with (
+            self.metrics.track("index_fsync_ms"),
+            self.path(session_id, _FRAME_MANIFEST_FILENAME).open("ab") as stream,
+        ):
+            stream.write(encoded)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except (OSError, RiderError) as exc:
+        return self.note(
+            session_id,
+            exc.code if isinstance(exc, RiderError) else "samples_video_write_failed",
+            terminal=True,
+        )
+    first = (
+        frame.received_mono
+        if row["first_received_mono"] is None
+        else row["first_received_mono"]
+    )
+    row.update(
+        state="recording",
+        error=None,
+        binding=binding,
+        frames=row["frames"] + 1,
+        bytes=row["bytes"] + len(frame.payload),
+        index_bytes=row["index_bytes"] + len(encoded),
+        last_key=frame.key,
+        first_received_mono=first,
+        last_received_mono=frame.received_mono,
+        last_sequence=sequence,
+        duration_s=max(0, frame.received_mono - first),
+        gaps=row["gaps"] + int(elapsed is not None and elapsed > 0.6),
+    )
+    return self._save(session_id, row)
+
+
+def _sequence_repeated(sequence, last_sequence):
+    """Reject non-increasing numeric source sequences without coercion."""
+    return (
+        isinstance(sequence, (int, float))
+        and isinstance(last_sequence, (int, float))
+        and (sequence <= last_sequence)
+    )
+
+
+def _source_age_stale(age):
+    """Interpret only numeric source age when deciding whether media is stale."""
+    return isinstance(age, (int, float)) and (not math.isfinite(age) or age > 1000)
+
+
+def _video_sequence_gap(sequence, last_sequence):
+    """Keep unknown sequence gaps distinct from numeric zero."""
+    return (
+        max(0, sequence - last_sequence - 1)
+        if isinstance(sequence, (int, float))
+        and isinstance(last_sequence, (int, float))
+        else None
+    )
+
+
+def _video_time_invalid(elapsed):
+    """Reject only known non-increasing reception time."""
+    return elapsed is not None and elapsed <= 0

@@ -59,8 +59,6 @@ def _validated(maps: Mapping[str, Any]) -> dict[str, Any]:
     """Validate bounded navigation evidence and optional original input bounds."""
     import numpy as np
 
-    from .spatial_evidence import semantic_masks
-
     gray = maps.get("gray")
     if (
         not isinstance(gray, np.ndarray)
@@ -73,52 +71,8 @@ def _validated(maps: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError("analysis_navigation_evidence_shape")
     shape = gray.shape
     result: dict[str, Any] = {"gray": gray, "valid": _boolean(maps.get("valid"))}
-    if "labels" in maps or "confidence" in maps:
-        if not {"labels", "confidence"}.issubset(maps):
-            raise ValueError("analysis_navigation_evidence_pair")
-        semantic_masks(maps["labels"], maps["confidence"], 0.8)
-        if maps["labels"].shape != shape:
-            raise ValueError("analysis_navigation_evidence_shape")
-        result.update(labels=maps["labels"], confidence=maps["confidence"])
-    else:
-        masks: list[Any] = [maps.get(key) for key in ("floor", "obstacle", "uncertain")]
-        if any(
-            not isinstance(mask, np.ndarray)
-            or mask.dtype != np.bool_
-            or mask.shape != shape
-            for mask in masks
-        ):
-            raise ValueError("analysis_navigation_evidence_masks")
-        floor, obstacle, uncertain = masks
-        if (
-            (floor & obstacle).any()
-            or (floor & uncertain).any()
-            or (obstacle & uncertain).any()
-            or not (floor | obstacle | uncertain).all()
-        ):
-            raise ValueError("analysis_navigation_evidence_partition")
-        result.update(floor=floor, obstacle=obstacle, uncertain=uncertain)
-    for key in ("critical", "negative_support", "corridor"):
-        if key in maps:
-            value = maps[key]
-            if (
-                not isinstance(value, np.ndarray)
-                or value.dtype != np.bool_
-                or value.shape != shape
-            ):
-                raise ValueError("analysis_navigation_evidence_masks")
-            result[key] = value
-    if "input_bounds" in maps:
-        value = np.asarray(maps["input_bounds"])
-        if value.shape != (4,) or value.dtype.kind not in "iu":
-            raise ValueError("analysis_navigation_evidence_input_bounds")
-        a, b, c, d = value.tolist()
-        if not 0 <= a < c <= shape[1] or not 0 <= b < d <= shape[0]:
-            raise ValueError("analysis_navigation_evidence_input_bounds")
-        result["input_bounds"] = value.astype(np.int16)
-    for key in _GEOMETRY:
-        if key in maps:
-            result[key] = _boolean(maps[key])
+    _validated_masks(maps, shape, result)
+    _validated_geometry(maps, shape, result)
     return result
 
 
@@ -357,69 +311,9 @@ def export_evidence(
     )
     previous = None
     for row, sample in zip(rows, inputs, strict=True):
-        if (
-            row.get("sample_id") != sample.get("sample_id")
-            or row.get("raw_sha256") != sample.get("raw", {}).get("sha256")
-            or row.get("state") not in {"clear", "obstacle", "unknown"}
-        ):
-            raise ValueError("analysis_navigation_export_report")
-        source = _source(sample, index)
-        evidence = row.get("navigation_evidence")
-        if (
-            not isinstance(evidence, dict)
-            or type(evidence.get("version")) is not int
-            or evidence["version"] != 1
-        ):
-            raise ValueError("analysis_navigation_export_evidence_missing")
-        path = _artifact(artifacts, evidence)
-        identity = source["source_identity"]
-        replay_context = {
-            "source_session": identity.get("camera_session")
-            or source["source_context"].get("source_session")
-            or context.get("session_id"),
-            "source_device_id": sample.get("source_device_id"),
-            "transport_epoch": identity.get("transport_epoch"),
-            "pipeline_revision": identity.get("pipeline_revision"),
-            "model_id": (
-                "depth-anything-v2-indoor-small"
-                if context.get("profile", {}).get("id") == "da2-default"
-                else context.get("profile", {}).get("id")
-            ),
-            "model_fingerprint": fingerprint,
-            "model_sha256": context.get("profile", {}).get("model_sha256"),
-            "code": context.get("code"),
-            "spec_sha256": _digest(context.get("spec")),
-            "dataset_revision": context.get("dataset_revision"),
-        }
-        if previous and previous["context"] == replay_context:
-            if source["captured_s"] <= previous["captured_s"]:
-                raise ValueError("analysis_navigation_export_source_time")
-        item = {
-            "frame_id": source["frame_id"],
-            "sequence": source["sequence"],
-            "captured_s": source["captured_s"],
-            "source_sha256": source["source_sha256"],
-            "source_identity": identity,
-            "source_context": source["source_context"],
-            "source_time_provenance": "explicit_source_timeline",
-            "identity_provenance": source["identity_provenance"],
-            "context": replay_context,
-            "valid": evidence.get("valid"),
-            "reason": row.get("reason"),
-            "raw_reason": row.get("reason"),
-            "raw_state": row["state"],
-            "corridor": context["spec"]["corridor"],
-            "maps": "maps/" + evidence["sha256"] + ".npz",
-            "source_gap": bool(
-                previous
-                and previous["context"] == replay_context
-                and source["sequence"] != previous["sequence"] + 1
-            )
-            or source.get("source_gap") is True,
-        }
-        line = json.dumps(item, separators=(",", ":"), allow_nan=False) + "\n"
-        if len(line.encode()) > 64 * 1024:
-            raise ValueError("analysis_navigation_export_manifest_size")
+        item, line, path, evidence = _prepare_export_item(
+            row, sample, index, artifacts, context, fingerprint, previous
+        )
         prepared.append((item, line.encode(), path, evidence))
         previous = item
     provenance = {
@@ -538,3 +432,138 @@ def _validated_export_payload(path, evidence):
     ):
         raise ValueError("analysis_navigation_export_evidence")
     return payload, digest
+
+
+def _validated_masks(maps, shape, result):
+    """Validate semantic pairs or a complete disjoint depth partition."""
+    import numpy as np
+
+    from .spatial_evidence import semantic_masks
+
+    if "labels" in maps or "confidence" in maps:
+        if not {"labels", "confidence"}.issubset(maps):
+            raise ValueError("analysis_navigation_evidence_pair")
+        semantic_masks(maps["labels"], maps["confidence"], 0.8)
+        if maps["labels"].shape != shape:
+            raise ValueError("analysis_navigation_evidence_shape")
+        result.update(labels=maps["labels"], confidence=maps["confidence"])
+    else:
+        masks: list[Any] = [maps.get(key) for key in ("floor", "obstacle", "uncertain")]
+        if any(
+            not isinstance(mask, np.ndarray)
+            or mask.dtype != np.bool_
+            or mask.shape != shape
+            for mask in masks
+        ):
+            raise ValueError("analysis_navigation_evidence_masks")
+        floor, obstacle, uncertain = masks
+        if (
+            (floor & obstacle).any()
+            or (floor & uncertain).any()
+            or (obstacle & uncertain).any()
+            or not (floor | obstacle | uncertain).all()
+        ):
+            raise ValueError("analysis_navigation_evidence_partition")
+        result.update(floor=floor, obstacle=obstacle, uncertain=uncertain)
+
+
+def _validated_geometry(maps, shape, result):
+    """Validate optional aligned masks, input bounds and geometry flags."""
+    import numpy as np
+
+    for key in ("critical", "negative_support", "corridor"):
+        if key in maps:
+            value = maps[key]
+            if (
+                not isinstance(value, np.ndarray)
+                or value.dtype != np.bool_
+                or value.shape != shape
+            ):
+                raise ValueError("analysis_navigation_evidence_masks")
+            result[key] = value
+    _validated_input_bounds(maps, shape, result)
+    for key in _GEOMETRY:
+        if key in maps:
+            result[key] = _boolean(maps[key])
+
+
+def _prepare_export_item(row, sample, index, artifacts, context, fingerprint, previous):
+    """Validate one immutable replay item before adding it to the export prefix."""
+    if (
+        row.get("sample_id") != sample.get("sample_id")
+        or row.get("raw_sha256") != sample.get("raw", {}).get("sha256")
+        or row.get("state") not in {"clear", "obstacle", "unknown"}
+    ):
+        raise ValueError("analysis_navigation_export_report")
+    source = _source(sample, index)
+    evidence = row.get("navigation_evidence")
+    if (
+        not isinstance(evidence, dict)
+        or type(evidence.get("version")) is not int
+        or evidence["version"] != 1
+    ):
+        raise ValueError("analysis_navigation_export_evidence_missing")
+    path = _artifact(artifacts, evidence)
+    identity = source["source_identity"]
+    replay_context = {
+        "source_session": identity.get("camera_session")
+        or source["source_context"].get("source_session")
+        or context.get("session_id"),
+        "source_device_id": sample.get("source_device_id"),
+        "transport_epoch": identity.get("transport_epoch"),
+        "pipeline_revision": identity.get("pipeline_revision"),
+        "model_id": (
+            "depth-anything-v2-indoor-small"
+            if context.get("profile", {}).get("id") == "da2-default"
+            else context.get("profile", {}).get("id")
+        ),
+        "model_fingerprint": fingerprint,
+        "model_sha256": context.get("profile", {}).get("model_sha256"),
+        "code": context.get("code"),
+        "spec_sha256": _digest(context.get("spec")),
+        "dataset_revision": context.get("dataset_revision"),
+    }
+    if previous and previous["context"] == replay_context:
+        if source["captured_s"] <= previous["captured_s"]:
+            raise ValueError("analysis_navigation_export_source_time")
+    item = {
+        "frame_id": source["frame_id"],
+        "sequence": source["sequence"],
+        "captured_s": source["captured_s"],
+        "source_sha256": source["source_sha256"],
+        "source_identity": identity,
+        "source_context": source["source_context"],
+        "source_time_provenance": "explicit_source_timeline",
+        "identity_provenance": source["identity_provenance"],
+        "context": replay_context,
+        "valid": evidence.get("valid"),
+        "reason": row.get("reason"),
+        "raw_reason": row.get("reason"),
+        "raw_state": row["state"],
+        "corridor": context["spec"]["corridor"],
+        "maps": "maps/" + evidence["sha256"] + ".npz",
+        "source_gap": bool(
+            previous
+            and previous["context"] == replay_context
+            and source["sequence"] != previous["sequence"] + 1
+        )
+        or source.get("source_gap") is True,
+    }
+    line = json.dumps(item, separators=(",", ":"), allow_nan=False) + "\n"
+    if len(line.encode()) > 64 * 1024:
+        raise ValueError("analysis_navigation_export_manifest_size")
+    return item, line, path, evidence
+
+
+def _validated_input_bounds(maps, shape, result):
+    """Validate integer input bounds after optional mask alignment."""
+    import numpy as np
+
+    if "input_bounds" in maps:
+        value = np.asarray(maps["input_bounds"])
+        if value.shape != (4,) or value.dtype.kind not in "iu":
+            raise ValueError("analysis_navigation_evidence_input_bounds")
+        a, b, c, d = value.tolist()
+        if not 0 <= a < c <= shape[1] or not 0 <= b < d <= shape[0]:
+            raise ValueError("analysis_navigation_evidence_input_bounds")
+        result["input_bounds"] = value.astype(np.int16)

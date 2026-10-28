@@ -57,51 +57,7 @@ def main(argv=None):
     comparison.add_argument("second")
     args = parser.parse_args(argv)
     try:
-        if args.action == "profiles":
-            value = request(args.url, "/profiles")
-        elif args.action == "runs":
-            value = request(
-                args.url,
-                "/runs"
-                + (
-                    "?" + urllib.parse.urlencode({"session_id": args.session})
-                    if args.session
-                    else ""
-                ),
-            )
-        elif args.action == "submit":
-            identity = args.request_id or uuid.uuid4().hex
-            # Print intent first: an interrupted HTTP reply can be recovered by GET.
-            print(
-                json.dumps({"request_id": identity, "recovery": "recover " + identity})
-            )
-            value = request(
-                args.url,
-                "/runs",
-                {
-                    "session_id": args.session,
-                    "request_id": identity,
-                    "spec": json.loads(args.spec.read_text()) if args.spec else {},
-                },
-            )
-        elif args.action == "compare":
-            value = request(
-                args.url,
-                "/compare?"
-                + urllib.parse.urlencode({"first": args.first, "second": args.second}),
-            )
-        else:
-            identity = urllib.parse.quote(args.id, safe="")
-            if args.action == "recover":
-                value = request(args.url, "/requests/" + identity)
-            elif args.action == "report":
-                value = request(
-                    args.url, _RUNS_PATH + identity + "/artifacts/report.json"
-                )
-            elif args.action == "cancel":
-                value = request(args.url, _RUNS_PATH + identity + "/cancel", {})
-            else:
-                value = request(args.url, _RUNS_PATH + identity + "?context=true")
+        value = _request_action(args)
         print(json.dumps(value, indent=2, allow_nan=False))
         return 0
     except urllib.error.HTTPError as exc:
@@ -114,6 +70,58 @@ def main(argv=None):
     except (OSError, ValueError):
         print(json.dumps({"error": "analysis_cli_failed"}))
         return 1
+
+
+def _request_action(args):
+    """Resolve the explicit CLI action without altering request order."""
+    if args.action == "profiles":
+        value = request(args.url, "/profiles")
+    elif args.action == "runs":
+        value = request(
+            args.url,
+            "/runs"
+            + (
+                "?" + urllib.parse.urlencode({"session_id": args.session})
+                if args.session
+                else ""
+            ),
+        )
+    elif args.action == "submit":
+        identity = args.request_id or uuid.uuid4().hex
+        # Print intent first: an interrupted HTTP reply can be recovered by GET.
+        print(json.dumps({"request_id": identity, "recovery": "recover " + identity}))
+        value = request(
+            args.url,
+            "/runs",
+            {
+                "session_id": args.session,
+                "request_id": identity,
+                "spec": json.loads(args.spec.read_text()) if args.spec else {},
+            },
+        )
+    elif args.action == "compare":
+        value = request(
+            args.url,
+            "/compare?"
+            + urllib.parse.urlencode({"first": args.first, "second": args.second}),
+        )
+    else:
+        value = _request_run_action(args)
+    return value
+
+
+def _request_run_action(args):
+    """Resolve one run-scoped operation after top-level CLI dispatch."""
+    identity = urllib.parse.quote(args.id, safe="")
+    if args.action == "recover":
+        value = request(args.url, "/requests/" + identity)
+    elif args.action == "report":
+        value = request(args.url, _RUNS_PATH + identity + "/artifacts/report.json")
+    elif args.action == "cancel":
+        value = request(args.url, _RUNS_PATH + identity + "/cancel", {})
+    else:
+        value = request(args.url, _RUNS_PATH + identity + "?context=true")
+    return value
 
 
 if __name__ == "__main__":

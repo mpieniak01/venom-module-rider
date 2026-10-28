@@ -108,21 +108,7 @@ def admit(registry, targets, records):
             if registry.closed or sid not in registry.active or sid in registry.closing:
                 state["dropped"] += len(records)
                 continue
-            admitted = []
-            for row in records:
-                key = row["record_id"]
-                if key in state["seen"]:
-                    continue
-                size = len(canonical(row).encode())
-                if (
-                    len(state["seen"]) >= MAX_EVIDENCE_SESSION_RECORDS
-                    or state["admitted_bytes"] + size > MAX_EVIDENCE_SESSION_BYTES
-                ):
-                    state["dropped"] += 1
-                    continue
-                state["seen"].add(key)
-                state["admitted_bytes"] += size
-                admitted.append(row)
+            admitted = _admit_records(state, records)
             if admitted:
                 jobs.append((sid, state, admitted))
     if not jobs:
@@ -272,6 +258,7 @@ def begin(domain, body, session):
 
 
 def finish(domain, ticket, result=None, error=None):
+    """Record a terminal result under the original admitted command identity."""
     if ticket is None:
         return
     registry, targets, requested = ticket
@@ -282,33 +269,7 @@ def finish(domain, ticket, result=None, error=None):
         "outcome": "unknown",
         "reason": None,
     }
-    if error is not None:
-        code = error.code if isinstance(error, RiderError) else type(error).__name__
-        host["reason"] = text(code)
-        host["outcome"] = (
-            "cancelled"
-            if code in {"CancelledError", "command_superseded", "stale_device_session"}
-            else "rejected"
-            if isinstance(error, RiderError) and error.status < 500
-            else "unknown"
-        )
-    elif isinstance(result, dict):
-        data = result.get("data")
-        data = data if isinstance(data, dict) else {}
-        safety = data.get("safety")
-        safety = safety if isinstance(safety, dict) else {}
-        ack = safety.get("last_ack") or data.get("ack")
-        ack = ack if isinstance(ack, dict) else {}
-        host["ack_status"] = text(ack.get("status"), 64)
-        accepted = data.get("accepted", ack.get("accepted"))
-        host["outcome"] = (
-            "accepted"
-            if accepted is True
-            else "rejected"
-            if accepted is False or data.get("error")
-            else "unknown"
-        )
-        host["reason"] = text(data.get("error") or ack.get("reason"))
+    _command_result_host(host, result, error)
     row = {
         **requested,
         "record_id": hashlib.sha256(
@@ -343,3 +304,62 @@ def report_failure(domain):
             domain.samples.failures += 1
     except Exception:
         pass
+
+
+def _admit_records(state, records):
+    """Preserve duplicate, count and byte admission before submitting writes."""
+    admitted = []
+    for row in records:
+        key = row["record_id"]
+        if key in state["seen"]:
+            continue
+        size = len(canonical(row).encode())
+        if (
+            len(state["seen"]) >= MAX_EVIDENCE_SESSION_RECORDS
+            or state["admitted_bytes"] + size > MAX_EVIDENCE_SESSION_BYTES
+        ):
+            state["dropped"] += 1
+            continue
+        state["seen"].add(key)
+        state["admitted_bytes"] += size
+        admitted.append(row)
+    return admitted
+
+
+def _command_result_host(host, result, error):
+    """Classify the terminal command acknowledgement without inventing completion."""
+    if error is not None:
+        code = error.code if isinstance(error, RiderError) else type(error).__name__
+        host["reason"] = text(code)
+        host["outcome"] = _command_error_outcome(code, error)
+    elif isinstance(result, dict):
+        _command_ack_host(host, result)
+
+
+def _command_ack_host(host, result):
+    """Extract the existing safety acknowledgement without fabricating acceptance."""
+    data = result.get("data")
+    data = data if isinstance(data, dict) else {}
+    safety = data.get("safety")
+    safety = safety if isinstance(safety, dict) else {}
+    ack = safety.get("last_ack") or data.get("ack")
+    ack = ack if isinstance(ack, dict) else {}
+    host["ack_status"] = text(ack.get("status"), 64)
+    accepted = data.get("accepted", ack.get("accepted"))
+    host["outcome"] = (
+        "accepted"
+        if accepted is True
+        else "rejected"
+        if accepted is False or data.get("error")
+        else "unknown"
+    )
+    host["reason"] = text(data.get("error") or ack.get("reason"))
+
+
+def _command_error_outcome(code, error):
+    """Classify cancellation, client rejection or unknown command outcome."""
+    if code in {"CancelledError", "command_superseded", "stale_device_session"}:
+        return "cancelled"
+    if isinstance(error, RiderError) and error.status < 500:
+        return "rejected"
+    return "unknown"

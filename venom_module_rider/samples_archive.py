@@ -150,7 +150,7 @@ class SampleArchive:
         try:
             with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_STORED) as archive:
                 archive.writestr(_MANIFEST_FILENAME, manifest)
-                seen = set()
+                seen: set[str] = set()
                 for row in dataset["samples"]:
                     digest = row["raw"]["sha256"]
                     if digest in seen:
@@ -224,47 +224,20 @@ class SampleArchive:
                     > max_bytes + MAX_MANIFEST_BYTES
                 ):
                     raise RiderError("samples_import_size", 413)
-                for entry in entries:
-                    name = PurePosixPath(entry.filename)
-                    if (
-                        name.is_absolute()
-                        or ".." in name.parts
-                        or "\\" in entry.filename
-                        or stat.S_ISLNK(entry.external_attr >> 16)
-                        or entry.flag_bits & 1
-                    ):
-                        raise RiderError("samples_import_path", 400)
+                _validate_entry_paths(entries)
                 info = archive.getinfo(_MANIFEST_FILENAME)
                 if info.file_size > MAX_MANIFEST_BYTES:
                     raise RiderError("samples_import_size", 413)
                 manifest = json.loads(archive.read(info))
                 SampleArchive._validate_manifest(manifest)
-                expected = {_MANIFEST_FILENAME}
-                for sample in manifest["samples"]:
-                    raw = sample["raw"]
-                    expected.add(raw["file"])
-                    info = archive.getinfo(raw["file"])
-                    if info.file_size != raw["bytes"]:
-                        raise RiderError("samples_import_hash", 400)
-                    payload = archive.read(info)
-                    if hashlib.sha256(payload).hexdigest() != raw["sha256"]:
-                        raise RiderError("samples_import_hash", 400)
-                for video in manifest.get("video", {}).get("files", []):
-                    expected.add(video["file"])
-                    info = archive.getinfo(video["file"])
-                    if info.file_size != video["bytes"]:
-                        raise RiderError("samples_import_hash", 400)
-                    with archive.open(info) as stream:
-                        if sha256_stream(stream) != video["sha256"]:
-                            raise RiderError("samples_import_hash", 400)
-                if set(archive.namelist()) != expected:
-                    raise RiderError("samples_import_invalid", 400)
+                _validate_zip_contents(archive, manifest)
                 return manifest
         except (OSError, ValueError, KeyError, TypeError, zipfile.BadZipFile) as exc:
             raise RiderError("samples_import_invalid", 400) from exc
 
     @staticmethod
     def _validate_manifest(manifest):
+        """Validate manifest structure before verifying its canonical revision."""
         if (
             not isinstance(manifest, dict)
             or manifest.get("schema_version") != 1
@@ -275,59 +248,11 @@ class SampleArchive:
             or not isinstance(manifest["session"].get("policy", {}), dict)
         ):
             raise RiderError("samples_import_invalid", 400)
-        if "video" in manifest:
-            video = manifest["video"]
-            if (
-                not isinstance(video, dict)
-                or video.get("version") != 1
-                or not isinstance(video.get("files"), list)
-                or len(video["files"]) != 3
-            ):
-                raise RiderError("samples_video_invalid", 400)
-            if {row.get("file") for row in video["files"] if isinstance(row, dict)} != {
-                "video/video.json",
-                "video/capture.mjpeg",
-                "video/frames.jsonl",
-            }:
-                raise RiderError("samples_video_invalid", 400)
-            for row in video["files"]:
-                if (
-                    not isinstance(row, dict)
-                    or type(row.get("bytes")) is not int
-                    or row["bytes"] < 0
-                    or not isinstance(row.get("sha256"), str)
-                    or re.fullmatch(r"[a-f0-9]{64}", row["sha256"]) is None
-                ):
-                    raise RiderError("samples_video_invalid", 400)
+        _validate_video_manifest(manifest)
         if "evidence" in manifest:
             validate_extension(manifest["evidence"])
-        seen = set()
-        for sample in manifest["samples"]:
-            if (
-                not isinstance(sample, dict)
-                or not isinstance(sample.get("raw"), dict)
-                or not isinstance(sample.get("sample_id"), str)
-                or re.fullmatch("[a-f0-9]{32}", sample["sample_id"]) is None
-                or not isinstance(sample.get("labels", []), list)
-                or not all(
-                    isinstance(label, dict) for label in sample.get("labels", [])
-                )
-                or not isinstance(sample.get("source_context", {}), dict)
-            ):
-                raise RiderError("samples_import_invalid", 400)
-            raw = sample["raw"]
-            digest = raw["sha256"]
-            if (
-                not isinstance(digest, str)
-                or re.fullmatch("[a-f0-9]{64}", digest) is None
-                or raw["file"] != f"raw/{digest}.bin"
-                or type(raw["bytes"]) is not int
-                or not 0 < raw["bytes"] <= 512 * 1024
-                or raw["format"] not in ("image/jpeg", "image/png")
-                or sample["sample_id"] in seen
-            ):
-                raise RiderError("samples_import_invalid", 400)
-            seen.add(sample["sample_id"])
+        seen: set[str] = set()
+        _validate_samples_manifest(manifest, seen)
         check = {
             key: value
             for key, value in manifest.items()
@@ -337,3 +262,97 @@ class SampleArchive:
             "dataset_revision"
         ):
             raise RiderError("samples_import_hash", 400)
+
+
+def _validate_entry_paths(entries):
+    """Reject traversal, links and encrypted entries before reading content."""
+    for entry in entries:
+        name = PurePosixPath(entry.filename)
+        if (
+            name.is_absolute()
+            or ".." in name.parts
+            or "\\" in entry.filename
+            or stat.S_ISLNK(entry.external_attr >> 16)
+            or entry.flag_bits & 1
+        ):
+            raise RiderError("samples_import_path", 400)
+
+
+def _validate_zip_contents(archive, manifest):
+    """Verify every declared hash and reject extra ZIP members."""
+    expected = {_MANIFEST_FILENAME}
+    for sample in manifest["samples"]:
+        raw = sample["raw"]
+        expected.add(raw["file"])
+        info = archive.getinfo(raw["file"])
+        if info.file_size != raw["bytes"]:
+            raise RiderError("samples_import_hash", 400)
+        payload = archive.read(info)
+        if hashlib.sha256(payload).hexdigest() != raw["sha256"]:
+            raise RiderError("samples_import_hash", 400)
+    for video in manifest.get("video", {}).get("files", []):
+        expected.add(video["file"])
+        info = archive.getinfo(video["file"])
+        if info.file_size != video["bytes"]:
+            raise RiderError("samples_import_hash", 400)
+        with archive.open(info) as stream:
+            if sha256_stream(stream) != video["sha256"]:
+                raise RiderError("samples_import_hash", 400)
+    if set(archive.namelist()) != expected:
+        raise RiderError("samples_import_invalid", 400)
+
+
+def _validate_video_manifest(manifest):
+    """Validate the optional three-file video envelope before sample identities."""
+    if "video" in manifest:
+        video = manifest["video"]
+        if (
+            not isinstance(video, dict)
+            or video.get("version") != 1
+            or not isinstance(video.get("files"), list)
+            or len(video["files"]) != 3
+        ):
+            raise RiderError("samples_video_invalid", 400)
+        if {row.get("file") for row in video["files"] if isinstance(row, dict)} != {
+            "video/video.json",
+            "video/capture.mjpeg",
+            "video/frames.jsonl",
+        }:
+            raise RiderError("samples_video_invalid", 400)
+        for row in video["files"]:
+            if (
+                not isinstance(row, dict)
+                or type(row.get("bytes")) is not int
+                or row["bytes"] < 0
+                or not isinstance(row.get("sha256"), str)
+                or re.fullmatch(r"[a-f0-9]{64}", row["sha256"]) is None
+            ):
+                raise RiderError("samples_video_invalid", 400)
+
+
+def _validate_samples_manifest(manifest, seen):
+    """Validate ordered sample IDs, labels and immutable RAW descriptors."""
+    for sample in manifest["samples"]:
+        if (
+            not isinstance(sample, dict)
+            or not isinstance(sample.get("raw"), dict)
+            or not isinstance(sample.get("sample_id"), str)
+            or re.fullmatch("[a-f0-9]{32}", sample["sample_id"]) is None
+            or not isinstance(sample.get("labels", []), list)
+            or not all(isinstance(label, dict) for label in sample.get("labels", []))
+            or not isinstance(sample.get("source_context", {}), dict)
+        ):
+            raise RiderError("samples_import_invalid", 400)
+        raw = sample["raw"]
+        digest = raw["sha256"]
+        if (
+            not isinstance(digest, str)
+            or re.fullmatch("[a-f0-9]{64}", digest) is None
+            or raw["file"] != f"raw/{digest}.bin"
+            or type(raw["bytes"]) is not int
+            or not 0 < raw["bytes"] <= 512 * 1024
+            or raw["format"] not in ("image/jpeg", "image/png")
+            or sample["sample_id"] in seen
+        ):
+            raise RiderError("samples_import_invalid", 400)
+        seen.add(sample["sample_id"])

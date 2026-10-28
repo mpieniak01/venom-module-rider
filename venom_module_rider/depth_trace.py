@@ -55,6 +55,7 @@ class DepthTraceRecorder:
         self._slots = {True: 0, False: 0}
 
     def submit(self, payload, depth, assessment, corridor, settings) -> str | None:
+        """Queue an eligible trace under the original nonblocking recorder lock."""
         if self._closed.is_set() or not self._lock.acquire(blocking=False):
             return None
         try:
@@ -69,26 +70,8 @@ class DepthTraceRecorder:
             )
             if capture is None:
                 return None
-            try:
-                self._queue.put_nowait(capture)
-            except queue.Full:
-                if not alarm:
-                    return None
-                pending = []
-                for _ in range(2):
-                    try:
-                        pending.append(self._queue.get_nowait())
-                    except queue.Empty:
-                        break
-                    self._queue.task_done()
-                if pending:
-                    drop = next(
-                        (i for i, item in enumerate(pending) if not item.alarm), 0
-                    )
-                    pending.pop(drop)
-                for item in pending:
-                    self._queue.put_nowait(item)
-                self._queue.put_nowait(capture)
+            if not self._enqueue_capture(capture, alarm):
+                return None
             if not alarm:
                 self._last_clear = now
             if self._thread is None:
@@ -102,6 +85,28 @@ class DepthTraceRecorder:
             return None
         finally:
             self._lock.release()
+
+    def _enqueue_capture(self, capture, alarm):
+        """Preserve alarm-priority eviction while retaining queue task accounting."""
+        try:
+            self._queue.put_nowait(capture)
+        except queue.Full:
+            if not alarm:
+                return False
+            pending = []
+            for _ in range(2):
+                try:
+                    pending.append(self._queue.get_nowait())
+                except queue.Empty:
+                    break
+                self._queue.task_done()
+            if pending:
+                drop = next((i for i, item in enumerate(pending) if not item.alarm), 0)
+                pending.pop(drop)
+            for item in pending:
+                self._queue.put_nowait(item)
+            self._queue.put_nowait(capture)
+        return True
 
     @staticmethod
     def _capture(payload, depth, assessment, corridor, settings, alarm):
