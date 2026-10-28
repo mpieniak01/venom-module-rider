@@ -102,7 +102,8 @@ async def test_protocol_commits_every_chunk_progress_and_final_report(tmp_path):
             SimpleNamespace(stdout=Reader(messages())), row, time.monotonic()
         )
         final = manager.store.finish(row["id"], "succeeded")
-        assert final["done"] == final["total"] == 257 and final["state"] == "succeeded"
+        assert final["done"] == final["total"] == 257
+        assert final["state"] == "succeeded"
         report = json.loads(manager.store.artifact(row["id"], "report.json")[0])
         chunks = [
             json.loads(manager.store.artifact(row["id"], name)[0])
@@ -173,7 +174,8 @@ async def test_video_cancellation_stops_mid_protocol_without_complete_report(tmp
         with pytest.raises(asyncio.CancelledError):
             await handle
         final = manager.store.finish(row["id"], "cancelled")
-        assert final["done"] < final["total"] and final["state"] == "cancelled"
+        assert final["done"] < final["total"]
+        assert final["state"] == "cancelled"
         assert "report.json" not in {
             item["name"] for item in manager.store.artifacts(row["id"])
         }
@@ -232,7 +234,8 @@ async def test_real_worker_layers_commit_without_source_rgb_duplicates(
             SimpleNamespace(stdout=Reader(messages)), row, time.monotonic()
         )
         final = manager.store.finish(row["id"], "succeeded")
-        assert final["state"] == "succeeded" and final["done"] == 2
+        assert final["state"] == "succeeded"
+        assert final["done"] == 2
         names = {item["name"] for item in manager.store.artifacts(row["id"])}
         assert names == {
             "0000-mask.png",

@@ -60,8 +60,10 @@ async def test_refresh_discards_cached_reads_without_hardware_mutations(monkeypa
         != 987
     )
     assert result["connection"]["status"] == "online"
-    assert session == service.session and service.device.id == "fixture"
-    assert pi.state == "DISARMED" and not pi.camera_on
+    assert session == service.session
+    assert service.device.id == "fixture"
+    assert pi.state == "DISARMED"
+    assert not pi.camera_on
     assert set(reads) == {"GET"}
     await service.close()
 
@@ -90,7 +92,9 @@ async def test_offline_refresh_runs_one_recovery_for_concurrent_panels(monkeypat
     assert recovered == ["/fixture/recover"]
     assert all(result["connection"]["status"] == "online" for result in results)
     assert all(result["recovery"]["state"] == "recovered" for result in results)
-    assert not pi.camera_on and pi.state == "DISARMED" and set(reads) == {"GET"}
+    assert not pi.camera_on
+    assert pi.state == "DISARMED"
+    assert set(reads) == {"GET"}
     await service.close()
 
 
@@ -197,9 +201,8 @@ async def test_runner_has_no_shell_or_tokens_and_bounded_process_cleanup(monkeyp
     await connection_recovery.recover_connection("/trusted/recover")
     args, kwargs = calls[0]
     assert args == ("/trusted/recover",)
-    assert (
-        "RIDER_AGENT_TOKEN" not in kwargs["env"] and "SONAR_TOKEN" not in kwargs["env"]
-    )
+    assert "RIDER_AGENT_TOKEN" not in kwargs["env"]
+    assert "SONAR_TOKEN" not in kwargs["env"]
     assert kwargs["stdin"] == asyncio.subprocess.DEVNULL
     assert kwargs["stdout"] == kwargs["stderr"] == asyncio.subprocess.DEVNULL
 
@@ -262,7 +265,9 @@ async def test_final_pi_read_wins_when_helper_failed_after_transport_recovered(
         "state": "recovered",
         "error": error,
     }
-    assert pi.state == "DISARMED" and not pi.camera_on and set(reads) == {"GET"}
+    assert pi.state == "DISARMED"
+    assert not pi.camera_on
+    assert set(reads) == {"GET"}
     await service.close()
 
 
@@ -298,5 +303,6 @@ async def test_read_only_guard_rejects_transport_recovery_but_allows_status_get(
         status = await client.get("/api/v1/rider/status?section=navigation")
         assert status.status_code == 200
         assert status.json()["connection"]["status"] == "online"
-    assert service.refresh_task is None and set(reads) == {"GET"}
+    assert service.refresh_task is None
+    assert set(reads) == {"GET"}
     await service.close()

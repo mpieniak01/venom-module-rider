@@ -71,7 +71,8 @@ def test_rug_requires_explicit_model_specific_surface_selection(model):
     assert assessment["floor_candidate_fraction"] == 1
     assert assessment["unsupported_ground_fraction"] == 0
     maps = semantic_maps(values, (100, 100), semantic=chosen)
-    assert maps["floor"].all() and not maps["obstacle"].any()
+    assert maps["floor"].all()
+    assert not maps["obstacle"].any()
     assert assess_evidence(maps, CORRIDOR, chosen)["candidate"] == "clear"
 
 
@@ -172,7 +173,8 @@ def test_preview_rug_changes_to_floor_green_only_when_explicitly_selected():
         )
     )[32, 48]
     assert default[2] > default[1] > default[0]
-    assert selected[1] > selected[0] and selected[1] > selected[2]
+    assert selected[1] > selected[0]
+    assert selected[1] > selected[2]
 
 
 class Session:

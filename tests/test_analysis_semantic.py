@@ -69,9 +69,12 @@ def test_semantic_profile_reuses_live_files_and_receipt_without_paths(
     profile = configured.resolve(model_id)
     assert set(configured.profiles()) == {"da2-default", "da3-small-280"}
     public = profile.describe()
-    assert public["task"] == "semantic" and public["windows"] == [1]
-    assert public["installed"] and not public["loaded"]
-    assert not public["drive_supported"] and public["device"] == "cuda"
+    assert public["task"] == "semantic"
+    assert public["windows"] == [1]
+    assert public["installed"]
+    assert not public["loaded"]
+    assert not public["drive_supported"]
+    assert public["device"] == "cuda"
     assert str(tmp_path) not in json.dumps(public)
     qualified = profile.qualify()
     assert qualified["model_sha256"] == artifact["sha256"]
@@ -107,7 +110,8 @@ def test_fast_scnn_remains_unavailable_and_runtime_missing_is_explicit(
 def test_semantic_defaults_are_observational_without_accepting_depth_geometry(model_id):
     spec = AnalysisSpec(profile=model_id)
     assert spec.perception.engine == "segformer"
-    assert spec.window == 1 and spec.geometry.mode == "image"
+    assert spec.window == 1
+    assert spec.geometry.mode == "image"
     for patch in (
         {"window": 3},
         {"geometry": {"mode": "ground"}},
@@ -206,12 +210,14 @@ def test_real_archive_overlay_and_semantic_metrics_share_depth_report_schema(
     source, store = semantic_job(tmp_path, monkeypatch, model_id=model_id)
     originals = {p.name: p.read_bytes() for p in store.blobs.glob("*")}
     messages, report, built, threads = execute(source, monkeypatch)
-    assert len(built) == 1 and threads == [2]
+    assert len(built) == 1
+    assert threads == [2]
     assert report["input_digest"] == source["context"]["input_digest"]
     assert report["summary"]["frames"] == 3
     assert report["summary"]["temporal_pairs"] == 2
     assert report["summary"]["false_go"] is None
-    assert report["device"] == "cuda" and report["peak_vram_mib"] == 0
+    assert report["device"] == "cuda"
+    assert report["peak_vram_mib"] == 0
     assert report["model_load_ms"] is None
     assert report["model"]["load_timing"] == "included_in_first_perception_call"
     assert [row["state"] for row in report["rows"]] == ["clear", "obstacle", "unknown"]
@@ -220,7 +226,8 @@ def test_real_archive_overlay_and_semantic_metrics_share_depth_report_schema(
             continue
         row = message["row"]
         assert row["drive_supported"] is False
-        assert row["actual_window"] == 1 and row["requested_window"] == 1
+        assert row["actual_window"] == 1
+        assert row["requested_window"] == 1
         assert row["model_id"] == model_id
         assert row["artifact_sha256"] == source["context"]["profile"]["model_sha256"]
         assert "perception_total" in row["timings_ms"]
@@ -244,7 +251,8 @@ def test_real_archive_overlay_and_semantic_metrics_share_depth_report_schema(
 def test_semantic_quality_rejection_never_loads_model(tmp_path, monkeypatch):
     source, _store = semantic_job(tmp_path, monkeypatch, dark=True)
     _messages, report, built, threads = execute(source, monkeypatch)
-    assert not built and not threads
+    assert not built
+    assert not threads
     assert report["model"] is None
     assert report["summary"]["rejected_inputs"] == 3
 

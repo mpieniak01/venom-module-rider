@@ -72,11 +72,13 @@ async def test_replay_observation_has_no_arm_or_actuation_and_preserves_recordin
     await asyncio.sleep(0.01)
     assert calls[0][1] == nav.payload
     assert calls[0][0]["mode"] == "observe"
-    assert pi.state == "DISARMED" and not pi.safety()["moving"]
+    assert pi.state == "DISARMED"
+    assert not pi.safety()["moving"]
     assert nav.status["decision"]["state"] == "unknown"
     nav.recorded_at = 100.5
     image = nav.image()
-    assert image.body == nav.payload and image.headers["x-rider-source"] == "replay"
+    assert image.body == nav.payload
+    assert image.headers["x-rider-source"] == "replay"
     assert image.headers["x-rider-recorded-at"] == "100.5"
     assert all(row["action"] != "go" for row in nav.events)
     await nav.close()
@@ -167,7 +169,8 @@ async def test_simulator_http_routes_and_stop_keep_independent_camera(replay):
         await client.post(
             "/api/logic/feature/s15_venom_perception", json={"enabled": False}
         )
-        assert pi.camera_on and nav.status["running"] is False
+        assert pi.camera_on
+        assert nav.status["running"] is False
     await nav.close()
 
 
@@ -197,10 +200,12 @@ async def test_transport_failure_and_watchdog_latch_without_restart(replay):
     nav.drop_link = True
     await nav.start("s15_venom_perception")
     await asyncio.sleep(0.32)
-    assert nav.status["running"] is False and nav.status["latched"]
+    assert nav.status["running"] is False
+    assert nav.status["latched"]
     nav.drop_link = False
     await asyncio.sleep(0.02)
-    assert not nav.status["running"] and not pi.safety()["moving"]
+    assert not nav.status["running"]
+    assert not pi.safety()["moving"]
     nav.status["running"] = True
     nav.lease.latched = True
     await nav.watch()
@@ -235,7 +240,8 @@ async def test_timed_navigation_arm_and_manual_takeover_are_fixture_only(replay)
         )
 
     old = pi.generation
-    assert arm("navigation").status_code == 200 and pi.owner == "navigation"
+    assert arm("navigation").status_code == 200
+    assert pi.owner == "navigation"
     assert pi.generation != old
     await asyncio.sleep(0.03)
     assert pi.safety()["state"] == "DISARMED"
@@ -327,17 +333,20 @@ async def test_full_authenticated_loop_actual_pi_permit_go_obstacle_timeout_and_
         grant_navigation()
         await nav.start("s14_venom_navigation")
         await until(lambda: any(e["action"] == "go" for e in nav.events))
-        assert nav.status["decision"]["clear_count"] >= 3 and pi.safety()["moving"]
+        assert nav.status["decision"]["clear_count"] >= 3
+        assert pi.safety()["moving"]
         generation = pi.generation
         arming_deadline = pi.arming_deadline
         detector.state = "obstacle"
         await until(lambda: nav.status.get("paused"))
         assert not pi.safety()["moving"]
-        assert pi.safety()["state"] == "ARMED" and pi.generation == generation
+        assert pi.safety()["state"] == "ARMED"
+        assert pi.generation == generation
         assert nav.status["decision"]["action"] == "stop"
         detector.state = "clear"
         await until(lambda: nav.status.get("simulated_moving"))
-        assert pi.generation == generation and pi.arming_deadline == arming_deadline
+        assert pi.generation == generation
+        assert pi.arming_deadline == arming_deadline
         nav.drop_link = True
         await until(lambda: nav.status.get("latched"))
         assert not pi.safety()["moving"]
@@ -361,9 +370,9 @@ async def test_full_authenticated_loop_actual_pi_permit_go_obstacle_timeout_and_
                 "operator_plan": "fixture-manual",
             }
         )
-        assert (
-            pi.owner == "manual" and pi.generation != old and not nav.status["running"]
-        )
+        assert pi.owner == "manual"
+        assert pi.generation != old
+        assert not nav.status["running"]
         with pytest.raises(ValueError, match="authority"):
             nav.drive(0.1, 0.1)
     finally:

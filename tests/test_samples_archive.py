@@ -83,8 +83,10 @@ async def test_plain_history_has_unknown_exposure_order_and_no_invented_labels(
         assert session["policy"]["order_source"] == "filename-unverified"
         for row in target.store.samples(session["session_id"]):
             sample = target.store.sample(row["sample_id"])
-            assert sample["sequence"] is None and sample["source_timestamp"] is None
-            assert sample["telemetry"] is None and sample["labels"] == []
+            assert sample["sequence"] is None
+            assert sample["source_timestamp"] is None
+            assert sample["telemetry"] is None
+            assert sample["labels"] == []
             assert sample["source_context"]["import_origin"]["original_file_name"]
     finally:
         await target.close()

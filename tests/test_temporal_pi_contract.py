@@ -44,11 +44,13 @@ def _verified_sources(root):
         "services/navigation_behavior.py",
         "services/perception_selection.py",
     }
-    assert isinstance(manifest, dict) and required <= manifest.keys()
+    assert isinstance(manifest, dict)
+    assert required <= manifest.keys()
     for relative, digest in manifest.items():
         path = (root / relative).resolve()
         assert path.is_relative_to(root), "Companion manifest escaped its root"
-        assert isinstance(digest, str) and len(digest) == 64
+        assert isinstance(digest, str)
+        assert len(digest) == 64
         assert hashlib.sha256(path.read_bytes()).hexdigest() == digest, relative
     return manifest
 
@@ -63,7 +65,8 @@ def _package(monkeypatch, name, root):
 def _module(monkeypatch, root, name):
     path = root / (name.replace(".", "/") + ".py")
     spec = importlib.util.spec_from_file_location(name, path)
-    assert spec and spec.loader
+    assert spec
+    assert spec.loader
     module = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, name, module)
     spec.loader.exec_module(module)
@@ -266,7 +269,8 @@ async def test_real_host_go_slow_near_stop_reaches_only_bounded_mock_outputs(pi)
         assert result["temporal"]["evidence_frames"] == 3
         detector.case = "far_uncertain"
         request, result, captured = await _decide(loop, clock, 4)
-        assert result["raw_state"] == "unknown" and result["action"] == "slow"
+        assert result["raw_state"] == "unknown"
+        assert result["action"] == "slow"
         assert pi.behavior.reply_valid(_policy(), result)
         assert _accept(lease, request, result, captured)
         factor = parameters(_behavior())["slow_speed_factor"]

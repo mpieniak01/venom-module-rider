@@ -53,7 +53,8 @@ def response(path, **data):
 def test_profiles_are_opt_in_and_private_peer_binding_is_required():
     row = {"id": "prod", "label": "Pi", "url": "http://rider.test:8080"}
     old = configured_devices(json.dumps([row]))[0]
-    assert old.transport_profile == "secure" and old.expected_peer_id is None
+    assert old.transport_profile == "secure"
+    assert old.expected_peer_id is None
     for extra in [
         {"transport_profile": "trusted_lan"},
         {"transport_profile": "trusted_lan", "expected_peer_id": ""},
@@ -69,8 +70,10 @@ def test_profiles_are_opt_in_and_private_peer_binding_is_required():
             [{**row, "transport_profile": "trusted_lan", "expected_peer_id": PEER}]
         )
     )[0]
-    assert new.id == old.id and new.url == old.url
-    assert "expected_peer_id" not in new.public() and "url" not in new.public()
+    assert new.id == old.id
+    assert new.url == old.url
+    assert "expected_peer_id" not in new.public()
+    assert "url" not in new.public()
 
 
 @pytest.mark.parametrize(
@@ -106,7 +109,8 @@ async def test_identity_precedes_commands_and_tokens_and_pins_canonical_host(
             path, method="POST", body={"fixture": True}, stop=path == "/api/safety"
         )
         assert [r.url.path for r in calls] == [IDENTITY_PATH, path]
-        assert calls[0].method == "GET" and "authorization" not in calls[0].headers
+        assert calls[0].method == "GET"
+        assert "authorization" not in calls[0].headers
         assert names == [("rider.test", 8080)]
         assert all(
             r.url.host == "192.0.2.7"
@@ -120,10 +124,8 @@ async def test_identity_precedes_commands_and_tokens_and_pins_canonical_host(
             "/api/voice/playback/cancel",
         }:
             assert calls[1].headers["authorization"] == "Bearer fixture-only-token"
-        assert (
-            client.credential_transport_allowed
-            and not client.credential_transport_secure
-        )
+        assert client.credential_transport_allowed
+        assert not client.credential_transport_secure
         generation = client.lan.current
         assert (
             len({id(generation.http), id(generation.stop), id(generation.media)}) == 3
@@ -167,10 +169,8 @@ async def test_foreign_or_unsupported_peer_never_receives_credentials_or_command
             with pytest.raises(RiderError, match=code):
                 await client.json("/api/control/agent/pulse", method="POST", body={})
         assert len(calls) == 1  # bounded backoff, no automatic redirect or retry
-        assert (
-            calls[0].url.path == IDENTITY_PATH
-            and "authorization" not in calls[0].headers
-        )
+        assert calls[0].url.path == IDENTITY_PATH
+        assert "authorization" not in calls[0].headers
         assert not client.credential_transport_allowed
         assert 0 < client.transport_status()["retry_in_ms"] <= 1200
     finally:
@@ -200,7 +200,8 @@ async def test_secure_profile_preserves_existing_http_credential_guard(monkeypat
     try:
         with pytest.raises(RiderError, match="agent_transport_insecure"):
             await client.json("/api/voice/playback", method="POST", body=b"fixture")
-        assert not calls and client.lan is None
+        assert not calls
+        assert client.lan is None
     finally:
         await client.close()
 
@@ -233,7 +234,8 @@ async def test_new_generation_reresolves_name_closes_pools_and_never_replays_pos
         assert client.lan.current is None
         fail[0], client.lan.retry_at = False, 0
         await client.json("/state")
-        assert len(lookups) == 2 and client.device.id == "prod"
+        assert len(lookups) == 2
+        assert client.device.id == "prod"
         assert client.lan.current.number == 2
         assert [r for r in calls if r[0] == "POST"] == [
             ("POST", "192.0.2.1", "/api/control")
@@ -302,7 +304,8 @@ async def test_connection_diagnostics_and_backoff_distinguish_failure_kind(kind,
         for _ in range(5):
             with pytest.raises(RiderError, match=code):
                 await client.json("/state")
-        assert len(lookups) == 1 and len(calls) == (0 if kind == "dns" else 1)
+        assert len(lookups) == 1
+        assert len(calls) == (0 if kind == "dns" else 1)
         for _ in range(10):
             client.lan._backoff(code)
         assert client.transport_status()["retry_in_ms"] <= 30000
@@ -373,15 +376,13 @@ async def test_refresh_coalesces_reresolves_and_never_invokes_ssh_or_changes_sel
         await asyncio.sleep(0)
         release.set()
         results = await asyncio.gather(first, second)
-        assert len(lookups) == 2 and all(
-            r["recovery"]["state"] == "recovered" for r in results
-        )
-        assert service.session == session and service.device.id == "prod"
-        assert (
-            not pi.camera_on
-            and pi.state == "DISARMED"
-            and all(r.method == "GET" for r in calls)
-        )
+        assert len(lookups) == 2
+        assert all(r["recovery"]["state"] == "recovered" for r in results)
+        assert service.session == session
+        assert service.device.id == "prod"
+        assert not pi.camera_on
+        assert pi.state == "DISARMED"
+        assert all(r.method == "GET" for r in calls)
         assert not service.selection_file.exists()
         assert all(c.is_closed for c in [old.http, old.stop, old.media])
         assert results[0]["connection"]["transport"]["identity_verified"]
@@ -425,7 +426,8 @@ async def test_http_close_server_supports_verified_authenticated_commands(
     port = server.sockets[0].getsockname()[1]
 
     async def resolver(host, requested_port):
-        assert host == "close-server.test" and requested_port == port
+        assert host == "close-server.test"
+        assert requested_port == port
         return "127.0.0.1"
 
     device = Device(
@@ -482,7 +484,8 @@ async def test_same_pinned_address_reassigned_without_http_error_is_reverified(
         assert all(
             r.method == "GET" and "authorization" not in r.headers for r in calls
         )
-        assert client.lan.current is None and not client.credential_transport_allowed
+        assert client.lan.current is None
+        assert not client.credential_transport_allowed
     finally:
         await client.close()
 
@@ -556,8 +559,10 @@ async def test_stop_revalidates_independently_during_transient_backoff(failed_la
             ),
             0.2,
         )
-        assert calls[-2].url.path == IDENTITY_PATH and calls[-2].method == "GET"
-        assert calls[-1].url.path == "/api/safety" and calls[-1].method == "POST"
+        assert calls[-2].url.path == IDENTITY_PATH
+        assert calls[-2].method == "GET"
+        assert calls[-1].url.path == "/api/safety"
+        assert calls[-1].method == "POST"
         assert len([r for r in calls if r.method == "POST"]) == 1
     finally:
         await client.close()
@@ -683,7 +688,8 @@ async def test_first_lan_json_failure_logs_exact_class_per_generation_without_se
         records = [
             r.message for r in caplog.records if "Rider LAN JSON failure" in r.message
         ]
-        assert len(records) == 2 and "generation=2 " in records[-1]
+        assert len(records) == 2
+        assert "generation=2 " in records[-1]
     finally:
         release.set()
         await client.close()

@@ -103,7 +103,8 @@ async def test_two_browsers_share_one_result_without_raw_fetch_or_inference():
             == "pi-reported-plus-host-elapsed"
         )
         assert response.headers["cache-control"] == "no-store"
-    assert detector.calls == 1 and domain.camera_calls == 0
+    assert detector.calls == 1
+    assert domain.camera_calls == 0
     assert all(ttl == 0.2 and not force for _, ttl, force in domain.reads)
 
 
@@ -129,7 +130,8 @@ async def test_active_loop_never_displays_previous_or_unconfirmed_run(status):
     loop.wait_for_preview = no_wait
     with pytest.raises(RiderError, match="vision_busy"):
         await processed_camera(request(domain, loop))
-    assert detector.calls == 1 and domain.camera_calls == 0
+    assert detector.calls == 1
+    assert domain.camera_calls == 0
 
 
 async def test_waiter_can_only_receive_its_matching_run():
@@ -178,7 +180,8 @@ async def test_unexpected_detector_exception_returns_unknown_and_clears_preview(
     assert result["action"] == result["vision_action"] == "stop"
     assert result["reason"] == "vision_inference_unavailable"
     assert result["clear_count"] == 0
-    assert loop.preview("pi") is None and loop.busy is None
+    assert loop.preview("pi") is None
+    assert loop.busy is None
 
 
 async def test_preview_age_uses_reported_age_and_host_monotonic_only(monkeypatch):
@@ -245,7 +248,8 @@ async def test_stopped_pi_cannot_serve_its_still_fresh_previous_mask():
     assert response.headers["x-rider-frame-id"] != "run-1"
     assert response.headers["x-rider-run-id"] != "run"
     assert response.headers["x-rider-frame-age-source"] == "host-received"
-    assert detector.calls == 2 and domain.camera_calls == 1
+    assert detector.calls == 2
+    assert domain.camera_calls == 1
 
 
 async def test_live_producer_without_cache_cannot_fall_back_to_independent_inference():
@@ -264,7 +268,8 @@ async def test_live_producer_without_cache_cannot_fall_back_to_independent_infer
     loop.wait_for_preview = no_result
     with pytest.raises(RiderError, match="vision_busy"):
         await processed_camera(request(domain, loop))
-    assert detector.calls == 0 and domain.camera_calls == 0
+    assert detector.calls == 0
+    assert domain.camera_calls == 0
 
 
 async def test_snapshot_cache_is_rechecked_after_slow_pi_metadata_reads():
@@ -288,7 +293,8 @@ async def test_snapshot_cache_is_rechecked_after_slow_pi_metadata_reads():
     response = await processed_camera(request(domain, loop))
     assert response.headers["x-rider-frame-id"] != "old-snapshot-1"
     assert float(response.headers["x-rider-frame-age-ms"]) < 500
-    assert domain.camera_calls == 1 and detector.calls == 2
+    assert domain.camera_calls == 1
+    assert detector.calls == 2
 
 
 async def test_snapshot_returns_newest_result_published_during_goal_read():
@@ -309,7 +315,8 @@ async def test_snapshot_returns_newest_result_published_during_goal_read():
     domain = UpdatedMetadata(active=False)
     response = await processed_camera(request(domain, loop))
     assert response.headers["x-rider-frame-id"] == "new-snapshot-1"
-    assert domain.camera_calls == 0 and detector.calls == 2
+    assert domain.camera_calls == 0
+    assert detector.calls == 2
 
 
 async def test_standalone_browsers_join_one_raw_capture_and_inference():

@@ -137,4 +137,5 @@ def test_saved_photo_worker_runs_crop_and_restores_full_source(tmp_path, monkeyp
     artifact = next(a for a in frame["artifacts"] if a["name"].endswith("depth.npy"))
     depth = np.load(io.BytesIO(base64.b64decode(artifact["data"])), allow_pickle=False)
     assert depth.shape == (48, 64)
-    assert np.isnan(depth[:9]).all() and np.isfinite(depth[9:]).all()
+    assert np.isnan(depth[:9]).all()
+    assert np.isfinite(depth[9:]).all()

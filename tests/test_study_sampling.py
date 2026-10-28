@@ -123,8 +123,10 @@ async def test_slow_reads_do_not_overlap_and_failures_back_off():
         sampler.ensure()
         await asyncio.sleep(1.2)
         await sampler.close()
-    assert len(calls) == 2 and calls[1] - calls[0] >= 0.99
-    assert sampler.errors == 2 and sampler.last_error == "study_sampling_failed"
+    assert len(calls) == 2
+    assert calls[1] - calls[0] >= 0.99
+    assert sampler.errors == 2
+    assert sampler.last_error == "study_sampling_failed"
     assert not collecting(SimpleNamespace(samples=None))
 
 
@@ -149,7 +151,8 @@ async def test_priority_read_invalidation_recovers_at_sampling_cadence():
         sampler.ensure()
         await asyncio.wait_for(read_again.wait(), 0.5)
         await sampler.close()
-    assert sampler.errors == 1 and sampler.reads >= 1
+    assert sampler.errors == 1
+    assert sampler.reads >= 1
 
 
 async def test_cancelled_shared_transport_recovers_without_view_poll(

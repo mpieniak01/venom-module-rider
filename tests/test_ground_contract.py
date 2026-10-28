@@ -97,9 +97,11 @@ async def test_ground_loop_to_actual_pi_steers_then_stops_without_progress(
             break
     curves = [o for o in outputs if o[0] == "steer"]
     assert curves == [("steer", "right" if side < 0 else "left", 0.1)] * 2
-    assert lease.latched and lease.reason == "avoidance_no_progress"
+    assert lease.latched
+    assert lease.reason == "avoidance_no_progress"
     assert outputs[-1] == ("halt",)
-    assert traces and traces[-1]["avoidance"]["geometry"] == geometry
+    assert traces
+    assert traces[-1]["avoidance"]["geometry"] == geometry
     assert len(traces[-1]["heading_candidates"]) == 49
     await loop.close()
 

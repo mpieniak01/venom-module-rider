@@ -53,15 +53,19 @@ async def test_two_browser_raw_readers_share_one_connection_and_close_independen
     assert headers["x-rider-source"] == "pi-camera"
     assert headers["x-rider-frame-id"] == "session-1"
     assert json.loads(headers["x-rider-source-json"])["camera_session"] == "session"
-    assert loop.detector.calls == 0 and pi.opened == 1
+    assert loop.detector.calls == 0
+    assert pi.opened == 1
     await a.aclose()
-    assert hub.connection.readers == 1 and pi.ended == 0
+    assert hub.connection.readers == 1
+    assert pi.ended == 0
     await pi.emit(2)
     next_headers, _payload = unpack(await anext(b))
     assert next_headers["x-rider-frame-id"] == "session-2"
-    assert payload and pi.snapshot_requests == 0
+    assert payload
+    assert pi.snapshot_requests == 0
     await b.aclose()
-    assert hub.connection is None and pi.ended == 1
+    assert hub.connection is None
+    assert pi.ended == 1
     await hub.close()
     await loop.close()
     await domain.close()
@@ -120,12 +124,14 @@ async def test_local_profile_allows_raw_and_rejects_venom_before_model_or_reader
     pi.pipeline["active_profile"] = {**PROFILE, "analysis_location": "local"}
     with pytest.raises(RiderError, match="vision_remote_disabled"):
         await browser_stream("venom", Browser(state))
-    assert pi.opened == 0 and loop.detector.calls == 0
+    assert pi.opened == 0
+    assert loop.detector.calls == 0
     response = await browser_stream("raw", Browser(state))
     iterator = response.body_iterator
     await anext(iterator)
     await iterator.aclose()
-    assert pi.opened == 1 and loop.detector.calls == 0
+    assert pi.opened == 1
+    assert loop.detector.calls == 0
     await hub.close()
     await loop.close()
     await domain.close()
@@ -139,7 +145,8 @@ async def test_page_disconnect_retires_last_reader_without_stopping_robot_servic
     browser.disconnected = True
     with pytest.raises(StopAsyncIteration):
         await anext(iterator)
-    assert pi.ended == 1 and hub.connection is None
+    assert pi.ended == 1
+    assert hub.connection is None
     assert not any(method != "GET" for method, _path, _body in pi.calls)
     await hub.close()
     await loop.close()
@@ -227,7 +234,8 @@ async def test_native_raw_photo_saves_exact_displayed_bytes_via_existing_api(tmp
         assert context["source_identity"]["frame_id"] == "session-1"
         assert context["transform"]["applied_on"] == "venom"
         assert context["timestamp_source"] == "pi-capture-monotonic-ns"
-        assert loop.detector.calls == 0 and pi.snapshot_requests == 0
+        assert loop.detector.calls == 0
+        assert pi.snapshot_requests == 0
         assert not any(method == "POST" for method, _path, _body in pi.calls)
     finally:
         if iterator is not None:
@@ -260,7 +268,8 @@ async def test_slow_policy_reads_select_latest_source_after_io_not_expired_candi
         headers, _ = unpack(await asyncio.wait_for(receiving, 1))
         assert headers["x-rider-frame-id"] == "session-2"
         assert float(headers["x-rider-frame-age-ms"]) < 300
-        assert loop.detector.calls == 1 and pi.opened == 1
+        assert loop.detector.calls == 1
+        assert pi.opened == 1
         assert pi.snapshot_requests == 0
     finally:
         receiving.cancel()
@@ -296,8 +305,10 @@ async def test_model_warmup_expiry_skips_one_part_without_reconnect_or_fake_fres
         headers, _ = unpack(await asyncio.wait_for(receiving, 1))
         assert headers["x-rider-frame-id"] == "session-2"
         assert float(headers["x-rider-frame-age-ms"]) < 300
-        assert pi.opened == 1 and pi.ended == 0
-        assert loop.detector.calls == 2 and pi.snapshot_requests == 0
+        assert pi.opened == 1
+        assert pi.ended == 0
+        assert loop.detector.calls == 2
+        assert pi.snapshot_requests == 0
         assert not any(method == "POST" for method, _path, _body in pi.calls)
     finally:
         receiving.cancel()
@@ -344,7 +355,8 @@ async def test_diagnostic_revision_change_without_camera_restart_recovers_previe
         domain.cache.pop("/api/navigation/config", None)
         await pi.emit(2)
         after = await next_analysis()
-        assert before["config_revision"] == 4 and after["config_revision"] == 5
+        assert before["config_revision"] == 4
+        assert after["config_revision"] == 5
         assert before["run_id"] != after["run_id"]
         assert after["clear_count"] == 1
         assert after["source"]["camera_session"] == before["source"]["camera_session"]
@@ -353,7 +365,8 @@ async def test_diagnostic_revision_change_without_camera_restart_recovers_previe
         assert following["run_id"] == after["run_id"]
         assert following["clear_count"] == 2
         assert following["source"]["sequence"] == 3
-        assert pi.opened == 1 and pi.snapshot_requests == 0
+        assert pi.opened == 1
+        assert pi.snapshot_requests == 0
         assert not any(method != "GET" for method, _path, _body in pi.calls)
     finally:
         if iterator is not None:
@@ -436,7 +449,8 @@ async def test_ended_journey_keeps_fresh_preview_without_goal_or_arm(
         assert analysis["preview_only"] is True
         assert headers["x-rider-vision-action"] == "stop"
         assert float(headers["x-rider-frame-age-ms"]) < 500
-        assert loop.detector.calls == 1 and pi.opened == 1
+        assert loop.detector.calls == 1
+        assert pi.opened == 1
         assert not any(method != "GET" for method, _path, _body in pi.calls)
     finally:
         if iterator is not None:

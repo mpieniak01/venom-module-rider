@@ -97,11 +97,13 @@ def test_ground_outlines_keep_gaps_and_are_bounded():
     points = [[i / 100, 0.8] for i in range(100)]
     points[50] = None
     line = outline(points, (320, 240))
-    assert None in line and len(line) <= 32
+    assert None in line
+    assert len(line) <= 32
     result = {"geometry": "ground_capsule", "_path_overlay": {"center": points}}
     g = analysis_geometry((320, 240), result, (0.35, 0.8, 0.65, 0.95))
     assert validate_geometry(g, (320, 240)) == g
-    assert "score_bounds" not in g and "_path_overlay" not in result
+    assert "score_bounds" not in g
+    assert "_path_overlay" not in result
 
 
 def test_optional_evidence_is_bounded_and_preview_does_not_change_identity():
@@ -123,7 +125,8 @@ def test_optional_evidence_is_bounded_and_preview_does_not_change_identity():
         },
     )
     validate_geometry(g, (320, 240))
-    assert len(g["objects"]) == 4 and len(g["floor_boundary"]) <= 16
+    assert len(g["objects"]) == 4
+    assert len(g["floor_boundary"]) <= 16
     result = {
         "state": "clear",
         "run_id": "run",
@@ -134,4 +137,5 @@ def test_optional_evidence_is_bounded_and_preview_does_not_change_identity():
     }
     old = deepcopy(result)
     encoded = analysis_header(result)
-    assert len(encoded) <= 4096 and result == old
+    assert len(encoded) <= 4096
+    assert result == old

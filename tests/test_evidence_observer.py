@@ -35,10 +35,12 @@ async def test_existing_response_only_and_cache_hit_adds_zero_requests():
         assert len(pi.trace) == before + 1
         assert len(recorder.rows) == 1
         path, payload, context = recorder.rows[0]
-        assert path == "/state" and payload == first
+        assert path == "/state"
+        assert payload == first
         assert context["source_session"] == service.session
         assert context["device_id"] == "demo"
-        assert context["received_mono"] > 0 and context["received_at"] > 0
+        assert context["received_mono"] > 0
+        assert context["received_at"] > 0
         await service.read("/healthz", 10)
         assert len(recorder.rows) == 1
     finally:

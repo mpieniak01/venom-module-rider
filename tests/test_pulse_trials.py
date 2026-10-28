@@ -143,7 +143,8 @@ async def test_start_preserves_fresh_operator_packet_and_shared_gate(monkeypatch
             json=original,
             headers={"X-Rider-Session": "old"},
         )
-        assert response.status_code == 409 and len(seen) == n
+        assert response.status_code == 409
+        assert len(seen) == n
     finally:
         await client.aclose()
         await service.close()
@@ -227,7 +228,8 @@ async def test_saved_series_round_trips_through_real_archive_without_device(tmp_
         pi.offline = True
         timeline = build_timeline(manifest)
         series = timeline["streams"][0]["trials"][0]
-        assert series["run_id"] == "run-abc" and series["completed_pulses"] == 2
+        assert series["run_id"] == "run-abc"
+        assert series["completed_pulses"] == 2
         assert timeline["physical_distance"] is None
         assert timeline["physical_velocity"] is None
     finally:
@@ -298,7 +300,8 @@ async def test_terminal_status_is_saved_before_the_recording_ends(
             registry.failures,
         )
         series = build_timeline(manifest)["streams"][0]["trials"][0]
-        assert series["phase"] == "completed" and series["completed_pulses"] == 2
+        assert series["phase"] == "completed"
+        assert series["completed_pulses"] == 2
     finally:
         await client.aclose()
         await registry.close()

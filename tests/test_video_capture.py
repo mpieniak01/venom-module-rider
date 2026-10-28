@@ -107,10 +107,13 @@ async def test_get_only_record_extract_identical_bytes_and_import_contract(
     async with client_for(wire, calls) as client:
         root = await video.record(client, tmp_path / "recorded", study_session="a" * 32)
     meta = json.loads((root / "recording.json").read_text())
-    assert meta["state"] == "stream_ended" and meta["frames"] == 2
-    assert meta["sequence_gaps"] == 1 and meta["continuous_telemetry_recorded"] is False
+    assert meta["state"] == "stream_ended"
+    assert meta["frames"] == 2
+    assert meta["sequence_gaps"] == 1
+    assert meta["continuous_telemetry_recorded"] is False
     assert (root / "capture.mjpeg").read_bytes() == payload + payload
-    assert all(method == "GET" for method, _ in calls) and len(calls) == 3
+    assert all((method == "GET" for method, _ in calls))
+    assert len(calls) == 3
     out = video.extract(root, tmp_path / "extracted")
     manifest = json.loads((out / "manifest.json").read_text())
     SampleArchive._validate_manifest(manifest)
@@ -120,7 +123,8 @@ async def test_get_only_record_extract_identical_bytes_and_import_contract(
     rows = [json.loads(s) for s in (root / "frames.jsonl").read_text().splitlines()]
     assert rows[0]["sha256"] == hashlib.sha256(payload).hexdigest()
     assert rows[0]["source"]["sha256"] != rows[0]["sha256"]
-    assert rows[0]["offset"] == 0 and rows[1]["offset"] == len(payload)
+    assert rows[0]["offset"] == 0
+    assert rows[1]["offset"] == len(payload)
     assert (
         json.loads((out / "transport.json").read_text())["stream"][1]["captured_at"]
         == 0.3
@@ -133,7 +137,8 @@ async def test_camera_off_does_not_open_media_or_create_output(tmp_path):
     async with client_for(b"", calls, {"state": "stopped"}) as client:
         with pytest.raises(ValueError, match="camera_not_active"):
             await video.record(client, tmp_path / "no")
-    assert len(calls) == 1 and not (tmp_path / "no").exists()
+    assert len(calls) == 1
+    assert not (tmp_path / "no").exists()
 
 
 @pytest.mark.asyncio
@@ -151,7 +156,8 @@ async def test_stream_error_preserves_committed_evidence(tmp_path, payload):
         with pytest.raises(Exception, match="stream_truncated"):
             await video.record(client, tmp_path / "rec")
     meta = json.loads((tmp_path / "rec/recording.json").read_text())
-    assert meta["state"] == "error" and meta["frames"] == 1
+    assert meta["state"] == "error"
+    assert meta["frames"] == 1
 
 
 @pytest.mark.parametrize("change", ["camera", "order", "clock", "placeholder"])

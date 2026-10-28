@@ -125,7 +125,8 @@ def test_brief_missing_near_mask_holds_stop_with_age_then_expires():
     second_missing = run(detector, scene(), 4)
     assert first_missing["action"] == second_missing["action"] == "stop"
     held = second_missing["objects"]["objects"][0]
-    assert held["evidence"] == "held" and not held["observed_now"]
+    assert held["evidence"] == "held"
+    assert not held["observed_now"]
     assert 119 <= held["age_ms"] <= 121
     assert second_missing["reason"] == "navigation_object_held"
     expired = run(detector, scene(), 5)
@@ -169,7 +170,8 @@ def test_distant_repeated_approach_can_stop_before_near_zone():
     ]
     approaching = values[-1]
     item = approaching["objects"]["objects"][0]
-    assert item["approaching_candidate"] and not item["near"]
+    assert item["approaching_candidate"]
+    assert not item["near"]
     assert approaching["reason"] == "navigation_object_approaching"
     assert approaching["action"] == "stop"
 
@@ -371,7 +373,8 @@ def test_clipped_full_width_band_cannot_boost_tiny_near_intersection_or_arm_hold
         for n in range(1, 5):
             current = run(detector, data, n, route=route)
         item = current["objects"]["objects"][0]
-        assert item["clipped"] and item["confirmed"]
+        assert item["clipped"]
+        assert item["confirmed"]
         assert not item["whole_object_qualified"]
         assert item["raw_route_pixels"] == pixels
         assert item["route_pixels"] == 0
@@ -388,7 +391,8 @@ def test_large_clipped_object_still_qualifies_ordinary_near_and_can_hold_stop():
     run(detector, data, 1)
     current = run(detector, data, 2)
     item = current["objects"]["objects"][0]
-    assert item["clipped"] and not item["whole_object_qualified"]
+    assert item["clipped"]
+    assert not item["whole_object_qualified"]
     assert item["route_pixels"] > 100
     assert current["reason"] == "navigation_near_obstacle"
     assert current["action"] == "stop"

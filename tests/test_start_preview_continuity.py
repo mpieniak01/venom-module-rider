@@ -67,7 +67,8 @@ async def test_preparing_journey_keeps_passive_preview_in_same_camera_session(ph
         assert first["preview_only"] is second["preview_only"] is True
         assert "journey" not in second
         assert headers["x-rider-vision-action"] == "stop"
-        assert pi.opened == 1 and pi.snapshot_requests == 0
+        assert pi.opened == 1
+        assert pi.snapshot_requests == 0
         assert not any(method != "GET" for method, _path, _body in pi.calls)
     finally:
         task.cancel()
@@ -206,13 +207,15 @@ async def test_pi_result_takes_over_reader_without_duplicate_inference():
         headers, _ = unpack(await asyncio.wait_for(anext(iterator), 1))
         after = json.loads(headers["x-rider-analysis-json"])
         assert before["preview_only"] is True
-        assert after["run_id"] == "pi-run" and not after.get("preview_only")
+        assert after["run_id"] == "pi-run"
+        assert not after.get("preview_only")
         assert after["source"]["sequence"] == 2
         assert after["source"]["camera_session"] == before["source"]["camera_session"]
         assert (
             loop.detector.calls == 2
         )  # One diagnostic + one Pi, no browser duplicate.
-        assert pi.opened == 1 and pi.snapshot_requests == 0
+        assert pi.opened == 1
+        assert pi.snapshot_requests == 0
         assert not any(method != "GET" for method, _path, _body in pi.calls)
     finally:
         await iterator.aclose()

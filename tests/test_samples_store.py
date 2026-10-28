@@ -35,11 +35,14 @@ def test_exact_source_durable_idempotent_and_labels_do_not_modify_input(tmp_path
     result = save(store, session, source)
     assert result["state"] == "saved"
     original, mime = store.original(result["sample_id"])
-    assert original == source.payload and mime == "image/png"
+    assert original == source.payload
+    assert mime == "image/png"
     assert hashlib.sha256(original).hexdigest() == source.sha256
     sample = store.sample(result["sample_id"])
-    assert sample["sequence"] == 17 and sample["source_timestamp"] is None
-    assert sample["telemetry"] is None and sample["commands"] is None
+    assert sample["sequence"] == 17
+    assert sample["source_timestamp"] is None
+    assert sample["telemetry"] is None
+    assert sample["commands"] is None
     assert "dim" in sample["quality"]["flags"]
     label = store.label(
         sample["sample_id"], {"expected_state": "obstacle"}, expected_revision=0
@@ -50,7 +53,8 @@ def test_exact_source_durable_idempotent_and_labels_do_not_modify_input(tmp_path
         expected_revision=1,
         author_kind="auto",
     )
-    assert label["revision"] == 1 and auto["review"] == "pending"
+    assert label["revision"] == 1
+    assert auto["review"] == "pending"
     with pytest.raises(RiderError, match="samples_label_conflict"):
         store.label(sample["sample_id"], {}, expected_revision=0)
     with pytest.raises(RiderError, match="samples_label_invalid"):
@@ -127,7 +131,8 @@ def test_failed_capture_is_never_saved(tmp_path, failure, code):
         source,
         admitted_at=9999 if failure == "old-session" else 1001,
     )
-    assert result["state"] == "failed" and result["error"] == code
+    assert result["state"] == "failed"
+    assert result["error"] == code
     assert store.samples(session) == []
     assert store.status()["samples"] == 0
 
@@ -138,7 +143,8 @@ def test_explicit_historical_sample_preserves_age_and_source(tmp_path):
         store, session, frame("white"), receipt_age_ms=5000, allow_historical=True
     )
     sample = store.sample(result["sample_id"])
-    assert sample["historical"] is True and sample["receipt_age_ms"] == 5000
+    assert sample["historical"] is True
+    assert sample["receipt_age_ms"] == 5000
     assert sample["clock_sync_uncertainty_ms"] is None
     assert sample["quality"]["mean_luma"] == 255
 
@@ -155,7 +161,8 @@ def test_quota_failure_preserves_existing_sources(tmp_path, limits):
     store, session = setup(tmp_path)
     store.limits = limits
     result = save(store, session, frame())
-    assert result["state"] == "failed" and result["error"] == "samples_quota_reached"
+    assert result["state"] == "failed"
+    assert result["error"] == "samples_quota_reached"
     assert not store.samples(session)
 
 

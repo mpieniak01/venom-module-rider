@@ -30,7 +30,8 @@ def test_indexed_replay_pages_and_seeks_original_bytes_without_copies(tmp_path):
     )
     reader = SessionVideoReader(store)
     page = reader.page(sid, limit=2)
-    assert page["total"] == 3 and page["next_offset"] == 2
+    assert page["total"] == 3
+    assert page["next_offset"] == 2
     assert [f["source_time_s"] for f in page["frames"]] == [0, 0.25]
     assert [f["sequence"] for f in page["frames"]] == [0, 1]
     assert reader.page(sid, offset=2)["next_offset"] is None
@@ -103,9 +104,11 @@ async def test_http_playback_never_reads_pi_or_occupies_writer(tmp_path):
         sid, frames = movie(registry.store)
         writing = [registry._submit(lambda: gate.wait(3)) for _ in range(4)]
         page = await client.get(BASE + f"/samples/sessions/{sid}/video/frames?limit=2")
-        assert page.status_code == 200 and page.json()["next_offset"] == 2
+        assert page.status_code == 200
+        assert page.json()["next_offset"] == 2
         response = await client.get(BASE + f"/samples/sessions/{sid}/video/frames/1")
-        assert response.status_code == 200 and response.content == frames[1].payload
+        assert response.status_code == 200
+        assert response.content == frames[1].payload
         assert response.headers["x-rider-raw-sha256"] == frames[1].sha256
         wrong = await client.get(
             BASE + f"/samples/sessions/{sid}/video/frames/1?sha256=" + "0" * 64
@@ -114,8 +117,10 @@ async def test_http_playback_never_reads_pi_or_occupies_writer(tmp_path):
         valid = await client.get(
             BASE + f"/samples/sessions/{sid}/video/frames/1?sha256=" + frames[1].sha256
         )
-        assert valid.status_code == 200 and valid.content == frames[1].payload
-        assert pi.state == "DISARMED" and not pi.camera_on
+        assert valid.status_code == 200
+        assert valid.content == frames[1].payload
+        assert pi.state == "DISARMED"
+        assert not pi.camera_on
         assert not any(job.done() for job in writing)
     finally:
         gate.set()

@@ -115,7 +115,8 @@ async def test_start_proxies_one_unchanged_intent_and_keeps_figure_identity(
             headers={"X-Rider-Session": service.session},
         )
         assert response.status_code == 200, response.text
-        assert len(calls) == 1 and calls[0].url.path == "/api/motion/figures/runs"
+        assert len(calls) == 1
+        assert calls[0].url.path == "/api/motion/figures/runs"
         assert json.loads(calls[0].content) == original
     finally:
         await client.aclose()
@@ -143,7 +144,8 @@ async def test_stale_session_cannot_start_or_cancel_and_cancel_is_scoped(monkeyp
             headers={"X-Rider-Session": service.session},
         )
         assert response.status_code == 200
-        assert len(calls) == 1 and calls[0].url.path.endswith("/run-own/cancel")
+        assert len(calls) == 1
+        assert calls[0].url.path.endswith("/run-own/cancel")
     finally:
         await client.aclose()
         await service.close()

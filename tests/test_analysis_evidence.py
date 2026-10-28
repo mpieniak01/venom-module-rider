@@ -36,7 +36,8 @@ def test_depth_opt_in_adds_bounded_npz_and_no_private_arrays_to_json(
     originals = {p.name: p.read_bytes() for p in store.blobs.iterdir()}
     messages, report = execute(source, monkeypatch)
     for message, row in zip(frame_messages(messages), report["rows"], strict=True):
-        assert row["state"] == "clear" and row["reason"] == "depth_plane_candidate"
+        assert row["state"] == "clear"
+        assert row["reason"] == "depth_plane_candidate"
         assert row["navigation_evidence"]["valid"] is True
         assert not any(key.startswith("_") for key in row)
         assert len(message["artifacts"]) == 4
@@ -57,14 +58,17 @@ def test_quality_rejection_is_exported_for_every_frame_without_loading_model(
     source, _ = job(tmp_path, monkeypatch, dark=True)
     source["context"]["spec"]["capture_evidence"] = True
     messages, report = execute(source, monkeypatch)
-    assert PlaneModel.loaded == 0 and len(report["rows"]) == 3
+    assert PlaneModel.loaded == 0
+    assert len(report["rows"]) == 3
     for message, row in zip(frame_messages(messages), report["rows"], strict=True):
-        assert row["state"] == "unknown" and row["reason"] == "vision_image_quality"
+        assert row["state"] == "unknown"
+        assert row["reason"] == "vision_image_quality"
         assert row["navigation_evidence"]["valid"] is False
         assert len(message["artifacts"]) == 1
         payload = base64.b64decode(message["artifacts"][0]["data"])
         maps = decode_evidence(payload)
-        assert maps["uncertain"].all() and not maps["floor"].any()
+        assert maps["uncertain"].all()
+        assert not maps["floor"].any()
         assert maps["valid"] is False
 
 
@@ -141,10 +145,12 @@ def test_native_semantic_worker_retains_scores_and_original_unknown_result(
             }, overlay.getvalue()
 
     analysis_worker.run(source, None, semantic_factory=Semantic)
-    assert len(calls) == 3 and all(evidence is True for _, evidence in calls)
+    assert len(calls) == 3
+    assert all((evidence is True for _, evidence in calls))
     for message in frame_messages(messages):
         row = message["row"]
-        assert row["state"] == "unknown" and row["reason"] == "vision_low_confidence"
+        assert row["state"] == "unknown"
+        assert row["reason"] == "vision_low_confidence"
         assert row["navigation_evidence"]["valid"] is True
         payload = base64.b64decode(
             next(
@@ -199,7 +205,8 @@ def test_probe_preserves_raw_model_state_but_invalid_quality_evidence_cannot_dri
     messages, report = execute(source, monkeypatch)
     assert PlaneModel.loaded == 1
     row = report["rows"][0]
-    assert row["state"] == "clear" and row["image_quality_passed"] is False
+    assert row["state"] == "clear"
+    assert row["image_quality_passed"] is False
     assert row["navigation_evidence"]["valid"] is False
     encoded = next(
         item
@@ -207,7 +214,8 @@ def test_probe_preserves_raw_model_state_but_invalid_quality_evidence_cannot_dri
         if item["name"].endswith(".npz")
     )
     maps = decode_evidence(base64.b64decode(encoded["data"]))
-    assert maps["valid"] is False and maps["uncertain"].all()
+    assert maps["valid"] is False
+    assert maps["uncertain"].all()
 
 
 @pytest.fixture(autouse=True)

@@ -134,7 +134,8 @@ async def test_unconfigured_does_not_create_observations():
     service = RiderService(())
     for section in ("overview", "control", "calibration", "resources", "face"):
         assert (await service.status(section))["connection"]["status"] == "unconfigured"
-    assert service.client is None and not service.inflight
+    assert service.client is None
+    assert not service.inflight
     await service.close()
 
 
@@ -148,11 +149,14 @@ async def test_status_preserves_domain_versions_and_measurement_units():
     assert result["control"]["server_time"] > 0
     descriptor = result["settings"]["parameter_schema"]["actuator_fields"]["height"]
     assert descriptor["unit"] == "sdk_height_command"
-    assert result["system"]["hist_ts"] and result["system"]["hist_cpu_peak"]
+    assert result["system"]["hist_ts"]
+    assert result["system"]["hist_cpu_peak"]
     sensors = result["telemetry"]["devices"]["xgo"]["sensor_quality"]["sensors"]
     assert sensors["yaw"]["unit"] == "sdk_raw"
     assert all(row["method"] == "GET" for row in pi.trace)
-    assert pi.state == "DISARMED" and not pi.camera_on and not pi.lcd_on
+    assert pi.state == "DISARMED"
+    assert not pi.camera_on
+    assert not pi.lcd_on
     await service.close()
 
 
@@ -163,9 +167,11 @@ async def test_reads_deduplicate_and_idle_has_no_background_collector():
     assert sum(row["path"] == "/sysinfo" for row in pi.trace) == 1
     count = len(pi.trace)
     await asyncio.sleep(0.02)
-    assert len(pi.trace) == count and not service.inflight
+    assert len(pi.trace) == count
+    assert not service.inflight
     await service.close()
-    assert service.client is None and not service.cache
+    assert service.client is None
+    assert not service.cache
 
 
 def test_service_operations_have_separate_bounded_timeouts():
@@ -239,7 +245,8 @@ async def test_camera_off_skips_frames_and_keeps_binary_headers():
         "/api/logic/feature/s2_camera_preview", {"enabled": True}, service.session
     )
     content, mime, headers = await service.camera("raw")
-    assert content.startswith(b"\x89PNG") and mime == "image/png"
+    assert content.startswith(b"\x89PNG")
+    assert mime == "image/png"
     assert headers["x-rider-source"] == "demo"
     await service.close()
 
@@ -290,10 +297,12 @@ async def test_concurrent_stops_both_complete_and_old_ack_keeps_newest_cache(
     second = await service.control({"action": "disarm"}, service.session)
     finish.set()
     earlier = await first
-    assert earlier["ok"] and second["ok"]
+    assert earlier["ok"]
+    assert second["ok"]
     latest = service.cache["/api/control/state"][1]["data"]["safety"]
     assert latest["generation"] == second["data"]["safety"]["generation"]
-    assert not service.stops and not service.commands
+    assert not service.stops
+    assert not service.commands
     await service.close()
 
 
@@ -402,7 +411,8 @@ async def test_offline_and_stale_state_do_not_enable_motion():
     await service.select("demo", service.session)
     pi.offline = True
     result = await service.status()
-    assert result["connection"]["status"] == "offline" and result["telemetry"] is None
+    assert result["connection"]["status"] == "offline"
+    assert result["telemetry"] is None
     pi.offline = False
     pi.stale = True
     assert (await service.status("control"))["control"]["safety"]["stale"]
@@ -441,7 +451,8 @@ def test_actual_host_registry_optional_loading_and_cleanup(monkeypatch):
             == "online"
         )
         assert all(row["method"] == "GET" for row in pi.trace)
-    assert service.closed and service.client is None
+    assert service.closed
+    assert service.client is None
 
 
 def test_origin_session_consent_and_explicit_face_operations(monkeypatch):
@@ -502,7 +513,8 @@ def test_origin_session_consent_and_explicit_face_operations(monkeypatch):
             json=copy.deepcopy(pi.library["gestures"][2]),
             headers=headers,
         )
-        assert preview.headers["content-type"] == "image/png" and not pi.lcd_on
+        assert preview.headers["content-type"] == "image/png"
+        assert not pi.lcd_on
         assert (
             client.post(
                 "/api/v1/rider/face/play",
@@ -568,7 +580,8 @@ async def test_stop_bypasses_pending_command_and_drops_its_result():
     await entered.wait()
     started = time.monotonic()
     await service.control({"action": "stop"}, None)
-    assert time.monotonic() - started < 0.2 and pi.state == "DISARMED"
+    assert time.monotonic() - started < 0.2
+    assert pi.state == "DISARMED"
     with pytest.raises(RiderError, match="command_superseded"):
         await pending
     await service.close()
@@ -763,7 +776,8 @@ def test_all_readonly_and_mutation_routes_use_the_same_fixture(monkeypatch):
             ),
             headers=h,
         )
-        assert response.status_code == 200 and pi.state == "DISARMED"
+        assert response.status_code == 200
+        assert pi.state == "DISARMED"
 
 
 def test_access_token_and_environment_guard(monkeypatch):
@@ -915,7 +929,8 @@ def test_readonly_environment_allows_stop_but_no_state_changes(monkeypatch):
             ).status_code
             == 200
         )
-        assert not pi.lcd_on and pi.state == "DISARMED"
+        assert not pi.lcd_on
+        assert pi.state == "DISARMED"
         assert (
             client.post("/api/v1/rider/face/library", json=[], headers=h).status_code
             == 400
@@ -967,7 +982,8 @@ async def test_navigation_snapshot_skips_diagnostics_and_refreshes_settings():
         second = await service.status("navigation")
         assert first["connection"]["status"] == "online"
         assert second["settings"]["revision"] == pi.controls["revision"]
-        assert second["telemetry"] is None and second["history"] is None
+        assert second["telemetry"] is None
+        assert second["history"] is None
         assert paths.count("/api/control/state") == 2
         assert paths.count("/api/calibration/controls") == 2
     finally:

@@ -77,9 +77,11 @@ async def test_whole_text_observation_keeps_source_time_and_no_idle_work():
     assert result["metrics"]["source_age_ms"] >= 1000
     assert not service.jobs["job"].payload
     await asyncio.sleep(0.01)
-    assert service.worker.done() and not service.pending
+    assert service.worker.done()
+    assert not service.pending
     await service.close()
-    assert not service.jobs and not service.leases
+    assert not service.jobs
+    assert not service.leases
 
 
 async def test_shared_identity_has_distinct_goal_leases():
@@ -172,7 +174,8 @@ def test_demo_configuration_with_omitted_executor_is_controlled():
     result = compute_response(
         state, "/api/compute/config", {"revision": state.compute_revision}, envelope
     )
-    assert result.status_code == 200 and state.compute_executor is None
+    assert result.status_code == 200
+    assert state.compute_executor is None
 
 
 async def test_saturation_is_explicit_and_does_not_change_manual_state():
@@ -189,7 +192,8 @@ async def test_saturation_is_explicit_and_does_not_change_manual_state():
             "pi", request(service, job_id="last", sequence=5), b"a", "text/plain"
         )
     assert error.value.status == 429
-    assert service.counters["rejected"] == 1 and len(service.pending) == 4
+    assert service.counters["rejected"] == 1
+    assert len(service.pending) == 4
     engines.release.set()
     await service.close()
 
@@ -224,7 +228,8 @@ async def test_cancel_and_deadline_prevent_late_output():
             service.cancel("pi", "job")
         result = await finish(service, "pi", "job")
         assert result["state"] == ("expired" if expiry else "cancelled")
-        assert not result["data"] and not result["output_available"]
+        assert not result["data"]
+        assert not result["output_available"]
         await service.close()
 
 
@@ -239,7 +244,8 @@ async def test_successful_speech_expires_before_output_can_be_used():
     assert (await finish(service, "pi", "job"))["state"] == "succeeded"
     await asyncio.sleep(0.12)
     result = await service.observe("pi", "job")
-    assert result["state"] == "expired" and not result["data"]
+    assert result["state"] == "expired"
+    assert not result["data"]
     with pytest.raises(RiderError, match="compute_output_unavailable"):
         await service.output("pi", "job")
     await service.close()
@@ -262,7 +268,8 @@ async def test_goal_off_during_revision_resolution_does_not_run_inference():
     service.close_session("pi", job.session_id)
     release.set()
     await service.worker
-    assert engines.calls == 0 and not service.jobs
+    assert engines.calls == 0
+    assert not service.jobs
     await service.close()
 
 
@@ -299,7 +306,8 @@ async def test_parallel_admission_keeps_session_memory_bounded():
         return_exceptions=True,
     )
     assert sum(isinstance(row, RiderError) for row in results) == 1
-    assert len(lease.seen) == 4096 and len(lease.sequences) == 32
+    assert len(lease.seen) == 4096
+    assert len(lease.sequences) == 32
     await service.close()
 
 
@@ -311,7 +319,8 @@ async def test_model_switch_invalidates_running_and_completed_results():
     engines.version = "new"
     engines.release.set()
     result = await finish(service, "pi", "job")
-    assert result["state"] == "expired" and result["error"] == "compute_runtime_changed"
+    assert result["state"] == "expired"
+    assert result["error"] == "compute_runtime_changed"
     await service.close()
 
 
@@ -368,7 +377,8 @@ async def test_audio_transcribe_and_tts_return_pcm16_wav():
     assert (await finish(service, "pi", "tts"))["output_available"]
     data, mime = await service.output("pi", "tts")
     with wave.open(io.BytesIO(data)) as audio:
-        assert audio.getframerate() == 16000 and audio.getsampwidth() == 2
+        assert audio.getframerate() == 16000
+        assert audio.getsampwidth() == 2
     assert mime == "audio/wav"
     service.cancel("pi", "tts")
     with pytest.raises(RiderError, match="compute_output_unavailable"):
@@ -407,7 +417,8 @@ def test_http_contract_authentication_and_no_browser_device_job(monkeypatch):
             == 403
         )
         caps = client.get("/api/v1/rider/compute/capabilities", headers=headers).json()
-        assert caps["protocol_version"] == 1 and len(caps["tasks"]) == 5
+        assert caps["protocol_version"] == 1
+        assert len(caps["tasks"]) == 5
         assert caps["tasks"]["conversation.respond"]["available"] is False
         session = client.post(
             "/api/v1/rider/compute/sessions",
@@ -496,7 +507,8 @@ def test_http_job_observation_output_cancel_and_invalid_inputs(monkeypatch):
                 break
             time.sleep(0.002)
         output = client.get(base + "/jobs/job/output", headers=headers)
-        assert output.status_code == 200 and output.content.startswith(b"RIFF")
+        assert output.status_code == 200
+        assert output.content.startswith(b"RIFF")
         assert (
             client.delete(base + "/jobs/job", headers=headers).json()["state"]
             == "cancelled"
@@ -563,7 +575,8 @@ def test_operator_compute_status_and_selection_use_only_pi_authority(monkeypatch
         assert result.status_code == 200
         status = client.get("/api/v1/rider/status?section=compute").json()
         assert status["compute"]["config"]["selected_executor"] == "venom"
-        assert pi.state == "DISARMED" and not pi.camera_on
+        assert pi.state == "DISARMED"
+        assert not pi.camera_on
         assert (
             client.post(
                 "/api/v1/rider/compute/executor",
@@ -590,7 +603,8 @@ def test_operator_compute_status_and_selection_use_only_pi_authority(monkeypatch
             headers={"X-Rider-Session": session},
             json={"enabled": False},
         )
-        assert not pi.camera_on and pi.state == "DISARMED"
+        assert not pi.camera_on
+        assert pi.state == "DISARMED"
 
 
 async def test_status_invalidates_old_model_result_and_history_is_bounded():
@@ -608,7 +622,8 @@ async def test_status_invalidates_old_model_result_and_history_is_bounded():
 
     engines.capabilities = changed
     result = await service.status("pi")
-    assert result["jobs"][0]["state"] == "expired" and result["jobs"][0]["data"] == {}
+    assert result["jobs"][0]["state"] == "expired"
+    assert result["jobs"][0]["data"] == {}
     assert not result["jobs"][0]["output_available"]
     await service.close()
 

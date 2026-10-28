@@ -163,7 +163,8 @@ async def test_cancelled_shared_image_read_recovers_without_ui_poll(monkeypatch)
     with patch("venom_module_rider.study_sampling.collecting", return_value=True):
         sampler.image_task = asyncio.create_task(sampler.images())
         await asyncio.wait_for(recovered.wait(), 2)
-        assert sampler.image_task is not None and not sampler.image_task.done()
+        assert sampler.image_task is not None
+        assert not sampler.image_task.done()
         await sampler.close()
     assert calls == 2
 

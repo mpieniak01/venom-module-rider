@@ -35,7 +35,8 @@ async def test_twelve_http_originals_succeed_while_the_writer_is_full(tmp_path):
         assert [response.status_code for response in responses] == [200] * 12
         assert [response.content for response in responses] == list(expected.values())
         assert not any(job.done() for job in writing)
-        assert pi.state == "DISARMED" and not pi.camera_on
+        assert pi.state == "DISARMED"
+        assert not pi.camera_on
     finally:
         gate.set()
         if writing:

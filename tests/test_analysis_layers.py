@@ -41,13 +41,13 @@ def test_depth_palette_alpha_geometry_source_size_and_no_photo_dependency():
     )
     assert "_errors" not in source
     with Image.open(io.BytesIO(payload)) as layer:
-        assert layer.format == "PNG" and layer.mode == "P" and layer.size == (64, 48)
+        assert layer.format == "PNG"
+        assert layer.mode == "P"
+        assert layer.size == (64, 48)
         assert layer.info["transparency"][: len(ALPHA)] == bytes(ALPHA)
-        assert (
-            layer.getpixel((0, 0)) == 0
-            and layer.getpixel((5, 5)) == 1
-            and layer.getpixel((6, 6)) == 2
-        )
+        assert layer.getpixel((0, 0)) == 0
+        assert layer.getpixel((5, 5)) == 1
+        assert layer.getpixel((6, 6)) == 2
         rgba = layer.convert("RGBA")
         assert rgba.getpixel((5, 5)) == (*PALETTE[1], 102)
         assert rgba.getpixel((18, 32)) == (*PALETTE[4], 255)
@@ -67,7 +67,8 @@ def test_depth_palette_alpha_geometry_source_size_and_no_photo_dependency():
         "0000-mask.png",
         "b" * 64,
     )
-    assert other == payload and other_meta["source_sha256"] != meta["source_sha256"]
+    assert other == payload
+    assert other_meta["source_sha256"] != meta["source_sha256"]
     assert len(payload) < 2000
 
 
@@ -83,7 +84,8 @@ def test_unknown_depth_does_not_paint_confident_floor():
         "a" * 64,
     )
     with Image.open(io.BytesIO(payload)) as layer:
-        assert layer.getpixel((5, 5)) == 0 and layer.getpixel((6, 6)) == 0
+        assert layer.getpixel((5, 5)) == 0
+        assert layer.getpixel((6, 6)) == 0
 
 
 def test_semantic_layer_keeps_unsupported_ground_blue_without_private_maps():
@@ -190,4 +192,5 @@ def test_real_semantic_postprocessing_evidence_flag_preserves_classification():
         return {key: item for key, item in value.items() if not key.startswith("_")}
 
     assert public(baseline) == public(with_maps)
-    assert "_navigation_maps" in with_maps and "_navigation_maps" not in baseline
+    assert "_navigation_maps" in with_maps
+    assert "_navigation_maps" not in baseline

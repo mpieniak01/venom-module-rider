@@ -76,7 +76,8 @@ async def test_native_mjpeg_uses_the_same_small_contract():
         assert analysis["sector_space"] == "image"
         assert analysis["sectors"] == FIXTURE["preview"]["sectors"]
         assert analysis["action"] == headers["x-rider-vision-action"] == "stop"
-        assert "temporal" not in analysis and "paths" not in analysis
+        assert "temporal" not in analysis
+        assert "paths" not in analysis
         assert pi.snapshot_requests == 0
     finally:
         if iterator:
@@ -195,7 +196,8 @@ async def test_native_preview_uses_display_age_without_changing_motion_source_li
     _, image, headers = await processed_native(
         request, SimpleNamespace(closed=False), incoming
     )
-    assert image == b"jpeg" and headers["x-rider-stale"] == "false"
+    assert image == b"jpeg"
+    assert headers["x-rider-stale"] == "false"
     assert float(headers["x-rider-frame-age-ms"]) == age
     # Tickets/decisions still use the original300ms source contract by default.
     assert source_headers(incoming, 10.0)["x-rider-stale"] == (
@@ -217,7 +219,8 @@ async def test_raw_browser_preview_uses_the_same_display_age_bound(monkeypatch):
         headers, _ = unpack(await anext(iterator))
         assert headers["x-rider-stale"] == "false"
         assert headers["x-rider-frame-age-ms"] == "350"
-        assert loop.detector.calls == 0 and pi.snapshot_requests == 0
+        assert loop.detector.calls == 0
+        assert pi.snapshot_requests == 0
     finally:
         if iterator:
             await iterator.aclose()

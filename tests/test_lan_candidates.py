@@ -84,7 +84,8 @@ async def test_scoped_ipv6_only_name_is_explicitly_rejected_before_http(
     try:
         with pytest.raises(RiderError, match="pi_name_unresolved"):
             await client.json("/api/control", method="POST", body={})
-        assert not calls and client.lan.number == 0
+        assert not calls
+        assert client.lan.number == 0
     finally:
         await client.close()
 
@@ -123,8 +124,10 @@ async def test_unreachable_first_unique_candidate_falls_through_with_own_identit
             and r.extensions["sni_hostname"] == "rider.test"
             for r in calls
         )
-        assert len(generations) == 2 and closed(generations[0])
-        assert client.lan.current is generations[1] and client.lan.number == 1
+        assert len(generations) == 2
+        assert closed(generations[0])
+        assert client.lan.current is generations[1]
+        assert client.lan.number == 1
         assert not closed(generations[1])
     finally:
         await client.close()
@@ -195,7 +198,8 @@ async def test_invalid_url_candidate_is_caught_closed_and_followed_by_verified_t
     generations = track_pools(client)
     try:
         await client.json("/state")
-        assert len(generations) == 2 and closed(generations[0])
+        assert len(generations) == 2
+        assert closed(generations[0])
         assert [(r.url.host, r.url.path) for r in calls] == [
             ("192.0.2.7", IDENTITY_PATH),
             ("192.0.2.7", "/state"),
@@ -236,10 +240,10 @@ async def test_responding_foreign_candidate_stops_fallthrough_without_credential
             ("GET", "192.0.2.1", IDENTITY_PATH)
         ]
         assert all("authorization" not in r.headers for r in calls)
-        assert client.lan.current is None and client.lan.number == 0
-        assert not client.credential_transport_allowed and all(
-            closed(g) for g in generations
-        )
+        assert client.lan.current is None
+        assert client.lan.number == 0
+        assert not client.credential_transport_allowed
+        assert all(closed(g) for g in generations)
     finally:
         await client.close()
 
@@ -268,9 +272,11 @@ async def test_urgent_candidates_share_one_dns_and_preflight_deadline(monkeypatc
                 "/api/safety", method="POST", body={"action": "stop"}, stop=True
             )
         assert time.monotonic() - started < 0.3
-        assert len(lookups) == 1 and 1 <= len(calls) <= 2
+        assert len(lookups) == 1
+        assert 1 <= len(calls) <= 2
         assert all(r.method == "GET" and r.url.path == IDENTITY_PATH for r in calls)
-        assert client.lan.number == 0 and all(closed(g) for g in generations)
+        assert client.lan.number == 0
+        assert all(closed(g) for g in generations)
     finally:
         await client.close()
 
@@ -311,8 +317,10 @@ async def test_cancelling_second_candidate_closes_all_owned_pools():
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
-        assert len(generations) == 2 and all(closed(g) for g in generations)
-        assert all(r.method == "GET" for r in calls) and client.lan.current is None
+        assert len(generations) == 2
+        assert all(closed(g) for g in generations)
+        assert all(r.method == "GET" for r in calls)
+        assert client.lan.current is None
     finally:
         await client.close()
 
@@ -338,7 +346,8 @@ async def test_identity_slow_drip_cannot_renew_preflight_deadline(monkeypatch):
     try:
         with pytest.raises(RiderError, match="pi_connection_timeout"):
             await asyncio.wait_for(client.json("/state"), 0.2)
-        assert released.is_set() and client.lan.current is None
+        assert released.is_set()
+        assert client.lan.current is None
     finally:
         await client.close()
 
@@ -373,8 +382,10 @@ async def test_expired_parallel_probe_uses_only_the_other_verified_generation(
             "/api/safety", method="POST", body={"action": "stop"}, stop=True
         )
         await asyncio.wait_for(ordinary, 0.2)
-        assert client.lan.number == 1 and client.transport_status()["state"] == "online"
-        assert client.lan.current is generations[1] and closed(generations[0])
+        assert client.lan.number == 1
+        assert client.transport_status()["state"] == "online"
+        assert client.lan.current is generations[1]
+        assert closed(generations[0])
         assert [(r.method, r.url.path) for r in calls if r.url.host == "192.0.2.1"] == [
             ("GET", IDENTITY_PATH)
         ]
@@ -415,8 +426,10 @@ async def test_refresh_during_candidate_fallthrough_rejects_late_identity():
         release.set()
         with pytest.raises(RiderError, match="stale_transport_generation"):
             await command
-        assert client.lan.current is None and client.lan.number == 0
-        assert len(generations) == 2 and all(closed(g) for g in generations)
+        assert client.lan.current is None
+        assert client.lan.number == 0
+        assert len(generations) == 2
+        assert all(closed(g) for g in generations)
         assert all(
             r.method == "GET" and "authorization" not in r.headers for r in calls
         )
@@ -472,9 +485,12 @@ async def test_terminal_probe_error_does_not_use_or_retire_parallel_verified_cur
         release.set()
         with pytest.raises(RiderError, match=error):
             await command
-        assert client.lan.current is healthy and healthy is generations[1]
-        assert client.lan.number == 1 and client.transport_status()["state"] == "online"
-        assert client.lan.retry_at == 0 and closed(generations[0])
+        assert client.lan.current is healthy
+        assert healthy is generations[1]
+        assert client.lan.number == 1
+        assert client.transport_status()["state"] == "online"
+        assert client.lan.retry_at == 0
+        assert closed(generations[0])
         assert all(
             not pool.is_closed for pool in (healthy.http, healthy.stop, healthy.media)
         )

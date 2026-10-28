@@ -53,7 +53,8 @@ def test_opposite_clear_path_then_stop_after_bounded_corrections(side, expected)
         expected,
         "stop",
     ]
-    assert terminal and reason == "avoidance_no_progress"
+    assert terminal
+    assert reason == "avoidance_no_progress"
 
 
 @pytest.mark.parametrize(
@@ -171,5 +172,6 @@ async def test_real_vision_loop_and_pi_lease_curve_then_terminal_stop():
         ("steer", "right", 0.1)
     ] * 3
     assert outputs[-1] == ("halt",)
-    assert lease.reason == "avoidance_no_progress" and lease.latched
+    assert lease.reason == "avoidance_no_progress"
+    assert lease.latched
     await loop.close()

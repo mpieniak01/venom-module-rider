@@ -48,10 +48,12 @@ def test_live_suspends_only_owned_compute_and_io_barrier_can_finish():
     assert guard.phase_compute(child)
     guard.live()
     guard.live()  # duplicate live notifications do not pile up signals
-    assert child.signals == [signal.SIGSTOP] and guard.paused
+    assert child.signals == [signal.SIGSTOP]
+    assert guard.paused
     guard.phase_io(child)  # actual worker handshake says computation is complete
     assert child.signals == [signal.SIGSTOP, signal.SIGCONT]
-    assert not guard.paused and not guard.available()
+    assert not guard.paused
+    assert not guard.available()
     assert guard.detach(child) is False
     guard.live()
     assert len(child.signals) == 2
@@ -94,7 +96,8 @@ def test_failed_preemption_never_raises_in_live_lane_and_kills_only_offline_chil
     guard.phase_compute(child)
     child.fail = True
     guard.live()
-    assert child.killed == 1 and guard.failures == 2
+    assert child.killed == 1
+    assert guard.failures == 2
 
 
 async def test_optional_scheduler_failure_cannot_revoke_live_clear_decision():

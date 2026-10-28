@@ -104,7 +104,8 @@ async def test_unloaded_vision_can_accept_a_new_requested_frame():
     frame = SimpleNamespace(perception=SimpleNamespace(engine="depth_plane"))
     try:
         admitted, task = await loop._admit_inference("device", frame, None, True)
-        assert admitted is frame and task is None
+        assert admitted is frame
+        assert task is None
         assert not hasattr(loop, "resources_suspended")
     finally:
         await loop.close()

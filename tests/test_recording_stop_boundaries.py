@@ -32,7 +32,8 @@ async def test_real_control_stop_preserves_recording_until_explicit_end(tmp_path
         await service.read("/state", 0)
         await registry.read(registry.store.video.append, sid, jpeg(2, 0.25))
         final = await registry.end(sid)
-        assert final["state"] == "closed" and final["video"]["state"] == "complete"
+        assert final["state"] == "closed"
+        assert final["video"]["state"] == "complete"
         assert final["video"]["frames"] == 2
     finally:
         await service.close()
@@ -103,4 +104,5 @@ async def test_overlapped_stop_epoch_is_transient_only_for_identical_source(
     else:
         with pytest.raises(asyncio.CancelledError):
             await source._refresh()
-        assert source.error is None and len(calls) == 2
+        assert source.error is None
+        assert len(calls) == 2

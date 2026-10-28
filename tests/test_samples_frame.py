@@ -16,7 +16,8 @@ def test_snapshot_is_exact_and_immutable_and_receipts_are_distinct():
     context["sequence"] = 9
     frame = buffer.get(key)
     assert frame.payload == b"exact-original-bytes"
-    assert frame.received_at == 123.0 and frame.context()["sequence"] == 1
+    assert frame.received_at == 123.0
+    assert frame.context()["sequence"] == 1
     frame.context()["sequence"] = 10
     assert frame.context()["sequence"] == 1
     newer = buffer.offer("robot", frame.payload, "image/jpeg", frame.context())
@@ -29,7 +30,8 @@ def test_byte_and_count_limits_never_return_the_next_frame():
     buffer = FrameBuffer(max_bytes=8, max_frames=2)
     first = buffer.offer("robot", b"first", "image/jpeg", {"frame_id": "one"})
     second = buffer.offer("robot", b"next", "image/jpeg", {"frame_id": "two"})
-    assert buffer.status()["bytes"] == 4 and buffer.status()["evicted"] == 1
+    assert buffer.status()["bytes"] == 4
+    assert buffer.status()["evicted"] == 1
     with pytest.raises(RiderError, match="samples_frame_expired"):
         buffer.get(first)
     assert buffer.get(second).payload == b"next"
@@ -79,7 +81,8 @@ def test_rejected_input_never_retains_memory_or_escapes_producer(
 ):
     buffer = FrameBuffer()
     assert buffer.offer("robot", payload, mime, context) is None
-    assert buffer.status()["frames"] == 0 and buffer.status()["rejected"] == 1
+    assert buffer.status()["frames"] == 0
+    assert buffer.status()["rejected"] == 1
 
 
 @pytest.mark.parametrize(

@@ -386,12 +386,12 @@ async def test_double_cancel_close_and_retry_wait_for_reaped_child(monkeypatch):
     closing = asyncio.create_task(installer.close())
     await asyncio.sleep(0)
     assert not closing.done()
-    assert len(calls) == 1 and len(installer.children) == 1
+    assert len(calls) == 1
+    assert len(installer.children) == 1
     reaped.set()
     await closing
-    assert (
-        not installer.children and installer.status(SEGFORMER)["state"] == "cancelled"
-    )
+    assert not installer.children
+    assert installer.status(SEGFORMER)["state"] == "cancelled"
 
 
 def test_released_runtime_never_reloads_from_a_frame_but_explicit_warmup_can(

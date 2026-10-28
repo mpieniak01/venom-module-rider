@@ -229,7 +229,9 @@ def test_raw_preview_and_two_panels_share_reader_without_model_or_legacy_file(
         assert first.content == second.content == jpeg()
         assert first.headers["x-rider-frame-id"] == current["frame_id"]
         assert first.headers["x-rider-source"] == "pi-camera"
-        assert pi.opened == 1 and pi.snapshot_requests == 0 and detector.calls == 0
+        assert pi.opened == 1
+        assert pi.snapshot_requests == 0
+        assert detector.calls == 0
         assert all(method == "GET" for method, _, _ in pi.calls)
     assert pi.ended == 1
 
@@ -253,8 +255,10 @@ def test_preview_then_pi_reference_uses_one_inference_but_keeps_run_gates(monkey
         assert response.status_code == 200, response.text
         result = response.json()
         assert result["source"] == current
-        assert result["action"] == "stop" and result["clear_count"] == 1
-        assert detector.calls == 1 and pi.opened == 1
+        assert result["action"] == "stop"
+        assert result["clear_count"] == 1
+        assert detector.calls == 1
+        assert pi.opened == 1
         duplicate = client.post(
             "/api/v1/rider/compute/vision/decision-reference",
             headers=AUTH,
@@ -290,10 +294,8 @@ def test_reference_is_exact_and_expiry_epoch_hash_errors_never_infer(monkeypatch
         assert bad_type.status_code == 415
         old_epoch = {**current, "transport_epoch": 1}
         old = client.post(endpoint, headers=AUTH, json=descriptor(old_epoch))
-        assert (
-            old.status_code == 409
-            and old.json()["detail"]["code"] == "stream_epoch_changed"
-        )
+        assert old.status_code == 409
+        assert old.json()["detail"]["code"] == "stream_epoch_changed"
         expired = client.post(
             endpoint, headers=AUTH, json=descriptor(current, age_ms=300.0)
         )
@@ -304,7 +306,8 @@ def test_reference_is_exact_and_expiry_epoch_hash_errors_never_infer(monkeypatch
         )
         assert missing.status_code == 409
         assert missing.json()["detail"]["code"] == "stream_frame_unavailable"
-        assert detector.calls == 0 and pi.snapshot_requests == 0
+        assert detector.calls == 0
+        assert pi.snapshot_requests == 0
         denied = client.post(endpoint, json=descriptor(current))
         assert denied.status_code == 403
 
@@ -313,7 +316,8 @@ def test_profile_proxy_preserves_pi_authority_and_old_device_capability(monkeypa
     app, service, pi = fixture(monkeypatch)
     with TestClient(app) as client:
         status = client.get("/api/v1/rider/camera/pipeline").json()
-        assert status["supported"] is True and status["revision"] == 3
+        assert status["supported"] is True
+        assert status["revision"] == 3
         source = warmup(client)
         connection = app.state.rider_stream.connection
         result = client.post(
@@ -329,7 +333,8 @@ def test_profile_proxy_preserves_pi_authority_and_old_device_capability(monkeypa
         )
         assert result.status_code == 200, result.text
         assert result.json()["revision"] == 4
-        assert connection.closed and app.state.rider_stream.connection is None
+        assert connection.closed
+        assert app.state.rider_stream.connection is None
         conflict = client.post(
             "/api/v1/rider/camera/pipeline",
             headers={"X-Rider-Session": service.session},
@@ -491,7 +496,8 @@ def test_active_pi_result_is_the_only_processed_preview_without_second_inference
         assert preview.headers["x-rider-run-id"] == "pi-run"
         assert preview.headers["x-rider-frame-id"] == current["frame_id"]
         assert json.loads(preview.headers["x-rider-analysis-json"])["source"] == current
-        assert detector.calls == 1 and pi.snapshot_requests == 0
+        assert detector.calls == 1
+        assert pi.snapshot_requests == 0
 
 
 def test_active_pi_without_a_current_result_never_creates_diagnostic_inference(
@@ -506,7 +512,8 @@ def test_active_pi_without_a_current_result_never_creates_diagnostic_inference(
         preview = client.get("/api/v1/rider/camera/venom")
         assert preview.status_code == 429
         assert preview.json()["detail"]["code"] == "vision_busy"
-        assert detector.calls == 0 and pi.snapshot_requests == 0
+        assert detector.calls == 0
+        assert pi.snapshot_requests == 0
 
 
 def test_empty_native_warmup_reports_not_ready_without_inference_or_legacy_fallback(
@@ -528,7 +535,8 @@ def test_empty_native_warmup_reports_not_ready_without_inference_or_legacy_fallb
         assert response.status_code == 200
         assert response.json()["stream"]["ready"] is False
         assert response.json()["stream"]["latest_source"] is None
-        assert detector.calls == 0 and pi.snapshot_requests == 0
+        assert detector.calls == 0
+        assert pi.snapshot_requests == 0
 
 
 async def test_old_pipeline_capability_is_not_polled_per_camera_frame():
@@ -606,7 +614,8 @@ def test_delayed_binary_and_legacy_preview_cannot_restart_old_inference_after_sw
         assert delayed.json()["detail"]["code"] == "vision_transport_mismatch"
         legacy_preview = client.get("/api/v1/rider/camera/venom")
         assert legacy_preview.status_code == 503
-        assert detector.calls == 1 and pi.snapshot_requests == 0
+        assert detector.calls == 1
+        assert pi.snapshot_requests == 0
 
 
 def test_local_profile_rejects_binary_vision_but_keeps_explicit_raw_consumer(
@@ -633,8 +642,10 @@ def test_local_profile_rejects_binary_vision_but_keeps_explicit_raw_consumer(
         preview = client.get("/api/v1/rider/camera/venom")
         assert preview.status_code == 409
         raw = client.get("/api/v1/rider/camera/raw")  # S12/manual explicit source.
-        assert raw.status_code == 200 and raw.content == jpeg()
-        assert detector.calls == 0 and pi.snapshot_requests == 0
+        assert raw.status_code == 200
+        assert raw.content == jpeg()
+        assert detector.calls == 0
+        assert pi.snapshot_requests == 0
 
 
 def test_network_delayed_part_is_stale_despite_small_send_age_and_never_infers(
@@ -686,7 +697,8 @@ def test_network_delayed_part_is_stale_despite_small_send_age_and_never_infers(
         )
         assert reference.status_code == 409
         assert reference.json()["detail"]["code"] == "vision_frame_expired"
-        assert detector.calls == 0 and pi.snapshot_requests == 0
+        assert detector.calls == 0
+        assert pi.snapshot_requests == 0
 
 
 async def test_cached_status_timing_is_never_redated_as_a_new_age_anchor():
@@ -718,7 +730,8 @@ def test_native_prepare_rechecks_cold_pipeline_and_retires_old_camera_authority(
         app.state.rider_vision.detector = detector
         old_source = warmup(client)
         old_connection = app.state.rider_stream.connection
-        assert old_connection is not None and not old_connection.closed
+        assert old_connection is not None
+        assert not old_connection.closed
 
         # Direct Pi start/stop changes can happen while the host's previous
         # active pipeline response is still inside its normal 200 ms cache.
@@ -739,7 +752,8 @@ def test_native_prepare_rechecks_cold_pipeline_and_retires_old_camera_authority(
             "frame_age_ms": None,
             "error": "stream_not_ready",
         }
-        assert old_connection.closed and app.state.rider_stream.connection is None
+        assert old_connection.closed
+        assert app.state.rider_stream.connection is None
 
         pi.pipeline.update(
             active_profile=PROFILE.copy(), state="active", camera_session="next-camera"
@@ -747,9 +761,12 @@ def test_native_prepare_rechecks_cold_pipeline_and_retires_old_camera_authority(
         pi.latest = native(session="next-camera", epoch=3, revision=4)
         ready = warmup(client)
         assert ready["camera_session"] == "next-camera"
-        assert ready["transport_epoch"] == 3 and ready["pipeline_revision"] == 4
-        assert ready != old_source and pi.opened == 2
-        assert detector.calls == 0 and pi.snapshot_requests == 0
+        assert ready["transport_epoch"] == 3
+        assert ready["pipeline_revision"] == 4
+        assert ready != old_source
+        assert pi.opened == 2
+        assert detector.calls == 0
+        assert pi.snapshot_requests == 0
         assert all(method == "GET" for method, _path, _body in pi.calls)
 
 
@@ -766,7 +783,8 @@ def test_native_prepare_reports_pending_without_a_camera_session_or_automatic_st
         assert response.status_code == 200, response.text
         assert response.json()["stream"]["ready"] is False
         assert response.json()["stream"]["latest_source"] is None
-        assert pi.opened == 0 and pi.snapshot_requests == 0
+        assert pi.opened == 0
+        assert pi.snapshot_requests == 0
         assert all(method == "GET" for method, _path, _body in pi.calls)
 
 
@@ -826,10 +844,12 @@ def test_active_native_preview_keeps_camera_source_distinct_from_pi_run_identity
             assert analysis["source"]["sequence"] == source["sequence"]
             assert analysis["frame_id"] == request_id
             assert analysis["sequence"] == request_sequence
-            assert preview.content == jpeg() and detector.calls == request_sequence
+            assert preview.content == jpeg()
+            assert detector.calls == request_sequence
             assert (
                 app.state.rider_vision.runs[("pi", "pi-run")]["sequence"]
                 == request_sequence
             )
-        assert pi.opened == 1 and pi.snapshot_requests == 0
+        assert pi.opened == 1
+        assert pi.snapshot_requests == 0
         assert all(method == "GET" for method, _path, _body in pi.calls)

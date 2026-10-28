@@ -60,7 +60,8 @@ async def test_manual_capture_and_offline_browse_never_need_inference_or_arm(tmp
         )
         assert created.status_code == 201
         sid = created.json()["session_id"]
-        assert pi.state == "DISARMED" and not pi.camera_on
+        assert pi.state == "DISARMED"
+        assert not pi.camera_on
         # The existing explicit preview goal owns the producer, not the collector.
         camera_on = await client.post(
             BASE + "/goal/s2_camera_preview", json={"enabled": True}, headers=headers
@@ -250,8 +251,10 @@ async def test_slow_full_writer_does_not_block_real_control_stop_path(
         stopped = await asyncio.wait_for(
             client.post(BASE + "/control", json={"action": "stop"}), 0.3
         )
-        assert time.monotonic() - started < 0.3 and stopped.status_code == 200
-        assert pi.state == "DISARMED" and pi.deadline == 0
+        assert time.monotonic() - started < 0.3
+        assert stopped.status_code == 200
+        assert pi.state == "DISARMED"
+        assert pi.deadline == 0
         event.set()
         assert (await outcome(client, "blocked-write"))["state"] == "saved"
     finally:

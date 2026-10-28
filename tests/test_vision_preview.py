@@ -19,11 +19,14 @@ def test_overlay_floor_obstacle_uncertainty_and_corridor():
     logits[0, :, 6:, :] = 0
     output = render_preview(rgb, logits, (0.35, 0.65, 0.65, 0.95))
     image = Image.open(io.BytesIO(output))
-    assert image.format == "JPEG" and image.size == (512, 512)
+    assert image.format == "JPEG"
+    assert image.size == (512, 512)
     green, red, amber = [image.getpixel(p) for p in [(80, 80), (430, 80), (80, 470)]]
-    assert green[1] > green[0] and green[1] > green[2]
+    assert green[1] > green[0]
+    assert green[1] > green[2]
     assert red[0] > red[1]
-    assert amber[0] > amber[2] and amber[1] > amber[2]
+    assert amber[0] > amber[2]
+    assert amber[1] > amber[2]
     assert min(image.getpixel((178, 350))) > 180
 
 
@@ -178,7 +181,8 @@ async def test_active_pi_loop_never_admits_independent_preview_inference(goal):
     with pytest.raises(RiderError) as error:
         await processed_camera(request(domain, loop))
     assert error.value.code == "vision_busy"
-    assert not loop.runs and loop.busy is None
+    assert not loop.runs
+    assert loop.busy is None
 
 
 async def test_unknown_pi_loop_state_does_not_compete_for_detector():
@@ -215,11 +219,13 @@ async def test_expired_preview_cannot_interrupt_next_pi_decision():
     with pytest.raises(RiderError) as error:
         await processed_camera(request(domain, loop))
     assert error.value.code == "vision_busy"
-    assert loop.busy is None and len(loop.runs) == 1
+    assert loop.busy is None
+    assert len(loop.runs) == 1
     result = await loop.decide(
         "pi", frame.model_copy(update={"sequence": 2, "frame_id": "next"}), b"raw"
     )
-    assert result["frame_id"] == "next" and result["action"] == "stop"
+    assert result["frame_id"] == "next"
+    assert result["action"] == "stop"
 
 
 async def test_preview_waits_for_inflight_pi_result_without_another_inference():
@@ -260,7 +266,8 @@ async def test_preview_waits_for_inflight_pi_result_without_another_inference():
     await decision
     response = await preview
     assert response.headers["x-rider-frame-id"] == "incoming"
-    assert detector.calls == 1 and len(loop.runs) == 1
+    assert detector.calls == 1
+    assert len(loop.runs) == 1
 
 
 async def test_preview_wait_requires_fresh_matching_policy_and_is_bounded():
@@ -288,7 +295,8 @@ async def test_preview_wait_requires_fresh_matching_policy_and_is_bounded():
         is None
     )
     cached = await loop.wait_for_preview("pi", corridor=frame.corridor, revision=4)
-    assert cached is not None and cached[2]["frame_id"] == "cached"
+    assert cached is not None
+    assert cached[2]["frame_id"] == "cached"
 
 
 async def test_module_close_releases_preview_waiters():

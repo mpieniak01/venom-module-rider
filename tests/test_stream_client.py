@@ -40,14 +40,13 @@ async def test_pi_client_accepts_exact_source_without_starting_camera_or_redirec
 
     client = PiClient(DEVICE, transport=httpx.MockTransport(handler))
     frames = [item async for item in client.mjpeg()]
-    assert len(frames) == 1 and frames[0].payload == jpeg()
+    assert len(frames) == 1
+    assert frames[0].payload == jpeg()
     assert frames[0].source.sha256 == source()["sha256"]
     assert requests[0].url.path == "/api/resource/camera/stream.mjpg"
     assert requests[0].method == "GET"
-    assert (
-        client.http is not client.media_http
-        and client.stop_http is not client.media_http
-    )
+    assert client.http is not client.media_http
+    assert client.stop_http is not client.media_http
     assert expected_contract("/api/resource/camera/pipeline") == (
         "rider.camera_pipeline",
         1,
@@ -100,7 +99,8 @@ async def test_read_timeout_is_reported_without_fallback_or_camera_mutation():
     client = PiClient(DEVICE, transport=httpx.MockTransport(failing))
     with pytest.raises(RiderError, match="stream_unavailable"):
         _frames = [frame async for frame in client.mjpeg()]
-    assert len(calls) == 1 and calls[0].method == "GET"
+    assert len(calls) == 1
+    assert calls[0].method == "GET"
     await client.close()
 
 
@@ -127,7 +127,8 @@ async def test_legacy_ram_alias_keeps_capture_metadata_without_changing_source_j
     )
     try:
         payload, mime, propagated = await client.image("/vision/cam")
-        assert payload == jpeg() and mime == "image/jpeg"
+        assert payload == jpeg()
+        assert mime == "image/jpeg"
         assert propagated["x-rider-source"] == "pi-camera"
         assert json.loads(propagated["x-rider-source-json"]) == metadata
         assert propagated["x-rider-frame-age-ms"] == "20.4"
@@ -228,7 +229,8 @@ async def test_bootstrap_failure_closes_persistent_http_source_before_reconnect(
             frame = await hub.frame(connection, timeout=1.2)
             assert frame.source.sequence == 2
             await asyncio.wait_for(released.wait(), 0.2)
-            assert connections == 2 and connection.received == 1
+            assert connections == 2
+            assert connection.received == 1
     finally:
         await hub.close()
         for item in retained:

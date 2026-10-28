@@ -27,7 +27,8 @@ async def test_download_endpoint_keeps_recordings_separate_and_never_arms(tmp_pa
             assert response.content == payload
             assert sid in response.headers["content-disposition"]
             assert response.headers["cache-control"] == "no-store"
-        assert pi.state == "DISARMED" and not pi.camera_on
+        assert pi.state == "DISARMED"
+        assert not pi.camera_on
     finally:
         await client.aclose()
         await registry.close()

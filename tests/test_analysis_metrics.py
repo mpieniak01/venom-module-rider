@@ -55,10 +55,14 @@ def test_missing_truth_is_na_not_perfect_safety_or_accuracy():
     samples = inputs()
     rows = output(samples, ["clear", "obstacle", "unknown"])
     result = summarize(samples, rows, "filename-unverified")
-    assert result["false_go"] is None and result["false_stop"] is None
-    assert result["side_errors"] is None and result["confusion"] is None
-    assert result["approved_labels"] == 0 and result["unlabelled_or_unreviewed"] == 3
-    assert result["temporal_pairs"] == 0 and result["flicker_rate"] is None
+    assert result["false_go"] is None
+    assert result["false_stop"] is None
+    assert result["side_errors"] is None
+    assert result["confusion"] is None
+    assert result["approved_labels"] == 0
+    assert result["unlabelled_or_unreviewed"] == 3
+    assert result["temporal_pairs"] == 0
+    assert result["flicker_rate"] is None
     assert result["unknown"] == 1
     assert result["historical_transport_ms"] is None
     assert result["physical_motion_ms"] is None
@@ -71,9 +75,12 @@ def test_only_clear_truth_cannot_claim_zero_false_go_for_obstacles():
     result = summarize(
         samples, output(samples, ["unknown", "clear", "clear"]), "receipt"
     )
-    assert result["false_go"] is None and result["false_go_rate"] is None
-    assert result["false_stop"] == 1 and result["false_stop_rate"] == 1
-    assert result["clear_labels"] == 1 and result["obstacle_labels"] == 0
+    assert result["false_go"] is None
+    assert result["false_go_rate"] is None
+    assert result["false_stop"] == 1
+    assert result["false_stop_rate"] == 1
+    assert result["clear_labels"] == 1
+    assert result["obstacle_labels"] == 0
 
 
 def test_only_obstacle_truth_cannot_claim_zero_false_stop_for_floor():
@@ -81,8 +88,10 @@ def test_only_obstacle_truth_cannot_claim_zero_false_stop_for_floor():
     label(samples[0], "obstacle", "left")
     result = summarize(samples, output(samples, ["clear", "clear", "clear"]), "receipt")
     assert result["false_stop"] is None
-    assert result["false_go"] == 1 and result["false_go_rate"] == 1
-    assert result["side_labelled"] == 1 and result["side_errors"] == 1
+    assert result["false_go"] == 1
+    assert result["false_go_rate"] == 1
+    assert result["side_labelled"] == 1
+    assert result["side_errors"] == 1
 
 
 def test_predictions_and_unreviewed_revisions_never_become_operator_truth():
@@ -93,7 +102,8 @@ def test_predictions_and_unreviewed_revisions_never_become_operator_truth():
     label(samples[2], review="pending")
     assert all(approved_label(row) is None for row in samples)
     result = summarize(samples, output(samples, ["clear"] * 3), "receipt")
-    assert result["eligible_labels"] == 0 and result["false_go"] is None
+    assert result["eligible_labels"] == 0
+    assert result["false_go"] is None
 
 
 def test_unknown_approved_truth_is_unscored_and_correct_side_is_measured():
@@ -103,8 +113,10 @@ def test_unknown_approved_truth_is_unscored_and_correct_side_is_measured():
     rows = output(samples, ["clear", "obstacle", "unknown"])
     rows[1]["obstacle_side"] = "right"
     result = summarize(samples, rows, "receipt")
-    assert result["approved_labels"] == 2 and result["eligible_labels"] == 1
-    assert result["side_errors"] == 0 and result["false_go"] == 0
+    assert result["approved_labels"] == 2
+    assert result["eligible_labels"] == 1
+    assert result["side_errors"] == 0
+    assert result["false_go"] == 0
     assert result["false_stop"] is None
     assert result["timings_ms"]["inference"] == {"p50": 1.0, "p95": 2.0}
 
@@ -113,7 +125,8 @@ def test_flicker_requires_actual_adjacent_different_source_frames():
     samples = inputs()
     rows = output(samples, ["clear", "obstacle", "obstacle"])
     result = summarize(samples, rows, "receipt")
-    assert result["temporal_pairs"] == 2 and result["state_flips"] == 1
+    assert result["temporal_pairs"] == 2
+    assert result["state_flips"] == 1
     assert result["flicker_rate"] == 0.5
     for changed in [
         {"run_id": "different"},

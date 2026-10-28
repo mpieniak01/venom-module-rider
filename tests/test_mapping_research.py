@@ -61,9 +61,11 @@ def test_actual_export_feature_audit_preserves_inputs_and_does_not_claim_map(tmp
     assert report["readiness"]["motion_model_baseline"]["trajectory"] is None
     assert len(report["overlap"]["pairs"]) == 2
     assert all(row["overlap_candidate"] for row in report["overlap"]["pairs"])
-    assert report["panorama"]["artifact"] is None and report["map"]["artifact"] is None
+    assert report["panorama"]["artifact"] is None
+    assert report["map"]["artifact"] is None
     assert report["map"]["ate_rmse_m"] is None
-    assert report["drive_supported"] is False and report["pi_access"] is False
+    assert report["drive_supported"] is False
+    assert report["pi_access"] is False
     assert report["pose"]["state"] == "not_requested"
 
 
@@ -177,7 +179,8 @@ def test_joint_pose_adapter_uses_exact_retained_profile_and_unscaled_sdk_output(
     images = [Image.new("RGB", (32, 32)) for _ in range(2)]
     result = research.pose_hypothesis(images, catalog=catalog)
     assert result["camera_centres_model_units"][1] == [-2.0, 0.0, 0.0]
-    assert result["metric_scale_available"] is False and result["ate_rmse_m"] is None
+    assert result["metric_scale_available"] is False
+    assert result["ate_rmse_m"] is None
     assert result["qualified_localization"] is False
     with pytest.raises(ValueError, match="mapping_pose_views"):
         research.pose_hypothesis(images[:1], catalog=catalog)
@@ -243,7 +246,8 @@ def test_cli_limits_are_scoped_and_report_creation_is_explicit(tmp_path, monkeyp
         research, "deny_network", lambda: calls.append(("offline", True))
     )
     assert research.main(["--archive", str(source), "--output", str(output)]) == 0
-    assert ("offline", True) in calls and ("nice", 10) in calls
+    assert ("offline", True) in calls
+    assert ("nice", 10) in calls
     assert any(row[0] == "affinity" and row[1] <= 2 for row in calls)
     assert json.loads(output.read_text())["pose"]["state"] == "not_requested"
 
