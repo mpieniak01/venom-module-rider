@@ -20,6 +20,7 @@ def normal_from_plane(coefficients, camera):
 
 
 def fit(depth, camera, tolerance):
+    """Fit a supported plane before constructing its ground-relative basis."""
     import numpy as np
 
     h, w = depth.shape
@@ -56,24 +57,7 @@ def fit(depth, camera, tolerance):
         if not supported(updated, u, v):
             return None
         best = updated
-    orientation = normal_from_plane(coefficients, camera)
-    if orientation is None:
-        return None
-    normal, height = orientation
-    forward = np.asarray([0.0, 0.0, 1.0]) - normal[2] * normal
-    length = np.linalg.norm(forward)
-    if length < 0.1:
-        return None
-    forward /= length
-    right = np.cross(normal, forward)
-    return {
-        "coefficients": coefficients,
-        "normal": normal,
-        "height": height,
-        "forward": forward,
-        "right": right,
-        "support": float(best.mean()),
-    }
+    return _ground_basis(coefficients, camera, best)
 
 
 def supported(inliers, u, v):
@@ -98,3 +82,27 @@ def pose_change(previous, reference, *, angle_limit=3.0, scale_limit=0.15):
     angle = math.degrees(math.acos(max(-1.0, min(1.0, dot))))
     ratio = reference["height"] / previous["height"]
     return angle > angle_limit or not 1 - scale_limit <= ratio <= 1 + scale_limit
+
+
+def _ground_basis(coefficients, camera, best):
+    """Construct the same supported forward/right basis after robust plane fitting."""
+    import numpy as np
+
+    orientation = normal_from_plane(coefficients, camera)
+    if orientation is None:
+        return None
+    normal, height = orientation
+    forward = np.asarray([0.0, 0.0, 1.0]) - normal[2] * normal
+    length = np.linalg.norm(forward)
+    if length < 0.1:
+        return None
+    forward /= length
+    right = np.cross(normal, forward)
+    return {
+        "coefficients": coefficients,
+        "normal": normal,
+        "height": height,
+        "forward": forward,
+        "right": right,
+        "support": float(best.mean()),
+    }

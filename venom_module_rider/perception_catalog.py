@@ -127,20 +127,7 @@ class LiveCatalog:
         """Validate model manifests and resolve an explicit operator override."""
         root = self.path(model_id)
         if model_id == DEPTH:
-            metadata = json.loads((root / "manifest.json").read_text())
-            files = metadata["files"]
-            required = {
-                "config.json",
-                "preprocessor_config.json",
-                _MODEL_WEIGHTS_FILENAME,
-            }
-            if (
-                set(files) != required
-                or metadata.get("revision") != SOURCES[DEPTH]["revision"]
-                or files[_MODEL_WEIGHTS_FILENAME] != SOURCES[DEPTH]["sha256"]
-            ):
-                raise ValueError("manifest")
-            return files, "da2"
+            return _depth_manifest(root)
         onnx = root / "model.onnx"
         if model_id == SEGFORMER and os.getenv("RIDER_VISION_MODEL"):
             onnx = Path(os.environ["RIDER_VISION_MODEL"]).resolve()
@@ -272,3 +259,21 @@ class LiveCatalog:
             if temporary is not None:
                 temporary.unlink(missing_ok=True)
         return artifact
+
+
+def _depth_manifest(root):
+    """Validate the pinned depth manifest before exposing its model files."""
+    metadata = json.loads((root / "manifest.json").read_text())
+    files = metadata["files"]
+    required = {
+        "config.json",
+        "preprocessor_config.json",
+        _MODEL_WEIGHTS_FILENAME,
+    }
+    if (
+        set(files) != required
+        or metadata.get("revision") != SOURCES[DEPTH]["revision"]
+        or files[_MODEL_WEIGHTS_FILENAME] != SOURCES[DEPTH]["sha256"]
+    ):
+        raise ValueError("manifest")
+    return files, "da2"

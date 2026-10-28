@@ -57,6 +57,7 @@ class Device:
 
 
 def configured_devices(raw: str | None = None) -> tuple[Device, ...]:
+    """Parse bounded device definitions without opening connections."""
     try:
         rows = json.loads(
             raw if raw is not None else os.getenv("RIDER_DEVICES_JSON", "[]")
@@ -67,96 +68,7 @@ def configured_devices(raw: str | None = None) -> tuple[Device, ...]:
         raise RiderError("invalid_device_configuration", 503)
     devices: list[Device] = []
     for row in rows:
-        if not isinstance(row, dict) or set(row) - {
-            "id",
-            "label",
-            "url",
-            "mode",
-            "compute_token_env",
-            "agent_token_env",
-            "reconnect_command",
-            "transport_profile",
-            "expected_peer_id",
-        }:
-            raise RiderError("invalid_device_configuration", 503)
-        id_ = row.get("id")
-        label = row.get("label")
-        url = row.get("url")
-        mode = row.get("mode", "device")
-        token_env = row.get("compute_token_env")
-        agent_env = row.get("agent_token_env", "RIDER_AGENT_TOKEN")
-        reconnect = row.get("reconnect_command")
-        profile = row.get("transport_profile", "secure")
-        peer = row.get("expected_peer_id")
-        if (
-            not isinstance(profile, str)
-            or profile not in {"secure", "trusted_lan"}
-            or peer is not None
-            and (not isinstance(peer, str) or not IDENTIFIER.fullmatch(peer))
-            or profile == "trusted_lan"
-            and (peer is None or mode != "device")
-        ):
-            raise RiderError("invalid_device_configuration", 503)
-        if reconnect is not None and (
-            not isinstance(reconnect, str)
-            or not reconnect.startswith("/")
-            or len(reconnect) > 4096
-            or any(ord(character) < 32 for character in reconnect)
-            or mode != "device"
-        ):
-            raise RiderError("invalid_device_configuration", 503)
-        if (
-            not isinstance(id_, str)
-            or not IDENTIFIER.fullmatch(id_)
-            or not isinstance(label, str)
-            or not 1 <= len(label) <= 128
-            or not isinstance(url, str)
-            or mode not in {"demo", "device"}
-            or not isinstance(agent_env, str)
-            or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", agent_env)
-            or token_env is not None
-            and (
-                not isinstance(token_env, str)
-                or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", token_env)
-            )
-            or os.getenv("RIDER_DEMO_ONLY", "").lower() in {"1", "true"}
-            and mode != "demo"
-        ):
-            raise RiderError("invalid_device_configuration", 503)
-        try:
-            parsed = urlsplit(url)
-            port = parsed.port
-        except ValueError as exc:
-            raise RiderError("invalid_device_configuration", 503) from exc
-        if (
-            port is not None
-            and not 1 <= port <= 65535
-            or parsed.scheme not in {"http", "https"}
-            or not parsed.hostname
-            or parsed.username
-            or parsed.password
-            or parsed.query
-            or parsed.fragment
-            or parsed.path not in {"", "/"}
-        ):
-            raise RiderError("invalid_device_configuration", 503)
-        if mode == "demo" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
-            raise RiderError("demo_requires_loopback", 503)
-        if id_ in {device.id for device in devices}:
-            raise RiderError("duplicate_device_id", 503)
-        devices.append(
-            Device(
-                id_,
-                label,
-                url.rstrip("/"),
-                mode,
-                token_env,
-                agent_env,
-                reconnect,
-                profile,
-                peer,
-            )
-        )
+        _append_configured_device(row, devices)
     return tuple(devices)
 
 
@@ -197,3 +109,122 @@ def persist_device(path: Path | None, device_id):
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
+
+
+def _append_configured_device(row, devices):
+    """Validate one device completely before appending it in operator order."""
+    if not isinstance(row, dict) or set(row) - {
+        "id",
+        "label",
+        "url",
+        "mode",
+        "compute_token_env",
+        "agent_token_env",
+        "reconnect_command",
+        "transport_profile",
+        "expected_peer_id",
+    }:
+        raise RiderError("invalid_device_configuration", 503)
+    id_ = row.get("id")
+    label = row.get("label")
+    url = row.get("url")
+    mode = row.get("mode", "device")
+    token_env = row.get("compute_token_env")
+    agent_env = row.get("agent_token_env", "RIDER_AGENT_TOKEN")
+    reconnect = row.get("reconnect_command")
+    profile = row.get("transport_profile", "secure")
+    peer = row.get("expected_peer_id")
+    _validate_transport(profile, peer, mode)
+    _validate_reconnect(reconnect, mode)
+    id_, label, url = _validate_device_values(
+        id_, label, url, mode, agent_env, token_env
+    )
+    _validate_address(url, mode)
+    if id_ in {device.id for device in devices}:
+        raise RiderError("duplicate_device_id", 503)
+    devices.append(
+        Device(
+            id_,
+            label,
+            url.rstrip("/"),
+            mode,
+            token_env,
+            agent_env,
+            reconnect,
+            profile,
+            peer,
+        )
+    )
+
+
+def _validate_transport(profile, peer, mode):
+    """Require the supported transport profile and trusted-LAN peer identity."""
+    if (
+        not isinstance(profile, str)
+        or profile not in {"secure", "trusted_lan"}
+        or peer is not None
+        and (not isinstance(peer, str) or not IDENTIFIER.fullmatch(peer))
+        or profile == "trusted_lan"
+        and (peer is None or mode != "device")
+    ):
+        raise RiderError("invalid_device_configuration", 503)
+
+
+def _validate_reconnect(reconnect, mode):
+    """Keep reconnection commands absolute, bounded and limited to devices."""
+    if reconnect is not None and (
+        not isinstance(reconnect, str)
+        or not reconnect.startswith("/")
+        or len(reconnect) > 4096
+        or any(ord(character) < 32 for character in reconnect)
+        or mode != "device"
+    ):
+        raise RiderError("invalid_device_configuration", 503)
+
+
+def _validate_device_values(
+    id_, label, url, mode, agent_env, token_env
+) -> tuple[str, str, str]:
+    """Validate device values and token variable names without reading tokens."""
+    if (
+        not isinstance(id_, str)
+        or not IDENTIFIER.fullmatch(id_)
+        or not isinstance(label, str)
+        or not 1 <= len(label) <= 128
+        or not isinstance(url, str)
+        or mode not in {"demo", "device"}
+        or not isinstance(agent_env, str)
+        or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", agent_env)
+        or token_env is not None
+        and (
+            not isinstance(token_env, str)
+            or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", token_env)
+        )
+        or os.getenv("RIDER_DEMO_ONLY", "").lower() in {"1", "true"}
+        and mode != "demo"
+    ):
+        raise RiderError("invalid_device_configuration", 503)
+    return id_, label, url
+
+
+def _validate_address(url, mode):
+    """Validate the original endpoint shape and loopback-only demo restriction."""
+    try:
+        parsed = urlsplit(url)
+        port = parsed.port
+    except ValueError as exc:
+        raise RiderError("invalid_device_configuration", 503) from exc
+    if (
+        port is not None
+        and not 1 <= port <= 65535
+        or parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in {"", "/"}
+    ):
+        raise RiderError("invalid_device_configuration", 503)
+    if mode == "demo" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
+        raise RiderError("demo_requires_loopback", 503)

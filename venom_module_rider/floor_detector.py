@@ -87,20 +87,7 @@ class FloorDetector:
             )
         # Darkness or flat/unusable capture must not become clearance.
         if rgb.mean() < 0.04 or rgb.std() < 0.01:
-            result = {
-                "state": "unknown",
-                "reason": "vision_image_quality",
-                "floor_fraction": 0.0,
-            }
-            if preview:
-                result["_preview"] = render_preview(
-                    rgb,
-                    np.zeros((1, 150, 4, 4)),
-                    corridor,
-                    semantic=semantic,
-                    draw_geometry=False,
-                )
-            return result
+            return _unusable_capture(rgb, corridor, semantic, preview)
         self._load()
         session = self.session
         if session is None:
@@ -305,3 +292,23 @@ def render_preview(
     stream = io.BytesIO()
     image.save(stream, format="JPEG", quality=85)
     return stream.getvalue()
+
+
+def _unusable_capture(rgb, corridor, semantic, preview):
+    """Describe a dark or flat capture without loading the segmentation model."""
+    import numpy as np
+
+    result = {
+        "state": "unknown",
+        "reason": "vision_image_quality",
+        "floor_fraction": 0.0,
+    }
+    if preview:
+        result["_preview"] = render_preview(
+            rgb,
+            np.zeros((1, 150, 4, 4)),
+            corridor,
+            semantic=semantic,
+            draw_geometry=False,
+        )
+    return result

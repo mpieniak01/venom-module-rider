@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 from typing import Literal
@@ -143,8 +144,7 @@ async def processed_native(request, connection, incoming):
         # awaits; a live Pi result above still pins its exact original source.
         incoming = await hub.frame(connection, timeout=0.5)
         payload = await hub.canonical_frame(connection, incoming)
-        if connection.closed:
-            raise RiderError("stream_epoch_changed", 409)
+        _require_open_stream(connection)
         ticket = native_ticket(domain, payload, source_headers(incoming, hub.clock()))
         age = incoming.age_ms(hub.clock())
         if age >= 300:
@@ -170,26 +170,8 @@ async def processed_native(request, connection, incoming):
         )
 
         async def infer():
-            cached = loop.preview(
-                domain.transport().device.id,
-                corridor=corridor,
-                revision=revision,
-            )
-            if cached and cached[2].get("source") == (
-                incoming.source.reference().model_dump(mode="json")
-            ):
-                return {**cached[2], "_preview": cached[1], "inference_ms": cached[3]}
-            return await loop.decide(
-                domain.transport().device.id,
-                frame,
-                payload,
-                with_preview=True,
-                input_ticket=ticket,
-                source_key=(
-                    incoming.source.identity(),
-                    incoming.source.image_transform.model_dump_json(),
-                ),
-                source_reference=incoming.source.reference().model_dump(mode="json"),
+            return await _infer_native_preview(
+                domain, loop, incoming, frame, payload, ticket, (corridor, revision)
             )
 
         result = dict(
@@ -212,8 +194,7 @@ async def processed_native(request, connection, incoming):
             raise RiderError(result["reason"], 503)
         elapsed = result["inference_ms"]
         result["preview_only"] = True
-    if connection.closed:
-        raise RiderError("stream_epoch_changed", 409)
+    _require_open_stream(connection)
     if incoming.age_ms(hub.clock()) >= MAX_FRAME_AGE_MS:
         raise RiderError("frame_stale", 409)
     headers = {
@@ -238,6 +219,7 @@ async def processed_native(request, connection, incoming):
 
 @router.get("/camera/stream/{kind}")
 async def browser_stream(kind: Literal["raw", "venom"], request: Request):
+    """Bind one browser response to the selected pipeline before producing parts."""
     domain, hub = request.app.state.rider, request.app.state.rider_stream
     pipeline = await native_pipeline(domain)
     if (
@@ -246,78 +228,129 @@ async def browser_stream(kind: Literal["raw", "venom"], request: Request):
     ):
         raise RiderError("vision_remote_disabled", 409)
     binding = hub.binding(domain, pipeline)
-
-    async def generate():
-        async with hub.lease(domain, pipeline) as connection:
-            previous = None
-            last_rejection_log = float("-inf")
-            while not await request.is_disconnected():
-                if hub.binding(domain, pipeline) != binding:
-                    return
-                frame = None
-                try:
-                    frame = await hub.frame(connection, after=previous, timeout=0.5)
-                    if kind == "venom":
-                        frame, payload, headers = await processed_native(
-                            request, connection, frame
-                        )
-                    else:
-                        payload = await hub.canonical_frame(connection, frame)
-                        if frame.age_ms(hub.clock()) >= MAX_FRAME_AGE_MS:
-                            return
-                        headers = source_headers(
-                            frame, hub.clock(), max_age_ms=MAX_FRAME_AGE_MS
-                        )
-                        if (
-                            connection.closed
-                            or hub.binding(domain, pipeline) != binding
-                        ):
-                            return
-                        ticket = native_ticket(domain, payload, headers)
-                        if ticket:
-                            headers["x-rider-capture-key"] = ticket
-                    if frame.source.identity() == previous:
-                        # A slower model must not retransmit a cached result as
-                        # a fresh source part or spin at full CPU.
-                        await asyncio.sleep(0.02)
-                        continue
-                    previous = frame.source.identity()
-                    yield multipart(payload, headers)
-                except RiderError as exc:
-                    if not connection.closed and exc.code in TRANSIENT_PREVIEW_ERRORS:
-                        # Skip work for this source; do not replay the preceding
-                        # JPEG or reset its age. The ingest continues latest-only.
-                        if frame is not None:
-                            previous = frame.source.identity()
-                        if hub.clock() - last_rejection_log >= 2:
-                            logger.warning(
-                                "Native %s preview skipped source: %s received=%s "
-                                "rejected=%s reconnects=%s",
-                                kind,
-                                exc.code,
-                                connection.received,
-                                connection.rejected,
-                                connection.reconnects,
-                            )
-                            last_rejection_log = hub.clock()
-                        await asyncio.sleep(0.02)
-                        continue
-                    logger.warning(
-                        "Native %s preview ended: %s received=%s rejected=%s "
-                        "reconnects=%s closed=%s",
-                        kind,
-                        exc.code,
-                        connection.received,
-                        connection.rejected,
-                        connection.reconnects,
-                        connection.closed,
-                    )
-                    return
-
-    import asyncio
-
     return StreamingResponse(
-        generate(),
+        _browser_parts(kind, request, domain, hub, pipeline, binding),
         media_type="multipart/x-mixed-replace; boundary=rider",
         headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
     )
+
+
+async def _browser_parts(kind, request, domain, hub, pipeline, binding):
+    """Yield distinct fresh parts while retaining the exact stream binding."""
+    async with hub.lease(domain, pipeline) as connection:
+        previous = None
+        last_rejection_log = float("-inf")
+        while not await request.is_disconnected():
+            if hub.binding(domain, pipeline) != binding:
+                return
+            frame = None
+            try:
+                frame = await hub.frame(connection, after=previous, timeout=0.5)
+                part = (
+                    await processed_native(request, connection, frame)
+                    if kind == "venom"
+                    else await _raw_browser_part(
+                        domain, hub, pipeline, binding, connection, frame
+                    )
+                )
+                if part is None:
+                    return
+                frame, payload, headers = part
+                if frame.source.identity() == previous:
+                    # A slower model must not retransmit a cached result as
+                    # a fresh source part or spin at full CPU.
+                    await asyncio.sleep(0.02)
+                    continue
+                previous = frame.source.identity()
+                yield multipart(payload, headers)
+            except RiderError as exc:
+                if _transient_error(connection, exc):
+                    # Skip work for this source; do not replay the preceding
+                    # JPEG or reset its age. The ingest continues latest-only.
+                    previous, last_rejection_log = _skipped_source(
+                        hub, kind, connection, exc, frame, previous, last_rejection_log
+                    )
+                    await asyncio.sleep(0.02)
+                    continue
+                logger.warning(
+                    "Native %s preview ended: %s received=%s rejected=%s "
+                    "reconnects=%s closed=%s",
+                    kind,
+                    exc.code,
+                    connection.received,
+                    connection.rejected,
+                    connection.reconnects,
+                    connection.closed,
+                )
+                return
+
+
+async def _raw_browser_part(domain, hub, pipeline, binding, connection, frame):
+    """Build one raw part or terminate when age or binding is no longer valid."""
+    payload = await hub.canonical_frame(connection, frame)
+    if frame.age_ms(hub.clock()) >= MAX_FRAME_AGE_MS:
+        return
+    headers = source_headers(frame, hub.clock(), max_age_ms=MAX_FRAME_AGE_MS)
+    if connection.closed or hub.binding(domain, pipeline) != binding:
+        return
+    ticket = native_ticket(domain, payload, headers)
+    if ticket:
+        headers["x-rider-capture-key"] = ticket
+    return frame, payload, headers
+
+
+def _skipped_source(hub, kind, connection, exc, frame, previous, last_rejection_log):
+    """Retire the rejected source and retain the existing warning throttle."""
+    if frame is not None:
+        previous = frame.source.identity()
+    if hub.clock() - last_rejection_log >= 2:
+        logger.warning(
+            "Native %s preview skipped source: %s received=%s "
+            "rejected=%s reconnects=%s",
+            kind,
+            exc.code,
+            connection.received,
+            connection.rejected,
+            connection.reconnects,
+        )
+        last_rejection_log = hub.clock()
+    return previous, last_rejection_log
+
+
+def _transient_error(connection, exc):
+    """Retry only the pre-existing transient errors on an open connection."""
+    return not connection.closed and exc.code in TRANSIENT_PREVIEW_ERRORS
+
+
+async def _infer_native_preview(
+    domain, loop, incoming, frame, payload, ticket, cache_policy
+):
+    """Reuse only the identical native source or infer within its original frame."""
+    corridor, revision = cache_policy
+    cached = loop.preview(
+        domain.transport().device.id,
+        corridor=corridor,
+        revision=revision,
+    )
+    if cached and cached[2].get("source") == (
+        incoming.source.reference().model_dump(mode="json")
+    ):
+        return {**cached[2], "_preview": cached[1], "inference_ms": cached[3]}
+    return await loop.decide(
+        domain.transport().device.id,
+        frame,
+        payload,
+        with_preview=True,
+        input_ticket=ticket,
+        source_key=(
+            incoming.source.identity(),
+            incoming.source.image_transform.model_dump_json(),
+        ),
+        source_reference=incoming.source.reference().model_dump(mode="json"),
+    )
+
+
+def _require_open_stream(connection):
+    """Reject retired stream epochs before publishing or annotating their data."""
+    if connection.closed:
+        raise RiderError("stream_epoch_changed", 409)
