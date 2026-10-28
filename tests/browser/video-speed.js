@@ -40,18 +40,27 @@ async page=>{
   throw new Error("source did not reach frame "+index+" at the selected playback speed");
  };
  await page.getByTestId("source-video-image").waitFor();
+ const waitReady=async()=>{
+  for(let attempt=0;attempt<150;attempt++){
+   if(await page.getByTestId("source-video-viewport").getAttribute("aria-busy")==="false")return;
+   await new Promise(resolve=>setTimeout(resolve,10));
+  }
+  throw new Error("video frame was not ready before starting playback");
+ };
+ await waitReady();
  await page.clock.pauseAt(new Date("2026-01-01T00:00:01Z"));
  for(const [rate,delay]of [["1",200],["2",100],["5",40]]){
-  await page.getByTestId("analysis-frame").fill("1");await waitSource(0);
+  await page.getByTestId("analysis-frame").fill("1");await waitSource(0);await waitReady();
   await page.getByTestId("source-video-speed").selectOption(rate);
   await page.getByTestId("source-video-play").click();
-  await page.clock.runFor(delay-1);
+  await page.clock.runFor(1);
+  await page.clock.runFor(delay-2);
   check(await page.getByTestId("source-video-image").getAttribute("data-source-index")==="0","playback advanced before its selected interval");
   await page.clock.runFor(2);await waitSource(1);
   await page.getByTestId("source-video-play").click();await page.clock.runFor(500);
   check(await page.getByTestId("source-video-image").getAttribute("data-source-index")==="1","paused playback advanced at speed "+rate);
  }
- await page.getByTestId("analysis-frame").fill("1");await waitSource(0);
+ await page.getByTestId("analysis-frame").fill("1");await waitSource(0);await waitReady();
  await page.getByTestId("source-video-speed").selectOption("1");
  await page.getByTestId("source-video-play").click();await page.clock.runFor(99);
  await page.getByTestId("source-video-speed").selectOption("5");
