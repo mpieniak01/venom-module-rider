@@ -142,11 +142,13 @@ def test_launcher_starts_only_host_api_and_ui_without_a_demo_listener(
             pass
 
     monkeypatch.setattr(runner.subprocess, "Popen", Process)
-    monkeypatch.setattr(
-        runner.urllib.request,
-        "urlopen",
-        lambda url, **kwargs: probes.append(url) or Response(),
-    )
+
+    class Opener:
+        def open(self, url, **kwargs):
+            probes.append(url)
+            return Response()
+
+    monkeypatch.setattr(runner, "local_api_opener", Opener)
 
     def finish(*args):
         raise KeyboardInterrupt

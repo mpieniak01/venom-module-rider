@@ -12,11 +12,11 @@ import socket
 import subprocess
 import sys
 import time
-import urllib.request
 from dataclasses import asdict
 from pathlib import Path
 
 from venom_module_rider.config import configured_devices
+from venom_module_rider.local_api import local_api_opener
 
 
 def targets(device_file, device_id):
@@ -233,6 +233,7 @@ def main():
                 indent=2,
             )
         )
+        opener = local_api_opener()
         deadline = time.monotonic() + 60
         ready = False
         while not stopping:
@@ -240,11 +241,9 @@ def main():
                 raise RuntimeError("Demo process stopped; inspect logs/r1-demo-*.log.")
             if not ready:
                 try:
-                    with urllib.request.urlopen(
-                        api_url + "/api/v1/rider/config", timeout=1
-                    ):
+                    with opener.open(api_url + "/api/v1/rider/config", timeout=1):
                         pass
-                    with urllib.request.urlopen(web_url + "/rider", timeout=2):
+                    with opener.open(web_url + "/rider", timeout=2):
                         pass
                     ready = True
                     print(

@@ -9,12 +9,7 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-from .local_api import local_api_origin
-
-
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        raise urllib.error.HTTPError(req.full_url, code, msg, headers, fp)
+from .local_api import local_api_opener, local_api_origin
 
 
 def request(base, path, body=None):
@@ -32,7 +27,7 @@ def request(base, path, body=None):
         data=encoded,
         headers=headers,
     )
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
+    opener = local_api_opener()
     with opener.open(operation, timeout=30) as response:
         return json.load(response)
 

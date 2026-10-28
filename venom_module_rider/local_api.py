@@ -1,6 +1,18 @@
 """Validate local-only API origins before sending operator credentials."""
 
+import urllib.error
+import urllib.request
 from urllib.parse import urlsplit
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(req.full_url, code, msg, headers, fp)
+
+
+def local_api_opener():
+    """Never consult ambient proxy settings or follow a local API redirect."""
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
 
 
 def local_api_origin(value: str) -> str:
