@@ -614,8 +614,12 @@ def _visit_json_float(self, value):
     """Charge finite or JSON nonfinite float spelling exactly."""
     if math.isfinite(value):
         self.consume(len(repr(value)))
+    elif math.isnan(value):
+        self.consume(3)
+    elif value > 0:
+        self.consume(8)
     else:
-        self.consume(3 if math.isnan(value) else 8 if value > 0 else 9)
+        self.consume(9)
 
 
 def _record_angle_reason(record, settings):
@@ -664,9 +668,7 @@ def _timing_observation(record, settings, accumulators):
     """Account one IMU observation while retaining previous-source and
     uniqueness order.
     """
-    previous, observed, counts, reasons, source_gaps, receipt_gaps, angular_rates = (
-        accumulators
-    )
+    previous, observed, counts, _, _, _, _ = accumulators
     if record["kind"] != "imu":
         return
     stream = (record["device_id"], record["kind"])
@@ -691,9 +693,7 @@ def _timing_observation(record, settings, accumulators):
 
 def _timing_pair(prior, record, timestamp, settings, accumulators):
     """Account intervals only after the stream predecessor is established."""
-    previous, observed, counts, reasons, source_gaps, receipt_gaps, angular_rates = (
-        accumulators
-    )
+    _, _, counts, reasons, source_gaps, receipt_gaps, angular_rates = accumulators
     if _identity(prior) != _identity(record):
         counts["identity_discontinuities"] += 1
         for key in ("source_session", "source_instance_id", "source_clock_domain"):

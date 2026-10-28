@@ -119,7 +119,7 @@ def assess_maps(
     import cv2
     import numpy as np
 
-    masks, shape, floor, obstacle, uncertain = _validate_spatial_masks(
+    _, shape, floor, obstacle, uncertain = _validate_spatial_masks(
         floor_mask, obstacle_mask, uncertain_mask, critical_mask
     )
     minimum = _fraction(params, "min_region_fraction")

@@ -412,7 +412,6 @@ def _guard_compute_device(request: Request):
         )
     except PermissionError as exc:
         raise RiderError("environment_read_only", 403) from exc
-    return
 
 
 def _guard_browser_headers(request: Request):

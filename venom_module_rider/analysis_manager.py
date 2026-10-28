@@ -192,7 +192,7 @@ class AnalysisManager:
             timeout_s = _analysis_timeout(row)
             async with asyncio.timeout(timeout_s):
                 async with self.slot:
-                    registered = await _admit_analysis(self, row, task_id, identity)
+                    registered = await _admit_analysis(self, task_id, identity)
                     row["queue_ms"] = max(
                         0, (self.store.samples.wall() - row["created"]) * 1000
                     )
@@ -422,7 +422,7 @@ def _analysis_timeout(row):
     return timeout_s
 
 
-async def _admit_analysis(self, row, task_id, identity):
+async def _admit_analysis(self, task_id, identity):
     """Wait for one admitted host slot while checking durable cancellation."""
     while True:
         if self.host_tasks.abandoned(task_id):

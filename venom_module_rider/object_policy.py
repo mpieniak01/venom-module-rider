@@ -288,7 +288,7 @@ def _object_support(self, item, raw, route, captured_s, params, supported):
     )
     qualified = confirmed and not item["clipped"]
     if qualified:
-        supported |= reliable
+        np.bitwise_or(supported, reliable, out=supported)
     history.update(current_tick=self.tick, current_s=captured_s)
     return {
         **item,

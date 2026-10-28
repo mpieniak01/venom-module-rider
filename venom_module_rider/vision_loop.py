@@ -786,13 +786,10 @@ class VisionLoop:
         temporal = self._observe_decision(run, result, source_reference)
         elapsed = (self.clock() - run.now) * 1000
         result = self._expire_inference(run, result, elapsed)
-        run.count = (
-            run.count + 1
-            if result["state"] == "clear"
-            else run.count
-            if temporal and temporal["action"] == "slow" and run.count >= 3
-            else 0
-        )
+        if result["state"] == "clear":
+            run.count = run.count + 1
+        elif not (temporal and temporal["action"] == "slow" and run.count >= 3):
+            run.count = 0
         run.state["count"] = run.count
         if self.closed:
             raise RiderError("module_closed", 503)
