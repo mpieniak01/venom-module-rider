@@ -4,6 +4,7 @@ import argparse
 import io
 import json
 import math
+import os
 import resource
 import time
 from collections import Counter
@@ -266,28 +267,43 @@ def main():
         apply_profile(args)
     except ValueError as error:
         parser.error(str(error))
-    if args.output.exists():
-        raise FileExistsError("report already exists")
     args.output.parent.mkdir(parents=True, exist_ok=True)
+    # Reserve the explicit report destination atomically. This also rejects a
+    # dangling symlink and preserves the existing report on a retry.
+    reserved = None
     try:
-        report = benchmark(args)
-    except Exception as error:
-        args.output.write_text(
-            json.dumps(
-                {
-                    "status": "failed",
-                    "backend": args.backend,
-                    "device": args.device,
-                    "quality_mode": args.quality_mode,
-                    "drive_supported": False,
-                    "error_type": type(error).__name__,
-                    "error": str(error)[:2000],
-                },
-                indent=2,
-            )
-        )
+        with args.output.open("x", encoding="utf-8") as output:
+            reserved = os.fstat(output.fileno())
+            try:
+                report = benchmark(args)
+            except Exception as error:
+                json.dump(
+                    {
+                        "status": "failed",
+                        "backend": args.backend,
+                        "device": args.device,
+                        "quality_mode": args.quality_mode,
+                        "drive_supported": False,
+                        "error_type": type(error).__name__,
+                        "error": str(error)[:2000],
+                    },
+                    output,
+                    indent=2,
+                )
+                raise
+            json.dump(report, output, indent=2, allow_nan=False)
+    except KeyboardInterrupt:
+        # Remove only the file we reserved, not a replacement at the same path.
+        try:
+            current = args.output.lstat()
+            if reserved and (current.st_dev, current.st_ino) == (
+                reserved.st_dev,
+                reserved.st_ino,
+            ):
+                args.output.unlink()
+        except FileNotFoundError:
+            pass
         raise
-    args.output.write_text(json.dumps(report, indent=2, allow_nan=False))
     print(json.dumps(report["summary"], indent=2))
 
 

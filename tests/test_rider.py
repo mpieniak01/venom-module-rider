@@ -1115,3 +1115,32 @@ async def test_goal_mutation_keeps_catalog_ttl_but_invalidates_runtime_cache(
     assert service.cache == {"/api/logic/catalog": catalog}
     assert service.cache["/api/logic/catalog"][0] == stamp
     await service.close()
+
+
+@pytest.mark.parametrize("operation", ["control", "mutate"])
+async def test_external_cancellation_is_not_misreported_as_device_change(
+    monkeypatch, operation
+):
+    service, _pi = domain()
+    await service.select("demo", service.session)
+    entered = asyncio.Event()
+
+    async def blocked(*args, **kwargs):
+        entered.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(service.client, "json", blocked)
+    if operation == "control":
+        task = asyncio.create_task(service.control({"action": "stop"}, None))
+    else:
+        task = asyncio.create_task(
+            service.mutate("/api/navigation/config", {}, service.session)
+        )
+    await asyncio.wait_for(entered.wait(), 2)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert not service.commands
+    assert not service.operations
+    assert service.native_admission_mutating == 0
+    await service.close()

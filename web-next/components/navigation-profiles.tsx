@@ -6,6 +6,13 @@ import type { Translator } from "../lib/i18n";
 import { Button, Field, Input, Pill, Select } from "./primitives";
 import styles from "../rider.module.css";
 
+// Remove a trailing translated unit without a backtracking regular expression.
+function withoutTrailingUnit(label: string): string {
+  if (!label.endsWith(")")) return label;
+  const start = label.indexOf("(", label.lastIndexOf(")", label.length - 2) + 1);
+  return start < 0 ? label : label.slice(0, start).trimEnd();
+}
+
 type Props = { editor?:{draft:JsonRecord|null;onChange:(value:JsonRecord)=>void}; client: RiderClient; policy: JsonRecord | null; goals: JsonRecord; locked: boolean; t: Translator; onApplied: (config: JsonRecord) => void; onRefresh: () => void; onPendingChange?: (pending: boolean) => void };
 export function NavigationProfiles({ client, policy, goals, locked, t, onApplied, onRefresh, onPendingChange, editor }: Props) {
   const [draft, setDraft] = useState<BehaviorDraft | null>(null);
@@ -97,10 +104,15 @@ export function NavigationProfiles({ client, policy, goals, locked, t, onApplied
           {group === "temporal" && <p className={styles.hint}>{t("behavior.temporalHint")}</p>}
           {group === "persistence" && <p className={styles.hint}>{t("behavior.persistenceHint", { required: String(values.obstacle_support_frames), window: String(values.obstacle_window_frames) })}</p>}
           {group === "objects" && <p className={styles.hint}>{t(selected === "room_fluid" ? "behavior.roomObjectsHint" : "behavior.objectsHint")}</p>}
-          <div className={styles.grid3}>{Object.entries(catalog.parameterSchema ?? {}).filter(([key, spec]) => spec.group === group && Object.hasOwn(values,key) && (key !== "pixel_confidence" || (policy?.perception as JsonRecord)?.engine === "segformer")).map(([key, spec]) => <Field key={key} label={t(key === "object_tracking_enabled" && selected === "room_fluid" ? "behavior.param.roomTrackingEnabled" : "behavior.param." + key).replace(spec.kind==="bool"?/$^/:/\s*\([^)]*\)$/, "")+(spec.kind==="bool"?"":` (${spec.min}–${spec.max}${key.endsWith("_ms")?" ms":""})`)}>
+          <div className={styles.grid3}>{Object.entries(catalog.parameterSchema ?? {}).filter(([key, spec]) => spec.group === group && Object.hasOwn(values,key) && (key !== "pixel_confidence" || (policy?.perception as JsonRecord)?.engine === "segformer")).map(([key, spec]) => {
+            const translated = t(key === "object_tracking_enabled" && selected === "room_fluid" ? "behavior.param.roomTrackingEnabled" : "behavior.param." + key);
+            const unit = key.endsWith("_ms") ? " ms" : "";
+            const rangeLabel = `${withoutTrailingUnit(translated)} (${spec.min}–${spec.max}${unit})`;
+            const label = spec.kind === "bool" ? translated : rangeLabel;
+            return <Field key={key} label={label}>
             {spec.kind === "bool" ? <input data-testid={"behavior-param-" + key} type="checkbox" checked={values[key] === true} onChange={e => editParameter(key, e.target.checked)}/>
               : <Input data-testid={"behavior-param-" + key} type="number" min={spec.min} max={spec.max} step={spec.step} value={typeof values[key] === "number" && Number.isFinite(values[key]) ? Number(values[key]) : ""} onChange={e => editParameter(key, e.target.value === "" ? Number.NaN : Number(e.target.value))}/>}
-          </Field>)}</div>
+          </Field>; })}</div>
         </fieldset>)}
         <p role="status" data-testid="behavior-custom-state">{t(custom ? "behavior.custom" : "behavior.profile." + selected, { profile: t("behavior.profile." + selected) })}</p>
       </div>}

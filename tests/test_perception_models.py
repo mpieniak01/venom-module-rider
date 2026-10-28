@@ -70,6 +70,20 @@ def test_receipt_and_content_both_required(catalog):
         catalog.ready(SEGFORMER)
 
 
+def test_receipt_write_does_not_follow_predictable_temporary_symlink(catalog, tmp_path):
+    provision(catalog)
+    private = tmp_path / "private.txt"
+    private.write_text("unchanged")
+    old_temporary = catalog.receipt_path(SEGFORMER).with_suffix(".tmp")
+    old_temporary.symlink_to(private)
+
+    catalog.save_receipt(SEGFORMER)
+
+    assert private.read_text() == "unchanged"
+    assert catalog.describe(SEGFORMER)["selectable"]
+    assert old_temporary.is_symlink()
+
+
 def test_manifest_cannot_escape_asset_root(catalog):
     provision(catalog)
     path = catalog.path(SEGFORMER) / "manifest.json"

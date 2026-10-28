@@ -244,7 +244,11 @@ class ComputeService:
             self.counters[state] += 1
         self._finish(job, state, error)
         job.output = None
-        if self.running == job.request.job_id and self.inference:
+        if (
+            self.running == job.request.job_id
+            and self.inference
+            and not self.inference.cancelling()
+        ):
             self.inference.cancel()
         with suppress(ValueError):
             self.pending.remove(job.request.job_id)
@@ -401,6 +405,13 @@ class ComputeService:
             and key not in lease.sequences
         ):
             raise RiderError("compute_session_limit", 429)
+        if (
+            not urgent
+            and self.worker is not None
+            and not self.worker.done()
+            and self.worker.cancelling()
+        ):
+            raise RiderError("compute_worker_stopping", 503)
         if request.task == "vision.describe":
             for job in list(self.jobs.values()):
                 if (
@@ -492,7 +503,35 @@ class ComputeService:
             raise RiderError("compute_output_unavailable", 409)
         return job.output, job.output_mime or "audio/wav"
 
+    def _cancel_pending(self):
+        while self.pending:
+            queued = self.jobs.get(self.pending[0])
+            if queued is None:
+                self.pending.popleft()
+            else:
+                self._cancel_job(queued, "cancelled", "compute_cancelled")
+
     async def _run(self):
+        try:
+            await self._run_jobs()
+        except asyncio.CancelledError:
+            # Cancellation can also arrive while the per-job drain is waiting.
+            # Keep ownership of the child and any queued jobs in that case.
+            running = self.jobs.get(self.running) if self.running else None
+            if running is not None and running.state not in TERMINAL:
+                self._cancel_job(running, "cancelled", "compute_cancelled")
+            self._cancel_pending()
+            if self.inference is not None:
+                if not self.inference.done() and not self.inference.cancelling():
+                    self.inference.cancel()
+                await asyncio.gather(self.inference, return_exceptions=True)
+            drain = getattr(self.engines, "drain", None)
+            if drain:
+                await drain()
+            self.running, self.inference = None, None
+            raise
+
+    async def _run_jobs(self):
         while self.pending and not self.closed:
             self._prune()
             if not self.pending:
@@ -557,6 +596,15 @@ class ComputeService:
                 job.output, job.output_mime = result.binary, result.content_type
                 self._finish(job, "succeeded")
             except asyncio.CancelledError:
+                # A superseded inference cancels only its child; cancellation of
+                # the queue worker itself must propagate after cleanup.
+                current = asyncio.current_task()
+                if current is not None and current.cancelling():
+                    self._cancel_job(job, "cancelled", "compute_cancelled")
+                    self._cancel_pending()
+                    if self.inference is not None:
+                        await asyncio.gather(self.inference, return_exceptions=True)
+                    raise
                 self._finish(job, "cancelled", "compute_cancelled")
             except Exception as exc:
                 self._finish(

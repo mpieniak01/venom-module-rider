@@ -364,7 +364,7 @@ class PiClient:
                     raise RiderError("pi_redirect_refused", 502)
                 try:
                     payload = json.loads(content, parse_constant=reject_constant)
-                except (ValueError, UnicodeError) as exc:
+                except ValueError as exc:
                     raise RiderError("invalid_pi_response", 502) from exc
                 if not isinstance(payload, dict):
                     raise RiderError("invalid_pi_response", 502)

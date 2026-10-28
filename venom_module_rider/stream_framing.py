@@ -84,7 +84,7 @@ class MultipartJpegParser:
                         if not re.fullmatch(r"[a-z0-9-]{1,64}", key) or key in headers:
                             raise ValueError("invalid or duplicate header")
                         headers[key] = value.strip()
-                except (ValueError, UnicodeError) as exc:
+                except ValueError as exc:
                     raise RiderError("stream_invalid_headers", 502) from exc
                 length = headers.get("content-length", "")
                 if not length.isascii() or not length.isdigit():

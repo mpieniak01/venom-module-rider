@@ -179,7 +179,7 @@ export function AnalysisPanel({session,t,language,sessionVideo,sessionPicker,ses
     try{setComparison(await apiFetch<JsonRecord>(BASE+"/compare?first="+selected+"&second="+other));}
     catch(err){setError(errorCode(err));}
   };
-  const number=(label:string,value:number,change:(value:number)=>void,min:number,max:number,step:number=1)=><Field label={t("analysis."+label)}><Input type="number" value={Number.isFinite(value)?value:""} min={min} max={max} step={step} onChange={event=>change(event.target.value===""?NaN:Number(event.target.value))}/></Field>;
+  const number=(label:string,value:number,change:(value:number)=>void,min:number,max:number,step:number=1)=><Field label={t("analysis."+label)}><Input type="number" value={Number.isFinite(value)?value:""} min={min} max={max} step={step} onChange={event=>change(event.target.value===""?Number.NaN:Number(event.target.value))}/></Field>;
   const rows:AnalysisRow[]=activeReport?(videoRun(activeReport)?videoRows??[]:Array.isArray(activeReport.rows)?activeReport.rows as AnalysisRow[]:[]):[];
   const row=record(rows[frame]);
   const summary=record(activeReport?.summary);

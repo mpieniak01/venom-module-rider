@@ -256,7 +256,7 @@ async def test_extract_rejects_corruption(tmp_path, payload, damage):
         "http://robot:8080",
         "http://127.0.0.1@robot:8080",
         "http://127.0.0.1/?token=x",
-        "https://localhost",
+        "https://robot:8080",
     ],
 )
 @pytest.mark.asyncio
@@ -283,3 +283,30 @@ def test_cli_errors_and_offline_extract(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(video, "run_record", fake)
     assert video.main(["check"]) == 0
     assert json.loads(capsys.readouterr().out) == {"ok": True}
+
+
+async def test_recorder_uses_normalized_loopback_without_proxy(monkeypatch):
+    seen = {}
+
+    class Client:
+        def __init__(self, **kwargs):
+            seen.update(kwargs)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+    async def snapshot(_client):
+        return {"fixture": True}
+
+    monkeypatch.setattr(video.httpx, "AsyncClient", Client)
+    monkeypatch.setattr(video, "snapshot", snapshot)
+    result = await video.run_record(
+        SimpleNamespace(url="http://localhost:8800/", action="check")
+    )
+    assert result == {"fixture": True}
+    assert seen["base_url"] == "http://127.0.0.1:8800"
+    assert seen["trust_env"] is False
+    assert seen["follow_redirects"] is False

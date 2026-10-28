@@ -8,7 +8,8 @@ export function readHoldTiming(value: unknown): HoldTiming | null {
   const row = value as Record<string, unknown>;
   const keys = ["click_threshold_ms", "hold_renewal_ms", "hold_timeout_ms", "request_ttl_ms"] as const;
   if (keys.some(key => typeof row[key] !== "number" || !Number.isFinite(row[key]) || (row[key] as number) <= 0)) return null;
-  if (!Array.isArray(row.supported) || !["pulse", "hold", "release"].every(mode => row.supported instanceof Array && row.supported.includes(mode))) return null;
+  const supported = row.supported;
+  if (!Array.isArray(supported) || !["pulse", "hold", "release"].every(mode => supported.includes(mode))) return null;
   if ((row.request_ttl_ms as number) > 500 || (row.hold_renewal_ms as number) >= (row.hold_timeout_ms as number)) return null;
   return row as HoldTiming;
 }

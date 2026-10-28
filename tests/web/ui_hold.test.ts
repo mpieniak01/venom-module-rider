@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import vm from "node:vm";
 import { test, type TestContext } from "node:test";
 import { HoldController, readHoldTiming, type HoldTiming, type MovementIntent } from "../../web-next/lib/hold-controller";
 import type { Direction } from "../../web-next/lib/model";
@@ -17,6 +18,8 @@ test("only descriptor timing with supported modes and bounded TTL is accepted", 
   assert.equal(readHoldTiming({ ...timing, request_ttl_ms: 501 }), null);
   assert.equal(readHoldTiming({ ...timing, hold_renewal_ms: timing.hold_timeout_ms }), null);
   assert.equal(readHoldTiming({ ...timing, supported: ["pulse"] }), null);
+  const crossRealmModes = vm.runInNewContext('["pulse", "hold", "release"]');
+  assert.ok(readHoldTiming({ ...timing, supported: crossRealmModes }));
 });
 test("a short click submits exactly one pulse and no later hold", async t => {
   const { controller, intents } = setup(t);

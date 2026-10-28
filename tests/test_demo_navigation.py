@@ -531,3 +531,36 @@ async def test_simulator_requires_disarm_before_switching_manual_to_navigation(r
     assert pi.owner == "navigation"
     pi.control({"action": "disarm"})
     await nav.close()
+
+
+async def test_replay_uses_session_token_and_local_api_only(monkeypatch):
+    monkeypatch.setenv("RIDER_COMPUTE_TOKEN", "fixture-session-token")
+    nav = ReplayNavigation(b"fixture", PermitFixture, api_url="http://localhost:8800/")
+    DemoPi(navigation=nav)
+    try:
+        assert nav.token == "fixture-session-token"
+        assert nav.api_url == "http://127.0.0.1:8800"
+    finally:
+        await nav.close()
+    for url in ("https://remote.invalid", "http://127.0.0.1@remote.invalid"):
+        with pytest.raises(ValueError, match="replay_requires_loopback"):
+            ReplayNavigation(b"fixture", PermitFixture, api_url=url)
+
+
+async def test_replay_omits_authorization_when_token_is_empty(monkeypatch):
+    monkeypatch.delenv("RIDER_COMPUTE_TOKEN", raising=False)
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(200, json={"action": "stop"})
+
+    nav = ReplayNavigation(b"fixture", PermitFixture, token="")
+    DemoPi(navigation=nav)
+    await nav.http.aclose()
+    nav.http = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+    try:
+        await nav._request({"sequence": 1}, b"jpg")
+        assert "Authorization" not in requests[0].headers
+    finally:
+        await nav.close()

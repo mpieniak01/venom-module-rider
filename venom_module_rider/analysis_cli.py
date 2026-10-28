@@ -9,8 +9,11 @@ import urllib.request
 import uuid
 from pathlib import Path
 
+from .local_api import local_api_opener, local_api_origin
+
 
 def request(base, path, body=None):
+    origin = local_api_origin(base)
     headers = {"Accept": "application/json"}
     token = os.getenv("RIDER_ACCESS_TOKEN")
     if token:
@@ -20,11 +23,12 @@ def request(base, path, body=None):
         headers["Content-Type"] = "application/json"
         encoded = json.dumps(body, allow_nan=False).encode()
     operation = urllib.request.Request(
-        base.rstrip("/") + "/api/v1/rider/analysis" + path,
+        origin + "/api/v1/rider/analysis" + path,
         data=encoded,
         headers=headers,
     )
-    with urllib.request.urlopen(operation, timeout=30) as response:
+    opener = local_api_opener(origin)
+    with opener.open(operation, timeout=30) as response:
         return json.load(response)
 
 
@@ -97,7 +101,11 @@ def main(argv=None):
         print(json.dumps(value, indent=2, allow_nan=False))
         return 0
     except urllib.error.HTTPError as exc:
-        print(json.dumps({"error": json.loads(exc.read()), "status": exc.code}))
+        try:
+            error = json.loads(exc.read())
+        except ValueError:
+            error = "analysis_http_error"
+        print(json.dumps({"error": error, "status": exc.code}))
         return 1
     except (OSError, ValueError):
         print(json.dumps({"error": "analysis_cli_failed"}))

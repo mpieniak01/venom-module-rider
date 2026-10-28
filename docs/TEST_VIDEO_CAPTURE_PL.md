@@ -37,6 +37,13 @@ Program wypisze katalog zapisu w
 Można podać nowy `--output /pełna/ścieżka`. Istniejących katalogów nie nadpisuje.
 `check` zgłosi `camera_not_active_mjpeg`, dopóki operator nie włączy kamery
 z istniejącym transportem MJPEG. Helper sam tego nie zmienia.
+Adres `--url` musi wskazywać lokalny origin HTTP lub HTTPS; klient nie korzysta
+z proxy środowiska ani nie podąża za przekierowaniami. Lokalny dev nadal używa
+HTTP. Dla HTTPS certyfikat i adres hosta są weryfikowane. Adres `localhost`
+jest zamieniany na `127.0.0.1`, który musi występować w SAN certyfikatu.
+Jeśli wystawcy nie ma
+w systemowym magazynie zaufania, podaj plik CA przez `RIDER_API_CA_FILE`.
+Ta opcja nie uruchamia ani nie rekonfiguruje serwera Venom.
 Jeśli API wymaga tokenu, używa wyłącznie zmiennej procesu `RIDER_ACCESS_TOKEN`;
 nie przekazuj tokenu w URL lub argumentach.
 

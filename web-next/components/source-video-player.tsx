@@ -88,7 +88,7 @@ export function SourceVideoPlayer({session,video,position,onPositionChange,rate,
       <Button data-testid="source-video-play" disabled={!!error||!current} onClick={()=>{if(playing)setHeldNext(nextKey);onPositionChange({index:index+1>=total?0:index,playing:!playing});}}>{t(playing?"analysis.video.pause":"analysis.video.play")}</Button>
       <Button data-testid="source-video-previous" disabled={index===0} onClick={()=>move(index-1)}>{t("samples.previous")}</Button>
       <Button data-testid="source-video-next" disabled={index+1>=total} onClick={()=>move(index+1)}>{t("samples.next")}</Button>
-      <span data-testid="source-video-position">{t("analysis.video.position",{frame:(shown?.index??index)+1,total,time:videoClock(visible?.source_time_s??NaN),duration:videoClock(meta?.duration_s??video.duration_s)})}</span>
+      <span data-testid="source-video-position">{t("analysis.video.position",{frame:(shown?.index??index)+1,total,time:videoClock(visible?.source_time_s??Number.NaN),duration:videoClock(meta?.duration_s??video.duration_s)})}</span>
     <Field label={t("analysis.video.speed")}><Select data-testid="source-video-speed" value={rate} onChange={event=>{const value=Number(event.target.value);if(value===1||value===2||value===5)onRateChange(value);}}>{[1,2,5].map(value=><option key={value} value={value}>×{value}</option>)}</Select></Field>
     <Field label={t("analysis.video.frame")}><Input aria-label={t("analysis.video.frame")} data-testid="analysis-frame" type="number" min={1} max={total} value={index+1} onChange={event=>{const value=Number(event.target.value)-1;if(Number.isSafeInteger(value)&&value>=0&&value<total)move(value);}}/></Field>
     </div>

@@ -12,11 +12,11 @@ import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
-from urllib.parse import urlsplit
 
 import httpx
 
 from .errors import RiderError
+from .local_api import local_api_origin, local_api_tls_context
 from .samples_archive import SampleArchive, canonical
 from .stream_contract import SourceDescription
 from .stream_framing import MultipartJpegParser, boundary_from_type
@@ -304,25 +304,17 @@ def extract(source, output):
 
 
 async def run_record(args):
-    url = urlsplit(args.url)
-    if (
-        url.scheme != "http"
-        or url.hostname not in {"127.0.0.1", "localhost", "::1"}
-        or url.username
-        or url.password
-        or url.query
-        or url.fragment
-        or url.path not in {"", "/"}
-    ):
-        raise ValueError("local_venom_url_required")
+    origin = local_api_origin(args.url)
     headers = {}
     token = os.getenv("RIDER_ACCESS_TOKEN")
     if token:
         headers["Authorization"] = "Bearer " + token
     async with httpx.AsyncClient(
-        base_url=args.url,
+        base_url=origin,
         headers=headers,
         follow_redirects=False,
+        trust_env=False,
+        verify=local_api_tls_context() if origin.startswith("https://") else True,
         timeout=httpx.Timeout(5, read=3),
     ) as client:
         if args.action == "check":

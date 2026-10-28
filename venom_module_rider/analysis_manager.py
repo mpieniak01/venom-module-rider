@@ -285,6 +285,7 @@ class AnalysisManager:
                     state = "succeeded"
         except asyncio.CancelledError:
             state, error = "cancelled", "analysis_cancelled"
+            raise
         except TimeoutError:
             error = "analysis_timeout"
         except Exception as exc:

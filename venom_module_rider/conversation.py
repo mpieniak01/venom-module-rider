@@ -337,7 +337,9 @@ class RiderConversation:
         except RiderError as exc:
             return message("failed", language) + exc.code
         except asyncio.CancelledError:
-            return message("expired", language)
+            if scope.revision != self.intent_epoch:
+                return message("expired", language)
+            raise
         finally:
             if scope.playback_id and scope.playback_transport:
                 try:

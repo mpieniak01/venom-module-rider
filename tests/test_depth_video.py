@@ -133,3 +133,40 @@ def test_production_rejects_dark_frame_anywhere_in_window(dark_index):
     assert result["reason"] == "vision_image_quality"
     assert result["image_quality_passed"] is False
     assert result["drive_supported"] is False
+
+
+def test_video_report_does_not_follow_output_inserted_during_replay(
+    tmp_path, monkeypatch
+):
+    from scripts import compare_depth_video as compare
+
+    target = tmp_path / "private"
+    target.write_text("original")
+    output = tmp_path / "report.json"
+
+    def replay(_args):
+        output.symlink_to(target)
+        return {"runs": []}
+
+    monkeypatch.setattr(compare, "replay", replay)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "compare_depth_video",
+            "--backend",
+            "da2",
+            "--model",
+            str(tmp_path / "model"),
+            "--manifest",
+            str(tmp_path / "manifest"),
+            "--transport",
+            str(tmp_path / "transport"),
+            "--video",
+            str(tmp_path / "video"),
+            "--output",
+            str(output),
+        ],
+    )
+    with pytest.raises(FileExistsError):
+        compare.main()
+    assert target.read_text() == "original"

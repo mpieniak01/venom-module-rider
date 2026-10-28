@@ -502,9 +502,7 @@ class RiderService:
                         recovery["state"] = "recovered"
             return {"connection": snapshot["connection"], "recovery": recovery}
 
-    async def validate_intent(
-        self, body, session, *, source="manual", require_ready=True
-    ):
+    async def validate_intent(self, body, session, *, source="manual"):
         self.check_session(session)
         # This gateway verifies request shape/session, never synthesizes ARM
         # from a status GET. The Pi executor owns all motion admission decisions.
@@ -590,9 +588,7 @@ class RiderService:
         client = self.transport()
         epoch = self.epoch
         if not stop:
-            safety = await self.validate_intent(
-                body, session, require_ready=action != "clear_estop"
-            )
+            safety = await self.validate_intent(body, session)
             if epoch != self.epoch:
                 raise RiderError("command_superseded")
             generation = safety["generation"]
@@ -639,6 +635,9 @@ class RiderService:
                     self.cache["/api/control/state"] = (time.monotonic(), previous)
             return result
         except asyncio.CancelledError as exc:
+            current = asyncio.current_task()
+            if current is not None and current.cancelling():
+                raise
             raise RiderError("command_superseded") from exc
         finally:
             self.commands.discard(task)
@@ -694,6 +693,9 @@ class RiderService:
                 raise RiderError("command_superseded")
             return result
         except asyncio.CancelledError as exc:
+            current = asyncio.current_task()
+            if current is not None and current.cancelling():
+                raise
             raise RiderError("stale_device_session") from exc
         finally:
             self.operations.discard(task)
