@@ -1,4 +1,4 @@
-name: Rider module SonarCloud
+name: Rider CI
 on:
   pull_request:
     branches: [main]
@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   module-independent:
-    name: Rider independent module tests
+    name: Backend module (pytest)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -33,7 +33,7 @@ jobs:
       - name: Run independent Rider tests
         run: make check-standalone STANDALONE_PYTHON=python
   module-web-independent:
-    name: Rider independent frontend tests
+    name: Frontend module (unit tests)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -48,7 +48,7 @@ jobs:
       - run: npm ci --prefix tests/web-independent
       - run: npm run --prefix tests/web-independent test:web:module
   host-web-integration:
-    name: Rider host frontend and browser fixtures
+    name: Frontend host (lint + browser tests)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -92,6 +92,7 @@ jobs:
           path: host/modules/venom-module-rider/test-results/browser-regressions/
           if-no-files-found: warn
   sonar:
+    name: Backend host (pytest + SonarCloud)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -136,7 +137,7 @@ jobs:
           PYTHONPATH=../..:. ../../.venv/bin/python -m pytest -q \
             --cov=scripts --cov-report=xml:test-results/scripts-coverage.xml \
             tests/test_runner.py tests/test_depth_candidates.py tests/test_depth_video.py \
-            tests/test_temporal_evidence.py
+            tests/test_temporal_evidence.py tests/test_mapping_research.py
       - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@v4

@@ -63,5 +63,9 @@ async page => {
     check(await page.getByTestId("automatic-speed").inputValue()==="0.11","preview synchronization overwrote the unsaved draft");
     check(calls.length===0,"read-only preview recovery mutated Pi");
     return {pass:true,revision:policy.revision,draft_preserved:true,robot_contacted:false};
-  } finally {await page.unroute("**/api/v1/rider/**");}
+  } finally {
+    // Stop polling before removing mocks, then wait for in-flight handlers.
+    await page.goto("about:blank");
+    await page.unrouteAll({behavior:"wait"});
+  }
 }

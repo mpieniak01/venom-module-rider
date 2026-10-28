@@ -8,7 +8,6 @@ import json
 import os
 import resource
 import sys
-import tempfile
 import time
 import uuid
 import zipfile
@@ -312,35 +311,86 @@ def audit(source, *, with_pose=False, catalog=None):
     return result
 
 
+def _open_publish_directory(directory: Path) -> int:
+    """Create and open an absolute path without following directory symlinks."""
+    if not directory.is_absolute() or ".." in directory.parts:
+        raise ValueError("mapping_output_outside_git_required")
+    if not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "O_DIRECTORY"):
+        raise ValueError("mapping_secure_directory_unsupported")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    current = os.open(directory.anchor, flags)
+    try:
+        for part in (*directory.parts[1:], None):
+            try:
+                os.stat(".git", dir_fd=current, follow_symlinks=False)
+            except FileNotFoundError:
+                pass
+            else:
+                raise ValueError("mapping_output_outside_git_required")
+            if part is None:
+                break
+            try:
+                os.mkdir(part, mode=0o700, dir_fd=current)
+            except FileExistsError:
+                pass
+            child = os.open(part, flags, dir_fd=current)
+            os.close(current)
+            current = child
+        return current
+    except BaseException:
+        os.close(current)
+        raise
+
+
 def publish(output, report):
-    """One immutable derived JSON, no source copies or replacement on retry."""
+    """Publish a new report relative to a verified, pinned directory handle."""
     output = Path(output)
-    if not output.is_absolute() or any(
-        p.is_symlink() or (p / ".git").exists() for p in [output, *output.parents]
+    if (
+        not output.is_absolute()
+        or ".." in output.parts
+        or ".git" in output.parts
+        or not output.name
     ):
         raise ValueError("mapping_output_outside_git_required")
     payload = canonical(report)
     if len(payload) > MAX_REPORT_BYTES:
         raise ValueError("mapping_report_limit")
-    output.parent.mkdir(parents=True, exist_ok=True)
-    if __import__("shutil").disk_usage(output.parent).free < 256 * 1024**2 + len(
-        payload
-    ):
-        raise ValueError("mapping_disk_full")
-    with tempfile.NamedTemporaryFile(dir=output.parent, delete=False) as stream:
-        temporary = Path(stream.name)
+    try:
+        directory = _open_publish_directory(output.parent)
+    except OSError as exc:
+        raise ValueError("mapping_output_outside_git_required") from exc
+    try:
+        if __import__("shutil").disk_usage(directory).free < 256 * 1024**2 + len(
+            payload
+        ):
+            raise ValueError("mapping_disk_full")
+        temporary = ".rider-mapping-" + uuid.uuid4().hex
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+        descriptor = os.open(temporary, flags, 0o600, dir_fd=directory)
         try:
-            stream.write(payload)
-            stream.flush()
-            os.fsync(stream.fileno())
-            os.link(temporary, output)
-            directory = os.open(output.parent, os.O_RDONLY)
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(payload)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.link(
+                temporary,
+                output.name,
+                src_dir_fd=directory,
+                dst_dir_fd=directory,
+                follow_symlinks=False,
+            )
             try:
-                os.fsync(directory)
-            finally:
-                os.close(directory)
+                named = os.stat(output.parent, follow_symlinks=False)
+            except OSError as exc:
+                raise ValueError("mapping_output_directory_changed") from exc
+            pinned = os.fstat(directory)
+            if (named.st_dev, named.st_ino) != (pinned.st_dev, pinned.st_ino):
+                raise ValueError("mapping_output_directory_changed")
+            os.fsync(directory)
         finally:
-            temporary.unlink(missing_ok=True)
+            os.unlink(temporary, dir_fd=directory)
+    finally:
+        os.close(directory)
     return output
 
 

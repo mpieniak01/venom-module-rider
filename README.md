@@ -268,8 +268,7 @@ separate operator authorization.
 
 ## GitHub Actions and SonarCloud
 
-The Rider repository owns its SonarCloud project and quality gate. The `Rider
-module SonarCloud` workflow runs on pull requests to `main`, pushes to `main`
+The Rider repository owns its SonarCloud project and quality gate. The `Rider CI` workflow runs on pull requests to `main`, pushes to `main`
 and manual dispatch. It checks out a pinned Venom host, runs the module Python
 quality checks and uploads their real coverage report before scanning the module
 sources, scripts, frontend and tests. The `SONAR_TOKEN` repository secret must

@@ -673,3 +673,54 @@ def test_replay_main_preserves_existing_summary(tmp_path, params):
         )
     assert summary.read_text() == "previous summary"
     assert not output.exists()
+
+
+def test_replay_map_rejects_symlink_swap_before_open(tmp_path, monkeypatch):
+    import os
+
+    from scripts.replay_navigation_policy import _read_maps
+
+    if not hasattr(os, "O_NOFOLLOW"):
+        pytest.skip("atomic symlink rejection requires O_NOFOLLOW")
+    source = tmp_path / "maps.npz"
+    other = tmp_path / "other.npz"
+    source.write_bytes(b"original")
+    other.write_bytes(b"private")
+    real_open = os.open
+
+    def swap(path, flags, *args, **kwargs):
+        if Path(path) == source:
+            source.unlink()
+            source.symlink_to(other)
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", swap)
+    with pytest.raises(ValueError, match="replay_maps_path"):
+        _read_maps(source)
+
+
+def test_replay_hashes_exact_map_bytes_despite_replacement(
+    tmp_path, params, monkeypatch
+):
+    import hashlib
+
+    import venom_module_rider.navigation_archive as archive
+
+    manifest = write_replay(tmp_path)
+    manifest.write_text(manifest.read_text().splitlines()[0] + "\n")
+    source = tmp_path / "maps.npz"
+    expected_map = hashlib.sha256(source.read_bytes()).hexdigest()
+    expected_manifest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+    original_read = archive._read_regular_file
+
+    def replace_after_read(path, maximum, error):
+        payload = original_read(path, maximum, error)
+        path.write_bytes(b"replacement after read")
+        return payload
+
+    monkeypatch.setattr(archive, "_read_regular_file", replace_after_read)
+    output = tmp_path / "results.jsonl"
+    summary = replay(manifest, params, output)
+    row = json.loads(output.read_text())
+    assert row["maps_sha256"] == expected_map
+    assert summary["manifest_sha256"] == expected_manifest
