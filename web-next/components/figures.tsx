@@ -123,12 +123,18 @@ export function FiguresPanel({client,t}:{client:RiderClient;t:Translator}){
    try{link.click();}finally{link.remove();setTimeout(()=>URL.revokeObjectURL(url),0);}
   }catch(error){setFailure(errorCode(error));}
  };
+ /** Explain failure, active run and unsupported selection in their existing order. */
+ const figureStatusText=()=>{
+  if(failure)return t("requestFailed")+" · "+failure;
+  if(run)return t("figures.phase."+str(run.phase))+" · "+scalarText(run.step??0)+"/"+scalarText(run.step_count??0);
+  return chosen&&!chosen.available?t("figures.unsupported"):t("figures.idle");
+ };
  if(!supported)return null;
  return <section className={styles.figurePanel} data-testid="figures-panel">
   <h3>{t("figures.title")}</h3><p className={styles.small}>{t("figures.trial")}</p>
   <Field label={t("figures.select")}><Select data-testid="figure-select" value={selected} disabled={busy||active} onChange={event=>{setSelected(event.target.value);setFailure("");}}>{recipes.map(row=><option key={row.id} value={row.id}>{t("figures.name."+row.id)}</option>)}</Select></Field>
   {chosen&&<div className={styles.figureDescription} data-testid="figure-plan"><p>{t("figures.description."+chosen.id)}</p><span>{t("figures.duration",{seconds:chosen.duration_ms/1000})}</span>{chosen.initial_height!==null&&<span>{t("figures.height",{value:chosen.initial_height})}</span>}{chosen.initial_roll!==null&&<span>{t("figures.roll",{value:chosen.initial_roll})}</span>}<span>{t("figures.strength",{factor:chosen.intensity_factor*100,limit:chosen.maximum_speed})}</span></div>}
   <div className={styles.flex}><Button tone="primary" size="large" data-testid="figure-start" disabled={!chosen?.available||!client.canMutate||!client.controlFresh||busy||active||!!client.busy} onClick={()=>void start()}>{t("figures.start")}</Button><Button tone="danger" size="large" data-testid="figure-cancel" disabled={!active||busy} onClick={()=>void cancel()}>{t("figures.cancel")}</Button>{runId&&<Button data-testid="figure-export" onClick={()=>void exportRun()}>{t("figures.export")}</Button>}</div>
-  <div className={styles.figureStatus} role="status" data-testid="figure-status">{failure?t("requestFailed")+" · "+failure:run?t("figures.phase."+str(run.phase))+" · "+scalarText(run.step??0)+"/"+scalarText(run.step_count??0):chosen&&!chosen.available?t("figures.unsupported"):t("figures.idle")}</div>
+  <output className={styles.statusBlock+" "+(styles.figureStatus)} aria-live="polite" data-testid="figure-status">{figureStatusText()}</output>
  </section>;
 }

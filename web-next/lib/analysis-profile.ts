@@ -61,7 +61,9 @@ export function analysisProfileSettings(
 ): { window: number; geometry: JsonRecord; perception: JsonRecord } {
   const models = perception.semantic_models === undefined ? {} : { semantic_models: structuredClone(record(perception.semantic_models)) };
   const depth = Object.fromEntries(["residual_limit", "outlier_limit", "slope_min"].filter(key => key in perception).map(key => [key, perception[key]]));
-  return semanticProfile(profile)
-    ? { window: 1, geometry: { mode: "image", fx: null, fy: null, radius_ratio: null, lookahead_ratio: 2 }, perception: { engine: "segformer", ...models } }
-    : { window: windowSize, geometry: { ...geometry }, perception: { ...depth, ...models, ...(profile?.id==="da2-default"&&perception.input_region!==undefined?{input_region:structuredClone(perception.input_region)}:{}), engine: "depth_plane" } };
+  if(semanticProfile(profile)){
+  return ({ window: 1, geometry: { mode: "image", fx: null, fy: null, radius_ratio: null, lookahead_ratio: 2 }, perception: { engine: "segformer", ...models } });
+}
+return ({ window: windowSize, geometry: { ...geometry }, perception: { ...depth, ...models, ...(profile?.id==="da2-default"&&perception.input_region!==undefined?{input_region:structuredClone(perception.input_region)}:{}), engine: "depth_plane" } });
+
 }

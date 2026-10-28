@@ -16,6 +16,10 @@ import type { Translator } from "../lib/i18n";
 import { Button, Details, Field, Input, Select } from "./primitives";
 import styles from "../rider.module.css";
 
+/** Replace one ROI coordinate without nesting another updater callback in the field. */
+function replaceCoordinate(values:number[],index:number,next:number):number[]{
+  return values.map((item,position)=>position===index?next:item);
+}
 const BASE="/api/v1/rider/analysis";
 const PENDING="rider.analysis.pending.v1";
 type Run=JsonRecord&{id:string;state:string;done:number;total:number;phase:string;created:number;error?:string};
@@ -29,7 +33,17 @@ function remembered(session:string):string {
 /** Keep frozen results separate from settings for a future offline study. */
 export function AnalysisPanel({session,t,language,sessionVideo,sessionPicker,sessionSummary}:{session:string;t:Translator;language:string;sessionVideo?:SessionVideo|null;sessionPicker?:ReactNode;sessionSummary?:ReactNode}) {
   /** Derive rows from the current captured render without effects. */
-  function analysisRows(){return (activeReport?(videoRun(activeReport)?videoRows??[]:Array.isArray(activeReport.rows)?activeReport.rows as AnalysisRow[]:[]):[]);}
+  function analysisRows(){if(activeReport){
+  if(videoRun(activeReport)){
+    return (videoRows??[]);
+  }
+  if(Array.isArray(activeReport.rows)){
+    return (activeReport.rows as AnalysisRow[]);
+  }
+  return ([]);
+}
+return ([]);
+}
 
   /** Derive validInput from the current captured render without effects. */
   function validAnalysisInput(){return (profile!=="da2-default"||(inputCovers(inputRegion,roi)&&(geometry!=="ground"||JSON.stringify(inputBounds(inputRegion))===JSON.stringify([0,0,1,1]))));}
@@ -40,7 +54,7 @@ export function AnalysisPanel({session,t,language,sessionVideo,sessionPicker,ses
   /** Render the FrozenResult section using this render's captured state. */
   function renderFrozenResult(){
     if(!activeReport)return null;
-    return (<div data-testid="analysis-result-snapshot" className={styles.sampleInfoCard}><SampleFacts items={[{label:t("analysis.runs"),value:selected.slice(0,8)},{label:t("analysis.profile"),value:str(frozen.profile)||str(record(record(activeReport.context).profile).id)},{label:t("behavior.title"),value:t("analysis.savedPolicy",{profile:t("behavior.profile."+str(savedBehavior.profile_id)),revision:scalarText(savedBehavior.profile_revision??"—")})}]}/><details className={styles.details}><summary>{t("analysis.resultScopeHelp")}</summary><p className={styles.hint} data-testid="analysis-result-scope">{t("analysis.resultScope")}</p></details>{settingsChanged&&<p role="status" data-testid="analysis-result-different">{t("analysis.resultDifferent")} <Button data-testid="analysis-new-from-settings" disabled={!validInput||busy||!!pending||!available?.installed||(inputSource==="video"&&!canVideo)} onClick={()=>void start()}>{t("analysis.newRun")}</Button></p>}</div>);
+    return (<div data-testid="analysis-result-snapshot" className={styles.sampleInfoCard}><SampleFacts items={[{label:t("analysis.runs"),value:selected.slice(0,8)},{label:t("analysis.profile"),value:str(frozen.profile)||str(record(record(activeReport.context).profile).id)},{label:t("behavior.title"),value:t("analysis.savedPolicy",{profile:t("behavior.profile."+str(savedBehavior.profile_id)),revision:scalarText(savedBehavior.profile_revision??"—")})}]}/><details className={styles.details}><summary>{t("analysis.resultScopeHelp")}</summary><p className={styles.hint} data-testid="analysis-result-scope">{t("analysis.resultScope")}</p></details>{settingsChanged&&<output className={styles.statusParagraph} aria-live="polite" data-testid="analysis-result-different">{t("analysis.resultDifferent")} <Button data-testid="analysis-new-from-settings" disabled={!validInput||busy||!!pending||!available?.installed||(inputSource==="video"&&!canVideo)} onClick={()=>void start()}>{t("analysis.newRun")}</Button></output>}</div>);
   }
 
   /** Render the AnalysisStatistics section using this render's captured state. */
@@ -77,7 +91,7 @@ export function AnalysisPanel({session,t,language,sessionVideo,sessionPicker,ses
     </div>
     <details className={styles.details}><summary>{t("analysis.parameters")}</summary><div className={styles.grid}>
       {inputSource==="samples"&&<>{number("count",count,setCount,1,200)}{number("offset",offset,setOffset,0,999)}</>}
-      {roi.map((value,index)=><span key={index}>{number("roi"+index,value,next=>setRoi(previous=>previous.map((item,i)=>i===index?next:item)),0,1,0.01)}</span>)}
+      {roi.map((value,index)=><span key={index}>{number("roi"+index,value,next=>setRoi(previous=>replaceCoordinate(previous,index,next)),0,1,0.01)}</span>)}
       {!semantic&&<><Field label={t("geometryMode")}><Select aria-label={t("geometryMode")} value={geometry} onChange={event=>setGeometry(event.target.value)}><option value="image">{t("geometryImage")}</option><option value="ground">{t("geometryGround")}</option></Select></Field>
       {geometry==="ground"&&<>{number("fx",fx,setFx,0.1,5,0.01)}{number("fy",fy,setFy,0.1,5,0.01)}{number("radius",radius,setRadius,0.05,5,0.01)}{number("lookahead",lookahead,setLookahead,0.25,8,0.05)}<p className={styles.hint}>{t("analysis.calibrationHint")}</p></>}
       {number("residual",residual,setResidual,0.01,0.15,0.001)}{number("outliers",outliers,setOutliers,0,0.02,0.001)}{number("slope",slope,setSlope,1,4,0.1)}{profile==="da2-default"&&<InputRegionControls value={inputRegion} onChange={setInputRegion} t={t}/>}</>}
@@ -91,7 +105,7 @@ export function AnalysisPanel({session,t,language,sessionVideo,sessionPicker,ses
     return (<div className={styles.sampleReviewBox} data-testid="analysis-actions-box">
     <Field label={t("analysis.runs")}><Select aria-label={t("analysis.runs")} data-testid="analysis-run" value={selected} onChange={event=>{setSourcePlayback(previous=>({...previous,playing:false}));setSelected(event.target.value);}}><option value="">{t("analysis.chooseRun")}</option>{runs.map(item=><option key={item.id} value={item.id}>{formatTime(item.created,language)} · {t("analysis.state."+item.state)} · {item.id.slice(0,8)}</option>)}</Select></Field>
     {run&&<div data-testid="analysis-status" className={styles.sampleRunStatus}><span aria-live="polite">{t("analysis.state."+run.state)} · {run.done}/{run.total}</span>{!terminal(run)&&<progress max={run.total} value={run.done}/>}{run.error&&<p role="alert"><code>{run.error}</code></p>}{!terminal(run)&&<Button data-testid="analysis-cancel" disabled={run.cancel_requested===true} onClick={()=>void cancel()}>{t(run.cancel_requested?"analysis.cancelling":"analysis.cancel")}</Button>}</div>}
-    {groundRequiresFull&&<p role="status" data-testid="analysis-input-region-message" className={styles.hint}>{t("inputRegion.groundRequiresFull")}</p>}
+    {groundRequiresFull&&<output aria-live="polite" data-testid="analysis-input-region-message" className={styles.statusParagraph+" "+(styles.hint)}>{t("inputRegion.groundRequiresFull")}</output>}
     <div className={styles.sampleAnalysisActions}><Button data-testid="analysis-start" tone="primary" disabled={!validInput||busy||!!pending||!available?.installed||(inputSource==="video"&&!canVideo)} onClick={()=>void start()}>{t(inputSource==="video"?"analysis.startVideo":"analysis.start")}</Button><Button onClick={()=>void refresh().catch(err=>setError(errorCode(err)))}>{t("refresh")}</Button></div>
       </div>);
   }

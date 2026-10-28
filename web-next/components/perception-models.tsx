@@ -14,12 +14,31 @@ type Props = {
   locked: boolean; onApplied: (config: JsonRecord) => void; onRefresh: () => void;
 };
 
+/** Retry a failed installation before offering verification of an installed model. */
+function installationActionLabel(installation:unknown,installed:unknown):string {
+  if(installation==="failed")return "perception.retry";
+  return installed?"perception.verify":"perception.install";
+}
 /** Resolve the selected local engine or host model without changing provider precedence. */
 function selectedCatalogModel(catalog:PerceptionCatalog|null):string {
   return catalog?.provider==="local"?catalog.local_models.find(model=>model.engine===catalog.local_engine)?.id??catalog.local_engine:catalog?.selection?.model_id??"";
 }
 /** Present and apply device-owned model choices with captured-session safeguards. */
 export function PerceptionModelsPanel({ client, t, language, policy, goals, locked, onApplied, onRefresh, embedded, beforeApply }: Props) {
+
+  /** Render CandidateInstallation from this render's captured facts. */
+  function renderCandidateInstallation(){
+    return (candidate && <div className={styles.stack}>
+        <p className={styles.small}>{t(draftProvider === "local" ? "perception.availability" : "perception.installation")}: {t("perception.install." + candidate.installation)} · {t("perception.revision")}: <code>{candidate.revision || "N/A"}</code> · {t("perception.provider")}: {candidate.execution_provider || "N/A"}</p>
+        {candidate.sha256 && <p className={styles.small}>{t("perception.artifact")}: <code>{candidate.sha256}</code></p>}
+        <div className={styles.flex}>
+          {readyToInstall && <Button data-testid="perception-install" disabled={!session || !!pending || !!readError} onClick={() => void run("install")} title={t("perception.installHint")}><Download size={14}/>{t(installationActionLabel(candidate?.installation,candidate?.installed))}</Button>}
+          {installing && <><output aria-live="polite">{t(["waiting", "cancelling"].includes(str(job.state)) ? "perception.job." + str(job.state) : "perception.install." + candidate.installation)} {typeof job.progress === "number" ? Math.round(Math.max(0, Math.min(100, job.progress))) + "%" : ""}</output><Button data-testid="perception-install-cancel" disabled={!session || !!pending} onClick={() => void run("cancel")}><Square size={14}/>{t("perception.cancel")}</Button></>}
+        </div>
+        {!!job.error && <p className={styles.loopError} role="alert">{t("perception.installFailed")} · <code>{scalarText(job.error)}</code></p>}
+      </div>);
+  }
+
   /** Present model selection status and errors separately from the operation lifecycle. */
   function renderModelFeedback(){
     return (<div className={styles.perceptionBody}>
@@ -30,8 +49,8 @@ export function PerceptionModelsPanel({ client, t, language, policy, goals, lock
     {renderModelSelection()}
     {!embedded&&<p className={styles.hint}>{t(draftProvider === "local" ? "perception.localOwned" : "perception.hostOwned")}</p>}
     {renderModelRuntime()}
-    {block && <p className={styles.hint} role="status" data-testid="perception-switch-block">{t(block)}</p>}
-    {candidate && modelBlock && <p className={styles.hint} role="status" data-testid="perception-model-block">{t(modelBlock)}{candidate.reason && <> · <code>{candidate.reason}</code></>}</p>}
+    {block && <output className={styles.statusParagraph+" "+(styles.hint)} aria-live="polite" data-testid="perception-switch-block">{t(block)}</output>}
+    {candidate && modelBlock && <output className={styles.statusParagraph+" "+(styles.hint)} aria-live="polite" data-testid="perception-model-block">{t(modelBlock)}{candidate.reason && <> · <code>{candidate.reason}</code></>}</output>}
     {!!candidate?.qualification_details.length && <ul className={styles.small}>{candidate.qualification_details.map(detail => <li key={detail}>{t(["external_data_missing", "preprocessing_unverified"].includes(detail) ? "perception.qualification." + detail : "perception.reason.review")}</li>)}</ul>}
     {catalog?.selection_error && <p className={styles.loopError} role="alert" data-testid="perception-selection-error">{t("perception.selectionReadFailed")} · <code>{catalog.selection_error}</code></p>}
     {draftProvider === "local" && catalog?.local_models_error && <p className={styles.loopError} role="alert">{t("perception.localReadFailed")} · <code>{catalog.local_models_error}</code></p>}
@@ -43,18 +62,6 @@ export function PerceptionModelsPanel({ client, t, language, policy, goals, lock
 
   /** Render ModelManagement with the captured state and unchanged event handlers. */
   function renderModelManagement(){
-  /** Render CandidateInstallation from this render's captured facts. */
-  function renderCandidateInstallation(){
-    return (candidate && <div className={styles.stack}>
-        <p className={styles.small}>{t(draftProvider === "local" ? "perception.availability" : "perception.installation")}: {t("perception.install." + candidate.installation)} · {t("perception.revision")}: <code>{candidate.revision || "N/A"}</code> · {t("perception.provider")}: {candidate.execution_provider || "N/A"}</p>
-        {candidate.sha256 && <p className={styles.small}>{t("perception.artifact")}: <code>{candidate.sha256}</code></p>}
-        <div className={styles.flex}>
-          {readyToInstall && <Button data-testid="perception-install" disabled={!session || !!pending || !!readError} onClick={() => void run("install")} title={t("perception.installHint")}><Download size={14}/>{t(candidate?.installation === "failed" ? "perception.retry" : candidate?.installed ? "perception.verify" : "perception.install")}</Button>}
-          {installing && <><span role="status">{t(["waiting", "cancelling"].includes(str(job.state)) ? "perception.job." + str(job.state) : "perception.install." + candidate.installation)} {typeof job.progress === "number" ? Math.round(Math.max(0, Math.min(100, job.progress))) + "%" : ""}</span><Button data-testid="perception-install-cancel" disabled={!session || !!pending} onClick={() => void run("cancel")}><Square size={14}/>{t("perception.cancel")}</Button></>}
-        </div>
-        {!!job.error && <p className={styles.loopError} role="alert">{t("perception.installFailed")} · <code>{scalarText(job.error)}</code></p>}
-      </div>);
-  }
 
     return (<details className={styles.details} data-testid="perception-model-details"><summary>{t("perception.manage")}</summary>
       {renderCandidateInstallation()}
@@ -74,7 +81,7 @@ export function PerceptionModelsPanel({ client, t, language, policy, goals, lock
       <Pill tone={runtime === "active" ? "good" : "warning"}>{t("perception.runtime." + runtime)}</Pill>
       {!embedded&&<><span>{t("perception.loaded")}: {active ?? "—"}</span>
       {catalog?.provider === "venom" && <span>{t("perception.effectiveProvider")}: {str(details.execution_provider) || "N/A"}</span>}
-      {str(details.error ?? "").startsWith("vision_cuda_") && <span role="status">{t("perception.cudaRequired")}</span>}
+      {str(details.error ?? "").startsWith("vision_cuda_") && <output aria-live="polite">{t("perception.cudaRequired")}</output>}
       <Pill>{t(selected?.drive_supported === false ? "perception.observeOnly" : "perception.noMotionGrant")}</Pill></>}
     </div>);
   }
@@ -99,9 +106,17 @@ export function PerceptionModelsPanel({ client, t, language, policy, goals, lock
   }
 
   /** Derive active from the current captured render without effects. */
-  function activeModelLabel(){return (catalog?.provider === "local"
-    ? runtime === "active" ? selected?.label : null
-    : selected?.loaded === true && (!details.active_model_id || details.active_model_id === selected.id) ? selected.label : null);}
+  function activeModelLabel(){if(catalog?.provider === "local"){
+  if(runtime === "active"){
+    return (selected?.label);
+  }
+  return (null);
+}
+if(selected?.loaded === true && (!details.active_model_id || details.active_model_id === selected.id)){
+  return (selected.label);
+}
+return (null);
+}
 
   /** Derive block from the current captured render without effects. */
   function selectionBlock(){
@@ -113,15 +128,46 @@ export function PerceptionModelsPanel({ client, t, language, policy, goals, lock
   }
 
   /** Derive modelBlock from the current captured render without effects. */
-  function candidateModelBlock(){return (!candidate ? "perception.block.policy" : !candidate.selectable ? draftProvider === "local" && candidate.installation === "unavailable" ? "perception.reason.localUnavailable" : perceptionReason(candidate.reason || "model_not_installed") : "");}
+  function candidateModelBlock(){if(!candidate){
+  return ("perception.block.policy");
+}
+if(!candidate.selectable){
+  if(draftProvider === "local" && candidate.installation === "unavailable"){
+    return ("perception.reason.localUnavailable");
+  }
+  return (perceptionReason(candidate.reason || "model_not_installed"));
+}
+return ("");
+}
 
   /** Derive legacyBlock from the current captured render without effects. */
-  function legacySelectionBlock(){return (conflict ? "perception.reason.conflict" : readError ? "perception.block.catalog" : perceptionSwitchBlock(client.status, client.controlFresh, goals, policy, locked || !!client.busy || !!pending || !!catalog?.switching || client.pipeline.busy));}
+  function legacySelectionBlock(){if(conflict){
+  return ("perception.reason.conflict");
+}
+if(readError){
+  return ("perception.block.catalog");
+}
+return (perceptionSwitchBlock(client.status, client.controlFresh, goals, policy, locked || !!client.busy || !!pending || !!catalog?.switching || client.pipeline.busy));
+}
 
   /** Derive runtime from the current captured render without effects. */
-  function selectedModelRuntime(){return (catalog?.provider === "local"
-    ? selected?.installation === "unavailable" ? "unavailable" : selected?.loaded === true && client.pipeline.status?.state === "active" && client.pipeline.status.active_profile?.analysis_location === "local" && client.pipeline.status.active_profile.local_engine === selected?.engine ? "active" : client.pipeline.busy ? "loading" : "unloaded"
-    : catalog?.provider === "venom" ? perceptionRuntime(catalog) : "unavailable");}
+  function selectedModelRuntime(){if(catalog?.provider === "local"){
+  if(selected?.installation === "unavailable"){
+    return ("unavailable");
+  }
+  if(selected?.loaded === true && client.pipeline.status?.state === "active" && client.pipeline.status.active_profile?.analysis_location === "local" && client.pipeline.status.active_profile.local_engine === selected?.engine){
+    return ("active");
+  }
+  if(client.pipeline.busy){
+    return ("loading");
+  }
+  return ("unloaded");
+}
+if(catalog?.provider === "venom"){
+  return (perceptionRuntime(catalog));
+}
+return ("unavailable");
+}
 
   const [catalog, setCatalog] = useState<PerceptionCatalog | null>(null);
   const workspace=useOperatorTuning();

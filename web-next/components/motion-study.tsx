@@ -13,6 +13,11 @@ import {Button,Details,Empty,Field,Input,Panel,Range,Select} from "./primitives"
 import {CommandTrace,MotionTrace,outputStream} from "./motion-trace";
 import styles from "../rider.module.css";
 
+/** Prefer retained-recording status before the current collection state. */
+function recordingStatusLabel(retired:boolean,active:boolean):string {
+  if(retired)return "study.retired";
+  return active?"study.recording":"study.globalHint";
+}
 function useTimeline(id:string,refresh:number|string){
   const key=id+":"+refresh;
   const [result,setResult]=useState<{key:string;value:MotionTimeline|null;error:string}>({key:"",value:null,error:""});
@@ -59,7 +64,7 @@ export function MotionStudy({recording,t,language}:{recording:StudyRecording;t:T
       <div className={styles.flex} style={{marginTop:12}}>
         <Button data-testid="study-refresh" onClick={()=>refresh(r=>r+1)}>{t("refresh")}</Button>
       </div>
-      <p role="status" className={styles.hint}>{t(retired?"study.retired":active?"study.recording":"study.globalHint")}</p>
+      <output aria-live="polite" className={styles.statusParagraph+" "+(styles.hint)}>{t(recordingStatusLabel(retired,active))}</output>
       {(error||capture.error||a.error||b.error)&&<p role="alert">{t("requestFailed")} · {error||capture.error||a.error||b.error}</p>}
       <div className={styles.grid}>{(["A","B"] as const).map(name=><Field key={name} label={t("study.session")+" "+name}>
         <Select data-testid={"study-session-"+name} value={name==="A"?aId:bId} onChange={e=>{if(name==="A"){setA({id:e.target.value,captureId:currentId});setAStream("");}else{setB(e.target.value);setBStream("");}}}>
@@ -83,8 +88,8 @@ export function MotionTimelineView({a,b,streamA,streamB,t,language}:{a:MotionTim
     {([["A",a],["B",b]] as const).map(([name,data])=>data&&<p key={name} data-testid={"study-quality-"+name} className={styles.hint}>{name}: {t("study.quality",{samples:Number(data.counts.imu_records??0),drops:Number(data.collection_status.dropped??0),failed:Number(data.collection_status.failed??0),gap:formatNumber(data.source_gaps_s.p95,language,3)})}</p>)}
     {([["A",streamA],["B",streamB]] as const).map(([name,stream])=>stream&&<div key={name} data-testid={"sampling-"+name} className={styles.hint}>{t("motion.sampling",{name,hz:formatNumber(stream.sampling_diagnostics?.observed_hz,language,2),gap:formatNumber(stream.sampling_diagnostics?.source_interval_max_s,language,3)})}{Array.isArray(stream.sampling_diagnostics?.pulses)&&stream.sampling_diagnostics.pulses.some(p=>record(p).insufficient===true)&&<p>{t("motion.sparse")}</p>}</div>)}
     <p className={styles.hint}>{t("motion.semantics")}</p>
-    {b&&(!a.context?.replace("motion-study-v1:","")||a.context!==b.context)&&<p role="status">{t("study.contextDifferent")}</p>}
-    {b&&trialA.event?.intent.direction!==trialB.event?.intent.direction&&<p role="status">{t("study.directionDifferent")}</p>}
+    {b&&(!a.context?.replace("motion-study-v1:","")||a.context!==b.context)&&<output className={styles.statusParagraph} aria-live="polite">{t("study.contextDifferent")}</output>}
+    {b&&trialA.event?.intent.direction!==trialB.event?.intent.direction&&<output className={styles.statusParagraph} aria-live="polite">{t("study.directionDifferent")}</output>}
     {!seriesA&&!seriesB&&<p className={styles.hint}>{t(trialA.peaks&&(!b||trialB.peaks)?"study.observedRange":"study.insufficient")}</p>}
     <Details t={t} value={{A:condition(trialA),...(b?{B:condition(trialB)}:{})}}/>
 </>;}
@@ -130,7 +135,7 @@ export function MotionTimelineView({a,b,streamA,streamB,t,language}:{a:MotionTim
       <Field label={t("study.time")+" · "+formatNumber(cursor,language,3)+" s"}><Range data-testid="study-time" min={min} max={Math.max(min+.001,max)} step="any" value={cursor} onChange={e=>chooseTime(nearestTime(times,Number(e.target.value)))} onKeyDown={e=>{if(["ArrowLeft","ArrowDown","ArrowRight","ArrowUp","Home","End"].includes(e.key)){e.preventDefault();if(e.key==="Home")chooseTime(min);else if(e.key==="End")chooseTime(max);else next(e.key==="ArrowRight"||e.key==="ArrowUp"?1:-1);}}}/></Field>
       <Field label={t("study.window")}><Select value={zoom} onChange={e=>setZoom(e.target.value)}><option value="all">{t("study.all")}</option>{[1,5,10].map(v=><option key={v} value={v}>{v} s</option>)}</Select></Field>
       <p className={styles.small} aria-live="polite">A: {readout(pA)}{b?<><br/>B: {readout(pB)}</>:null}</p>
-      {(reducedMotion||step.gap)&&<p role="status" className={styles.hint}>{t(step.gap?"attitude.gap":"attitude.reducedMotion")}</p>}
+      {(reducedMotion||step.gap)&&<output aria-live="polite" className={styles.statusParagraph+" "+(styles.hint)}>{t(step.gap?"attitude.gap":"attitude.reducedMotion")}</output>}
       <AttitudeComparison a={streamA} b={streamB} time={cursor} t={t} language={language}/>
       <CommandTrace stream={streamA} range={range} cursor={cursor} t={t} language={language}/>
       {streamB&&<CommandTrace series="B" stream={streamB} range={range} cursor={cursor} t={t} language={language}/>}

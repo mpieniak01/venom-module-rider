@@ -24,14 +24,27 @@ export function NavigationProfiles({ client, policy, goals, locked, t, onApplied
     <p className={styles.small} data-testid="behavior-current">{t("behavior.current", { profile: profileName(catalog.active), revision: scalarText(policy?.revision ?? "—") })}</p>
     {visibleDraft && <p className={styles.hint} data-testid="behavior-draft">{t("behavior.draft", { profile: profileName(selection) })}</p>}
     {!editor && !!(failure || block) && <p className={failure || conflict ? styles.loopError : styles.hint} role={failure || conflict ? "alert" : "status"} data-testid="behavior-message">{t(failure || block, { model: localModel })}</p>}
-    {saved !== null && policy?.revision === saved && <p className={styles.hint} role="status" data-testid="behavior-saved">{t("behavior.saved", { revision: scalarText(saved) })}</p>}
+    {saved !== null && policy?.revision === saved && <output className={styles.statusParagraph+" "+(styles.hint)} aria-live="polite" data-testid="behavior-saved">{t("behavior.saved", { revision: scalarText(saved) })}</output>}
     {local && !(failure || block === "behavior.localOnly") && <p className={styles.hint} data-testid="behavior-provider-hint">{t("behavior.localOnly", { model: localModel })}</p>}
     {renderProfileParameters()}
     </div>);
   }
 
   /** Derive the first applicable profile editing blocker from the current captured render without effects. */
-  function profileEditBlock(){return (invalid ? "behavior.invalidParameters" : !catalog.supported ? "behavior.unsupported" : conflict ? "behavior.conflict" : local && selected !== "legacy" ? "behavior.localOnly" : behaviorSwitchBlock(client.status, client.controlFresh, goals, locked || pending || !!client.busy));}
+  function profileEditBlock(){if(invalid){
+  return ("behavior.invalidParameters");
+}
+if(!catalog.supported){
+  return ("behavior.unsupported");
+}
+if(conflict){
+  return ("behavior.conflict");
+}
+if(local && selected !== "legacy"){
+  return ("behavior.localOnly");
+}
+return (behaviorSwitchBlock(client.status, client.controlFresh, goals, locked || pending || !!client.busy));
+}
 
   /** Render the ProfileParameters section using this render's captured state. */
   function renderProfileParameters(){
@@ -60,7 +73,7 @@ export function NavigationProfiles({ client, policy, goals, locked, t, onApplied
               : <Input data-testid={"behavior-param-" + key} type="number" min={spec.min} max={spec.max} step={spec.step} value={typeof values[key] === "number" && Number.isFinite(values[key]) ? Number(values[key]) : ""} onChange={e => editParameter(key, e.target.value === "" ? Number.NaN : Number(e.target.value))}/>}
           </Field>; })}</div>
         </fieldset>)}
-        <p role="status" data-testid="behavior-custom-state">{t(custom ? "behavior.custom" : "behavior.profile." + selected, { profile: t("behavior.profile." + selected) })}</p>
+        <output className={styles.statusParagraph} aria-live="polite" data-testid="behavior-custom-state">{t(custom ? "behavior.custom" : "behavior.profile." + selected, { profile: t("behavior.profile." + selected) })}</output>
       </div>}
     </>}
     <p className={styles.hint} data-testid="behavior-description">{t("behavior.description." + selected)}</p>

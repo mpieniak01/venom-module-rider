@@ -83,7 +83,11 @@ export function behaviorWrite(draft: BehaviorDraft, policy: JsonRecord | null, s
 }
 export function behaviorEditDraft(policy: JsonRecord, session: string): BehaviorDraft | null {
   const catalog = behaviorCatalog(policy), draft = behaviorDraft(policy, catalog.active.profile_id, session);
-  return draft && catalog.editable ? { ...draft, selection: catalog.active.profile_revision === 2 ? structuredClone(catalog.active) : draft.selection } : null;
+  if(draft && catalog.editable){
+  return ({ ...draft, selection: catalog.active.profile_revision === 2 ? structuredClone(catalog.active) : draft.selection });
+}
+return (null);
+
 }
 export function validBehaviorDraft(draft: BehaviorDraft, policy: JsonRecord | null): boolean {
   const catalog = behaviorCatalog(policy), overrides = draft.selection.overrides ?? {};

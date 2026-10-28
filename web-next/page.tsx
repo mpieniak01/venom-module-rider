@@ -68,7 +68,11 @@ function RiderToolbar({client,recording,t,focused,setFocused}:PageToolbarProps){
           <option value="">{t("selectDevice")}</option>
           {(["demo", "device"] as const).map(mode => {
             const devices = client.config?.devices.filter(device => device.mode === mode) ?? [];
-            return devices.length ? devices.map(device => <option key={device.id} value={device.id}>{t(mode === "demo" ? "environmentDemo" : "environmentProd")}{devices.length > 1 ? ` · ${device.label}` : ""}</option>) : <option key={mode} disabled value={`unavailable-${mode}`}>{t(mode === "demo" ? "environmentDemo" : "environmentProd")} · {t("notConfigured")}</option>;
+            if(devices.length){
+  return (devices.map(device => <option key={device.id} value={device.id}>{t(mode === "demo" ? "environmentDemo" : "environmentProd")}{devices.length > 1 ? ` · ${device.label}` : ""}</option>));
+}
+return (<option key={mode} disabled value={`unavailable-${mode}`}>{t(mode === "demo" ? "environmentDemo" : "environmentProd")} · {t("notConfigured")}</option>);
+
           })}
         </Select></label>
         <Pill tone={client.canMutate ? "good" : "warning"}>{client.canMutate ? <Wifi size={12} /> : <WifiOff size={12} />}{t(connection?.status ?? "unknown")}</Pill>

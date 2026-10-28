@@ -32,8 +32,30 @@ export function useImageReference(session:string){
   const save=async(client:RiderClient)=>{
     if(!state||!draft||!validReference(draft)||saving)return false;
     const origin=client.currentSession();setSaving(true);setError("");
-    try{const result=await client.mutate("/navigation/image-reference",{revision:state.revision,values:draft},"POST",true);if(!referenceOwner(client,origin))return false;const saved=readReference(data(result));if(!saved)throw new Error("invalid_reference");setState(saved);setDraft(null);setEditing(false);return true;}
-    catch(error){if(owner.current!==origin)return false;const conflict=errorCode(error).includes("conflict");if(conflict){await recoverReference(origin);}if(owner.current===origin)setError(conflict?"conflict":"reference.saveFailed");return false;}
+    try{
+      const result=await client.mutate("/navigation/image-reference",{revision:state.revision,values:draft},"POST",true);
+      if(!referenceOwner(client,origin)){
+        return false;
+      }
+      const saved=readReference(data(result));
+      if(!saved){
+        throw new Error("invalid_reference");
+      }
+      setState(saved);setDraft(null);setEditing(false);return true;
+    }
+    catch(error){
+      if(owner.current!==origin){
+        return false;
+      }
+      const conflict=errorCode(error).includes("conflict");
+      if(conflict){
+        await recoverReference(origin);
+      }
+      if(owner.current===origin){
+        setError(conflict?"conflict":"reference.saveFailed");
+      }
+      return false;
+    }
     finally{if(owner.current===origin)setSaving(false);}
   };
   const baseline=state?.values??initialReference(),values=draft??baseline;
@@ -65,7 +87,7 @@ export function ImageReferenceControls({reference,client,size,t}:{reference:Refe
         <label className={styles.flex}><input data-testid="reference-visible" disabled={unavailable} type="checkbox" checked={v.visible} onChange={e=>change({...v,visible:e.target.checked})}/>{t("reference.visible")}</label>
         <div className={styles.grid3}>{(["track_width_cm","robot_width_cm","camera_height_cm"] as const).map(key=><Field key={key} label={t("reference."+key)+" · cm"}><Input data-testid={"reference-"+key} disabled={unavailable} type="number" min=".1" step=".1" value={v[key]>0?v[key]:""} onChange={e=>change({...v,[key]:e.target.value===""?0:Number(e.target.value)})}/></Field>)}</div>
         <div className={styles.grid3}>{v.markers.map(([cm,y],i)=><Field key={i} label={t("reference.marker")+" "+(i+1)+" · cm"}><Input data-testid={"reference-marker-"+i} disabled={unavailable} type="number" min=".1" step=".1" value={cm>0?cm:""} onChange={e=>change({...v,markers:v.markers.map((p,j)=>j===i?[Number(e.target.value),y]:p)})}/></Field>)}</div>
-        <p className={styles.hint}>{t("reference.dragHint")}</p>{!referenceFitsFrame(v,size)&&<p className={styles.hint}>{t("reference.frameMismatch")}</p>}{!validReference(v)&&<p role="status">{t("reference.invalid")}</p>}
+        <p className={styles.hint}>{t("reference.dragHint")}</p>{!referenceFitsFrame(v,size)&&<p className={styles.hint}>{t("reference.frameMismatch")}</p>}{!validReference(v)&&<output className={styles.statusParagraph} aria-live="polite">{t("reference.invalid")}</output>}
         <div className={styles.flex}>
           <Button data-testid="reference-edit" disabled={unavailable} onClick={()=>{reference.setEditing(true);setOpen(false);}}>{t("reference.edit")}</Button>
           <Button data-testid="reference-save" tone="primary" disabled={!reference.state||!client.canMutate||reference.saving||!validReference(v)} onClick={()=>void reference.save(client).then(saved=>{if(saved)setOpen(false);})}>{t("reference.save")}</Button>

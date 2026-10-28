@@ -7,6 +7,11 @@ import { scalarText, formatNumber, formatTime, record, safetyOf, type JsonRecord
 import type { Translator } from "../lib/i18n";
 import styles from "../rider.module.css";
 
+/** An unobserved executor stays unknown even when an older moving flag is true. */
+function executorMotionLabel(observed:boolean,moving:boolean):string {
+  if(!observed)return "unknown";
+  return moving?"decisionMoving":"decisionStopped";
+}
 /** Present image analysis, Pi replies and executor evidence as separate observations. */
 export function LoopDecision({frame,state,detector,policy,status,t,language}:{frame?:Frame|null;state:JsonRecord;detector:JsonRecord;policy:JsonRecord|null;status:RiderStatus|null;t:Translator;language:string}) {
   /** Render the DecisionDiagnostics section using this render's captured state. */
@@ -28,7 +33,7 @@ export function LoopDecision({frame,state,detector,policy,status,t,language}:{fr
 
   /** Render the ExecutorDecision section using this render's captured state. */
   function renderExecutorDecision(){
-    return (<div className={styles.decisionCard}><span>{t("decisionExecutor")}</span><strong data-testid="pi-motion">{t(observed?moving?"decisionMoving":"decisionStopped":"unknown")}</strong><p>{t("owner")}: {scalarText(safety.owner??"—")}</p><p>{t("decisionReportedMotion")}</p></div>);
+    return (<div className={styles.decisionCard}><span>{t("decisionExecutor")}</span><strong data-testid="pi-motion">{t(executorMotionLabel(observed,moving))}</strong><p>{t("owner")}: {scalarText(safety.owner??"—")}</p><p>{t("decisionReportedMotion")}</p></div>);
   }
 
   /** Translate known maneuver replies while preserving the original GO/STOP labels. */
@@ -38,7 +43,20 @@ export function LoopDecision({frame,state,detector,policy,status,t,language}:{fr
     return Object.hasOwn(labels,view.reply)?t(labels[view.reply]):view.reply.toUpperCase();
   }
   /** Explain the reply without granting permission from model intent. */
-  function replyText(){return (view.reply==="go"?t("decisionForward")+" · "+scalarText(policy?.speed??"—")+" SDK · ≤ "+scalarText(policy?.max_motion_ms??"—")+" ms":view.reply==="slow"?slowFactor!==null?t("decisionSlowLease",{speed:formatNumber(Number(policy?.speed)*slowFactor,language,3),factor:scalarText(slowFactor),duration:scalarText(policy?.max_motion_ms??"—")}):t("decisionSlowUnconfirmed"):view.current?replyReason:t("decisionNoReply"));}
+  function replyText(){if(view.reply==="go"){
+  return (t("decisionForward")+" · "+scalarText(policy?.speed??"—")+" SDK · ≤ "+scalarText(policy?.max_motion_ms??"—")+" ms");
+}
+if(view.reply==="slow"){
+  if(slowFactor!==null){
+    return (t("decisionSlowLease",{speed:formatNumber(Number(policy?.speed)*slowFactor,language,3),factor:scalarText(slowFactor),duration:scalarText(policy?.max_motion_ms??"—")}));
+  }
+  return (t("decisionSlowUnconfirmed"));
+}
+if(view.current){
+  return (replyReason);
+}
+return (t("decisionNoReply"));
+}
   /** Render the ReplyDecision section using this render's captured state. */
   function renderReplyDecision(){
     return (<div className={styles.decisionCard}><span>{t("decisionReply")}</span><strong data-testid="pi-reply">{replyLabel()}</strong><p>{replyText()}</p></div>);

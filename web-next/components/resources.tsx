@@ -7,6 +7,17 @@ import type { RiderClient } from "../lib/use-rider";
 import { Button, Details, Empty, Field, Panel, Pill, Select } from "./primitives";
 import styles from "../rider.module.css";
 
+/** Keep offline evidence ahead of the reported on/off state. */
+function resourcePowerLabel(offline:unknown,power:string):string {
+  if(offline===true)return "offline";
+  const state=power.toLowerCase();
+  return ["on","off"].includes(state)?state:"unknown";
+}
+/** Preserve a measured false availability as busy instead of unknown. */
+function resourceAvailability(free:unknown):string {
+  if(free===true)return "free";
+  return free===false?"busy":"unknown";
+}
 function Goal({ goal, client, t }: { goal: JsonRecord; client: RiderClient; t: Translator }) {
   const [option, setOption] = useState<string | null>(null);
   const name = str(goal.name), schema = record(goal.option_schema), optionField = str(schema.field);
@@ -27,7 +38,7 @@ function Goal({ goal, client, t }: { goal: JsonRecord; client: RiderClient; t: T
 function Resource({ name, payload, client, t, language }: { name: string; payload: JsonRecord; client: RiderClient; t: Translator; language: string }) {
   /** Render ResourceDetails with the captured state and unchanged event handlers. */
   function renderResourceDetails(){
-    return (<div className={styles.resource}><div className={styles.flex}><Pill tone={row.free === true ? "good" : undefined}>{t(row.free === true ? "free" : row.free === false ? "busy" : "unknown")}</Pill><span className={styles.small}>{t("owner")}: {owner || "—"}</span></div>
+    return (<div className={styles.resource}><div className={styles.flex}><Pill tone={row.free === true ? "good" : undefined}>{t(resourceAvailability(row.free))}</Pill><span className={styles.small}>{t("owner")}: {owner || "—"}</span></div>
       <div className={styles.small}>{t("holders")}: {holders.length ? holders.map(holder => { const detail = record(holder); return str(detail.comm ?? detail.unit ?? detail.name) || scalarText(detail.pid ?? holder); }).join(", ") : "—"}</div>
       <div className={styles.small}>{t("consumers")}: {consumers.length ? consumers.map(consumer => str(record(consumer).name ?? record(consumer).unit) || scalarText(consumer)).join(", ") : "—"}</div>
       <div className={styles.flex}>{["lcd", "led"].includes(name) && <><Button disabled={!client.canMutate || !!client.busy} onClick={() => void client.mutate(`/resource/${encodeURIComponent(name)}`, { action: "on" })}>{t("enable")}</Button><Button disabled={!client.canMutate || !!client.busy} onClick={() => void client.mutate(`/resource/${encodeURIComponent(name)}`, { action: "off" })}>{t("disable")}</Button></>}
@@ -39,7 +50,20 @@ function Resource({ name, payload, client, t, language }: { name: string; payloa
   }
 
   /** Derive device resource power with native boolean precedence from the current captured render without effects. */
-  function resourcePower(){return (typeof activity.on === "boolean" ? (activity.on ? "on" : "off") : typeof row.on === "boolean" ? (row.on ? "on" : "off") : str(activity.state ?? state.state ?? row.power ?? row.state ?? row.status));}
+  function resourcePower(){if(typeof activity.on === "boolean"){
+  if(activity.on){
+    return ("on");
+  }
+  return ("off");
+}
+if(typeof row.on === "boolean"){
+  if(row.on){
+    return ("on");
+  }
+  return ("off");
+}
+return (str(activity.state ?? state.state ?? row.power ?? row.state ?? row.status));
+}
 
   const [confirmation, setConfirmation] = useState<string | null>(null);
   const row = data(payload), state = record(row.state), activity = record(row.activity);
@@ -48,7 +72,7 @@ function Resource({ name, payload, client, t, language }: { name: string; payloa
   const holders = Array.isArray(row.holders) ? row.holders : [];
   const consumers = Array.isArray(row.consumers) ? row.consumers : [];
   const unknown = row.ownership_known === false || row.free === null || row.diagnostic_available === false || !!row.error || row.offline === true;
-  return <Panel title={t(name)} extra={<Pill tone={row.offline === true ? "warning" : undefined}>{t(row.offline === true ? "offline" : ["on", "off"].includes(power.toLowerCase()) ? power.toLowerCase() : "unknown")}</Pill>}>
+  return <Panel title={t(name)} extra={<Pill tone={row.offline === true ? "warning" : undefined}>{t(resourcePowerLabel(row.offline,power))}</Pill>}>
     {renderResourceDetails()}<Details value={row} t={t} />
   </Panel>;
 }
@@ -60,7 +84,20 @@ export function Resources({ client, t, language }: { client: RiderClient; t: Tra
   }
 
   /** Derive diagnostic log text without changing source precedence from the current captured render without effects. */
-  function resourceLogText(){return (logs ? (Array.isArray(logs.lines) ? logs.lines.map(line=>scalarText(line)).join("\n") : typeof logs.logs === "string" ? logs.logs : typeof logs.output === "string" ? logs.output : JSON.stringify(logs, null, 2)) : "");}
+  function resourceLogText(){if(logs){
+  if(Array.isArray(logs.lines)){
+    return (logs.lines.map(line=>scalarText(line)).join("\n"));
+  }
+  if(typeof logs.logs === "string"){
+    return (logs.logs);
+  }
+  if(typeof logs.output === "string"){
+    return (logs.output);
+  }
+  return (JSON.stringify(logs, null, 2));
+}
+return ("");
+}
 
   const [diagnostics, setDiagnostics] = useState<JsonRecord | null>(null);
   const [unit, setUnit] = useState(""); const [logs, setLogs] = useState<JsonRecord | null>(null); const [reading, setReading] = useState(false);

@@ -26,67 +26,189 @@ import { ModelTuning } from "./model-tuning";
 import { Button, Checkbox, Field, Input, Panel, Pill, Select } from "./primitives";
 import styles from "../rider.module.css";
 
+/** Show apply-before-start ahead of a resumable automatic session. */
+function startActionLabel(dirty:boolean,priority:boolean,state:JsonRecord):string {
+  if(dirty)return "operator.applyStart";
+  return priority&&state.operator_control_version===1&&state.running===true?"cockpitResume":"cockpitStartTrial";
+}
+/** Keep a pending stop visible before the ordinary pause/stop action label. */
+function stopActionLabel(operation:string|null,priority:boolean):string {
+  if(operation==="stop")return "loopStopping";
+  return priority?"cockpitPause":"cockpitStop";
+}
+/** Explain policy loading, analysis-only mode and image acceptance in that order. */
+function preparationSummaryLabel(policy:JsonRecord|null,detector:JsonRecord,needsAcceptance:boolean):string {
+  if(!policy)return "loading";
+  if(detector.drive_supported===false)return "trialAnalysisMode";
+  return needsAcceptance?"workspace.acceptancePending":"workspace.acceptanceReady";
+}
+/** Keep confirmation ahead of preparation when image acceptance is already possible. */
+function preparationActionLabel(block:string|null,active:boolean):string {
+  if(!block)return "workspace.confirm";
+  return active?"workspace.preparation":"workspace.prepare";
+}
+/** Present an active journey before terminal warning phases without granting motion. */
+function journeyPhaseTone(active:boolean,phase:string):"good"|"warning"|undefined {
+  if(active&&phase!=="unknown")return "good";
+  return ["blocked","failed","unknown"].includes(phase)?"warning":undefined;
+}
+/** Preserve untranslated stop causes only for the generic stop-reason key. */
+function failureCauseSuffix(cause:string,key:string,translated:string):string {
+  if(!cause)return "";
+  return " · "+(key==="trialStopped"?cause:translated);
+}
+/** Resolve visible workspace labels without changing the selected workspace. */
+function workspaceModeLabel(mode:string):string {
+  if(mode==="manual")return "workspaceManual";
+  return mode==="journey"?"workspaceJourney":"workspaceAutomatic";
+}
 const geometryRanges = {fx:[.1,5],fy:[.1,5],cx:[0,1],cy:[0,1],radius_ratio:[.05,5],lookahead_ratio:[.25,8],max_heading_deg:[5,70]} as const;
 
+/** Preserve the terminal fault label before interpreting a previous start result. */
+function trialResultLabel(phase:string,result:string):string {
+  if(phase==="fault")return "trialEnded";
+  return result==="trialStarted"&&phase==="stopped"?"trialStopped":result;
+}
+/** Show warning phases without changing any underlying motion permission. */
+function navigationPhaseTone(phase:string):"good"|"warning"|undefined {
+  if(phase==="running")return "good";
+  return ["offline","unknown","fault"].includes(phase)?"warning":undefined;
+}
 /** Coordinate navigation drafts, live preview and bounded operator requests. */
 export function NavigationLoop({client,t,language,recording,operatorDetails,studyRecording}:{client:RiderClient;t:Translator;language:string;recording?:ReactNode;operatorDetails?:ReactNode;studyRecording?:StudyRecording}) {
-  /** Derive trialUnavailable from the current captured render without effects. */
-  function trialStartBlock(){return (record(policy?.avoidance).enabled===true&&!avoidanceSupported?"avoidanceUpdateRequired":trialBlock(draft??policy,runtime,detector,connected,false,client.status,false));}
 
-  /** Derive automaticActive from the current captured render without effects. */
-  function automaticControlActive(){return (priority ? operator.state === "active" || operator.state === "qualifying" : phase === "running" && goals.drive === true);}
 
-  /** Derive prepareAction from the current captured render without effects. */
-  function navigationPreparationReady(){return (needsAcceptance&&detector.drive_supported!==false&&(view==="automatic"&&!trialUnavailable||view==="journey"&&journeyUnavailable.length===0));}
-
-  /** Derive needsAcceptance from the current captured render without effects. */
-  function imageAcceptanceNeeded(){return (!!policy&&(!calibrationMatches(policy,detector)||view==="journey"&&record(policy.avoidance).sweep_verified!==true));}
-
-  /** Derive confirmJourney from the current captured render without effects. */
-  function journeyConfirmationReady(){return (!!policy&&(!calibrationMatches(policy,detector)||record(policy.avoidance).sweep_verified!==true)
-    &&!acceptanceBlock&&detector.loaded===true&&/^[a-f0-9]{64}$/.test(str(detector.sha256))
-    &&!nonAcceptanceJourneyBlock);}
-
-  /** Derive visibleError from the current captured render without effects. */
-  function visibleRequestError(){return (error.includes("navigation_trial_cancelled")||diagnostic.requestErrorCovered||preparation?.source==="pi"&&hasPreparationError||errorRun&&sharedTrial?.run_id===errorRun?"":error);}
-
-  /** Derive acceptanceBlock from the current captured render without effects. */
-  function imageAcceptanceBlock(){return (dirty?"loopUnsaved":view==="journey"&&(record(policy?.avoidance).enabled!==true||record(policy?.avoidance).protocol_version!==3)?"journeyAvoidanceRequired":calibrationFrameBlock(client.camera,client.cameraStream,loopState,policy)|| (imageDecision.vision!=="go"?"calibrationClearFrame":""));}
-
-  /** Explain journey failures before prerequisites and current journey status. */
-  function journeyCommandReason():string {
-    if(journeyError)return t("journeyRequestError")+" · "+journeyError;
-    if(readError)return readError;
-    if(nonAcceptanceJourneyBlock||journeyUnavailable[0])return journeyBlockLabel(nonAcceptanceJourneyBlock||journeyUnavailable[0]);
-    if(journey.reason&&["failed","blocked"].includes(journey.phase))return t(["decision_timeout","decision_invalid_or_expired"].includes(journey.reason)?"workspace.journeyAnalysisExpired":trialStopReasonKey(journey.reason));
-    return journey.active&&journey.reason?t("state")+": "+journey.reason:"";
+  /** Keep operation labels ahead of phase labels in the original priority order. */
+  function loopPhaseLabel():string {
+    if(operation==="stop")return "loopStopping";
+    if(phase==="fault")return "loopPhase.fault";
+    if(operation==="check")return "trialChecking";
+    return operation==="start"?"loopStarting":"loopPhase."+phase;
   }
-  /** Preserve automatic-mode fallback precedence when a translated message is empty. */
-  function automaticCommandReason():string {
-    let reason=visibleError||readError;
-    if(!reason&&preparation?.state==="failed")reason=t(trialPreparationErrorKey(preparation));
-    if(!reason&&trialUnavailable)reason=t(trialUnavailable);
-    if(!reason&&displayedStopReason)reason=t(trialStopReasonKey(displayedStopReason));
-    return reason;
+
+
+  /** Render ExecutorPermission from this render's captured facts. */
+  function renderExecutorPermission(){
+    return (<strong data-testid="venom-permission" className={permission.venom===true?styles.verdictGo:undefined}>{t(executionHeadline(loopState,goals,client.status,permission))}</strong>);
   }
-  /** Explain the current mode before the final loading override. */
-  function currentCommandReason():string {
-    const reason=view==="journey"?journeyCommandReason():view==="automatic"?automaticCommandReason():"";
-    return loading&&!policy&&view!=="manual"?t("loading"):reason;
+
+
+  /** Render AutomaticState with the captured state and unchanged event handlers. */
+  function renderAutomaticState(){
+
+    return (<output className={styles.statusBlock+" "+(styles.loopStatus)} aria-live="polite" data-testid="loop-state">
+      {priority && <Pill>{t("operatorState." + str(operator.state ?? "idle"))}</Pill>}
+      <Pill tone={navigationPhaseTone(phase)}>{t(loopPhaseLabel())}</Pill>
+      <strong>{t(goals.drive===true?"trialActiveMode":"trialAnalysisMode")}</strong>
+      <span className={styles.small} data-testid="active-perception-method">{t("perceptionMethod")}: {t(detector.purpose==="relative_ground_geometry"?"perceptionGeometry":"perceptionSemantic")}</span>
+      {renderExecutorPermission()}
+    </output>);
   }
-  /** Explain image preparation only when no higher-priority request or read failed. */
-  function preparationCommandReason(previous:string):string {
-    if(prepareAction&&!dirty&&(view!=="journey"||!nonAcceptanceJourneyBlock)&&!journeyError&&!visibleError&&!readError)return t(!active||loopState.running!==true?"workspace.prepareImage":acceptanceBlock||"workspace.confirmReady");
-    return previous;
+
+
+  /** Render AutomaticActions with the captured state and unchanged event handlers. */
+  function renderAutomaticActions(){
+    return (<div className={styles.loopActions}>
+      <Button tone="primary" size="large" data-testid="loop-start" title={t("trialSimpleHelp")} aria-describedby="rider-trial-help" disabled={!!trialUnavailable||!operatorApply.valid||operatorDraft.modelPending&&!operatorDraft.modelReady||!!operation||!!client.busy||loading||automaticActive||journey.active} onClick={()=>void runTrial()}><Play size={18}/>{t(startActionLabel(dirty,priority,loopState))}</Button>
+      <Button tone="caution" size="large" data-testid="loop-stop" title={t(priority ? "operatorPauseHint" : "loopStop")} disabled={!connected||operation==="stop"||!priority&&operation==="save"} onClick={()=>void stop()}><Square size={18}/>{t(stopActionLabel(operation,priority))}</Button>
+      {detector.drive_supported!==false&&<span className={styles.small} data-testid="trial-plan">{scalarText(policy?.speed??"—")} SDK · ≤ {scalarText(policy?.max_motion_ms??"—")} ms</span>}
+    </div>);
   }
-  /** Render the WorkspaceDetails section using this render's captured state. */
-  function renderWorkspaceDetails(){
-  /** Render AutomaticDetails from this render's captured facts. */
-  function renderAutomaticDetails(){
-  /** Render TrialResult without changing the established condition or callbacks. */
-  function renderTrialResult(){
-    return (!!trialResult&&!displayedStopReason&&!(trialResult==="trialStarted"&&phase==="running")&&<p className={styles.hint} role="status" data-testid="trial-result">{t(phase==="fault"?"trialEnded":trialResult==="trialStarted"&&phase==="stopped"?"trialStopped":trialResult)}</p>);
+
+
+  /** Render trial-acceptance using current captured navigation facts. */
+  function renderImageAcceptance(){
+    return (policy&&(!calibrationMatches(policy,detector)||view==="journey"&&record(policy.avoidance).sweep_verified!==true)&&detector.drive_supported!==false&&<div className={styles.stack} data-testid="trial-acceptance">
+      <p className={styles.hint} data-testid="calibration-acceptance-help">{t(view==="journey"?"journeyAcceptanceHelp":"trialAcceptanceHelp")}</p>
+      {!!acceptanceBlock&&<output className={styles.statusParagraph+" "+(styles.hint)} aria-live="polite" data-testid="calibration-preview-block">{t(acceptanceBlock)}</output>}
+      <Button data-testid="trial-accept" disabled={!connected||!!operation||loading||!!acceptanceBlock||goals.drive===true} onClick={()=>void acceptTrial()}>{t(view==="journey"?"journeyAccept":"trialAccept")}</Button>
+    </div>);
   }
+
+
+
+  /** Render ground-geometry-settings using current captured navigation facts. */
+  function renderGroundGeometry(){
+    return (record(draft?.avoidance).protocol_version===3&&<fieldset className={styles.stack} disabled={settingsLocked} data-testid="ground-geometry-settings"><legend>{t("geometrySettings")}</legend>
+          <Field label={t("geometryMode")}><Select data-testid="geometry-mode" value={scalarText(record(record(draft?.avoidance).geometry).mode??"image")} onChange={e=>draft&&setDraft({...draft,avoidance:{...record(draft.avoidance),geometry:{...record(record(draft.avoidance).geometry),mode:e.target.value},sweep_verified:false}})}><option value="ground">{t("geometryGround")}</option><option value="image">{t("geometryImage")}</option></Select></Field>
+          <p className={styles.hint} data-testid="geometry-mode-help">{t(record(record(draft?.avoidance).geometry).mode==="ground"?"geometryCalibrationHelp":"geometryImageHelp")}</p>
+          {record(record(draft?.avoidance).geometry).mode==="ground"&&<><p className={styles.hint}>{t("geometryHelp")}</p>{(["fx","fy","cx","cy","radius_ratio","lookahead_ratio","max_heading_deg"] as const).map(key=><Field key={key} label={t("geometry."+key)+` (${geometryRanges[key][0]}–${geometryRanges[key][1]})`}><Input type="number" min={geometryRanges[key][0]} max={geometryRanges[key][1]} step=".01" value={record(record(draft?.avoidance).geometry)[key]===null?"":Number(record(record(draft?.avoidance).geometry)[key])} onChange={e=>draft&&setDraft({...draft,avoidance:{...record(draft.avoidance),geometry:{...record(record(draft.avoidance).geometry),[key]:e.target.value===""?null:Number(e.target.value)},sweep_verified:false}})}/></Field>)}</>}
+        </fieldset>);
+  }
+
+
+  /** Render avoidance-settings using current captured navigation facts. */
+  function renderAvoidanceSettings(){
+    return ("avoidance" in (draft??{})&&<fieldset disabled={settingsLocked} className={styles.stack} data-testid="avoidance-settings"><legend>{t("avoidanceSettings")}</legend>{!avoidanceSupported&&<p>{t("avoidanceUpdateRequired")}</p>}
+          <label className={styles.check}><Checkbox type="checkbox" disabled={!avoidanceSupported} checked={record(draft?.avoidance).enabled===true} onChange={e=>draft&&setDraft({...draft,mode:"observe",avoidance:{...record(draft.avoidance),enabled:e.target.checked,protocol_version:3,geometry:record(draft.avoidance).geometry??{mode:"ground",fx:null,fy:null,cx:.5,cy:.5,radius_ratio:null,lookahead_ratio:2,max_heading_deg:45},max_stalled_corrections:record(draft.avoidance).max_stalled_corrections??2,progress_min_delta:record(draft.avoidance).progress_min_delta??.03,sweep_verified:false}})}/>{t("avoidanceEnabled")}</label>
+          <label className={styles.check}><Checkbox type="checkbox" checked={record(draft?.avoidance).mirrored===true} onChange={e=>draft&&setDraft({...draft,avoidance:{...record(draft.avoidance),mirrored:e.target.checked,sweep_verified:false}})}/>{t("avoidanceMirrored")}</label>
+          {view!=="journey"&&<label className={styles.check}><Checkbox type="checkbox" checked={record(draft?.avoidance).sweep_verified===true} onChange={e=>draft&&setDraft({...draft,avoidance:{...record(draft.avoidance),sweep_verified:e.target.checked}})}/>{t("avoidanceSweepAcceptance")}</label>}
+          {view==="journey"&&<p className={styles.hint}>{t(record(policy?.avoidance).sweep_verified===true?"journeySweepSaved":"journeySweepHelp")}</p>}
+          <Field label={t("avoidanceStalled")+" (1–5)"}><Input type="number" min="1" max="5" step="1" value={Number(record(draft?.avoidance).max_stalled_corrections??2)} onChange={e=>draft&&setDraft({...draft,avoidance:{...record(draft.avoidance),max_stalled_corrections:Number(e.target.value),sweep_verified:false}})}/></Field>
+          <Field label={t("avoidanceProgress")+" (0–0.3)"}><Input type="number" min="0" max=".3" step=".01" value={Number(record(draft?.avoidance).progress_min_delta??.03)} onChange={e=>draft&&setDraft({...draft,avoidance:{...record(draft.avoidance),progress_min_delta:Number(e.target.value),sweep_verified:false}})}/></Field>
+          <Field label={t("avoidanceMaxTurns")+" (1–5)"}><Input type="number" min="1" max="5" step="1" value={Number(record(draft?.avoidance).max_turn_pulses)} onChange={e=>draft&&setDraft({...draft,avoidance:{...record(draft.avoidance),max_turn_pulses:Number(e.target.value),sweep_verified:false}})}/></Field><p className={styles.hint}>{t(view==="journey"?"journeyAvoidanceHelp":"avoidanceHelp")}</p>
+        </fieldset>);
+  }
+
+
+
+  /** Render advanced-motion-settings using current captured navigation facts. */
+  function renderAdvancedMotion(){
+
+    return (<section ref={settingsRef} className={styles.details} data-testid="advanced-motion-settings"><h3>{t("loopSettings")}</h3>
+      <div className={styles.metrics}>
+      <div className={styles.metric}><div className={styles.metricLabel}>{t("loopDecision")}</div><strong>{decision.state?t("vision."+str(decision.state)):"—"}</strong><p className={styles.small}>{scalarText(decision.reason??loopState.reason??loopState.stop_reason??"")}</p></div>
+      <div className={styles.metric}><div className={styles.metricLabel}>{t("loopLastFrame")}</div><strong>{formatTime(loopState.observed_at,language)}</strong><p className={styles.small}>{scalarText(decision.inference_ms??"—")} ms · {t("loopLoaded")}: {t(detector.loaded===true?"yes":"no")}</p></div>
+    </div>
+      {draft?<div className={styles.stack}>
+
+          {!groundDraft&&<Field label={t("loopCorridor")}><Input disabled={settingsLocked} value={Array.isArray(draft.corridor)?draft.corridor.map(value=>scalarText(value)).join(","):""} onChange={e=>setDraft({...draft,corridor:e.target.value.split(",").map(Number)})}/></Field>}
+        {"perception" in draft?<div className={styles.grid} data-testid="perception-settings">
+          <p className={styles.hint}>{t("perceptionMethod")}: {t(perception.engine==="depth_plane"?"perceptionGeometry":"perceptionSemantic")}</p>
+          <Button data-testid="open-model-tuning" onClick={showModelTuning}>{t("tuning.title")}</Button>
+        </div>:<p className={styles.hint}>{t("perceptionPiUpdate")}</p>}
+        {renderGroundGeometry()}
+        {renderAvoidanceSettings()}
+        <p className={styles.hint}>{t("loopModel")}: {t(detector.configured===true?"yes":"no")} · {t("computeRevision")}: {scalarText(policy?.revision??"—")}</p>
+      </div>:<p>{t(loading?"loading":"loopLoadFailed")}</p>}
+    </section>);
+  }
+
+
+
+  /** Render trial-preparation using current captured navigation facts. */
+  function renderTrialPreparation(){
+    return (preparation&&!diagnostic.combined&&<div className={preparation.state==="failed"?styles.loopError:styles.metric} role={preparation.state==="failed"?"alert":"status"} data-testid="trial-preparation" data-request-id={preparation.requestId}>
+      <strong>{t(trialPreparationTitle(preparation))} · {t("trialPreparation.phase."+preparation.phase)}</strong>
+      <p className={styles.small}>{t("trialPreparationElapsed",{seconds:formatNumber(preparation.elapsedMs===null?null:preparation.elapsedMs/1000,language,1)})}</p>
+      <p className={styles.small}>{t(preparation.source==="pi"?"trialPreparationSource":"trialPreparationResponse")} · {formatTime(preparation.observedAt,language)}{!preparation.fresh?" · "+t("trialPreparationStale"):""}</p>
+      {preparation.error&&<p>{t(trialPreparationErrorKey(preparation))}</p>}
+    </div>);
+  }
+
+
+
+  /** Render trial-stop-reason using current captured navigation facts. */
+  function renderTrialStopReason(){
+    return (!!displayedStopReason&&<output aria-live="polite" className={styles.statusParagraph+" "+(trialOutcomeTone(displayedStopReason)==="neutral"?styles.hint:styles.loopError)} data-testid="trial-stop-reason">{sharedTrial?t("lastTrial")+" · "+formatTime(sharedTrial.observed_at,language):t("trialEnded")} · {t(trialStopReasonKey(displayedStopReason))}
+      {diagnostic.combined&&preparation&&<><br/><span className={styles.small} data-testid="trial-preparation-report">{t("trialPreparationReport",{phase:t("trialPreparation.phase."+preparation.phase),seconds:formatNumber(preparation.elapsedMs===null?null:preparation.elapsedMs/1000,language,1)})}</span></>}
+      {sharedRecovery&&<><br/><span className={styles.small}>{t("trialRecoveryFailed")} · {sharedRecovery.code}</span></>}
+    </output>);
+  }
+
+
+
+  /** Render JourneyDetails from this render's captured facts. */
+  function renderJourneyDetails(){
+    return (<div hidden={view !== "journey"}>
+            {journeyUnavailable.length>0&&<div data-testid="journey-blocks" className={styles.loopError} role="status"><ul>{journeyUnavailable.map(block=><li key={block}>{journeyBlockLabel(block)}</li>)}</ul><Button onClick={prepareAction?showPreparation:showJourneySettings}>{t(prepareAction?"workspace.prepare":"journeySettings")}</Button></div>}
+            {journey.reason&&<p className={styles.hint} data-testid="journey-reason">{t("state")}: <code>{journey.reason}</code></p>}
+            {journeyRequested&&journey.active&&<p className={styles.hint}>{t("journeyStarted")}</p>}
+            {journeyError&&<p className={styles.loopError} role="alert" data-testid="journey-error">{t("journeyRequestError")} · {journeyError}</p>}
+            </div>);
+  }
+
+
 
   /** Render StoppingZone without changing the established condition or callbacks. */
   function renderStoppingZone(){
@@ -99,6 +221,16 @@ export function NavigationLoop({client,t,language,recording,operatorDetails,stud
       <p className={styles.hint}>{t(operation==="zone"?"stopZoneUpdating":"stopZoneHelp")}</p>
     </div>);
   }
+
+
+  /** Render TrialResult without changing the established condition or callbacks. */
+  function renderTrialResult(){
+    return (!!trialResult&&!displayedStopReason&&!(trialResult==="trialStarted"&&phase==="running")&&<output className={styles.statusParagraph+" "+(styles.hint)} aria-live="polite" data-testid="trial-result">{t(trialResultLabel(phase,trialResult))}</output>);
+  }
+
+
+  /** Render AutomaticDetails from this render's captured facts. */
+  function renderAutomaticDetails(){
 
     return (<div data-testid="automatic-panel">
           <Panel title={t("loopSettings")}>
@@ -124,76 +256,66 @@ export function NavigationLoop({client,t,language,recording,operatorDetails,stud
         </div>);
   }
 
-  /** Render JourneyDetails from this render's captured facts. */
-  function renderJourneyDetails(){
-    return (<div hidden={view !== "journey"}>
-            {journeyUnavailable.length>0&&<div data-testid="journey-blocks" className={styles.loopError} role="status"><ul>{journeyUnavailable.map(block=><li key={block}>{journeyBlockLabel(block)}</li>)}</ul><Button onClick={prepareAction?showPreparation:showJourneySettings}>{t(prepareAction?"workspace.prepare":"journeySettings")}</Button></div>}
-            {journey.reason&&<p className={styles.hint} data-testid="journey-reason">{t("state")}: <code>{journey.reason}</code></p>}
-            {journeyRequested&&journey.active&&<p className={styles.hint}>{t("journeyStarted")}</p>}
-            {journeyError&&<p className={styles.loopError} role="alert" data-testid="journey-error">{t("journeyRequestError")} · {journeyError}</p>}
-            </div>);
-  }
+  /** Derive trialUnavailable from the current captured render without effects. */
+  function trialStartBlock(){return (record(policy?.avoidance).enabled===true&&!avoidanceSupported?"avoidanceUpdateRequired":trialBlock(draft??policy,runtime,detector,connected,false,client.status,false));}
 
-  /** Render trial-stop-reason using current captured navigation facts. */
-  function renderTrialStopReason(){
-    return (!!displayedStopReason&&<p role="status" className={trialOutcomeTone(displayedStopReason)==="neutral"?styles.hint:styles.loopError} data-testid="trial-stop-reason">{sharedTrial?t("lastTrial")+" · "+formatTime(sharedTrial.observed_at,language):t("trialEnded")} · {t(trialStopReasonKey(displayedStopReason))}
-      {diagnostic.combined&&preparation&&<><br/><span className={styles.small} data-testid="trial-preparation-report">{t("trialPreparationReport",{phase:t("trialPreparation.phase."+preparation.phase),seconds:formatNumber(preparation.elapsedMs===null?null:preparation.elapsedMs/1000,language,1)})}</span></>}
-      {sharedRecovery&&<><br/><span className={styles.small}>{t("trialRecoveryFailed")} · {sharedRecovery.code}</span></>}
-    </p>);
-  }
+  /** Derive automaticActive from the current captured render without effects. */
+  function automaticControlActive(){return (priority ? operator.state === "active" || operator.state === "qualifying" : phase === "running" && goals.drive === true);}
 
-  /** Render trial-preparation using current captured navigation facts. */
-  function renderTrialPreparation(){
-    return (preparation&&!diagnostic.combined&&<div className={preparation.state==="failed"?styles.loopError:styles.metric} role={preparation.state==="failed"?"alert":"status"} data-testid="trial-preparation" data-request-id={preparation.requestId}>
-      <strong>{t(trialPreparationTitle(preparation))} · {t("trialPreparation.phase."+preparation.phase)}</strong>
-      <p className={styles.small}>{t("trialPreparationElapsed",{seconds:formatNumber(preparation.elapsedMs===null?null:preparation.elapsedMs/1000,language,1)})}</p>
-      <p className={styles.small}>{t(preparation.source==="pi"?"trialPreparationSource":"trialPreparationResponse")} · {formatTime(preparation.observedAt,language)}{!preparation.fresh?" · "+t("trialPreparationStale"):""}</p>
-      {preparation.error&&<p>{t(trialPreparationErrorKey(preparation))}</p>}
-    </div>);
-  }
+  /** Derive prepareAction from the current captured render without effects. */
+  function navigationPreparationReady(){return (needsAcceptance&&detector.drive_supported!==false&&(view==="automatic"&&!trialUnavailable||view==="journey"&&journeyUnavailable.length===0));}
 
-  /** Render advanced-motion-settings using current captured navigation facts. */
-  function renderAdvancedMotion(){
-  /** Render avoidance-settings using current captured navigation facts. */
-  function renderAvoidanceSettings(){
-    return ("avoidance" in (draft??{})&&<fieldset disabled={settingsLocked} className={styles.stack} data-testid="avoidance-settings"><legend>{t("avoidanceSettings")}</legend>{!avoidanceSupported&&<p>{t("avoidanceUpdateRequired")}</p>}
-          <label className={styles.check}><Checkbox type="checkbox" disabled={!avoidanceSupported} checked={record(draft?.avoidance).enabled===true} onChange={e=>draft&&setDraft({...draft,mode:"observe",avoidance:{...record(draft.avoidance),enabled:e.target.checked,protocol_version:3,geometry:record(draft.avoidance).geometry??{mode:"ground",fx:null,fy:null,cx:.5,cy:.5,radius_ratio:null,lookahead_ratio:2,max_heading_deg:45},max_stalled_corrections:record(draft.avoidance).max_stalled_corrections??2,progress_min_delta:record(draft.avoidance).progress_min_delta??.03,sweep_verified:false}})}/>{t("avoidanceEnabled")}</label>
-          <label className={styles.check}><Checkbox type="checkbox" checked={record(draft?.avoidance).mirrored===true} onChange={e=>draft&&setDraft({...draft,avoidance:{...record(draft.avoidance),mirrored:e.target.checked,sweep_verified:false}})}/>{t("avoidanceMirrored")}</label>
-          {view!=="journey"&&<label className={styles.check}><Checkbox type="checkbox" checked={record(draft?.avoidance).sweep_verified===true} onChange={e=>draft&&setDraft({...draft,avoidance:{...record(draft.avoidance),sweep_verified:e.target.checked}})}/>{t("avoidanceSweepAcceptance")}</label>}
-          {view==="journey"&&<p className={styles.hint}>{t(record(policy?.avoidance).sweep_verified===true?"journeySweepSaved":"journeySweepHelp")}</p>}
-          <Field label={t("avoidanceStalled")+" (1–5)"}><Input type="number" min="1" max="5" step="1" value={Number(record(draft?.avoidance).max_stalled_corrections??2)} onChange={e=>draft&&setDraft({...draft,avoidance:{...record(draft.avoidance),max_stalled_corrections:Number(e.target.value),sweep_verified:false}})}/></Field>
-          <Field label={t("avoidanceProgress")+" (0–0.3)"}><Input type="number" min="0" max=".3" step=".01" value={Number(record(draft?.avoidance).progress_min_delta??.03)} onChange={e=>draft&&setDraft({...draft,avoidance:{...record(draft.avoidance),progress_min_delta:Number(e.target.value),sweep_verified:false}})}/></Field>
-          <Field label={t("avoidanceMaxTurns")+" (1–5)"}><Input type="number" min="1" max="5" step="1" value={Number(record(draft?.avoidance).max_turn_pulses)} onChange={e=>draft&&setDraft({...draft,avoidance:{...record(draft.avoidance),max_turn_pulses:Number(e.target.value),sweep_verified:false}})}/></Field><p className={styles.hint}>{t(view==="journey"?"journeyAvoidanceHelp":"avoidanceHelp")}</p>
-        </fieldset>);
-  }
+  /** Derive needsAcceptance from the current captured render without effects. */
+  function imageAcceptanceNeeded(){return (!!policy&&(!calibrationMatches(policy,detector)||view==="journey"&&record(policy.avoidance).sweep_verified!==true));}
 
-  /** Render ground-geometry-settings using current captured navigation facts. */
-  function renderGroundGeometry(){
-    return (record(draft?.avoidance).protocol_version===3&&<fieldset className={styles.stack} disabled={settingsLocked} data-testid="ground-geometry-settings"><legend>{t("geometrySettings")}</legend>
-          <Field label={t("geometryMode")}><Select data-testid="geometry-mode" value={scalarText(record(record(draft?.avoidance).geometry).mode??"image")} onChange={e=>draft&&setDraft({...draft,avoidance:{...record(draft.avoidance),geometry:{...record(record(draft.avoidance).geometry),mode:e.target.value},sweep_verified:false}})}><option value="ground">{t("geometryGround")}</option><option value="image">{t("geometryImage")}</option></Select></Field>
-          <p className={styles.hint} data-testid="geometry-mode-help">{t(record(record(draft?.avoidance).geometry).mode==="ground"?"geometryCalibrationHelp":"geometryImageHelp")}</p>
-          {record(record(draft?.avoidance).geometry).mode==="ground"&&<><p className={styles.hint}>{t("geometryHelp")}</p>{(["fx","fy","cx","cy","radius_ratio","lookahead_ratio","max_heading_deg"] as const).map(key=><Field key={key} label={t("geometry."+key)+` (${geometryRanges[key][0]}–${geometryRanges[key][1]})`}><Input type="number" min={geometryRanges[key][0]} max={geometryRanges[key][1]} step=".01" value={record(record(draft?.avoidance).geometry)[key]===null?"":Number(record(record(draft?.avoidance).geometry)[key])} onChange={e=>draft&&setDraft({...draft,avoidance:{...record(draft.avoidance),geometry:{...record(record(draft.avoidance).geometry),[key]:e.target.value===""?null:Number(e.target.value)},sweep_verified:false}})}/></Field>)}</>}
-        </fieldset>);
-  }
+  /** Derive confirmJourney from the current captured render without effects. */
+  function journeyConfirmationReady(){return (!!policy&&(!calibrationMatches(policy,detector)||record(policy.avoidance).sweep_verified!==true)
+    &&!acceptanceBlock&&detector.loaded===true&&/^[a-f0-9]{64}$/.test(str(detector.sha256))
+    &&!nonAcceptanceJourneyBlock);}
 
-    return (<section ref={settingsRef} className={styles.details} data-testid="advanced-motion-settings"><h3>{t("loopSettings")}</h3>
-      <div className={styles.metrics}>
-      <div className={styles.metric}><div className={styles.metricLabel}>{t("loopDecision")}</div><strong>{decision.state?t("vision."+str(decision.state)):"—"}</strong><p className={styles.small}>{scalarText(decision.reason??loopState.reason??loopState.stop_reason??"")}</p></div>
-      <div className={styles.metric}><div className={styles.metricLabel}>{t("loopLastFrame")}</div><strong>{formatTime(loopState.observed_at,language)}</strong><p className={styles.small}>{scalarText(decision.inference_ms??"—")} ms · {t("loopLoaded")}: {t(detector.loaded===true?"yes":"no")}</p></div>
-    </div>
-      {draft?<div className={styles.stack}>
+  /** Derive visibleError from the current captured render without effects. */
+  function visibleRequestError(){return (error.includes("navigation_trial_cancelled")||diagnostic.requestErrorCovered||preparation?.source==="pi"&&hasPreparationError||errorRun&&sharedTrial?.run_id===errorRun?"":error);}
 
-          {!groundDraft&&<Field label={t("loopCorridor")}><Input disabled={settingsLocked} value={Array.isArray(draft.corridor)?draft.corridor.map(value=>scalarText(value)).join(","):""} onChange={e=>setDraft({...draft,corridor:e.target.value.split(",").map(Number)})}/></Field>}
-        {"perception" in draft?<div className={styles.grid} data-testid="perception-settings">
-          <p className={styles.hint}>{t("perceptionMethod")}: {t(perception.engine==="depth_plane"?"perceptionGeometry":"perceptionSemantic")}</p>
-          <Button data-testid="open-model-tuning" onClick={showModelTuning}>{t("tuning.title")}</Button>
-        </div>:<p className={styles.hint}>{t("perceptionPiUpdate")}</p>}
-        {renderGroundGeometry()}
-        {renderAvoidanceSettings()}
-        <p className={styles.hint}>{t("loopModel")}: {t(detector.configured===true?"yes":"no")} · {t("computeRevision")}: {scalarText(policy?.revision??"—")}</p>
-      </div>:<p>{t(loading?"loading":"loopLoadFailed")}</p>}
-    </section>);
+  /** Derive acceptanceBlock from the current captured render without effects. */
+  function imageAcceptanceBlock(){if(dirty){
+  return ("loopUnsaved");
+}
+if(view==="journey"&&(record(policy?.avoidance).enabled!==true||record(policy?.avoidance).protocol_version!==3)){
+  return ("journeyAvoidanceRequired");
+}
+return (calibrationFrameBlock(client.camera,client.cameraStream,loopState,policy)|| (imageDecision.vision!=="go"?"calibrationClearFrame":""));
+}
+
+  /** Explain journey failures before prerequisites and current journey status. */
+  function journeyCommandReason():string {
+    if(journeyError)return t("journeyRequestError")+" · "+journeyError;
+    if(readError)return readError;
+    if(nonAcceptanceJourneyBlock||journeyUnavailable[0])return journeyBlockLabel(nonAcceptanceJourneyBlock||journeyUnavailable[0]);
+    if(journey.reason&&["failed","blocked"].includes(journey.phase))return t(["decision_timeout","decision_invalid_or_expired"].includes(journey.reason)?"workspace.journeyAnalysisExpired":trialStopReasonKey(journey.reason));
+    return journey.active&&journey.reason?t("state")+": "+journey.reason:"";
   }
+  /** Preserve automatic-mode fallback precedence when a translated message is empty. */
+  function automaticCommandReason():string {
+    let reason=visibleError||readError;
+    if(!reason&&preparation?.state==="failed")reason=t(trialPreparationErrorKey(preparation));
+    if(!reason&&trialUnavailable)reason=t(trialUnavailable);
+    if(!reason&&displayedStopReason)reason=t(trialStopReasonKey(displayedStopReason));
+    return reason;
+  }
+  /** Explain the current mode before the final loading override. */
+  function currentCommandReason():string {
+    let reason="";
+    if(view==="journey")reason=journeyCommandReason();
+    else if(view==="automatic")reason=automaticCommandReason();
+    return loading&&!policy&&view!=="manual"?t("loading"):reason;
+  }
+  /** Explain image preparation only when no higher-priority request or read failed. */
+  function preparationCommandReason(previous:string):string {
+    if(prepareAction&&!dirty&&(view!=="journey"||!nonAcceptanceJourneyBlock)&&!journeyError&&!visibleError&&!readError)return t(!active||loopState.running!==true?"workspace.prepareImage":acceptanceBlock||"workspace.confirmReady");
+    return previous;
+  }
+  /** Render the WorkspaceDetails section using this render's captured state. */
+  function renderWorkspaceDetails(){
 
     return (<details id="rider-workspace-details" ref={workspaceDetailsRef} onToggle={event=>setDetailsOpen(event.currentTarget.open)} className={styles.workspaceDetails} data-testid="workspace-details">
           <summary>{t("cockpitDetails")}</summary>
@@ -207,17 +329,9 @@ export function NavigationLoop({client,t,language,recording,operatorDetails,stud
 
   /** Render the Preparation section using this render's captured state. */
   function renderPreparation(){
-  /** Render trial-acceptance using current captured navigation facts. */
-  function renderImageAcceptance(){
-    return (policy&&(!calibrationMatches(policy,detector)||view==="journey"&&record(policy.avoidance).sweep_verified!==true)&&detector.drive_supported!==false&&<div className={styles.stack} data-testid="trial-acceptance">
-      <p className={styles.hint} data-testid="calibration-acceptance-help">{t(view==="journey"?"journeyAcceptanceHelp":"trialAcceptanceHelp")}</p>
-      {!!acceptanceBlock&&<p className={styles.hint} role="status" data-testid="calibration-preview-block">{t(acceptanceBlock)}</p>}
-      <Button data-testid="trial-accept" disabled={!connected||!!operation||loading||!!acceptanceBlock||goals.drive===true} onClick={()=>void acceptTrial()}>{t(view==="journey"?"journeyAccept":"trialAccept")}</Button>
-    </div>);
-  }
 
     return (<details ref={preparationRef} className={styles.workspaceDisclosure} data-testid="navigation-preparation">
-        <summary><span>{t("workspace.preparation")}</span><span>{t(!policy?"loading":detector.drive_supported===false?"trialAnalysisMode":needsAcceptance?"workspace.acceptancePending":"workspace.acceptanceReady")}</span></summary>
+        <summary><span>{t("workspace.preparation")}</span><span>{t(preparationSummaryLabel(policy,detector,needsAcceptance))}</span></summary>
         <div className={styles.disclosureBody}>
           <div className={styles.preparationActions} data-testid="loop-observation">
             <span>{t("workspace.observationStep")}</span>
@@ -228,7 +342,7 @@ export function NavigationLoop({client,t,language,recording,operatorDetails,stud
     {renderImageAcceptance()}
 
           {trialUnavailable&&trialUnavailable!=="loopUnverified"&&<p id="rider-trial-block" className={styles.hint} data-testid="loop-block">{t(trialUnavailable)}</p>}
-          {!needsAcceptance&&policy&&<p role="status" data-testid={view==="journey"?"journey-acceptance-saved":"trial-acceptance-saved"}><Pill tone="good">{t("workspace.acceptanceRevision",{revision:scalarText(policy.revision)})}</Pill></p>}
+          {!needsAcceptance&&policy&&<output className={styles.statusParagraph} aria-live="polite" data-testid={view==="journey"?"journey-acceptance-saved":"trial-acceptance-saved"}><Pill tone="good">{t("workspace.acceptanceRevision",{revision:scalarText(policy.revision)})}</Pill></output>}
         </div>
       </details>);
   }
@@ -250,10 +364,10 @@ export function NavigationLoop({client,t,language,recording,operatorDetails,stud
 
   /** Render the WorkspaceMessages section using this render's captured state. */
   function renderWorkspaceMessages(){
-    return (<div className={styles.workspaceMessages} data-testid="workspace-messages">      <div className={styles.commandReason} role="status" data-testid="command-reason" hidden={!commandReason&&!(prepareAction&&!dirty&&!(view==="journey"&&confirmJourney))}>
+    return (<div className={styles.workspaceMessages} data-testid="workspace-messages">      <output className={styles.statusBlock+" "+(styles.commandReason)} aria-live="polite" data-testid="command-reason" hidden={!commandReason&&!(prepareAction&&!dirty&&!(view==="journey"&&confirmJourney))}>
         <span>{commandReason}</span>
-        {prepareAction&&!dirty&&!(view==="journey"&&confirmJourney)&&<Button data-testid="prepare-navigation" disabled={!connected||!!operation||loading||!!observeBlock||goals.drive===true} onClick={()=>{if(!acceptanceBlock)void acceptTrial();else showPreparation();}}>{t(!acceptanceBlock?"workspace.confirm":active?"workspace.preparation":"workspace.prepare")}</Button>}
-      </div>{!commandReason&&!settingsError&&!journeyError&&!visibleError&&<OperatorMessages client={client} t={t} authority={view==="manual"}/>}</div>);
+        {prepareAction&&!dirty&&!(view==="journey"&&confirmJourney)&&<Button data-testid="prepare-navigation" disabled={!connected||!!operation||loading||!!observeBlock||goals.drive===true} onClick={()=>{if(!acceptanceBlock)void acceptTrial();else showPreparation();}}>{t(preparationActionLabel(acceptanceBlock,active))}</Button>}
+      </output>{!commandReason&&!settingsError&&!journeyError&&!visibleError&&<OperatorMessages client={client} t={t} authority={view==="manual"}/>}</div>);
   }
 
   /** Render the ModelPane section using this render's captured state. */
@@ -282,11 +396,11 @@ export function NavigationLoop({client,t,language,recording,operatorDetails,stud
   function renderJourneyCommands(){
     return (<div hidden={view !== "journey"} data-testid="journey-commands">
           <Panel title={t("journeyTitle")}>
-            <div className={styles.loopStatus} role="status" data-testid="journey-state">
+            <output className={styles.statusBlock+" "+(styles.loopStatus)} aria-live="polite" data-testid="journey-state">
               {journey.historical&&<span className={styles.small} data-testid="journey-last-outcome">{t("journeyLastOutcome")}</span>}
-              <Pill tone={journey.active&&journey.phase!=="unknown"?"good":journey.phase==="blocked"||journey.phase==="failed"||journey.phase==="unknown"?"warning":undefined}>{t("journey.state."+journey.phase)}</Pill>
+              <Pill tone={journeyPhaseTone(journey.active,journey.phase)}>{t("journey.state."+journey.phase)}</Pill>
               <span className={styles.small}>{t("journeyElapsed")}: {formatNumber(journey.elapsed,language,1)} s · {t("journeyManeuver")}: {journey.maneuver??"—"}</span>
-            </div>
+            </output>
             <div className={styles.loopActions}>
               <Button tone="primary" size="large" data-testid="journey-start" disabled={journeyUnavailable.length>0||!operatorApply.valid||operatorDraft.modelPending&&!operatorDraft.modelReady||!!operation||!!client.busy||loading||journey.active||automaticActive} onClick={()=>void runJourney()}><Play size={18}/>{t(dirty?"operator.applyStart":"cockpitStartJourney")}</Button>
               <Button tone="caution" size="large" data-testid="journey-stop" disabled={!connected||operation==="stop"} onClick={()=>void stopJourney()}><Square size={18}/>{t("cockpitStopJourney")}</Button>
@@ -298,37 +412,6 @@ export function NavigationLoop({client,t,language,recording,operatorDetails,stud
 
   /** Render the AutomaticCommands section using this render's captured state. */
   function renderAutomaticCommands(){
-  /** Render AutomaticActions with the captured state and unchanged event handlers. */
-  function renderAutomaticActions(){
-    return (<div className={styles.loopActions}>
-      <Button tone="primary" size="large" data-testid="loop-start" title={t("trialSimpleHelp")} aria-describedby="rider-trial-help" disabled={!!trialUnavailable||!operatorApply.valid||operatorDraft.modelPending&&!operatorDraft.modelReady||!!operation||!!client.busy||loading||automaticActive||journey.active} onClick={()=>void runTrial()}><Play size={18}/>{t(dirty?"operator.applyStart":priority&&loopState.operator_control_version===1&&loopState.running===true?"cockpitResume":"cockpitStartTrial")}</Button>
-      <Button tone="caution" size="large" data-testid="loop-stop" title={t(priority ? "operatorPauseHint" : "loopStop")} disabled={!connected||operation==="stop"||!priority&&operation==="save"} onClick={()=>void stop()}><Square size={18}/>{t(operation==="stop"?"loopStopping":priority?"cockpitPause":"cockpitStop")}</Button>
-      {detector.drive_supported!==false&&<span className={styles.small} data-testid="trial-plan">{scalarText(policy?.speed??"—")} SDK · ≤ {scalarText(policy?.max_motion_ms??"—")} ms</span>}
-    </div>);
-  }
-
-  /** Keep operation labels ahead of phase labels in the original priority order. */
-  function loopPhaseLabel():string {
-    if(operation==="stop")return "loopStopping";
-    if(phase==="fault")return "loopPhase.fault";
-    if(operation==="check")return "trialChecking";
-    return operation==="start"?"loopStarting":"loopPhase."+phase;
-  }
-  /** Render AutomaticState with the captured state and unchanged event handlers. */
-  function renderAutomaticState(){
-  /** Render ExecutorPermission from this render's captured facts. */
-  function renderExecutorPermission(){
-    return (<strong data-testid="venom-permission" className={permission.venom===true?styles.verdictGo:undefined}>{t(executionHeadline(loopState,goals,client.status,permission))}</strong>);
-  }
-
-    return (<div className={styles.loopStatus} role="status" data-testid="loop-state">
-      {priority && <Pill>{t("operatorState." + str(operator.state ?? "idle"))}</Pill>}
-      <Pill tone={phase==="running"?"good":phase==="offline"||phase==="unknown"||phase==="fault"?"warning":undefined}>{t(loopPhaseLabel())}</Pill>
-      <strong>{t(goals.drive===true?"trialActiveMode":"trialAnalysisMode")}</strong>
-      <span className={styles.small} data-testid="active-perception-method">{t("perceptionMethod")}: {t(detector.purpose==="relative_ground_geometry"?"perceptionGeometry":"perceptionSemantic")}</span>
-      {renderExecutorPermission()}
-    </div>);
-  }
 
     return (<div hidden={view !== "automatic"} data-testid="automatic-commands">
           <Panel title={t("loopTitle")} extra={<Button aria-label={t("loopLoad")} disabled={loading||!!operation||!connected} onClick={()=>setRefresh(v=>v+1)}><RefreshCw size={14}/>{t("refresh")}</Button>}>
@@ -481,7 +564,7 @@ export function NavigationLoop({client,t,language,recording,operatorDetails,stud
     const diagnostic=record(record(record(record(err).data).detail).details).navigation;
     const row=record(diagnostic);setErrorRun(scalarText(row.run_id??""));const cause=scalarText(record(row.motion_failure).reason??row.stop_reason??"");
     const key=trialStopReasonKey(cause), translated=t(key);
-    setError(t(loopFailure(err))+" · "+errorCode(err)+(cause?" · "+(key==="trialStopped"?cause:translated):""));
+    setError(t(loopFailure(err))+" · "+errorCode(err)+failureCauseSuffix(cause,key,translated));
   },[t]);
   const stop=async()=>{
     if(stopping.current)return;
@@ -769,7 +852,7 @@ export function NavigationLoop({client,t,language,recording,operatorDetails,stud
     <div className={styles.drivingSurface} data-testid="driving-surface" data-view={view}>
     <div className={styles.controlModeRow}>
       <div className={styles.controlModes} role="group" aria-label={t("workspaceView")}>
-        {(["manual", "automatic", "journey"] as const).map(mode => <Button key={mode} data-testid={"workspace-" + mode} aria-pressed={view === mode} tone={view === mode ? "primary" : undefined} onClick={() => setView(mode)}>{t(mode === "manual" ? "workspaceManual" : mode === "journey" ? "workspaceJourney" : "workspaceAutomatic")}</Button>)}
+        {(["manual", "automatic", "journey"] as const).map(mode => <Button key={mode} data-testid={"workspace-" + mode} aria-pressed={view === mode} tone={view === mode ? "primary" : undefined} onClick={() => setView(mode)}>{t(workspaceModeLabel(mode))}</Button>)}
       </div>
       <div className={styles.commandAccess}>
         <Button data-testid="workspace-settings-toggle" aria-expanded={detailsOpen} aria-controls="rider-workspace-details" onClick={()=>{if(workspaceDetailsRef.current){workspaceDetailsRef.current.open=!workspaceDetailsRef.current.open;if(workspaceDetailsRef.current.open)workspaceDetailsRef.current.scrollIntoView({block:"nearest",behavior:"smooth"});}}}>{t("cockpitDetails")}</Button>

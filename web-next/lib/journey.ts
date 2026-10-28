@@ -24,7 +24,20 @@ export function journeyBlocks(policy: JsonRecord | null, runtime: JsonRecord, de
 /** Preserve the idle/unknown distinction before interpreting a known journey phase. */
 function journeyPhase(journey:JsonRecord,supported:boolean,current:boolean,active:boolean):string {
   const known = ["qualifying", "forward", "steer_left", "steer_right", "waiting", "blocked", "stopped", "failed"];
-  return !supported ? "idle" : !current && active ? "unknown" : known.includes(str(journey.state)) ? str(journey.state) : active ? "unknown" : "idle";
+  if(!supported){
+  return ("idle");
+}
+if(!current && active){
+  return ("unknown");
+}
+if(known.includes(str(journey.state))){
+  return (str(journey.state));
+}
+if(active){
+  return ("unknown");
+}
+return ("idle");
+
 }
 /** Stale status never represents a currently travelling robot. */
 export function journeyView(state: JsonRecord) {

@@ -15,21 +15,36 @@ const depthFields={
   outlier_limit:{label:"perceptionOutliers",range:"0–2",minimum:0,maximum:2,step:.1,scale:100},
   slope_min:{label:"perceptionSlope",range:"1–4",minimum:1,maximum:4,step:.1,scale:1},
 } as const;
+/** Resolve a custom tuning value only after the operator leaves inheritance mode. */
+function selectedTuningValue(mode:string,effective:JsonRecord|null,field:TuningField):number|null {
+  if(mode==="inherit")return null;
+  const value=effective?.[field];
+  return typeof value==="number"?value:Number.NaN;
+}
+/** Keep inherited and non-finite tuning values empty without hiding a measured zero. */
+function displayTuningValue(value:number|null):number|"" {
+  if(value===null)return "";
+  return Number.isFinite(value)?value:"";
+}
 type ScopedDraft = ModelTuningDraft & { pipelineRevision: number; provider: string };
 type Props = { editor?:{draft:JsonRecord|null;onChange:(value:JsonRecord)=>void}; client: RiderClient; policy: JsonRecord | null; goals: JsonRecord; locked: boolean; t: Translator; onApplied: (config: JsonRecord) => void; onRefresh: () => void; onPendingChange?: (pending: boolean) => void };
 /** Apply operator perception edits with session, pipeline and policy revision guards. */
 export function ModelTuning({ client, policy, goals, locked, t, onApplied, onRefresh, onPendingChange, editor }: Props) {
-  /** Render TuningFeedback with the captured state and unchanged event handlers. */
-  function renderTuningFeedback(){
-  /** Render TuningActions from this render's captured facts. */
-  function renderTuningActions(){
-    return (!editor&&<div className={styles.flex}><Button data-testid="tuning-apply" disabled={!changed || !valid || !!block || !client.canMutate} onClick={() => void apply()}>{t(pending ? "behavior.saving" : "tuning.apply")}</Button><Button data-testid="tuning-refresh" disabled={pending} onClick={discard}>{t(visibleDraft ? "behavior.discard" : "refresh")}</Button></div>);
-  }
+
 
   /** Render TuningMessage from this render's captured facts. */
   function renderTuningMessage(){
     return (!editor && !!(failure || block) && <p role={failure || conflict ? "alert" : "status"} data-testid="tuning-message" className={failure || conflict ? styles.loopError : styles.hint}>{t(failure || block, { model: pipeline?.profile.local_engine ?? "—" })}</p>);
   }
+
+
+  /** Render TuningActions from this render's captured facts. */
+  function renderTuningActions(){
+    return (!editor&&<div className={styles.flex}><Button data-testid="tuning-apply" disabled={!changed || !valid || !!block || !client.canMutate} onClick={() => void apply()}>{t(pending ? "behavior.saving" : "tuning.apply")}</Button><Button data-testid="tuning-refresh" disabled={pending} onClick={discard}>{t(visibleDraft ? "behavior.discard" : "refresh")}</Button></div>);
+  }
+
+  /** Render TuningFeedback with the captured state and unchanged event handlers. */
+  function renderTuningFeedback(){
 
     return (<div className={styles.perceptionBody}>
       {!editor&&<p className={styles.hint}>{t("tuning.hint")}</p>}
@@ -40,20 +55,39 @@ export function ModelTuning({ client, policy, goals, locked, t, onApplied, onRef
       {host && effective && <details data-testid="tuning-effective"><summary>{t("behavior.technicalDetails")}</summary><strong>{t("tuning.effective")}</strong><pre className={styles.pre}>{JSON.stringify(effective, null, 2)}</pre></details>}
       {host && visibleDraft && <Pill tone={valid && !conflict ? "warning" : "danger"}>{t(valid && !conflict ? "unsaved" : "invalidDraft")}</Pill>}
       {renderTuningMessage()}
-      {saved !== null && saved === policy?.revision && <p data-testid="tuning-saved" role="status" className={styles.hint}>{t("tuning.saved", { revision: saved })}</p>}
+      {saved !== null && saved === policy?.revision && <output data-testid="tuning-saved" aria-live="polite" className={styles.statusParagraph+" "+(styles.hint)}>{t("tuning.saved", { revision: saved })}</output>}
       {renderTuningActions()}
     </div>);
   }
 
   /** Derive block from the current captured render without effects. */
-  function modelTuningBlock(){return (local ? "tuning.local" : !host ? "tuning.providerUnknown" : !supported ? "tuning.unsupported" : conflict ? "behavior.conflict"
-    : behaviorSwitchBlock(client.status, client.controlFresh, goals, locked || pending || !!client.busy));}
+  function modelTuningBlock(){if(local){
+  return ("tuning.local");
+}
+if(!host){
+  return ("tuning.providerUnknown");
+}
+if(!supported){
+  return ("tuning.unsupported");
+}
+if(conflict){
+  return ("behavior.conflict");
+}
+return (behaviorSwitchBlock(client.status, client.controlFresh, goals, locked || pending || !!client.busy));
+}
 
   /** Derive valid from the current captured render without effects. */
   function validModelDraft(){return (!!visibleDraft && validTuning(visibleDraft) && (visibleDraft.perception.input_region === undefined || inputCovers(visibleDraft.perception.input_region,policy?.corridor) && !(record(policy?.avoidance).enabled === true && record(record(policy?.avoidance).geometry).mode === "ground" && JSON.stringify(record(visibleDraft.perception.input_region).bounds)!==JSON.stringify([0,0,1,1]))));}
 
   /** Derive displayId from the current captured render without effects. */
-  function displayModelId(){return (local ? "Rider-Pi · " + (pipeline?.profile.local_engine ?? "—") : host ? tuningModelId(policy) : t("tuning.providerUnknown"));}
+  function displayModelId(){if(local){
+  return ("Rider-Pi · " + (pipeline?.profile.local_engine ?? "—"));
+}
+if(host){
+  return (tuningModelId(policy));
+}
+return (t("tuning.providerUnknown"));
+}
 
   /** Render the DepthTuning section using this render's captured state. */
   function renderDepthTuning(){
@@ -80,11 +114,11 @@ export function ModelTuning({ client, policy, goals, locked, t, onApplied, onRef
         </Select></Field>
         <p className={styles.hint}>{t("tuning.rugHint")}</p>
         {TUNING_FIELDS.map(field => <div className={styles.tuningField} key={field}>
-          <Field label={t("tuning." + field)}><Select data-testid={"tuning-mode-" + field} value={row[field] === null ? "inherit" : "custom"} onChange={event => semanticEdit(field, event.target.value === "inherit" ? null : typeof effective?.[field] === "number" ? effective[field] as number : Number.NaN)}>
+          <Field label={t("tuning." + field)}><Select data-testid={"tuning-mode-" + field} value={row[field] === null ? "inherit" : "custom"} onChange={event => semanticEdit(field, selectedTuningValue(event.target.value, effective, field))}>
             <option value="inherit">{t("tuning.inherit")}</option><option value="custom">{t("tuning.custom")}</option>
           </Select></Field>
           <Field label={t("tuning.value")}><Input data-testid={"tuning-" + field} type="number" min={TUNING_BOUNDS[field][0]} max={TUNING_BOUNDS[field][1]} step={field === "min_region_fraction" ? ".0001" : ".01"}
-            value={row[field] === null ? "" : Number.isFinite(row[field]) ? row[field]! : ""} placeholder={effective?.[field] === undefined ? "—" : scalarText(effective[field])} disabled={row[field] === null}
+            value={displayTuningValue(row[field])} placeholder={effective?.[field] === undefined ? "—" : scalarText(effective[field])} disabled={row[field] === null}
             onChange={event => semanticEdit(field, event.target.value === "" ? Number.NaN : Number(event.target.value))}/></Field>
         </div>)}
       </fieldset>);

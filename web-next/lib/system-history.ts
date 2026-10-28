@@ -8,14 +8,29 @@ export function systemAge(system:JsonRecord,now=performance.now()):number|null {
 }
 /** Preserve restart/resume precedence across consecutive sampler observations. */
 function systemEvent(before:JsonRecord,observation:JsonRecord,identity:unknown,fallback:unknown):unknown {
-  return before.boot_id&&observation.boot_id&&before.boot_id!==observation.boot_id?"systemHostRestart"
-    :before.instance_id&&observation.instance_id&&before.instance_id!==observation.instance_id?"systemApiRestart"
-    :identity&&finite(before.generation)&&finite(observation.generation)&&before.generation!==observation.generation?"systemSamplerResume":fallback;
+  if(before.boot_id&&observation.boot_id&&before.boot_id!==observation.boot_id){
+  return ("systemHostRestart");
+}
+if(before.instance_id&&observation.instance_id&&before.instance_id!==observation.instance_id){
+  return ("systemApiRestart");
+}
+if(identity&&finite(before.generation)&&finite(observation.generation)&&before.generation!==observation.generation){
+  return ("systemSamplerResume");
+}
+return (fallback);
+
 
 }
 /** Prefer an explicit observation age before deriving the server timestamp age. */
 function observedAge(system:JsonRecord,observation:JsonRecord):number|null {
-  return finite(observation.age_s)?observation.age_s:finite(system.server_time)&&finite(system.ts)?Math.max(0,system.server_time-system.ts):null;
+  if(finite(observation.age_s)){
+  return (observation.age_s);
+}
+if(finite(system.server_time)&&finite(system.ts)){
+  return (Math.max(0,system.server_time-system.ts));
+}
+return (null);
+
 }
 /** Keep graph segments apart after missing samples, cadence gaps or generation changes. */
 function historySeparated(i:number,stamp:number,previous:unknown,cadence:number,generations:unknown,seq:unknown):boolean {

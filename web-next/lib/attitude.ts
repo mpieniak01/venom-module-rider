@@ -28,7 +28,9 @@ function attitudeAxis(point:MotionPoint,meta:ReturnType<typeof record>,qualified
   const q=record(point.quality),value=point.values[axis],sensor=record(record(q.sensors)[axis]);
   const declared=point.angle_semantics?.[axis]?.unit??point.units[axis];
   const known=declared==="deg"||declared==="rad";
-  const unit=qualified?meta.unit:known?declared:preview!.assumedUnit;
+  let unit:unknown;
+  if(qualified)unit=meta.unit;
+  else unit=known?declared:preview!.assumedUnit;
   if(!finite(value)||Math.abs(value)>1e9||qualified&&(point.units[axis]!==unit||sensor.unit!==unit||Math.abs(value)>(unit==="deg"?360:2*Math.PI)))return {error:{state:"unqualified",reason:"units"}};
   if(sensor.unit!==point.units[axis]||sensor.ready!==true||sensor.stale!==false||sensor.offline!==false||sensor.instance_id!==point.instance_id||!finite(sensor.observed_at))return {error:{state:"unavailable",reason:"coherence"}};
   const period=unit==="deg"?360:2*Math.PI;
