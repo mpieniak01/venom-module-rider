@@ -171,21 +171,26 @@ def decode_evidence(payload: bytes) -> dict[str, Any]:
         raise ValueError("analysis_navigation_evidence_format") from exc
 
 
-def _json_file(path: Path, maximum: int):
+def _read_regular_file(path: Path, maximum: int, error: str) -> bytes:
     if path.is_symlink():
-        raise ValueError("analysis_navigation_export_source")
+        raise ValueError(error)
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     try:
         descriptor = os.open(path, flags)
     except OSError as exc:
-        raise ValueError("analysis_navigation_export_source") from exc
+        raise ValueError(error) from exc
     with os.fdopen(descriptor, "rb") as stream:
         info = os.fstat(stream.fileno())
         if not stat.S_ISREG(info.st_mode) or info.st_size > maximum:
-            raise ValueError("analysis_navigation_export_source")
+            raise ValueError(error)
         payload = stream.read(maximum + 1)
     if len(payload) > maximum:
-        raise ValueError("analysis_navigation_export_source")
+        raise ValueError(error)
+    return payload
+
+
+def _json_file(path: Path, maximum: int):
+    payload = _read_regular_file(path, maximum, "analysis_navigation_export_source")
     return json.loads(payload), hashlib.sha256(payload).hexdigest()
 
 
@@ -454,8 +459,9 @@ def export_evidence(
     try:
         with (output / "manifest.jsonl").open("xb") as manifest:
             for item, line_bytes, path, evidence in prepared:
-                with path.open("rb") as source_file:
-                    payload = source_file.read(MAX_EVIDENCE_BYTES + 1)
+                payload = _read_regular_file(
+                    path, MAX_EVIDENCE_BYTES, "analysis_navigation_export_artifact"
+                )
                 digest = hashlib.sha256(payload).hexdigest()
                 if digest != evidence["sha256"]:
                     raise ValueError("analysis_navigation_export_hash")

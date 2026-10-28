@@ -618,3 +618,25 @@ def test_export_json_rejects_symlink_swapped_after_initial_check(tmp_path, monke
     monkeypatch.setattr(archive.os, "open", swap)
     with pytest.raises(ValueError, match="analysis_navigation_export_source"):
         archive._json_file(source, 1024)
+
+
+def test_export_artifact_rejects_symlink_swapped_before_read(tmp_path, monkeypatch):
+    import os
+
+    if not hasattr(os, "O_NOFOLLOW"):
+        pytest.skip("atomic symlink protection requires O_NOFOLLOW")
+    report, artifacts, timeline, frozen, _ = fixture_export(tmp_path)
+    target = artifacts / frozen["rows"][0]["navigation_evidence"]["artifact"]
+    private = tmp_path / "private.npz"
+    private.write_bytes(target.read_bytes())
+    original_open = os.open
+
+    def swap(path, flags, *args, **kwargs):
+        if path == target:
+            target.unlink()
+            target.symlink_to(private)
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(archive.os, "open", swap)
+    with pytest.raises(ValueError, match="analysis_navigation_export_failed"):
+        archive.export_evidence(report, artifacts, timeline, tmp_path / "out")
