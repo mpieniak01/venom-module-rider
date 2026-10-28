@@ -82,5 +82,9 @@ async page => {
     }
     check(calls.length===0,"layout test sent a mutation");
     return {pass:true,viewports:3,robot_contacted:false};
-  } finally {await page.unroute("**/api/v1/rider/**");}
+  } finally {
+    // Stop polling before removing mocks, then wait for in-flight handlers.
+    await page.goto("about:blank");
+    await page.unrouteAll({behavior:"wait"});
+  }
 }
