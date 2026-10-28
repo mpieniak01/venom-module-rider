@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fcntl
 import hashlib
+import io
 import json
 import os
 import re
@@ -202,7 +203,9 @@ class SampleArchive:
 
     @staticmethod
     def validate_zip(source, max_bytes):
-        if source.is_symlink() or not source.is_file():
+        if not isinstance(source, io.IOBase) and (
+            source.is_symlink() or not source.is_file()
+        ):
             raise RiderError("samples_import_path", 400)
         try:
             with zipfile.ZipFile(source) as archive:

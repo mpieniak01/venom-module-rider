@@ -147,24 +147,24 @@ async page=>{
    check(await page.getByTestId("analysis-frame-overlay").getAttribute("data-source-index")===await page.getByTestId("source-video-image").getAttribute("data-source-index"),"playback speed desynchronized the result");
  }
  await page.getByTestId("source-video-speed").selectOption("1");
- await page.getByTestId("analysis-frame").fill("151");
- await page.waitForFunction(()=>document.querySelector('[data-testid="analysis-frame-overlay"]')?.getAttribute("data-source-index")==="150");
+ await page.getByTestId("analysis-frame").fill("231");
+ await page.waitForFunction(()=>document.querySelector('[data-testid="analysis-frame-overlay"]')?.getAttribute("data-source-index")==="230");
  check(posts.length===0,"changing playback speed started inference");
  // A slow mask must not cause the two halves to show different frames.
- const previousMaskRequests=requests.filter(x=>x.path.endsWith("/0150-mask.png")).length;
- slowLayerIndex=151;
+ const previousMaskRequests=requests.filter(x=>x.path.endsWith("/0230-mask.png")).length;
+ slowLayerIndex=231;
  await page.getByTestId("source-video-play").click();
- await page.waitForFunction(()=>document.querySelector('[data-testid="source-video-pending-image"]')?.getAttribute("data-source-index")==="151");
+ await page.waitForFunction(()=>document.querySelector('[data-testid="source-video-pending-image"]')?.getAttribute("data-source-index")==="231");
  await page.waitForTimeout(200);
- check(await page.getByTestId("source-video-image").getAttribute("data-source-index")==="150","RAW advanced before its matching mask loaded");
- check(await page.getByTestId("analysis-frame-overlay").getAttribute("data-source-index")==="150","processed half drifted during buffering");
- check(requests.filter(x=>x.path.endsWith("/0150-mask.png")).length===previousMaskRequests,"retaining the old pair reloaded its mask");
+ check(await page.getByTestId("source-video-image").getAttribute("data-source-index")==="230","RAW advanced before its matching mask loaded");
+ check(await page.getByTestId("analysis-frame-overlay").getAttribute("data-source-index")==="230","processed half drifted during buffering");
+ check(requests.filter(x=>x.path.endsWith("/0230-mask.png")).length===previousMaskRequests,"retaining the old pair reloaded its mask");
  await page.getByTestId("source-video-play").click();
  await page.waitForTimeout(700);
- check(await page.getByTestId("source-video-image").getAttribute("data-source-index")==="150","paused buffering advanced the displayed pair");
+ check(await page.getByTestId("source-video-image").getAttribute("data-source-index")==="230","paused buffering advanced the displayed pair");
  await page.getByTestId("source-video-play").click();
- await page.waitForFunction(()=>document.querySelector('[data-testid="source-video-image"]')?.getAttribute("data-source-index")==="151");
- check(await page.getByTestId("analysis-frame-overlay").getAttribute("data-source-index")==="151","mask did not advance with RAW");
+ await page.waitForFunction(()=>document.querySelector('[data-testid="source-video-image"]')?.getAttribute("data-source-index")==="231");
+ check(await page.getByTestId("analysis-frame-overlay").getAttribute("data-source-index")==="231","mask did not advance with RAW");
  slowLayerIndex=-1;
  await page.getByTestId("analysis-frame").fill("121");
  await page.waitForFunction(()=>document.querySelector('[data-testid="source-video-image"]')?.getAttribute("data-source-index")==="120");

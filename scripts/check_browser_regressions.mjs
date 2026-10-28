@@ -62,10 +62,17 @@ await mkdir(output,{recursive:true});
 const assets=new Map();
 for(const name of new Set(cases.map(value=>value.fixture))){
   const result=await build({entryPoints:[path.join(root,"tests/browser",fixtures[name])],bundle:true,jsx:"automatic",write:false,
+    nodePaths:[path.join(webRoot,"node_modules")],
     outfile:path.join(output,"assets",name+".js"),alias:{"@":webRoot,"@/lib/i18n":path.join(root,"tests/browser/workspace-host.tsx"),"@/lib/theme":path.join(root,"tests/browser/workspace-host.tsx")},
     define:{"process.env":JSON.stringify({NODE_ENV:"development"})}});
   for(const file of result.outputFiles)assets.set("/assets/"+path.basename(file.path),file.contents);
 }
+// Never discover git through PATH: a writable earlier entry can replace the binary.
+// An explicit absolute override supports installations outside the standard location.
+const gitExecutable=process.env.RIDER_GIT_EXECUTABLE??(process.platform==="win32"?"C:\\Program Files\\Git\\cmd\\git.exe":"/usr/bin/git");
+if(!path.isAbsolute(gitExecutable))throw new Error("RIDER_GIT_EXECUTABLE must be an absolute path to a trusted git executable");
+const gitOptions={cwd:root,encoding:"utf8"};
+const report={head:execFileSync(gitExecutable,["rev-parse","HEAD"],gitOptions).trim(),worktree_dirty:!!execFileSync(gitExecutable,["-c","core.fsmonitor=false","status","--porcelain"],gitOptions).trim(),playwright:require("playwright/package.json").version,browser:"",isolation:false,cases:[]};
 let serverApiRequests=0;
 const html=name=>'<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Isolated Rider regression</title><style>body{margin:0;font-family:Arial,sans-serif}*{box-sizing:border-box}</style><link rel="stylesheet" href="/assets/'+name+'.css"><div id="root"></div><script src="/assets/'+name+'.js"></script>';
 const server=createServer((request,response)=>{
@@ -81,7 +88,7 @@ const server=createServer((request,response)=>{
 });
 await new Promise((resolve,reject)=>{server.once("error",reject);server.listen(0,"127.0.0.1",resolve);});
 const origin="http://127.0.0.1:"+server.address().port;
-const report={head:execFileSync("git",["rev-parse","HEAD"],{cwd:root,encoding:"utf8"}).trim(),worktree_dirty:!!execFileSync("git",["status","--porcelain"],{cwd:root,encoding:"utf8"}).trim(),playwright:require("playwright/package.json").version,browser:"",isolation:false,cases:[]};
+
 let browser;
 async function contextFor(blocked){
   const context=await browser.newContext({viewport:{width:1440,height:1100},serviceWorkers:"block"});
@@ -129,6 +136,8 @@ try{
       await page.goto(fixtureUrl);
       if(item.file==="operator-parameters.js")await page.getByTestId("navigation-profiles").waitFor();
       blocked.length=0;errors.length=0;
+      // These are executable test scenarios from the checkout, not untrusted data.
+      // vm.runInThisContext does not sandbox code; run only a trusted checkout.
       const source=(await readFile(path.join(root,"tests/browser",item.file),"utf8")).trim().replace(/;$/,"");
       const scenario=vm.runInThisContext("("+source+"\n)",{filename:item.file});
       const result=await Promise.race([scenario(page),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error("Browser case exceeded 90 seconds")),90000);})]);

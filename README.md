@@ -244,6 +244,28 @@ This runs Ruff, formatting, mypy, targeted Python tests with a 90% coverage floo
 
 Local session reports, screenshots and operator/device settings stay under ignored docs_dev/, output/ and local environment files. The host integration also requires make pr-fast.
 
+### Independent module tests
+
+The standalone Python group runs from a Rider-only checkout and rejects imports of
+`venom_core`. Install this module and `requirements-module-test.txt` in an
+activated Python environment, then run `make check-standalone`. The explicit
+file list is `tests/standalone.txt`; it is a measured subset, not a replacement
+for the host integration suite. CI runs this group without checking out Core,
+while the separate Sonar job retains the pinned host and full existing suite.
+Pytest reports total duration and slowest cases. On the reference local CPU
+run, the standalone group had 588 passes and 3 optional Pi-source skips in
+10.24 seconds; the full host Python run had 2213 passes, 35 skips and 8
+deselected in 90.91 seconds.
+These are test execution times, not installation or end-to-end CI times.
+For standalone frontend unit tests, run `npm ci --prefix tests/web-independent` and
+`npm run --prefix tests/web-independent test:web:module`.
+The runner explicitly leaves `figure_lifecycle.test.ts` in the host integration
+suite because it imports host React/jsdom and host contract fixtures. The
+standalone frontend group does not yet run typecheck, ESLint or browser E2E;
+those remain in the host checks. Neither automated group controls physical hardware. Do not start another Venom
+instance for tests; real-device checks require a running existing stack and
+separate operator authorization.
+
 ## GitHub Actions and SonarCloud
 
 The Rider repository owns its SonarCloud project and quality gate. The `Rider

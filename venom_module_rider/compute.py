@@ -531,6 +531,63 @@ class ComputeService:
             self.running, self.inference = None, None
             raise
 
+    async def _execute_job(self, job: Job):
+        if job.revision != await self.engines.revision():
+            self._finish(job, "expired", "compute_runtime_changed")
+            return
+        # OFF, restart or a newer frame may arrive while revision() awaits.
+        if (
+            self.closed
+            or job.state in TERMINAL
+            or self.jobs.get(job.request.job_id) is not job
+        ):
+            return
+        if time.monotonic() >= job.deadline:
+            self._finish(job, "expired", "compute_deadline")
+            return
+        job.state, job.started = "running", time.monotonic()
+        metadata = job.request.model_dump()
+        metadata.update(device_id=job.device_id, content_type=job.mime)
+        if job.request.task == "conversation.respond":
+            lease = self.lease(job.device_id, job.request.session_id)
+            metadata.update(
+                client_id=lease.client_id,
+                deadline_monotonic=job.deadline,
+                conversation_revision=job.runtime.get("policy_revision"),
+                conversation_turn=job.conversation_turn,
+            )
+        self.inference = asyncio.create_task(
+            self.engines.execute(
+                job.request.task,
+                job.request.params.model_dump(),
+                job.payload,
+                metadata,
+            )
+        )
+        done, _ = await asyncio.wait(
+            {self.inference}, timeout=max(0, job.deadline - time.monotonic())
+        )
+        if not done:
+            self._cancel_job(job, "expired", "compute_deadline")
+        # Shared synchronous inference cannot be killed. Drain it before
+        # occupying the next slot, while STOP remains entirely separate.
+        result = await self.inference
+        if job.state in TERMINAL:
+            return
+        if job.revision != await self.engines.revision():
+            self._finish(job, "expired", "compute_runtime_changed")
+            return
+        if result.binary is not None and len(result.binary) > MAX_OUTPUT:
+            self._finish(job, "failed", "compute_output_size")
+            return
+        job.data, job.runtime, job.quality = (
+            result.data,
+            result.runtime,
+            result.quality,
+        )
+        job.output, job.output_mime = result.binary, result.content_type
+        self._finish(job, "succeeded")
+
     async def _run_jobs(self):
         while self.pending and not self.closed:
             self._prune()
@@ -539,62 +596,7 @@ class ComputeService:
             job = self.jobs[self.pending.popleft()]
             self.running = job.request.job_id
             try:
-                if job.revision != await self.engines.revision():
-                    self._finish(job, "expired", "compute_runtime_changed")
-                    continue
-                # OFF, restart or a newer frame can arrive while revision()
-                # resolves the active adapter. Never revive a cancelled job.
-                if (
-                    self.closed
-                    or job.state in TERMINAL
-                    or self.jobs.get(job.request.job_id) is not job
-                ):
-                    continue
-                if time.monotonic() >= job.deadline:
-                    self._finish(job, "expired", "compute_deadline")
-                    continue
-                job.state, job.started = "running", time.monotonic()
-                metadata = job.request.model_dump()
-                metadata.update(device_id=job.device_id, content_type=job.mime)
-                if job.request.task == "conversation.respond":
-                    lease = self.lease(job.device_id, job.request.session_id)
-                    metadata.update(
-                        client_id=lease.client_id,
-                        deadline_monotonic=job.deadline,
-                        conversation_revision=job.runtime.get("policy_revision"),
-                        conversation_turn=job.conversation_turn,
-                    )
-                self.inference = asyncio.create_task(
-                    self.engines.execute(
-                        job.request.task,
-                        job.request.params.model_dump(),
-                        job.payload,
-                        metadata,
-                    )
-                )
-                done, _ = await asyncio.wait(
-                    {self.inference}, timeout=max(0, job.deadline - time.monotonic())
-                )
-                if not done:
-                    self._cancel_job(job, "expired", "compute_deadline")
-                # Shared synchronous inference cannot be killed. Drain it before
-                # occupying the next slot, while STOP remains entirely separate.
-                result = await self.inference
-                if job.state in TERMINAL:
-                    continue
-                if job.revision != await self.engines.revision():
-                    self._finish(job, "expired", "compute_runtime_changed")
-                    continue
-                if result.binary is not None and len(result.binary) > MAX_OUTPUT:
-                    self._finish(job, "failed", "compute_output_size")
-                    continue
-                job.data, job.runtime, job.quality = (
-                    result.data,
-                    result.runtime,
-                    result.quality,
-                )
-                job.output, job.output_mime = result.binary, result.content_type
-                self._finish(job, "succeeded")
+                await self._execute_job(job)
             except asyncio.CancelledError:
                 # A superseded inference cancels only its child; cancellation of
                 # the queue worker itself must propagate after cleanup.

@@ -1,0 +1,11 @@
+{
+  "name": "venom-module-rider-web-tests",
+  "private": true,
+  "scripts": {
+    "test:web:module": "node ../../scripts/test-web-module.mjs"
+  },
+  "devDependencies": {
+    "tsx": "4.23.15",
+    "typescript": "5.9.3"
+  }
+}

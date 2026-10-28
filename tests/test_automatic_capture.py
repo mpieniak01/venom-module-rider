@@ -138,7 +138,9 @@ async def test_real_vision_loop_hook_retains_decision_and_exact_source(tmp_path)
         assert reg.automatic.status()["saved"] == 1
         sample = reg.store.samples(sid)[0]
         assert sample["frame_id"] == result["frame_id"]
-        assert sample["prediction"]["valid_for_ms"] <= result["valid_for_ms"]
+        # The stored prediction is captured before the final response ages
+        # its remaining deadline; time spent afterwards can only shorten it.
+        assert result["valid_for_ms"] <= sample["prediction"]["valid_for_ms"]
         assert reg.store.original(sample["sample_id"])[0] == png()
     finally:
         await loop.close()

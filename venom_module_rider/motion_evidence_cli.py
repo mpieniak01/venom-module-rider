@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import stat
 from pathlib import Path
 
@@ -15,17 +16,29 @@ MAX_LOCAL_ARCHIVE_BYTES = 512 * 1024 * 1024
 MAX_SETTINGS_BYTES = 16 * 1024
 
 
-def _local_file(path: Path, limit: int) -> None:
-    metadata = path.lstat()
-    if path.is_symlink() or not stat.S_ISREG(metadata.st_mode):
+def _open_local(path: Path, limit: int):
+    if path.is_symlink():
         raise ValueError("motion_local_file_invalid")
-    if metadata.st_size > limit:
-        raise ValueError("motion_local_input_limit")
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise ValueError("motion_local_file_invalid") from exc
+    stream = os.fdopen(descriptor, "rb")
+    try:
+        metadata = os.fstat(stream.fileno())
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError("motion_local_file_invalid")
+        if metadata.st_size > limit:
+            raise ValueError("motion_local_input_limit")
+        return stream
+    except BaseException:
+        stream.close()
+        raise
 
 
 def _read_json(path: Path, limit: int) -> object:
-    _local_file(path, limit)
-    with path.open("rb") as stream:
+    with _open_local(path, limit) as stream:
         payload = stream.read(limit + 1)
     if len(payload) > limit:
         raise ValueError("motion_local_input_limit")
@@ -43,9 +56,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.output.exists() or args.output.is_symlink():
             raise ValueError("motion_output_exists")
-        _local_file(args.source, MAX_LOCAL_ARCHIVE_BYTES)
         if args.source.suffix.lower() == ".zip":
-            manifest = SampleArchive.validate_zip(args.source, MAX_LOCAL_ARCHIVE_BYTES)
+            with _open_local(args.source, MAX_LOCAL_ARCHIVE_BYTES) as source:
+                manifest = SampleArchive.validate_zip(source, MAX_LOCAL_ARCHIVE_BYTES)
         else:
             manifest = _read_json(args.source, MAX_MANIFEST_BYTES)
         settings = (

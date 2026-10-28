@@ -12,6 +12,85 @@ concurrency:
   group: rider-sonar-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  module-independent:
+    name: Rider independent module tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ENV_FILE: /dev/null
+      CUDA_VISIBLE_DEVICES: "-1"
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14.8"
+      - name: Install module and independent test dependencies
+        run: python -m pip install -e . -r requirements-module-test.txt
+      - name: Run independent Rider tests
+        run: make check-standalone STANDALONE_PYTHON=python
+  module-web-independent:
+    name: Rider independent frontend tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: tests/web-independent/package-lock.json
+      - run: npm ci --prefix tests/web-independent
+      - run: npm run --prefix tests/web-independent test:web:module
+  host-web-integration:
+    name: Rider host frontend and browser fixtures
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          repository: mpieniak01/Venom
+          ref: 3144d5c9edf451d79ed093b116a4f49dd5bbce28
+          path: host
+          persist-credentials: false
+      - uses: actions/checkout@v5
+        with:
+          path: host/modules/venom-module-rider
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.22.0"
+          cache: npm
+          cache-dependency-path: host/web-next/package-lock.json
+      - name: Install host frontend dependencies
+        working-directory: host/web-next
+        run: npm ci
+      - name: Link host frontend dependencies
+        working-directory: host/modules/venom-module-rider
+        run: ln -s ../../web-next/node_modules node_modules
+      - name: Run host frontend integration checks
+        working-directory: host/modules/venom-module-rider
+        run: make check-web
+      - name: Install Chromium for browser fixtures
+        working-directory: host/web-next
+        run: npx playwright install --with-deps chromium
+      - name: Run isolated browser fixtures
+        working-directory: host/modules/venom-module-rider
+        run: make check-browser
+      - name: Upload browser report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rider-browser-regressions
+          path: host/modules/venom-module-rider/test-results/browser-regressions/
+          if-no-files-found: warn
   sonar:
     runs-on: ubuntu-latest
     timeout-minutes: 30

@@ -447,7 +447,7 @@ def test_replay_bad_npz_keys_and_invalid_observation(tmp_path, params):
     manifest = write_replay(tmp_path)
     np.savez_compressed(tmp_path / "maps.npz", labels=np.ones((10, 10)))
     with pytest.raises(ValueError, match="replay_maps_keys"):
-        replay(manifest, params, tmp_path / "result.jsonl")
+        replay(manifest, params, tmp_path / "invalid-keys.jsonl")
     manifest = write_replay(tmp_path)
     rows = [json.loads(line) for line in manifest.read_text().splitlines()]
     rows[0]["valid"] = False
@@ -547,7 +547,7 @@ def test_replay_decompression_and_manifest_bounds(tmp_path, params):
         replay(manifest, params, tmp_path / "output.jsonl")
     manifest.write_text("x" * (65536 + 1))
     with pytest.raises(ValueError, match="replay_manifest_bounds"):
-        replay(manifest, params, tmp_path / "output.jsonl")
+        replay(manifest, params, tmp_path / "manifest-error.jsonl")
 
 
 def test_replay_large_file_is_rejected_before_numpy_load(tmp_path, params):
@@ -634,4 +634,42 @@ def test_replay_rejects_incomplete_or_invalid_semantic_scores(tmp_path, params):
         confidence=np.full((100, 100), np.nan, dtype=np.float16),
     )
     with pytest.raises(ValueError, match="navigation_semantic_maps"):
-        replay(manifest, params, tmp_path / "out.jsonl")
+        replay(manifest, params, tmp_path / "invalid-semantic.jsonl")
+
+
+def test_replay_rejects_existing_output_and_symlink(tmp_path, params):
+    manifest = write_replay(tmp_path)
+    output = tmp_path / "result.jsonl"
+    output.write_text("previous result")
+    with pytest.raises(FileExistsError):
+        replay(manifest, params, output)
+    assert output.read_text() == "previous result"
+    output.unlink()
+    secret = tmp_path / "secret"
+    secret.write_text("unchanged")
+    output.symlink_to(secret)
+    with pytest.raises(FileExistsError):
+        replay(manifest, params, output)
+    assert secret.read_text() == "unchanged"
+
+
+def test_replay_main_preserves_existing_summary(tmp_path, params):
+    manifest = write_replay(tmp_path)
+    policy = tmp_path / "params.json"
+    policy.write_text(json.dumps(params))
+    output = tmp_path / "result.jsonl"
+    summary = output.with_suffix(".summary.json")
+    summary.write_text("previous summary")
+    with pytest.raises(FileExistsError):
+        main(
+            [
+                "--manifest",
+                str(manifest),
+                "--params",
+                str(policy),
+                "--output",
+                str(output),
+            ]
+        )
+    assert summary.read_text() == "previous summary"
+    assert not output.exists()
