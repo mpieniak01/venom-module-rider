@@ -596,3 +596,25 @@ def test_explicit_replay_rejects_maps_from_another_model_type(tmp_path, semantic
             behavior=behavior,
             perception=perception,
         )
+
+
+def test_export_json_rejects_symlink_swapped_after_initial_check(tmp_path, monkeypatch):
+    import os
+
+    if not hasattr(os, "O_NOFOLLOW"):
+        pytest.skip("atomic symlink protection requires O_NOFOLLOW")
+    source = tmp_path / "report.json"
+    secret = tmp_path / "secret.json"
+    source.write_text("{}")
+    secret.write_text('{"private": true}')
+    original_open = os.open
+
+    def swap(path, flags, *args, **kwargs):
+        if path == source:
+            source.unlink()
+            source.symlink_to(secret)
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(archive.os, "open", swap)
+    with pytest.raises(ValueError, match="analysis_navigation_export_source"):
+        archive._json_file(source, 1024)

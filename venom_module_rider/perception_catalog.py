@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import tempfile
 from pathlib import Path
 
 from .errors import RiderError
@@ -238,17 +239,28 @@ class LiveCatalog:
         artifact = self.qualify_files(model_id)
         path = self.receipt_path(model_id)
         path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_suffix(".tmp")
-        temporary.write_text(
-            json.dumps(
-                {
-                    "model_id": model_id,
-                    "sha256": artifact["sha256"],
-                    "smoke": True,
-                    "revision": SOURCES[model_id]["revision"],
-                    "backend": artifact["backend"],
-                }
-            )
+        payload = json.dumps(
+            {
+                "model_id": model_id,
+                "sha256": artifact["sha256"],
+                "smoke": True,
+                "revision": SOURCES[model_id]["revision"],
+                "backend": artifact["backend"],
+            }
         )
-        temporary.replace(path)
+        # Never follow a predictable temporary-file symlink, and publish only a
+        # complete receipt in the same filesystem.
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=path.parent, delete=False
+            ) as stream:
+                temporary = Path(stream.name)
+                stream.write(payload)
+                stream.flush()
+                os.fsync(stream.fileno())
+            temporary.replace(path)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
         return artifact

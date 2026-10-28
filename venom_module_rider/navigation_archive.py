@@ -6,7 +6,9 @@ import hashlib
 import io
 import json
 import math
+import os
 import re
+import stat
 import zipfile
 from collections.abc import Mapping
 from pathlib import Path
@@ -170,9 +172,17 @@ def decode_evidence(payload: bytes) -> dict[str, Any]:
 
 
 def _json_file(path: Path, maximum: int):
-    if path.is_symlink() or not path.is_file() or path.stat().st_size > maximum:
+    if path.is_symlink():
         raise ValueError("analysis_navigation_export_source")
-    with path.open("rb") as stream:
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise ValueError("analysis_navigation_export_source") from exc
+    with os.fdopen(descriptor, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_size > maximum:
+            raise ValueError("analysis_navigation_export_source")
         payload = stream.read(maximum + 1)
     if len(payload) > maximum:
         raise ValueError("analysis_navigation_export_source")
