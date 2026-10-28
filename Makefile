@@ -2,6 +2,7 @@
 HOST ?= ../..
 PYTHON ?= $(HOST)/.venv/bin/python
 RUFF ?= $(HOST)/.venv/bin/ruff
+WEB_TEST_ARGS ?=
 WEB_BIN = $(HOST)/web-next/node_modules/.bin
 
 check: check-python check-web check-browser
@@ -69,7 +70,7 @@ check-web:
 	node --check tests/browser/operator-journey-priority.js
 	$(WEB_BIN)/tsc --project web-next/tsconfig.json --noEmit
 	$(WEB_BIN)/eslint web-next tests/web --max-warnings 0 --config web-next/eslint.config.mjs
-	node --import $(HOST)/web-next/node_modules/tsx/dist/loader.mjs --test tests/web/*.test.ts
+	node $(WEB_TEST_ARGS) --import $(HOST)/web-next/node_modules/tsx/dist/loader.mjs --test tests/web/*.test.ts
 
 test:
 	PYTHONPATH=$(HOST):. $(PYTHON) -m pytest -q
@@ -97,3 +98,13 @@ check-journey:
 .PHONY: check-browser
 check-browser:
 	RIDER_WEB_ROOT="$(abspath $(HOST)/web-next)" node scripts/check_browser_regressions.mjs $(BROWSER_ARGS)
+
+.PHONY: check-web-coverage check-browser-coverage
+# Install the pinned test tooling with npm ci --prefix tests/web-independent first.
+check-web-coverage:
+	node --test tests/browser/coverage.test.mjs
+	mkdir -p test-results/web-coverage
+	$(MAKE) check-web WEB_TEST_ARGS="--enable-source-maps --experimental-test-coverage --test-coverage-include=web-next/** --test-reporter=spec --test-reporter-destination=stderr --test-reporter=lcov --test-reporter-destination=test-results/web-coverage/lcov-unit.info"
+
+check-browser-coverage:
+	$(MAKE) check-browser BROWSER_ARGS=--coverage

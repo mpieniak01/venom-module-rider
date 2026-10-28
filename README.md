@@ -757,3 +757,20 @@ acceptance still require their existing dedicated workflows.
 Tests: tests/test_local_simulation.py forbids real network transport, covers an
 offline physical target and checks every simulated motion/pose command.
 The operator-demo browser regression uses mocked endpoints and the real panel.
+
+### Frontend coverage for SonarCloud
+
+Install the pinned reporting tools with `npm ci --prefix tests/web-independent`.
+`make check-web-coverage` runs the host frontend checks and emits Node's native
+LCOV report for the original TypeScript sources. `make check-browser-coverage`
+runs the complete isolated Chromium suite, collects execution ranges, and maps
+bundled code back to the module's TypeScript/TSX sources with source maps. These
+commands use the existing host frontend dependencies and browser; they do not
+start Venom or access a robot. Browser coverage deliberately requires the full
+suite rather than `--only`.
+
+Reports are written to `test-results/web-coverage/lcov-unit.info` and
+`lcov-browser.info`. The GitHub frontend and backend test jobs run in parallel;
+the existing `Backend host (pytest + SonarCloud)` gate then downloads both sets
+of reports and performs one scan. The normal `make check-web` and
+`make check-browser` commands remain available without coverage collection.
