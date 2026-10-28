@@ -558,6 +558,11 @@ class ComputeService:
                 self._finish(job, "succeeded")
             except asyncio.CancelledError:
                 self._finish(job, "cancelled", "compute_cancelled")
+                # A superseded inference cancels only its child; cancellation of
+                # the queue worker itself must propagate after cleanup.
+                current = asyncio.current_task()
+                if current is not None and current.cancelling():
+                    raise
             except Exception as exc:
                 self._finish(
                     job, "failed", getattr(exc, "code", "compute_engine_error")

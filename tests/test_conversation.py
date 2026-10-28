@@ -873,3 +873,23 @@ async def test_tools_dispatch_through_the_registered_skill(rig, monkeypatch):
         "left",
         "right",
     ]
+
+
+async def test_external_chat_cancellation_propagates_and_releases_scope(
+    rig, monkeypatch
+):
+    enable(rig)
+    entered = asyncio.Event()
+
+    async def blocked(*args):
+        entered.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(rig.provider.skill, "speak", blocked)
+    turn = context()
+    task = asyncio.create_task(rig.registry.handle("Rider powiedz hello", turn))
+    await asyncio.wait_for(entered.wait(), 2)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert not rig.provider.scopes

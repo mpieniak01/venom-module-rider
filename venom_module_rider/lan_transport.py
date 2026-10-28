@@ -173,7 +173,7 @@ class LanConnection:
                     raise RiderError("pi_identity_invalid", 502)
             try:
                 identity = json.loads(content)
-            except (ValueError, UnicodeError) as exc:
+            except ValueError as exc:
                 raise RiderError("pi_identity_invalid", 502) from exc
             if (
                 not isinstance(identity, dict)

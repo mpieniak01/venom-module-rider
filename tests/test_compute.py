@@ -641,3 +641,21 @@ async def test_unavailable_closed_oversized_output_and_history_retention():
     await service.close()
     with pytest.raises(RiderError, match="compute_closed"):
         await service.capabilities()
+
+
+async def test_external_worker_cancellation_propagates_after_job_cleanup():
+    engines = BlockingEngines()
+    service = ComputeService(engines)
+    try:
+        job = request(service)
+        await service.submit("pi", job, b"hello", "text/plain")
+        await asyncio.wait_for(engines.entered.wait(), 2)
+        worker = service.worker
+        worker.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await worker
+        assert service.jobs["job"].state == "cancelled"
+        assert service.jobs["job"].payload == b""
+        assert service.running is None and service.inference is None
+    finally:
+        await service.close()

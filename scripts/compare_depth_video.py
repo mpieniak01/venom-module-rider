@@ -205,11 +205,13 @@ def main():
     )
     parser.add_argument("--decoder", choices=["jpeg", "video"], default="video")
     args = parser.parse_args()
-    if args.output.exists():
+    if args.output.exists() or args.output.is_symlink():
         raise FileExistsError("report exists")
     report = replay(args)
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(report, indent=2, allow_nan=False))
+    # Exclusive creation prevents clobbering an output inserted during replay.
+    with args.output.open("x", encoding="utf-8") as output:
+        json.dump(report, output, indent=2, allow_nan=False)
     print(json.dumps([{"window": r["window"], **r["summary"]} for r in report["runs"]]))
 
 

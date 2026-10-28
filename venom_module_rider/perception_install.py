@@ -131,6 +131,7 @@ class ModelInstaller:
                 raise RiderError("model_install_failed", 409)
         except asyncio.CancelledError:
             outcome = ("cancelled", None)
+            raise
         except RiderError as exc:
             outcome = ("failed", exc.code)
         except Exception:

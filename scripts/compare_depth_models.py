@@ -266,14 +266,14 @@ def main():
         apply_profile(args)
     except ValueError as error:
         parser.error(str(error))
-    if args.output.exists():
-        raise FileExistsError("report already exists")
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        report = benchmark(args)
-    except Exception as error:
-        args.output.write_text(
-            json.dumps(
+    # Reserve the explicit report destination atomically. This also rejects a
+    # dangling symlink and preserves the existing report on a retry.
+    with args.output.open("x", encoding="utf-8") as output:
+        try:
+            report = benchmark(args)
+        except Exception as error:
+            json.dump(
                 {
                     "status": "failed",
                     "backend": args.backend,
@@ -283,11 +283,11 @@ def main():
                     "error_type": type(error).__name__,
                     "error": str(error)[:2000],
                 },
+                output,
                 indent=2,
             )
-        )
-        raise
-    args.output.write_text(json.dumps(report, indent=2, allow_nan=False))
+            raise
+        json.dump(report, output, indent=2, allow_nan=False)
     print(json.dumps(report["summary"], indent=2))
 
 

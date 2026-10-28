@@ -69,7 +69,7 @@ export function useRider(section: Section) {
   const abortRef = useRef<AbortController | null>(null);
   const controlPollPromise = useRef<Promise<void> | null>(null);
   const controlAbortRef = useRef<AbortController | null>(null);
-  const commandRef = useRef<(body: JsonRecord, current?: () => boolean) => Promise<unknown>>(async () => undefined);
+  const commandRef = useRef<(body: JsonRecord, current?: () => boolean) => Promise<unknown>>(() => Promise.resolve(undefined));
   const abortReads = useCallback(() => { abortRef.current?.abort(); controlAbortRef.current?.abort(); }, []);
   const isConnected = useCallback(() => ["online", "degraded"].includes(statusRef.current?.connection.status ?? ""), []);
   const hasFreshControl = useCallback(() => freshControl(statusRef.current, clockRef.current, Date.now(), freshnessCadence(sectionRef.current)), []);

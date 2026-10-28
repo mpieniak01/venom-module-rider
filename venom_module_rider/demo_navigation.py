@@ -6,15 +6,16 @@ import asyncio
 import hashlib
 import importlib.util
 import json
+import os
 import time
 import uuid
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
 import httpx
 from fastapi.responses import Response
 
+from .local_api import local_api_origin
 from .motion_limits import MAX_DECISION_MS, MAX_MOTION_MS, MAX_SPEED
 from .vision_contract import VisionFrame
 
@@ -68,15 +69,20 @@ class ReplayNavigation:
         clock=time.monotonic,
         model_sha="",
         api_url="http://127.0.0.1:8800",
-        token="rider-demo-only-token",
+        token=None,
     ):
-        if urlsplit(api_url).hostname not in {"127.0.0.1", "localhost"}:
-            raise ValueError("replay_requires_loopback")
+        try:
+            api_url = local_api_origin(api_url)
+        except ValueError:
+            raise ValueError("replay_requires_loopback") from None
         self.payload, self.lease_factory = payload, lease_factory
         self.recorded_at, self.clock = recorded_at, clock
         self.policy: dict[str, Any] = dict(DEFAULT_POLICY)
         self.policy["corridor"] = list(DEFAULT_POLICY["corridor"])
-        self.model_sha, self.api_url, self.token = model_sha, api_url, token
+        self.model_sha, self.api_url = model_sha, api_url
+        self.token = (
+            token if token is not None else os.getenv("RIDER_COMPUTE_TOKEN", "")
+        )
         self.request = request or self._request
         self.state: Any = None
         self.task: asyncio.Task | None = None

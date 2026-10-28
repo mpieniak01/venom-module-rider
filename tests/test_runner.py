@@ -160,8 +160,25 @@ def test_launcher_starts_only_host_api_and_ui_without_a_demo_listener(
     assert "node_modules/next/dist/bin/next" in children[1][0]
     assert json.loads(children[0][1]["env"]["RIDER_DEVICES_JSON"]) == []
     assert children[0][1]["env"]["RIDER_DEFAULT_DEVICE"] == "demo"
+    api_env = children[0][1]["env"]
+    assert len(api_env["RIDER_COMPUTE_TOKEN"]) >= 32
+    assert len(api_env["RIDER_AGENT_TOKEN"]) >= 32
+    assert api_env["RIDER_COMPUTE_TOKEN"] != api_env["RIDER_AGENT_TOKEN"]
+    assert (
+        children[1][1]["env"]["RIDER_COMPUTE_TOKEN"] == api_env["RIDER_COMPUTE_TOKEN"]
+    )
     assert probes == [
         "http://127.0.0.1:8800/api/v1/rider/config",
         "http://127.0.0.1:3300/rider",
     ]
     assert all(process.stopped for _, _, process in children)
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "65536", "NaN"])
+def test_launcher_rejects_invalid_ports(value):
+    with pytest.raises(runner.argparse.ArgumentTypeError):
+        runner.loopback_port(value)
+
+
+def test_launcher_accepts_valid_loopback_port():
+    assert runner.loopback_port("8800") == 8800

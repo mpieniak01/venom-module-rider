@@ -151,7 +151,9 @@ python -m venom_module_rider.analysis_cli cancel RUN
 python -m venom_module_rider.analysis_cli compare FIRST SECOND
 ```
 
-Global `--url` defaults to the existing localhost API on port 8800.
+Global `--url` defaults to the existing localhost API on port 8800. It accepts
+only an HTTP loopback origin and does not follow redirects or environment proxies,
+so the configured access token cannot be forwarded to another host.
 `submit --spec FILE` reads validated AnalysisSpec JSON. It cannot provide model
 paths/URLs, actuator settings, a shell command or a new provider.
 `RIDER_ACCESS_TOKEN`, if configured, supplies the existing authorization header.

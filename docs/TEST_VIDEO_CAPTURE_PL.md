@@ -37,6 +37,8 @@ Program wypisze katalog zapisu w
 Można podać nowy `--output /pełna/ścieżka`. Istniejących katalogów nie nadpisuje.
 `check` zgłosi `camera_not_active_mjpeg`, dopóki operator nie włączy kamery
 z istniejącym transportem MJPEG. Helper sam tego nie zmienia.
+Adres `--url` musi wskazywać lokalny origin HTTP; klient nie korzysta z proxy
+środowiska ani nie podąża za przekierowaniami.
 Jeśli API wymaga tokenu, używa wyłącznie zmiennej procesu `RIDER_ACCESS_TOKEN`;
 nie przekazuj tokenu w URL lub argumentach.
 

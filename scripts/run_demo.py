@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import secrets
 import signal
 import socket
 import subprocess
@@ -46,6 +47,18 @@ def resolve_runtime_profile(demo_only, requested_profile=None):
     return requested_profile or "full"
 
 
+def loopback_port(value):
+    try:
+        port = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            "Port must be an integer from 1 to 65535."
+        ) from None
+    if not 1 <= port <= 65535:
+        raise argparse.ArgumentTypeError("Port must be an integer from 1 to 65535.")
+    return port
+
+
 def free_port(port):
     with socket.socket() as connection:
         connection.settimeout(0.2)
@@ -62,8 +75,8 @@ def main():
     module = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--core-root", type=Path, default=module.parent.parent)
-    parser.add_argument("--api-port", type=int, default=8800)
-    parser.add_argument("--web-port", type=int, default=3300)
+    parser.add_argument("--api-port", type=loopback_port, default=8800)
+    parser.add_argument("--web-port", type=loopback_port, default=3300)
     parser.add_argument(
         "--device-file",
         type=Path,
@@ -108,9 +121,8 @@ def main():
         subprocess.run(["node", "scripts/" + script], cwd=web, check=True)
     api_url = f"http://127.0.0.1:{args.api_port}"
     web_url = f"http://127.0.0.1:{args.web_port}"
-    flags = {
-        name: "false"
-        for name in (
+    flags = dict.fromkeys(
+        (
             "ENABLE_AUTO_DOCUMENTATION",
             "ENABLE_AUTO_GARDENING",
             "ENABLE_HEALTH_CHECKS",
@@ -124,8 +136,9 @@ def main():
             "ENABLE_INTENT_EMBEDDING_ROUTER",
             "ENABLE_RUNTIME_RETENTION_CLEANUP",
             "LLM_WARMUP_ON_STARTUP",
-        )
-    }
+        ),
+        "false",
+    )
     flags.update(
         VENOM_RUNTIME_PROFILE=runtime_profile,
         ENABLE_AUDIO_INTERFACE="true" if audio_enabled else "false",
@@ -145,8 +158,8 @@ def main():
     # A real-device access token does not belong to the isolated demo.
     if demo_only:
         api_env.pop("RIDER_ACCESS_TOKEN", None)
-        api_env["RIDER_COMPUTE_TOKEN"] = "rider-demo-only-token"
-        api_env["RIDER_AGENT_TOKEN"] = "rider-demo-only-agent-token"
+        api_env["RIDER_COMPUTE_TOKEN"] = secrets.token_urlsafe(32)
+        api_env["RIDER_AGENT_TOKEN"] = secrets.token_urlsafe(32)
     web_env = {
         **api_env,
         "API_PROXY_TARGET": api_url,
@@ -250,7 +263,7 @@ def main():
                         ),
                         flush=True,
                     )
-                except (OSError, TimeoutError):
+                except OSError:
                     if time.monotonic() > deadline:
                         raise RuntimeError(
                             "Demo startup failed; inspect logs/r1-demo-*.log."

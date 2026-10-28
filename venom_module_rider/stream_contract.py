@@ -154,7 +154,7 @@ def canonical_jpeg(frame: NativeFrame) -> bytes:
     """Apply the declared transform once, on Venom, retaining original source SHA."""
     import io
 
-    from PIL import Image, UnidentifiedImageError
+    from PIL import Image
 
     transform = frame.source.image_transform
     if (
@@ -193,7 +193,6 @@ def canonical_jpeg(frame: NativeFrame) -> bytes:
     except (
         OSError,
         ValueError,
-        UnidentifiedImageError,
         Image.DecompressionBombError,
     ) as exc:
         raise RiderError("stream_invalid_jpeg", 502) from exc
