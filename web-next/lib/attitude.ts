@@ -18,25 +18,38 @@ export function rotate(q:Quaternion,v:Vector3):Vector3 {
   return [r[1],r[2],r[3]];
 }
 export type PreviewOptions={enabled:boolean;assumedUnit:"deg"|"rad"};
+/** Require the complete device orientation convention and sample identity. */
+function qualifiedOrientation(point:MotionPoint,meta:ReturnType<typeof record>):boolean {
+  return meta.convention==="rider-body-zyx-v1"&&meta.revision===1&&meta.verified===true&&!!str(meta.qualification_ref)&&str(meta.qualification_ref).length<=128&&(meta.unit==="deg"||meta.unit==="rad")&&!!point.instance_id&&meta.instance_id===point.instance_id;
+}
+type AttitudeAxis={value:number;stamp:number;unit:string;assumed:boolean}|{error:Attitude};
+/** Validate one axis and normalize its angle only after sensor coherence checks. */
+function attitudeAxis(point:MotionPoint,meta:ReturnType<typeof record>,qualified:boolean,preview:PreviewOptions|undefined,axis:string):AttitudeAxis {
+  const q=record(point.quality),value=point.values[axis],sensor=record(record(q.sensors)[axis]);
+  const declared=point.angle_semantics?.[axis]?.unit??point.units[axis];
+  const known=declared==="deg"||declared==="rad";
+  let unit:unknown;
+  if(qualified)unit=meta.unit;
+  else unit=known?declared:preview!.assumedUnit;
+  if(!finite(value)||Math.abs(value)>1e9||qualified&&(point.units[axis]!==unit||sensor.unit!==unit||Math.abs(value)>(unit==="deg"?360:2*Math.PI)))return {error:{state:"unqualified",reason:"units"}};
+  if(sensor.unit!==point.units[axis]||sensor.ready!==true||sensor.stale!==false||sensor.offline!==false||sensor.instance_id!==point.instance_id||!finite(sensor.observed_at))return {error:{state:"unavailable",reason:"coherence"}};
+  const period=unit==="deg"?360:2*Math.PI;
+  return {value:((value%period)+period)%period*(unit==="deg"?Math.PI/180:1),unit:str(unit),stamp:sensor.observed_at,assumed:!known&&!qualified};
+}
+/** Qualify a coherent orientation before producing any reconstructed attitude. */
 export function qualifyAttitude(point:MotionPoint|null,preview?:PreviewOptions):Attitude {
   if(!point)return {state:"unavailable",reason:"noSample"};
   const q=record(point.quality),meta=record(q.orientation);
-  const qualified=meta.convention==="rider-body-zyx-v1"&&meta.revision===1&&meta.verified===true&&!!str(meta.qualification_ref)&&str(meta.qualification_ref).length<=128&&(meta.unit==="deg"||meta.unit==="rad")&&!!point.instance_id&&meta.instance_id===point.instance_id;
+  const qualified=qualifiedOrientation(point,meta);
   if(!qualified&&!preview?.enabled)return {state:"unqualified",reason:"convention"};
   if(!point.valid||!point.instance_id||q.ready!==true||q.stale!==false||q.offline!==false)return {state:"unavailable",reason:"quality"};
   const values:number[]=[],stamps:number[]=[],units:string[]=[];
   let assumed=false;
   for(const axis of ["roll","pitch","yaw"]){
-    const value=point.values[axis],sensor=record(record(q.sensors)[axis]);
-    const declared=point.angle_semantics?.[axis]?.unit??point.units[axis];
-    const known=declared==="deg"||declared==="rad";
-    const unit=qualified?meta.unit:known?declared:preview!.assumedUnit;
-    if(!known&&!qualified)assumed=true;
-    if(!finite(value)||Math.abs(value)>1e9||qualified&&(point.units[axis]!==unit||sensor.unit!==unit||Math.abs(value)>(unit==="deg"?360:2*Math.PI)))return {state:"unqualified",reason:"units"};
-    if(sensor.unit!==point.units[axis]||sensor.ready!==true||sensor.stale!==false||sensor.offline!==false||sensor.instance_id!==point.instance_id||!finite(sensor.observed_at))return {state:"unavailable",reason:"coherence"};
-    const period=unit==="deg"?360:2*Math.PI;
-    values.push(((value%period)+period)%period*(unit==="deg"?Math.PI/180:1));
-    units.push(String(unit));stamps.push(sensor.observed_at);
+    const result=attitudeAxis(point,meta,qualified,preview,axis);
+    if("error" in result)return result.error;
+    if(result.assumed)assumed=true;
+    values.push(result.value);units.push(result.unit);stamps.push(result.stamp);
   }
   if(!finite(point.source_time)||Math.max(...stamps)-Math.min(...stamps)>1e-6||Math.abs(Math.max(...stamps)-point.source_time)>1e-6)return {state:"unavailable",reason:"coherence"};
   const identity=qualified?[meta.convention,meta.revision,meta.unit,meta.qualification_ref,point.instance_id]:["provisional-axes-123-v1",units,point.instance_id];

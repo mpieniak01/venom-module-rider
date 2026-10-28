@@ -27,6 +27,7 @@ def elapsed(value, origin):
 
 
 def build_timeline(manifest):
+    """Validate evidence and assemble bounded per-session timelines."""
     analysis = analyze_manifest(manifest)
     evidence = manifest.get("evidence", {})
     groups = defaultdict(list)
@@ -35,116 +36,7 @@ def build_timeline(manifest):
         groups[(row["device_id"], row["source_session"])].append(row)
     streams = []
     for (device, session), rows in groups.items():
-        commands = [row for row in rows if row["kind"] == "command"]
-        starts = [
-            row["received_mono"]
-            for row in commands
-            if row["host"]["phase"] == "requested"
-            and row["host"]["intent"]["action"] == "move"
-        ]
-        origin = min(starts or [row["received_mono"] for row in rows])
-        points, events, outputs, profiles = [], [], [], {}
-        previous = None
-        segment = 0
-        skipped_times = 0
-        for row in rows:
-            t = elapsed(row["received_mono"], origin)
-            if t is None:
-                skipped_times += 1
-                continue
-            if row["kind"] == "profile":
-                profiles[row["record_id"]] = row["host"]
-            elif row["kind"] == "command":
-                events.append({"id": row["record_id"], "t": t, **row["host"]})
-            elif row["kind"] == "executor":
-                output = row.get("executor") or {}
-                outputs.append(
-                    {
-                        "id": row["record_id"],
-                        "t": t,
-                        "instance_id": row["source_instance_id"],
-                        "source_time": row["source_observed_at"],
-                        "target": {
-                            key: number(output.get("target", {}).get(key))
-                            for key in ("lx", "az")
-                        },
-                        "output": {
-                            key: number(output.get("output", {}).get(key))
-                            for key in ("lx", "az")
-                        },
-                        "state": output.get("state"),
-                        "quality": row["quality"],
-                    }
-                )
-            elif row["kind"] == "imu":
-                q = row["quality"]
-                valid = q.get("ready") is True and not any(
-                    q.get(flag) is True for flag in ("stale", "offline")
-                )
-                source = row["source_observed_at"]
-                contiguous = False
-                if previous is not None and valid:
-                    prior, prior_valid = previous
-                    source_gap = (
-                        elapsed(source, prior["source_observed_at"])
-                        if source is not None
-                        and prior["source_observed_at"] is not None
-                        else None
-                    )
-                    host_gap = elapsed(row["received_mono"], prior["received_mono"])
-                    contiguous = bool(
-                        prior_valid
-                        and row["source_instance_id"] is not None
-                        and row["source_instance_id"] == prior["source_instance_id"]
-                        and source_gap is not None
-                        and 0 < source_gap <= 1
-                        and host_gap is not None
-                        and 0 < host_gap <= 1
-                    )
-                if not contiguous:
-                    segment += 1
-                points.append(
-                    {
-                        "id": row["record_id"],
-                        "t": t,
-                        "segment": segment,
-                        "valid": valid,
-                        "instance_id": row["source_instance_id"],
-                        "source_time": source,
-                        "values": {key: row["values"].get(key) for key in CHANNELS},
-                        "units": {
-                            key: row["units"].get(key, "unknown") for key in CHANNELS
-                        },
-                        "quality": q,
-                        "angle_semantics": semantics(row),
-                    }
-                )
-                previous = row, valid
-        diagnostics = enrich(points, events)
-        trials = series_timeline(rows, origin)
-        times = [row["t"] for row in [*points, *events, *outputs]]
-        times += [
-            run["t"] + event["elapsed_ms"] / 1000
-            for run in trials
-            for event in run["events"]
-        ]
-        streams.append(
-            {
-                "id": hashlib.sha256((device + ":" + session).encode()).hexdigest(),
-                "device_id": device,
-                "source_session": session,
-                "clock": "host-reception-monotonic",
-                "origin": "first_move_request" if starts else "first_receipt",
-                "range": [min(times), max(times)] if times else [0.0, 0.0],
-                "points": points,
-                "events": events,
-                "outputs": outputs,
-                "profiles": profiles,
-                "trials": trials,
-                "skipped_times": skipped_times,
-                "sampling_diagnostics": diagnostics,
-            }
-        )
+        streams.append(_stream_timeline(device, session, rows))
     report = {
         "schema_version": 1,
         "dataset_revision": manifest["dataset_revision"],
@@ -162,3 +54,122 @@ def build_timeline(manifest):
     if len(json.dumps(report, allow_nan=False).encode()) > 24 * 1024**2:
         raise ValueError("motion_timeline_size")
     return report
+
+
+def _stream_timeline(device, session, rows):
+    """Build one device/session timeline in original receipt order."""
+    commands = [row for row in rows if row["kind"] == "command"]
+    starts = [
+        row["received_mono"]
+        for row in commands
+        if row["host"]["phase"] == "requested"
+        and row["host"]["intent"]["action"] == "move"
+    ]
+    origin = min(starts or [row["received_mono"] for row in rows])
+    points, events, outputs, profiles, skipped_times = _stream_rows(rows, origin)
+    diagnostics = enrich(points, events)
+    trials = series_timeline(rows, origin)
+    times = [row["t"] for row in [*points, *events, *outputs]]
+    times += [
+        run["t"] + event["elapsed_ms"] / 1000
+        for run in trials
+        for event in run["events"]
+    ]
+    return {
+        "id": hashlib.sha256((device + ":" + session).encode()).hexdigest(),
+        "device_id": device,
+        "source_session": session,
+        "clock": "host-reception-monotonic",
+        "origin": "first_move_request" if starts else "first_receipt",
+        "range": [min(times), max(times)] if times else [0.0, 0.0],
+        "points": points,
+        "events": events,
+        "outputs": outputs,
+        "profiles": profiles,
+        "trials": trials,
+        "skipped_times": skipped_times,
+        "sampling_diagnostics": diagnostics,
+    }
+
+
+def _stream_rows(rows, origin):
+    """Collect receipt-ordered events and IMU points within one stream."""
+    points, events, outputs, profiles = [], [], [], {}
+    previous = None
+    segment = 0
+    skipped_times = 0
+    for row in rows:
+        t = elapsed(row["received_mono"], origin)
+        if t is None:
+            skipped_times += 1
+            continue
+        if row["kind"] == "profile":
+            profiles[row["record_id"]] = row["host"]
+        elif row["kind"] == "command":
+            events.append({"id": row["record_id"], "t": t, **row["host"]})
+        elif row["kind"] == "executor":
+            output = row.get("executor") or {}
+            outputs.append(
+                {
+                    "id": row["record_id"],
+                    "t": t,
+                    "instance_id": row["source_instance_id"],
+                    "source_time": row["source_observed_at"],
+                    "target": {
+                        key: number(output.get("target", {}).get(key))
+                        for key in ("lx", "az")
+                    },
+                    "output": {
+                        key: number(output.get("output", {}).get(key))
+                        for key in ("lx", "az")
+                    },
+                    "state": output.get("state"),
+                    "quality": row["quality"],
+                }
+            )
+        elif row["kind"] == "imu":
+            point, previous, segment = _imu_point(row, t, previous, segment)
+            points.append(point)
+    return points, events, outputs, profiles, skipped_times
+
+
+def _imu_point(row, t, previous, segment):
+    """Bind one point to its valid source and receipt-clock segment."""
+    q = row["quality"]
+    valid = q.get("ready") is True and not any(
+        q.get(flag) is True for flag in ("stale", "offline")
+    )
+    source = row["source_observed_at"]
+    contiguous = False
+    if previous is not None and valid:
+        prior, prior_valid = previous
+        source_gap = (
+            elapsed(source, prior["source_observed_at"])
+            if source is not None and prior["source_observed_at"] is not None
+            else None
+        )
+        host_gap = elapsed(row["received_mono"], prior["received_mono"])
+        contiguous = bool(
+            prior_valid
+            and row["source_instance_id"] is not None
+            and row["source_instance_id"] == prior["source_instance_id"]
+            and source_gap is not None
+            and 0 < source_gap <= 1
+            and host_gap is not None
+            and 0 < host_gap <= 1
+        )
+    if not contiguous:
+        segment += 1
+    point = {
+        "id": row["record_id"],
+        "t": t,
+        "segment": segment,
+        "valid": valid,
+        "instance_id": row["source_instance_id"],
+        "source_time": source,
+        "values": {key: row["values"].get(key) for key in CHANNELS},
+        "units": {key: row["units"].get(key, "unknown") for key in CHANNELS},
+        "quality": q,
+        "angle_semantics": semantics(row),
+    }
+    return point, (row, valid), segment

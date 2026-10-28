@@ -218,6 +218,16 @@ class LanConnection:
         except TimeoutError as exc:
             raise httpx.ReadTimeout("identity preflight deadline exceeded") from exc
 
+    def _timeout_recovery(self, revision, failures):
+        """Allow only the existing healthy-generation rescue after connect timeout."""
+        if revision == self.revision and not self.closed:
+            if self.current is not None:
+                self.state = "online"
+                return self.current
+            if self.failures == failures:
+                self._backoff("pi_connection_timeout")
+        return None
+
     async def acquire(self, *, urgent=False):
         if self.closed:
             raise RiderError("module_closed", 503)
@@ -240,13 +250,55 @@ class LanConnection:
                         raise RiderError(self.error or "pi_connect_failed", 503)
                     return await self._connect(urgent=urgent)
         except TimeoutError as exc:
-            if revision == self.revision and not self.closed:
-                if self.current is not None:
-                    self.state = "online"
-                    return self.current
-                if self.failures == failures:
-                    self._backoff("pi_connection_timeout")
+            rescued = self._timeout_recovery(revision, failures)
+            if rescued is not None:
+                return rescued
             raise RiderError("pi_connection_timeout", 503) from exc
+
+    async def _resolve_peer(self, parsed, host):
+        """
+        Resolve within the caller budget while retaining in-process transport
+        bypass.
+        """
+        # An explicitly supplied in-process test transport does not use DNS.
+        resolved: str | tuple[str, ...]
+        if self.transport is not None and self.resolver is resolve_address:
+            resolved = host
+        else:
+            lookup = asyncio.wait_for(
+                self.resolver(
+                    host, parsed.port or (443 if parsed.scheme == "https" else 80)
+                ),
+                timeout=DNS_TIMEOUT,
+            )
+            resolved = await lookup
+        return resolved
+
+    def _adopt_generation(self, generation, revision):
+        """Publish only a verified generation that still belongs to this connection."""
+        if self.closed:
+            raise RiderError("module_closed", 503)
+        if revision != self.revision:
+            raise RiderError("stale_transport_generation", 409)
+        if self.current is None:
+            generation.number = self.number + 1
+            self.number = generation.number
+            self.current = generation
+        self.state, self.error = "online", None
+        self.retry_at, self.failures = 0.0, 0
+        return self.current
+
+    def _connect_recovery(self, revision, exc, error):
+        """Preserve terminal identity errors while allowing healthy transport rescue."""
+        if self.current is not None and revision == self.revision and not self.closed:
+            self.state = "online"
+            # A parallel healthy generation can rescue transport failure,
+            # but cannot override this request's terminal identity result.
+            if not isinstance(exc, RiderError):
+                return self.current
+        elif revision == self.revision and not self.closed:
+            self._backoff(error.code)
+        return None
 
     async def _connect(self, *, urgent):
         generation, revision = None, self.revision
@@ -256,18 +308,7 @@ class LanConnection:
             if host is None:
                 raise RiderError("invalid_device_configuration", 503)
             self.state = "resolving"
-            # An explicitly supplied in-process test transport does not use DNS.
-            resolved: str | tuple[str, ...]
-            if self.transport is not None and self.resolver is resolve_address:
-                resolved = host
-            else:
-                lookup = asyncio.wait_for(
-                    self.resolver(
-                        host, parsed.port or (443 if parsed.scheme == "https" else 80)
-                    ),
-                    timeout=DNS_TIMEOUT,
-                )
-                resolved = await lookup
+            resolved = await self._resolve_peer(parsed, host)
             last_error = None
             for address in address_candidates(resolved):
                 self.state = "connecting"
@@ -285,17 +326,7 @@ class LanConnection:
                 if last_error is not None:
                     raise last_error
                 raise socket.gaierror("no peer candidate available")
-            if self.closed:
-                raise RiderError("module_closed", 503)
-            if revision != self.revision:
-                raise RiderError("stale_transport_generation", 409)
-            if self.current is None:
-                generation.number = self.number + 1
-                self.number = generation.number
-                self.current = generation
-            self.state, self.error = "online", None
-            self.retry_at, self.failures = 0.0, 0
-            return self.current
+            return self._adopt_generation(generation, revision)
         except (
             socket.gaierror,
             TimeoutError,
@@ -304,18 +335,9 @@ class LanConnection:
             RiderError,
         ) as exc:
             error = self._error(exc)
-            if (
-                self.current is not None
-                and revision == self.revision
-                and not self.closed
-            ):
-                self.state = "online"
-                # A parallel healthy generation can rescue transport failure,
-                # but cannot override this request's terminal identity result.
-                if not isinstance(exc, RiderError):
-                    return self.current
-            elif revision == self.revision and not self.closed:
-                self._backoff(error.code)
+            rescued = self._connect_recovery(revision, exc, error)
+            if rescued is not None:
+                return rescued
             raise error from exc
         finally:
             if generation is not None and self.current is not generation:

@@ -37,13 +37,7 @@ def plan(result, previous, settings, phase, eligible):
     state.setdefault("turns", 0)
     counts = dict(state.get("counts", {"left": 0, "right": 0}))
     state["counts"] = counts
-    for side in ("left", "right"):
-        row = sectors.get(side, {})
-        counts[side] = (
-            counts.get(side, 0) + 1
-            if row.get("state") == "clear" and row.get("coverage_complete")
-            else 0
-        )
+    _advance_side_counts(counts, sectors)
     motion = "stop"
     reason = "avoidance_waiting"
     if not eligible or not settings.sweep_verified:
@@ -59,29 +53,7 @@ def plan(result, previous, settings, phase, eligible):
         reason = "clear_frames_ready" if motion == "go" else "clear_frames_pending"
     elif result.get("state") == "obstacle":
         state["front"] = 0
-        if result.get("farther_outlier_pixels", 0):
-            reason = "avoidance_recess"
-        elif state["turns"] >= settings.max_turn_pulses:
-            reason = "avoidance_turn_limit"
-        else:
-            choices = [s for s in ("left", "right") if counts[s] >= 3]
-            chosen = state.get("side")
-            if chosen and chosen not in choices:
-                reason = "avoidance_selected_side_blocked"
-            elif choices:
-                chosen = chosen or min(
-                    choices, key=lambda s: sectors[s]["outlier_fraction"]
-                )
-                state["side"] = chosen
-                if state.get("paused"):
-                    motion = "turn_" + chosen
-                    state["turns"] += 1
-                    counts.update(left=0, right=0)
-                    reason = "avoidance_turn"
-                else:
-                    reason = "avoidance_stop_before_turn"
-            else:
-                reason = "avoidance_no_clear_side"
+        motion, reason = _obstacle_action(result, state, counts, sectors, settings)
         state["paused"] = True
     else:
         state["front"] = 0
@@ -91,3 +63,35 @@ def plan(result, previous, settings, phase, eligible):
 
 
 MotionPhase = Literal["ready", "turn_settling", "steer_wait"]
+
+
+def _obstacle_action(result, state, counts, sectors, settings):
+    """Select the same bounded side only after an accepted obstacle observation."""
+    if result.get("farther_outlier_pixels", 0):
+        return "stop", "avoidance_recess"
+    if state["turns"] >= settings.max_turn_pulses:
+        return "stop", "avoidance_turn_limit"
+    choices = [side for side in ("left", "right") if counts[side] >= 3]
+    chosen = state.get("side")
+    if chosen and chosen not in choices:
+        return "stop", "avoidance_selected_side_blocked"
+    if not choices:
+        return "stop", "avoidance_no_clear_side"
+    chosen = chosen or min(choices, key=lambda side: sectors[side]["outlier_fraction"])
+    state["side"] = chosen
+    if not state.get("paused"):
+        return "stop", "avoidance_stop_before_turn"
+    state["turns"] += 1
+    counts.update(left=0, right=0)
+    return "turn_" + chosen, "avoidance_turn"
+
+
+def _advance_side_counts(counts, sectors):
+    """Accumulate each original complete-clear side before eligibility is evaluated."""
+    for side in ("left", "right"):
+        row = sectors.get(side, {})
+        counts[side] = (
+            counts.get(side, 0) + 1
+            if row.get("state") == "clear" and row.get("coverage_complete")
+            else 0
+        )

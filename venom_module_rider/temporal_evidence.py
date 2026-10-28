@@ -223,63 +223,20 @@ class TemporalEvidence:
         anchor is renewed here.
         """
         values = _parameters(params)
-        if (
-            isinstance(sequence, bool)
-            or not isinstance(sequence, int)
-            or sequence < 0
-            or not isinstance(frame_id, str)
-            or not frame_id
-            or not isinstance(captured_s, (int, float))
-            or isinstance(captured_s, bool)
-            or not isfinite(captured_s)
-            or not isinstance(context, Mapping)
-            or not context
-        ):
+        if _invalid_temporal_source(sequence, frame_id, captured_s, context):
             raise ValueError("navigation_frame_identity")
         identity = dumps(dict(context), sort_keys=True, allow_nan=False)
-        reset_reason = None
-        if self._context is not None and identity != self._context:
-            reset_reason = "navigation_context_changed"
-        elif self._last_sequence is not None and (
-            sequence <= self._last_sequence or frame_id in self._seen_frames
-        ):
-            reset_reason = "navigation_duplicate_frame"
-        elif self._last_s is not None and captured_s <= self._last_s:
-            reset_reason = "navigation_time_discontinuity"
-        elif self._last_s is not None and (
-            (captured_s - self._last_s) * 1000 > values["max_gap_ms"]
-        ):
-            reset_reason = "navigation_frame_gap"
-        elif observation.get("source_gap") is True:
-            reset_reason = "navigation_frame_gap"
+        reset_reason = _temporal_reset_reason(
+            self, identity, sequence, frame_id, captured_s, values, observation
+        )
         if reset_reason is not None:
-            seen_frames = list(self._seen_frames)
-            last_sequence, last_frame, last_s = (
-                self._last_sequence,
-                self._last_frame,
-                self._last_s,
-            )
-            self.reset()
-            self._context = identity
-            if reset_reason in {
-                "navigation_duplicate_frame",
-                "navigation_time_discontinuity",
-            }:
-                self._seen_frames.extend(seen_frames)
-                self._last_sequence, self._last_frame, self._last_s = (
-                    last_sequence,
-                    last_frame,
-                    last_s,
-                )
-            else:
-                self._seen_frames.append(frame_id)
-                self._last_sequence, self._last_frame, self._last_s = (
-                    sequence,
-                    frame_id,
-                    captured_s,
-                )
-            return self._result(
-                "stop", reset_reason, values, observation, {"status": "reset"}
+            return _apply_temporal_reset(
+                self,
+                identity,
+                (sequence, frame_id, captured_s),
+                reset_reason,
+                values,
+                observation,
             )
         self._context = identity
         self._seen_frames.append(frame_id)
@@ -294,18 +251,7 @@ class TemporalEvidence:
             "uncertain",
             "obstacle",
         }:
-            self._points.clear()
-            self._had_clear = False
-            self._degraded_s = None
-            self._regions = []
-            self._motion.reset()
-            return self._result(
-                "stop",
-                str(observation.get("reason", "navigation_invalid_evidence")),
-                values,
-                observation,
-                {"status": "disabled" if gray is None else "reset"},
-            )
+            return _reject_temporal_observation(self, observation, values, gray)
         tracking = (
             self._motion.update(gray, values["min_tracking_ratio"])
             if gray is not None
@@ -346,52 +292,160 @@ class TemporalEvidence:
                 state="obstacle",
                 growth=growth,
             )
-        guard_clear = observation.get("guard_clear") is True
-        if candidate == "clear" and guard_clear:
-            frames, duration = self._streak("clear")
-            if frames >= values["release_frames"] and duration >= values["release_ms"]:
-                self._had_clear = True
-                self._degraded_s = None
-                return self._result(
-                    "go",
-                    "navigation_stable_clear",
-                    values,
-                    observation,
-                    tracking,
-                    state="clear",
-                    growth=growth,
-                )
-            reason = "navigation_clear_confirmation"
-        elif candidate == "obstacle":
-            frames, duration = self._streak("obstacle")
-            if frames >= values["enter_frames"] and duration >= values["enter_ms"]:
-                self._had_clear = False
-                self._degraded_s = None
-                return self._result(
-                    "stop",
-                    "navigation_obstacle_confirmed",
-                    values,
-                    observation,
-                    tracking,
-                    state="obstacle",
-                    growth=growth,
-                )
-            reason = "navigation_obstacle_confirmation"
-        else:
-            reason = "navigation_local_uncertainty"
-        if self._degraded_s is None:
-            self._degraded_s = captured_s
-        elapsed = (captured_s - self._degraded_s) * 1000
-        if (
-            self._had_clear
-            and guard_clear
-            and values["max_uncertain_ms"] > 0
-            and elapsed < values["max_uncertain_ms"]
-        ):
-            return self._result(
-                "slow", reason, values, observation, tracking, growth=growth
-            )
-        self._had_clear = False
-        return self._result(
-            "stop", reason, values, observation, tracking, growth=growth
+        return _temporal_decision(
+            self, candidate, observation, captured_s, values, tracking, growth
         )
+
+
+def _temporal_reset_reason(
+    self, identity, sequence, frame_id, captured_s, values, observation
+):
+    """Preserve context, duplicate, time-discontinuity and gap reset precedence."""
+    reset_reason = None
+    if self._context is not None and identity != self._context:
+        reset_reason = "navigation_context_changed"
+    elif self._last_sequence is not None and (
+        sequence <= self._last_sequence or frame_id in self._seen_frames
+    ):
+        reset_reason = "navigation_duplicate_frame"
+    elif self._last_s is not None and captured_s <= self._last_s:
+        reset_reason = "navigation_time_discontinuity"
+    elif self._last_s is not None and (
+        (captured_s - self._last_s) * 1000 > values["max_gap_ms"]
+    ):
+        reset_reason = "navigation_frame_gap"
+    elif observation.get("source_gap") is True:
+        reset_reason = "navigation_frame_gap"
+    return reset_reason
+
+
+def _apply_temporal_reset(self, identity, source, reset_reason, values, observation):
+    """Retain duplicate/time history while resetting a genuinely changed source."""
+    sequence, frame_id, captured_s = source
+    seen_frames = list(self._seen_frames)
+    last_sequence, last_frame, last_s = (
+        self._last_sequence,
+        self._last_frame,
+        self._last_s,
+    )
+    self.reset()
+    self._context = identity
+    if reset_reason in {
+        "navigation_duplicate_frame",
+        "navigation_time_discontinuity",
+    }:
+        self._seen_frames.extend(seen_frames)
+        self._last_sequence, self._last_frame, self._last_s = (
+            last_sequence,
+            last_frame,
+            last_s,
+        )
+    else:
+        self._seen_frames.append(frame_id)
+        self._last_sequence, self._last_frame, self._last_s = (
+            sequence,
+            frame_id,
+            captured_s,
+        )
+    return self._result("stop", reset_reason, values, observation, {"status": "reset"})
+
+
+def _temporal_decision(
+    self, candidate, observation, captured_s, values, tracking, growth
+):
+    """Apply unchanged streak confirmation and bounded uncertain grace."""
+    guard_clear = observation.get("guard_clear") is True
+    if candidate == "clear" and guard_clear:
+        confirmed = _temporal_clear(self, values, observation, tracking, growth)
+        if confirmed is not None:
+            return confirmed
+        reason = "navigation_clear_confirmation"
+    elif candidate == "obstacle":
+        confirmed = _temporal_obstacle(self, values, observation, tracking, growth)
+        if confirmed is not None:
+            return confirmed
+        reason = "navigation_obstacle_confirmation"
+    else:
+        reason = "navigation_local_uncertainty"
+    if self._degraded_s is None:
+        self._degraded_s = captured_s
+    elapsed = (captured_s - self._degraded_s) * 1000
+    if (
+        self._had_clear
+        and guard_clear
+        and values["max_uncertain_ms"] > 0
+        and elapsed < values["max_uncertain_ms"]
+    ):
+        return self._result(
+            "slow", reason, values, observation, tracking, growth=growth
+        )
+    self._had_clear = False
+    return self._result("stop", reason, values, observation, tracking, growth=growth)
+
+
+def _temporal_clear(self, values, observation, tracking, growth):
+    """Confirm the existing clear streak before publishing its decision."""
+    frames, duration = self._streak("clear")
+    if frames >= values["release_frames"] and duration >= values["release_ms"]:
+        self._had_clear = True
+        self._degraded_s = None
+        return self._result(
+            "go",
+            "navigation_stable_clear",
+            values,
+            observation,
+            tracking,
+            state="clear",
+            growth=growth,
+        )
+
+
+def _temporal_obstacle(self, values, observation, tracking, growth):
+    """Confirm the existing obstacle streak before publishing its decision."""
+    frames, duration = self._streak("obstacle")
+    if frames >= values["enter_frames"] and duration >= values["enter_ms"]:
+        self._had_clear = False
+        self._degraded_s = None
+        return self._result(
+            "stop",
+            "navigation_obstacle_confirmed",
+            values,
+            observation,
+            tracking,
+            state="obstacle",
+            growth=growth,
+        )
+
+
+def _invalid_temporal_source(sequence, frame_id, captured_s, context):
+    """Validate literal temporal source identity without coercing numbers
+    or booleans.
+    """
+    return (
+        isinstance(sequence, bool)
+        or not isinstance(sequence, int)
+        or sequence < 0
+        or (not isinstance(frame_id, str))
+        or (not frame_id)
+        or (not isinstance(captured_s, (int, float)))
+        or isinstance(captured_s, bool)
+        or (not isfinite(captured_s))
+        or (not isinstance(context, Mapping))
+        or (not context)
+    )
+
+
+def _reject_temporal_observation(self, observation, values, gray):
+    """Reset all temporal proof on invalid model evidence before returning STOP."""
+    self._points.clear()
+    self._had_clear = False
+    self._degraded_s = None
+    self._regions = []
+    self._motion.reset()
+    return self._result(
+        "stop",
+        str(observation.get("reason", "navigation_invalid_evidence")),
+        values,
+        observation,
+        {"status": "disabled" if gray is None else "reset"},
+    )

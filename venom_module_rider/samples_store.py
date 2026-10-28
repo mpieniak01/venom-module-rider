@@ -368,30 +368,16 @@ class SampleStore:
                 ),
             )
         try:
-            if frame is None or frame.key != frame_key:
-                raise RiderError("samples_frame_expired", 409)
-            if frame.device_id != session["source_device_id"]:
-                raise RiderError("samples_source_mismatch", 409)
-            if session["state"] != "collecting" and not (
-                session["state"] == "closed" and admitted <= session["ended_at"]
-            ):
-                raise RiderError("samples_session_closed", 409)
-            if admitted - session["started_at"] > self.limits.session_seconds:
-                raise RiderError("samples_session_expired", 409)
-            context = self.evidence.collection_context(session_id, frame.context())
-            source_age = context.get("source_age_ms")
-            age_lower_bound = receipt_age_ms + (
-                source_age
-                if isinstance(source_age, (int, float)) and source_age > 0
-                else 0
+            frame, context, age_lower_bound, historical = _capture_context(
+                self,
+                session_id,
+                session,
+                frame_key,
+                frame,
+                admitted,
+                receipt_age_ms,
+                allow_historical,
             )
-            historical = (
-                context.get("stale") is True
-                or age_lower_bound > 1000
-                or bool(context.get("recorded_at_header"))
-            )
-            if historical and not allow_historical:
-                raise RiderError("samples_historical_consent_required", 409)
             with self.db() as db:
                 count, size = db.execute(
                     "SELECT COUNT(*),COALESCE(SUM(bytes),0) FROM samples "
@@ -627,3 +613,39 @@ class SampleStore:
                     "SELECT COUNT(*) FROM requests WHERE state='failed'"
                 ).fetchone()[0],
             }
+
+
+def _capture_context(
+    self,
+    session_id,
+    session,
+    frame_key,
+    frame,
+    admitted,
+    receipt_age_ms,
+    allow_historical,
+):
+    """Validate the admitted source and historical consent before quota or blob IO."""
+    if frame is None or frame.key != frame_key:
+        raise RiderError("samples_frame_expired", 409)
+    if frame.device_id != session["source_device_id"]:
+        raise RiderError("samples_source_mismatch", 409)
+    if session["state"] != "collecting" and not (
+        session["state"] == "closed" and admitted <= session["ended_at"]
+    ):
+        raise RiderError("samples_session_closed", 409)
+    if admitted - session["started_at"] > self.limits.session_seconds:
+        raise RiderError("samples_session_expired", 409)
+    context = self.evidence.collection_context(session_id, frame.context())
+    source_age = context.get("source_age_ms")
+    age_lower_bound = receipt_age_ms + (
+        source_age if isinstance(source_age, (int, float)) and source_age > 0 else 0
+    )
+    historical = (
+        context.get("stale") is True
+        or age_lower_bound > 1000
+        or bool(context.get("recorded_at_header"))
+    )
+    if historical and not allow_historical:
+        raise RiderError("samples_historical_consent_required", 409)
+    return frame, context, age_lower_bound, historical

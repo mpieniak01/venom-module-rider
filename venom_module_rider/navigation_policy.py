@@ -17,70 +17,15 @@ def evaluate(result, frame, observer, *, context, captured_s, source=None):
     objects = None
     object_policy = params.get("object_policy_enabled", False)
     try:
-        if maps is not None:
-            options = {
-                "context": context,
-                "sequence": source["sequence"]
-                if source is not None
-                else frame.sequence,
-                "captured_s": captured_s,
-                "params": params,
-            }
-            if params.get("object_tracking_enabled", False):
-                diagnostic_maps = result.pop("_object_maps", maps)
-                object_options = dict(options)
-                if object_policy:
-                    diagnostic_maps = resolve_semantic_evidence(diagnostic_maps, params)
-                    object_options["frame_id"] = (
-                        source["frame_id"] if source is not None else frame.frame_id
-                    )
-                try:
-                    object_corridor = (
-                        maps.get("corridor", frame.corridor)
-                        if object_policy
-                        else frame.corridor
-                    )
-                    objects = observer.observe_objects(
-                        diagnostic_maps, object_corridor, **object_options
-                    )
-                except (ImportError, ValueError, KeyError, TypeError):
-                    objects = {
-                        "diagnostic_only": not object_policy,
-                        "state": "unavailable",
-                        "objects": [],
-                    }
-            original_maps = (
-                resolve_semantic_evidence(maps, params) if object_policy else maps
-            )
-            if params.get("obstacle_support_frames", 1) > 1:
-                maps = resolve_semantic_evidence(maps, params)
-                maps, persistence = observer.prepare_maps(
-                    maps,
-                    frame.corridor,
-                    frame_id=source["frame_id"]
-                    if source is not None
-                    else frame.frame_id,
-                    **options,
-                )
-                maps = {
-                    key: value
-                    for key, value in maps.items()
-                    if key not in {"labels", "confidence"}
-                }
-            if object_policy:
-                from .object_policy import apply_object_evidence
-
-                maps = apply_object_evidence(original_maps, maps, objects or {})
-            spatial = assess_evidence(
-                maps, frame.corridor, params, raw_reason=raw_reason
-            )
-            if object_policy:
-                from .object_policy import assess_objects
-
-                spatial = assess_objects(
-                    spatial, maps, frame.corridor, objects or {}, params
-                )
-            gray = maps.get("gray")
+        options = {
+            "context": context,
+            "sequence": source["sequence"] if source is not None else frame.sequence,
+            "captured_s": captured_s,
+            "params": params,
+        }
+        spatial, gray, persistence, objects = _spatial_result(
+            result, maps, frame, observer, params, options, source
+        )
         temporal = observer.update(
             spatial,
             gray,
@@ -103,20 +48,7 @@ def evaluate(result, frame, observer, *, context, captured_s, source=None):
             "history_ms": 0,
             "tracking": {"status": "unavailable"},
         }
-    if "overlay_geometry" in result:
-        from .overlay_geometry import with_evidence
-
-        result["overlay_geometry"] = with_evidence(
-            result["overlay_geometry"], spatial, objects
-        )
-    elif "_preview" in result:
-        from .navigation_overlay import render_evidence
-
-        result["_preview"] = render_evidence(result["_preview"], spatial)
-        if objects is not None:
-            from .object_diagnostics import render_objects
-
-            result["_preview"] = render_objects(result["_preview"], objects)
+    _render_evidence(result, spatial, objects)
     temporal = {**temporal, "version": 1, "spatial": public_spatial(spatial)}
     if persistence is not None:
         temporal["persistence"] = persistence
@@ -145,3 +77,87 @@ def evaluate(result, frame, observer, *, context, captured_s, source=None):
         reason=temporal["reason"],
     )
     return temporal
+
+
+def _observe_objects(result, maps, frame, observer, params, options, source):
+    """Observe optional objects with the same semantic-map and fallback boundaries."""
+    object_policy = params.get("object_policy_enabled", False)
+    objects = None
+    if params.get("object_tracking_enabled", False):
+        diagnostic_maps = result.pop("_object_maps", maps)
+        object_options = dict(options)
+        if object_policy:
+            diagnostic_maps = resolve_semantic_evidence(diagnostic_maps, params)
+            object_options["frame_id"] = (
+                source["frame_id"] if source is not None else frame.frame_id
+            )
+        try:
+            object_corridor = (
+                maps.get("corridor", frame.corridor)
+                if object_policy
+                else frame.corridor
+            )
+            objects = observer.observe_objects(
+                diagnostic_maps, object_corridor, **object_options
+            )
+        except (ImportError, ValueError, KeyError, TypeError):
+            objects = {
+                "diagnostic_only": not object_policy,
+                "state": "unavailable",
+                "objects": [],
+            }
+    return objects
+
+
+def _render_evidence(result, spatial, objects):
+    """Render the original geometry or preview outside the inference error boundary."""
+    if "overlay_geometry" in result:
+        from .overlay_geometry import with_evidence
+
+        result["overlay_geometry"] = with_evidence(
+            result["overlay_geometry"], spatial, objects
+        )
+    elif "_preview" in result:
+        from .navigation_overlay import render_evidence
+
+        result["_preview"] = render_evidence(result["_preview"], spatial)
+        if objects is not None:
+            from .object_diagnostics import render_objects
+
+            result["_preview"] = render_objects(result["_preview"], objects)
+
+
+def _spatial_result(result, maps, frame, observer, params, options, source):
+    """Evaluate current spatial maps before the temporal observer advances."""
+    raw_reason = result["reason"]
+    spatial = {"valid": False, "reason": raw_reason, "guard_clear": False}
+    gray = persistence = objects = None
+    object_policy = params.get("object_policy_enabled", False)
+    if maps is None:
+        return spatial, gray, persistence, objects
+    objects = _observe_objects(result, maps, frame, observer, params, options, source)
+    original_maps = resolve_semantic_evidence(maps, params) if object_policy else maps
+    if params.get("obstacle_support_frames", 1) > 1:
+        maps = resolve_semantic_evidence(maps, params)
+        maps, persistence = observer.prepare_maps(
+            maps,
+            frame.corridor,
+            frame_id=source["frame_id"] if source is not None else frame.frame_id,
+            **options,
+        )
+        maps = {
+            key: value
+            for key, value in maps.items()
+            if key not in {"labels", "confidence"}
+        }
+    if object_policy:
+        from .object_policy import apply_object_evidence
+
+        maps = apply_object_evidence(original_maps, maps, objects or {})
+    spatial = assess_evidence(maps, frame.corridor, params, raw_reason=raw_reason)
+    if object_policy:
+        from .object_policy import assess_objects
+
+        spatial = assess_objects(spatial, maps, frame.corridor, objects or {}, params)
+    gray = maps.get("gray")
+    return spatial, gray, persistence, objects

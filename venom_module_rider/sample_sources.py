@@ -23,6 +23,7 @@ def offer(registry, device_id, payload, mime, context):
 
 
 def raw(registry, device_id, source_session, payload, mime, headers, *, mode=None):
+    """Offer RAW provenance without changing duplicate receipt identity."""
     values = {key.lower(): value for key, value in headers.items()}
     if values.get("x-rider-placeholder") == "true":
         return None
@@ -54,34 +55,9 @@ def raw(registry, device_id, source_session, payload, mime, headers, *, mode=Non
         "association": "unmeasured",
         "input_kind": "raw",
     }
-    descriptor = values.get("x-rider-source-json")
-    if descriptor and len(descriptor.encode()) <= 8192:
-        try:
-            from .stream_contract import SourceDescription
-
-            native = SourceDescription.model_validate_json(descriptor)
-            context.update(
-                source_session=native.camera_session,
-                source_timestamp=str(native.captured_monotonic_ns),
-                timestamp_source="pi-capture-monotonic-ns",
-                clock_domain="pi-monotonic-unsynchronised",
-                transform={
-                    **native.image_transform.model_dump(mode="json"),
-                    "applied_on": "venom",
-                },
-                source_identity=native.reference().model_dump(mode="json"),
-                source_sha256=native.sha256,
-                association="exact-source-reference",
-            )
-            # Two browsers or a subsequent model reference must not create a
-            # new receipt age or evict the same displayed frame's ticket.
-            if registry is not None:
-                key = registry.frames.lookup(device_id, context)
-                if key and registry.frames.get(key).payload == payload:
-                    return key
-        except Exception:
-            # Optional provenance and collection must not break live viewing.
-            pass
+    key = _reuse_native_source(registry, device_id, payload, values, context)
+    if key is not None:
+        return key
     return offer(registry, device_id, payload, mime, context)
 
 
@@ -151,3 +127,36 @@ def vision(
             "frame_descriptor": frame.model_dump(mode="json"),
         },
     )
+
+
+def _reuse_native_source(registry, device_id, payload, values, context):
+    """Apply optional native provenance and reuse an identical retained receipt."""
+    descriptor = values.get("x-rider-source-json")
+    if descriptor and len(descriptor.encode()) <= 8192:
+        try:
+            from .stream_contract import SourceDescription
+
+            native = SourceDescription.model_validate_json(descriptor)
+            context.update(
+                source_session=native.camera_session,
+                source_timestamp=str(native.captured_monotonic_ns),
+                timestamp_source="pi-capture-monotonic-ns",
+                clock_domain="pi-monotonic-unsynchronised",
+                transform={
+                    **native.image_transform.model_dump(mode="json"),
+                    "applied_on": "venom",
+                },
+                source_identity=native.reference().model_dump(mode="json"),
+                source_sha256=native.sha256,
+                association="exact-source-reference",
+            )
+            # Two browsers or a subsequent model reference must not create a
+            # new receipt age or evict the same displayed frame's ticket.
+            if registry is not None:
+                key = registry.frames.lookup(device_id, context)
+                if key and registry.frames.get(key).payload == payload:
+                    return key
+        except Exception:
+            # Optional provenance and collection must not break live viewing.
+            pass
+    return None

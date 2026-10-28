@@ -96,43 +96,18 @@ class StudySampler:
             self.image_task = asyncio.create_task(self.images())
 
     async def run(self):
+        """Sample read-only state at the retained cadence for this device session."""
         session = self.domain.session
         while session == self.domain.session and collecting(self.domain):
             started = time.monotonic()
             delay = INTERVAL_S
-            try:
-                # Refresh the HTTP snapshot for this recording; the ordinary
-                # reader still coalesces inflight work and publishes its cache
-                # for slower UI readers. This never forces a UART sensor read.
-                await self.domain.read("/state", 0)
-                self.reads += 1
-                self.last_success = time.monotonic()
-                self.last_error = None
-            except asyncio.CancelledError:
-                task = asyncio.current_task()
-                if task is not None and task.cancelling():
-                    raise
-                # Connection refresh can cancel the shared transport task,
-                # independently of this still-active recording task.
-                self.errors += 1
-                self.last_error = "study_sampling_read_cancelled"
-            except Exception as exc:
-                self.errors += 1
-                self.last_error = (
-                    exc.code if isinstance(exc, RiderError) else "study_sampling_failed"
-                )
-                # Priority motion invalidates an overlapping read epoch without
-                # changing the device session. Do not turn that normal boundary
-                # into a one-second hole in an otherwise active recording.
-                delay = (
-                    INTERVAL_S
-                    if self.last_error == "stale_device_session"
-                    and session == self.domain.session
-                    else ERROR_BACKOFF_S
-                )
+            delay = await _sample_state_tick(self, session, delay)
             await asyncio.sleep(max(0.01, delay - (time.monotonic() - started)))
 
     async def image_tick(self):
+        """Capture active study media without changing selection, camera or
+        robot state.
+        """
         domain = self.domain
         registry = domain.samples
         session = domain.session
@@ -159,79 +134,11 @@ class StudySampler:
             key = await self.source.key()
         else:
             # Read only: neither camera power nor robot control may be changed here.
-            camera = domain.data(await domain.read("/api/resource/camera", 0.5))
-            activity = camera.get("activity") or camera
-            enabled = activity.get("on", activity.get("enabled"))
-            state = str(activity.get("state") or camera.get("state")).lower()
-            if enabled is False or (
-                enabled is not True and state not in {"on", "active", "running"}
-            ):
-                for sid in videos:
-                    await registry.read(
-                        registry.store.video.note, sid, "samples_video_camera_off"
-                    )
+            key = await _snapshot_capture_key(self, domain, registry, videos)
+            if key is None:
                 return
-            _, _, headers = await domain.camera("raw")
-            key = headers.get("x-rider-capture-key")
-            if not key:
-                raise RiderError("samples_frame_unavailable", 409)
-            latest = await domain.pipeline(force=True)
-            if latest.get("supported"):
-                expected = (
-                    latest.get("camera_session"),
-                    latest.get("transport_epoch"),
-                    latest.get("revision"),
-                )
-                received = tuple(
-                    headers.get(name)
-                    for name in (
-                        "x-rider-camera-session",
-                        "x-rider-transport-epoch",
-                        "x-rider-pipeline-revision",
-                    )
-                )
-                if (
-                    latest.get("state") not in {"active", "waiting_frame"}
-                    or expected[0] is None
-                    or any(value is None for value in expected[1:])
-                    or received != tuple(str(value) for value in expected)
-                ):
-                    raise RiderError("stream_epoch_changed", 409)
-        for sid, row in videos.items():
-            if (
-                domain.session == session
-                and registry.study_videos.get(sid) is row
-                and sid not in registry.closing
-            ):
-                submitted = time.perf_counter()
-
-                captured = registry.frames.get(key)
-
-                def append_video(sid=sid, submitted=submitted, captured=captured):
-                    self.metrics.record(
-                        "writer_queue_ms", (time.perf_counter() - submitted) * 1000
-                    )
-                    with self.metrics.track("writer_append_ms"):
-                        return registry.store.video.append(sid, captured)
-
-                result = await registry.read(append_video)
-                if result and result["state"] in {"error", "limit"}:
-                    registry.study_videos.pop(sid, None)
-        for sid, row in pending.items():
-            if (
-                domain.session != session
-                or registry.study_images.get(sid) is not row
-                or registry.evidence.sessions[sid]["retired"]
-                or row["last"] == key
-            ):
-                continue
-            now = time.monotonic()
-            if videos and now - row.get("last_saved_mono", -1000) < 1:
-                continue
-            row["last_saved_mono"] = now
-            registry.capture(sid, f"study-image-{sid}-{row['count']}", key)
-            row["count"] += 1
-            row["last"] = key
+        await _append_study_videos(self, domain, registry, session, videos, key)
+        _capture_study_images(domain, registry, session, pending, videos, key)
         self.image_reads += 1
 
     async def video_error(self, reason):
@@ -294,3 +201,124 @@ class StudySampler:
             await asyncio.gather(self.task, return_exceptions=True)
         if self.image_task is not None:
             await asyncio.gather(self.image_task, return_exceptions=True)
+
+
+async def _sample_state_tick(self, session, delay):
+    """Preserve shared-read cancellation and error backoff for one sampling tick."""
+    try:
+        # Refresh the HTTP snapshot for this recording; the ordinary
+        # reader still coalesces inflight work and publishes its cache
+        # for slower UI readers. This never forces a UART sensor read.
+        await self.domain.read("/state", 0)
+        self.reads += 1
+        self.last_success = time.monotonic()
+        self.last_error = None
+    except asyncio.CancelledError:
+        task = asyncio.current_task()
+        if task is not None and task.cancelling():
+            raise
+        # Connection refresh can cancel the shared transport task,
+        # independently of this still-active recording task.
+        self.errors += 1
+        self.last_error = "study_sampling_read_cancelled"
+    except Exception as exc:
+        self.errors += 1
+        self.last_error = (
+            exc.code if isinstance(exc, RiderError) else "study_sampling_failed"
+        )
+        # Priority motion invalidates an overlapping read epoch without
+        # changing the device session. Do not turn that normal boundary
+        # into a one-second hole in an otherwise active recording.
+        delay = (
+            INTERVAL_S
+            if self.last_error == "stale_device_session"
+            and session == self.domain.session
+            else ERROR_BACKOFF_S
+        )
+    return delay
+
+
+async def _snapshot_capture_key(self, domain, registry, videos):
+    """Read camera state and an exact RAW ticket without changing camera power."""
+    camera = domain.data(await domain.read("/api/resource/camera", 0.5))
+    activity = camera.get("activity") or camera
+    enabled = activity.get("on", activity.get("enabled"))
+    state = str(activity.get("state") or camera.get("state")).lower()
+    if enabled is False or (
+        enabled is not True and state not in {"on", "active", "running"}
+    ):
+        for sid in videos:
+            await registry.read(
+                registry.store.video.note, sid, "samples_video_camera_off"
+            )
+        return
+    _, _, headers = await domain.camera("raw")
+    key = headers.get("x-rider-capture-key")
+    if not key:
+        raise RiderError("samples_frame_unavailable", 409)
+    latest = await domain.pipeline(force=True)
+    if latest.get("supported"):
+        expected = (
+            latest.get("camera_session"),
+            latest.get("transport_epoch"),
+            latest.get("revision"),
+        )
+        received = tuple(
+            headers.get(name)
+            for name in (
+                "x-rider-camera-session",
+                "x-rider-transport-epoch",
+                "x-rider-pipeline-revision",
+            )
+        )
+        if (
+            latest.get("state") not in {"active", "waiting_frame"}
+            or expected[0] is None
+            or any(value is None for value in expected[1:])
+            or received != tuple(str(value) for value in expected)
+        ):
+            raise RiderError("stream_epoch_changed", 409)
+    return key
+
+
+async def _append_study_videos(self, domain, registry, session, videos, key):
+    """Append captured video frames on the same bounded writer lane."""
+    for sid, row in videos.items():
+        if (
+            domain.session == session
+            and registry.study_videos.get(sid) is row
+            and sid not in registry.closing
+        ):
+            submitted = time.perf_counter()
+
+            captured = registry.frames.get(key)
+
+            def append_video(sid=sid, submitted=submitted, captured=captured):
+                self.metrics.record(
+                    "writer_queue_ms", (time.perf_counter() - submitted) * 1000
+                )
+                with self.metrics.track("writer_append_ms"):
+                    return registry.store.video.append(sid, captured)
+
+            result = await registry.read(append_video)
+            if result and result["state"] in {"error", "limit"}:
+                registry.study_videos.pop(sid, None)
+
+
+def _capture_study_images(domain, registry, session, pending, videos, key):
+    """Retain image cadence and frame identity during active study capture."""
+    for sid, row in pending.items():
+        if (
+            domain.session != session
+            or registry.study_images.get(sid) is not row
+            or registry.evidence.sessions[sid]["retired"]
+            or row["last"] == key
+        ):
+            continue
+        now = time.monotonic()
+        if videos and now - row.get("last_saved_mono", -1000) < 1:
+            continue
+        row["last_saved_mono"] = now
+        registry.capture(sid, f"study-image-{sid}-{row['count']}", key)
+        row["count"] += 1
+        row["last"] = key

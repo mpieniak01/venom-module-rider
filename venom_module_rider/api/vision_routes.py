@@ -57,15 +57,7 @@ async def detector_status(request: Request):
             )
         )
         tasks.append(pipeline_task)
-    try:
-        if tasks:
-            await asyncio.gather(*tasks)
-    finally:
-        for task in tasks:
-            if not task.done():
-                task.cancel()
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+    await _wait_preparation_tasks(tasks)
     if policy_task is not None:
         perception = policy_task.result()["data"].get("perception")
     result = request.app.state.rider_vision.status(perception)
@@ -248,10 +240,7 @@ async def _reference_decision(request, device, descriptor, admitted_at):
             pipeline, policy = await asyncio.gather(*checks)
         finally:
             # A rejected check cannot leave another request running beyond admission.
-            for check in checks:
-                if not check.done():
-                    check.cancel()
-            await asyncio.gather(*checks, return_exceptions=True)
+            await _settle_checks(checks)
         phases["authority_source"] = "pi_reads"
     if (pipeline.get("active_profile") or {}).get("analysis_location") != "venom":
         raise RiderError("vision_remote_disabled", 409)
@@ -566,3 +555,24 @@ async def configure_image_reference(request: Request):
         await request.json(),
         request.headers.get("X-Rider-Session"),
     )
+
+
+async def _settle_checks(checks):
+    """Cancel only unfinished child checks and await their original cleanup."""
+    for check in checks:
+        if not check.done():
+            check.cancel()
+    await asyncio.gather(*checks, return_exceptions=True)
+
+
+async def _wait_preparation_tasks(tasks):
+    """Join optional preparation reads and retire all unfinished children."""
+    try:
+        if tasks:
+            await asyncio.gather(*tasks)
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)

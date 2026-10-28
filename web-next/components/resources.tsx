@@ -1,12 +1,23 @@
 import { useState } from "react";
 import { apiFetch } from "@/lib/api-client";
 import { Boxes, FileText } from "lucide-react";
-import { data, errorCode, featureRows, formatTime, record, rows, str, type JsonRecord } from "../lib/model";
+import { scalarText, data, errorCode, featureRows, formatTime, record, rows, str, type JsonRecord } from "../lib/model";
 import type { Translator } from "../lib/i18n";
 import type { RiderClient } from "../lib/use-rider";
 import { Button, Details, Empty, Field, Panel, Pill, Select } from "./primitives";
 import styles from "../rider.module.css";
 
+/** Keep offline evidence ahead of the reported on/off state. */
+function resourcePowerLabel(offline:unknown,power:string):string {
+  if(offline===true)return "offline";
+  const state=power.toLowerCase();
+  return ["on","off"].includes(state)?state:"unknown";
+}
+/** Preserve a measured false availability as busy instead of unknown. */
+function resourceAvailability(free:unknown):string {
+  if(free===true)return "free";
+  return free===false?"busy":"unknown";
+}
 function Goal({ goal, client, t }: { goal: JsonRecord; client: RiderClient; t: Translator }) {
   const [option, setOption] = useState<string | null>(null);
   const name = str(goal.name), schema = record(goal.option_schema), optionField = str(schema.field);
@@ -23,27 +34,71 @@ function Goal({ goal, client, t }: { goal: JsonRecord; client: RiderClient; t: T
     <Details value={goal} t={t} />
   </div>;
 }
+/** Present device-owned power and ownership with explicit stop/release confirmation. */
 function Resource({ name, payload, client, t, language }: { name: string; payload: JsonRecord; client: RiderClient; t: Translator; language: string }) {
-  const [confirmation, setConfirmation] = useState<string | null>(null);
-  const row = data(payload), state = record(row.state), activity = record(row.activity);
-  const power = typeof activity.on === "boolean" ? (activity.on ? "on" : "off") : typeof row.on === "boolean" ? (row.on ? "on" : "off") : str(activity.state ?? state.state ?? row.power ?? row.state ?? row.status);
-  const owner = str(row.owner ?? state.owner);
-  const holders = Array.isArray(row.holders) ? row.holders : [];
-  const consumers = Array.isArray(row.consumers) ? row.consumers : [];
-  const unknown = row.ownership_known === false || row.free === null || row.diagnostic_available === false || !!row.error || row.offline === true;
-  return <Panel title={t(name)} extra={<Pill tone={row.offline === true ? "warning" : undefined}>{t(row.offline === true ? "offline" : ["on", "off"].includes(power.toLowerCase()) ? power.toLowerCase() : "unknown")}</Pill>}>
-    <div className={styles.resource}><div className={styles.flex}><Pill tone={row.free === true ? "good" : undefined}>{t(row.free === true ? "free" : row.free === false ? "busy" : "unknown")}</Pill><span className={styles.small}>{t("owner")}: {owner || "—"}</span></div>
-      <div className={styles.small}>{t("holders")}: {holders.length ? holders.map(holder => { const detail = record(holder); return str(detail.comm ?? detail.unit ?? detail.name) || String(detail.pid ?? holder); }).join(", ") : "—"}</div>
-      <div className={styles.small}>{t("consumers")}: {consumers.length ? consumers.map(consumer => str(record(consumer).name ?? record(consumer).unit) || String(consumer)).join(", ") : "—"}</div>
+  /** Render ResourceDetails with the captured state and unchanged event handlers. */
+  function renderResourceDetails(){
+    return (<div className={styles.resource}><div className={styles.flex}><Pill tone={row.free === true ? "good" : undefined}>{t(resourceAvailability(row.free))}</Pill><span className={styles.small}>{t("owner")}: {owner || "—"}</span></div>
+      <div className={styles.small}>{t("holders")}: {holders.length ? holders.map(holder => { const detail = record(holder); return str(detail.comm ?? detail.unit ?? detail.name) || scalarText(detail.pid ?? holder); }).join(", ") : "—"}</div>
+      <div className={styles.small}>{t("consumers")}: {consumers.length ? consumers.map(consumer => str(record(consumer).name ?? record(consumer).unit) || scalarText(consumer)).join(", ") : "—"}</div>
       <div className={styles.flex}>{["lcd", "led"].includes(name) && <><Button disabled={!client.canMutate || !!client.busy} onClick={() => void client.mutate(`/resource/${encodeURIComponent(name)}`, { action: "on" })}>{t("enable")}</Button><Button disabled={!client.canMutate || !!client.busy} onClick={() => void client.mutate(`/resource/${encodeURIComponent(name)}`, { action: "off" })}>{t("disable")}</Button></>}
         <Button disabled={!client.canMutate || !!client.busy || unknown} onClick={() => setConfirmation("stop")}>{t("resourceStop")}</Button><Button disabled={!client.canMutate || !!client.busy || unknown} onClick={() => setConfirmation("release")}>{t("resourceRelease")}</Button>
       </div>
       {confirmation && <div className={`${styles.banner} ${styles.demo}`}><span className={styles.noticeText}>{t(confirmation === "stop" ? "resourceStop" : "resourceRelease")}?</span><Button tone="danger" onClick={() => { void client.mutate(`/resource/${encodeURIComponent(name)}`, { action: confirmation }); setConfirmation(null); }}>{t("apply")}</Button><Button onClick={() => setConfirmation(null)}>{t("cancel")}</Button></div>}
       <span className={styles.small}>{t("observedAt")}: {formatTime(row.observed_at, language)}</span>
-    </div><Details value={row} t={t} />
+    </div>);
+  }
+
+  /** Derive device resource power with native boolean precedence from the current captured render without effects. */
+  function resourcePower(){if(typeof activity.on === "boolean"){
+  if(activity.on){
+    return ("on");
+  }
+  return ("off");
+}
+if(typeof row.on === "boolean"){
+  if(row.on){
+    return ("on");
+  }
+  return ("off");
+}
+return (str(activity.state ?? state.state ?? row.power ?? row.state ?? row.status));
+}
+
+  const [confirmation, setConfirmation] = useState<string | null>(null);
+  const row = data(payload), state = record(row.state), activity = record(row.activity);
+  const power = resourcePower();
+  const owner = str(row.owner ?? state.owner);
+  const holders = Array.isArray(row.holders) ? row.holders : [];
+  const consumers = Array.isArray(row.consumers) ? row.consumers : [];
+  const unknown = row.ownership_known === false || row.free === null || row.diagnostic_available === false || !!row.error || row.offline === true;
+  return <Panel title={t(name)} extra={<Pill tone={row.offline === true ? "warning" : undefined}>{t(resourcePowerLabel(row.offline,power))}</Pill>}>
+    {renderResourceDetails()}<Details value={row} t={t} />
   </Panel>;
 }
+/** Load requested diagnostics and logs independently of resource actuation. */
 export function Resources({ client, t, language }: { client: RiderClient; t: Translator; language: string }) {
+  /** Render ResourceServices with the captured state and unchanged event handlers. */
+  function renderResourceServices(){
+    return (<Panel title={t("goals")} hint={t("goalsHint")}>{features.length ? <div className={styles.grid3}>{features.map((goal, index) => <Goal key={str(goal.name) || index} goal={goal} client={client} t={t} />)}</div> : <Empty><Boxes size={28} />{t("unavailable")}</Empty>}</Panel>);
+  }
+
+  /** Derive diagnostic log text without changing source precedence from the current captured render without effects. */
+  function resourceLogText(){if(logs){
+  if(Array.isArray(logs.lines)){
+    return (logs.lines.map(line=>scalarText(line)).join("\n"));
+  }
+  if(typeof logs.logs === "string"){
+    return (logs.logs);
+  }
+  if(typeof logs.output === "string"){
+    return (logs.output);
+  }
+  return (JSON.stringify(logs, null, 2));
+}
+return ("");
+}
+
   const [diagnostics, setDiagnostics] = useState<JsonRecord | null>(null);
   const [unit, setUnit] = useState(""); const [logs, setLogs] = useState<JsonRecord | null>(null); const [reading, setReading] = useState(false);
   const catalog = data(client.status?.catalog);
@@ -64,8 +119,8 @@ export function Resources({ client, t, language }: { client: RiderClient; t: Tra
     catch (error) { client.setNotice({ key: "requestFailed", code: errorCode(error), tone: "error" }); }
     finally { setReading(false); }
   };
-  const logText = logs ? (Array.isArray(logs.lines) ? logs.lines.join("\n") : typeof logs.logs === "string" ? logs.logs : typeof logs.output === "string" ? logs.output : JSON.stringify(logs, null, 2)) : "";
-  return <div className={styles.stack}><Panel title={t("goals")} hint={t("goalsHint")}>{features.length ? <div className={styles.grid3}>{features.map((goal, index) => <Goal key={str(goal.name) || index} goal={goal} client={client} t={t} />)}</div> : <Empty><Boxes size={28} />{t("unavailable")}</Empty>}</Panel>
+  const logText = resourceLogText();
+  return <div className={styles.stack}>{renderResourceServices()}
     <p className={styles.hint}>{t("resourceHint")}</p><div className={styles.grid3}>{Object.entries(client.status?.resources ?? {}).map(([name, row]) => <Resource key={name} name={name} payload={row} client={client} t={t} language={language} />)}</div>
     <Panel title={t("services")} extra={<Button disabled={!client.canMutate || reading} onClick={() => void readDiagnostics()}>{t("readDiagnostics")}</Button>}>
       {diagnostics && <><div className={styles.tableWrap}><table className={styles.table}><thead><tr><th>{t("unit")}</th><th>{t("state")}</th><th>{t("owner")}</th></tr></thead><tbody>{rows(diagnostics.nodes ?? diagnostics.services).map((node, index) => <tr key={str(node.unit ?? node.name ?? node.id) || index}><td>{str(node.unit ?? node.name ?? node.id) || "—"}</td><td>{str(record(node.state).active_state ?? record(node.state).active ?? node.status) || "—"}</td><td>{str(node.motion_owner ?? node.owner) || "—"}</td></tr>)}</tbody></table></div><Details value={diagnostics} t={t} /></>}

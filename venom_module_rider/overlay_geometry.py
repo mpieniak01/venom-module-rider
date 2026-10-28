@@ -17,6 +17,12 @@ def bounds(corridor, size):
     ]
 
 
+def _outline_break(result):
+    """Append a gap only after an existing observed stroke."""
+    if result and result[-1] is not None:
+        result.append(None)
+
+
 def outline(points, size, count=25):
     """Bound curves without joining strokes across unobserved source pixels."""
     if not points:
@@ -30,11 +36,9 @@ def outline(points, size, count=25):
         if previous is not None and any(
             p is None for p in points[previous : index + 1]
         ):
-            if result and result[-1] is not None:
-                result.append(None)
+            _outline_break(result)
         if point is None:
-            if result and result[-1] is not None:
-                result.append(None)
+            _outline_break(result)
         else:
             result.append(
                 [
@@ -144,6 +148,53 @@ def with_evidence(geometry, spatial, objects=None):
     return result
 
 
+def _validate_geometry_box(box, width, height):
+    """Require integer pixel bounds inside their immutable source frame."""
+    if (
+        not isinstance(box, (list, tuple))
+        or len(box) != 4
+        or any(type(point) is not int for point in box)
+    ):
+        raise ValueError("vision_overlay_geometry_invalid")
+    if not 0 <= box[0] < box[2] <= width or not 0 <= box[1] < box[3] <= height:
+        raise ValueError("vision_overlay_geometry_invalid")
+
+
+def _validate_geometry_points(points, width, height):
+    """Keep every optional path vertex bounded without joining missing pixels."""
+    if not isinstance(points, list) or len(points) > 32:
+        raise ValueError("vision_overlay_geometry_invalid")
+    for point in points:
+        if point is not None and (
+            not isinstance(point, list)
+            or len(point) != 2
+            or any(type(value) is not int for value in point)
+            or not 0 <= point[0] < width
+            or not 0 <= point[1] < height
+        ):
+            raise ValueError("vision_overlay_geometry_invalid")
+
+
+def _validate_geometry_object(item, size):
+    """Validate an object identity before applying the shared bounds contract."""
+    if (
+        not isinstance(item, dict)
+        or type(item.get("id")) is not int
+        or not isinstance(item.get("evidence"), str)
+    ):
+        raise ValueError("vision_overlay_geometry_invalid")
+    width, height = size
+    validate_geometry(
+        {
+            "version": 1,
+            "width": width,
+            "height": height,
+            "input_bounds": item.get("bounds"),
+        },
+        size,
+    )
+
+
 def validate_geometry(value, size):
     """A visual descriptor must fit its own immutable source frame."""
     if (
@@ -162,15 +213,7 @@ def validate_geometry(value, size):
     for key in ("input_bounds", "score_bounds", "reference_bounds"):
         if key not in value:
             continue
-        box = value[key]
-        if (
-            not isinstance(box, (list, tuple))
-            or len(box) != 4
-            or any(type(p) is not int for p in box)
-        ):
-            raise ValueError("vision_overlay_geometry_invalid")
-        if not 0 <= box[0] < box[2] <= w or not 0 <= box[1] < box[3] <= h:
-            raise ValueError("vision_overlay_geometry_invalid")
+        _validate_geometry_box(value[key], w, h)
     if "input_bounds" not in value:
         raise ValueError("vision_overlay_geometry_invalid")
     paths = value.get("paths", {})
@@ -180,29 +223,10 @@ def validate_geometry(value, size):
         *paths.values(),
         *[value[k] for k in ("near", "floor_boundary") if k in value],
     ]:
-        if not isinstance(points, list) or len(points) > 32:
-            raise ValueError("vision_overlay_geometry_invalid")
-        for point in points:
-            if point is not None and (
-                not isinstance(point, list)
-                or len(point) != 2
-                or any(type(p) is not int for p in point)
-                or not 0 <= point[0] < w
-                or not 0 <= point[1] < h
-            ):
-                raise ValueError("vision_overlay_geometry_invalid")
+        _validate_geometry_points(points, w, h)
     objects = value.get("objects", [])
     if not isinstance(objects, list) or len(objects) > 4:
         raise ValueError("vision_overlay_geometry_invalid")
     for item in objects:
-        if (
-            not isinstance(item, dict)
-            or type(item.get("id")) is not int
-            or not isinstance(item.get("evidence"), str)
-        ):
-            raise ValueError("vision_overlay_geometry_invalid")
-        validate_geometry(
-            {"version": 1, "width": w, "height": h, "input_bounds": item.get("bounds")},
-            size,
-        )
+        _validate_geometry_object(item, size)
     return value

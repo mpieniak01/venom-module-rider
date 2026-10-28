@@ -203,39 +203,21 @@ class NativeStreamHub:
         return True
 
     async def _read(self, connection):
-        backoff = 0.1
+        """Reconnect one owned media reader with bounded backoff and cleanup."""
+        backoff = _ReconnectDelay()
         while not self.closed and not connection.closed:
             try:
                 # async-for alone does not close its suspended async generator
                 # when bootstrap/admission fails or its consumer is cancelled.
                 # Release the one HTTP media slot before any next reader starts.
                 async with aclosing(connection.client.mjpeg()) as incoming:
-                    async for frame in incoming:
-                        if connection.closed:
-                            return
-                        if connection.anchor is None:
-                            # Only bootstrap once when start status preceded the
-                            # first capture. Normal updates reuse profile GETs;
-                            # there is no per-frame status poll.
-                            pipeline = await connection.domain.pipeline(force=True)
-                            self.update_anchor(pipeline)
-                        if self._admit(connection, frame):
-                            backoff = 0.1
+                    if not await _ingest_frames(self, connection, incoming, backoff):
+                        return
                 connection.error = "stream_disconnected"
             except asyncio.CancelledError:
                 raise
             except RiderError as exc:
-                logger.warning(
-                    "Native ingest failed: %s status=%s cause=%s",
-                    exc.code,
-                    exc.status,
-                    type(exc.__cause__).__name__ if exc.__cause__ else "none",
-                )
-                connection.error = exc.code
-                connection.rejected += 1
-                if exc.code == "stream_epoch_changed":
-                    connection.frames.clear()
-                    self._notify(connection)
+                if _ingest_protocol_failure(self, connection, exc):
                     return
             except Exception as exc:
                 # An optional reader failure cannot leak stale data as ready.
@@ -249,8 +231,8 @@ class NativeStreamHub:
             if connection.closed:
                 return
             connection.reconnects += 1
-            await asyncio.sleep(backoff)
-            backoff = min(backoff * 2, 2.0)
+            await asyncio.sleep(backoff.seconds)
+            backoff.seconds = min(backoff.seconds * 2, 2.0)
 
     async def _reap(self, connection):
         try:
@@ -275,16 +257,12 @@ class NativeStreamHub:
         after=None,
         timeout=0.5,
     ):
+        """Wait for a fresh or exact retained frame within the original deadline."""
         deadline = asyncio.get_running_loop().time() + timeout
         while not self.closed and not connection.closed:
             changed = connection.changed
             self._purge(connection)
-            if source is not None:
-                frame = connection.frames.get(source.identity())
-            else:
-                frame = next(reversed(connection.frames.values()), None)
-                if frame is not None and frame.source.identity() == after:
-                    frame = None
+            frame = _selected_stream_frame(connection, source, after)
             if frame is not None:
                 return frame
             if source is not None and source.sequence <= connection.sequence:
@@ -385,3 +363,55 @@ class NativeStreamHub:
             await self.invalidate()
         finally:
             self.workers.close()
+
+
+async def _ingest_frames(self, connection, incoming, backoff):
+    """Bootstrap the anchor once and admit frames within the owned media context."""
+    async for frame in incoming:
+        if connection.closed:
+            return False
+        if connection.anchor is None:
+            # Only bootstrap once when start status preceded the
+            # first capture. Normal updates reuse profile GETs;
+            # there is no per-frame status poll.
+            pipeline = await connection.domain.pipeline(force=True)
+            self.update_anchor(pipeline)
+        if self._admit(connection, frame):
+            backoff.seconds = 0.1
+    return True
+
+
+def _selected_stream_frame(connection, source, after):
+    """Select an exact source or a newer latest frame without waiting."""
+    if source is not None:
+        frame = connection.frames.get(source.identity())
+    else:
+        frame = next(reversed(connection.frames.values()), None)
+        if frame is not None and frame.source.identity() == after:
+            frame = None
+    return frame
+
+
+class _ReconnectDelay:
+    """Retain successful-frame backoff resets even when an ingest phase raises."""
+
+    def __init__(self):
+        """Start with the existing minimum reconnect delay."""
+        self.seconds = 0.1
+
+
+def _ingest_protocol_failure(self, connection, exc):
+    """Publish protocol failure and retire only an epoch-invalidated connection."""
+    logger.warning(
+        "Native ingest failed: %s status=%s cause=%s",
+        exc.code,
+        exc.status,
+        type(exc.__cause__).__name__ if exc.__cause__ else "none",
+    )
+    connection.error = exc.code
+    connection.rejected += 1
+    if exc.code == "stream_epoch_changed":
+        connection.frames.clear()
+        self._notify(connection)
+        return True
+    return False

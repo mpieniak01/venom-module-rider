@@ -175,6 +175,7 @@ class ModelRuntime:
 
     @model_operation
     def detect(self, payload, frame):
+        """Run qualified inference under the existing model-resource lock."""
         with self.lock:
             if self.state == "released":
                 raise RiderError("model_released", 409)
@@ -194,44 +195,8 @@ class ModelRuntime:
             assert detector is not None
             start = time.perf_counter()
             try:
-                from .navigation_profiles import parameters
-
-                perception = frame.perception.model_dump()
-                behavior = frame.behavior.model_dump()
-                options = (
-                    {"evidence": parameters(behavior, perception)}
-                    if frame.behavior.profile_id != "legacy"
-                    else {}
-                )
-                if model_id != DEPTH and (
-                    frame.behavior.profile_id != "legacy"
-                    or model_id in perception.get("semantic_models", {})
-                ):
-                    from .perception_tuning import semantic_parameters
-
-                    options["semantic"] = semantic_parameters(
-                        perception, behavior, model_id
-                    )
-                if model_id == DEPTH:
-                    if (
-                        frame.protocol_version == 3
-                        and frame.avoidance.geometry.mode == "ground"
-                    ):
-                        result = detector.detect_ground(
-                            payload,
-                            frame.corridor,
-                            frame.perception,
-                            frame.avoidance.geometry,
-                            **options,
-                        )
-                    else:
-                        result = detector.detect(
-                            payload, frame.corridor, frame.perception, **options
-                        )
-                else:
-                    result = detector.detect(payload, frame.corridor, **options)
-                    if result.get("_preview"):
-                        result["_preview"] = source_overlay(payload, result["_preview"])
+                options = _runtime_options(frame, model_id)
+                result = _runtime_inference(detector, payload, frame, model_id, options)
                 elapsed = (time.perf_counter() - start) * 1000
                 self.timings.append(elapsed)
                 self.last = time.monotonic()
@@ -441,3 +406,46 @@ class YoloSemanticOnnx:
             draw_geometry=False,
         )
         return result
+
+
+def _runtime_options(frame, model_id):
+    """Resolve behavior and semantic tuning inside the original inference guard."""
+    from .navigation_profiles import parameters
+
+    perception = frame.perception.model_dump()
+    behavior = frame.behavior.model_dump()
+    options = (
+        {"evidence": parameters(behavior, perception)}
+        if frame.behavior.profile_id != "legacy"
+        else {}
+    )
+    if model_id != DEPTH and (
+        frame.behavior.profile_id != "legacy"
+        or model_id in perception.get("semantic_models", {})
+    ):
+        from .perception_tuning import semantic_parameters
+
+        options["semantic"] = semantic_parameters(perception, behavior, model_id)
+    return options
+
+
+def _runtime_inference(detector, payload, frame, model_id, options):
+    """Dispatch the same qualified detector and preserve source-overlay ordering."""
+    if model_id == DEPTH:
+        if frame.protocol_version == 3 and frame.avoidance.geometry.mode == "ground":
+            result = detector.detect_ground(
+                payload,
+                frame.corridor,
+                frame.perception,
+                frame.avoidance.geometry,
+                **options,
+            )
+        else:
+            result = detector.detect(
+                payload, frame.corridor, frame.perception, **options
+            )
+    else:
+        result = detector.detect(payload, frame.corridor, **options)
+        if result.get("_preview"):
+            result["_preview"] = source_overlay(payload, result["_preview"])
+    return result

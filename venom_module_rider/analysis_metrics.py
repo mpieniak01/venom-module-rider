@@ -71,37 +71,18 @@ def summarize(samples, rows, order_source):
     """Score actual results against frozen labels; never treat N/A as zero error."""
     if len(samples) != len(rows):
         raise ValueError("analysis_metric_inputs_mismatch")
-    confusion: Counter[str] = Counter()
-    sides = side_errors = eligible = false_go = false_stop = 0
-    labels = clear_labels = obstacle_labels = 0
-    for sample, result in zip(samples, rows, strict=True):
-        if (
-            result.get("sample_id") != sample.get("sample_id")
-            or result.get("raw_sha256") != sample["raw"]["sha256"]
-        ):
-            raise ValueError("analysis_metric_inputs_mismatch")
-        label = approved_label(sample)
-        if label is None:
-            continue
-        labels += 1
-        expected = label.get("expected_state")
-        state = result["state"]
-        if expected in {"clear", "obstacle"}:
-            eligible += 1
-            clear_labels += expected == "clear"
-            obstacle_labels += expected == "obstacle"
-            confusion[expected + "->" + state] += 1
-            false_go += expected == "obstacle" and state == "clear"
-            false_stop += expected == "clear" and state != "clear"
-        side = label.get("obstacle_side", "unknown")
-        if expected == "obstacle" and side in {"left", "right", "centre", "both"}:
-            sides += 1
-            side_errors += result.get("obstacle_side", "unknown") != side
-    pairs = flips = 0
-    for index in range(1, len(samples)):
-        if adjacent(samples[index - 1], samples[index], order_source):
-            pairs += 1
-            flips += rows[index - 1]["state"] != rows[index]["state"]
+    (
+        confusion,
+        sides,
+        side_errors,
+        eligible,
+        false_go,
+        false_stop,
+        labels,
+        clear_labels,
+        obstacle_labels,
+    ) = _label_scores(samples, rows)
+    pairs, flips = _temporal_scores(samples, rows, order_source)
     stages = {name for row in rows for name in row.get("timings_ms", {})}
     timings = {}
     for name in sorted(stages):
@@ -203,3 +184,54 @@ class StreamingMetrics:
             },
         )
         return result
+
+
+def _label_scores(samples, rows):
+    """Accumulate approved label counts while validating result identity."""
+    confusion: Counter[str] = Counter()
+    sides = side_errors = eligible = false_go = false_stop = 0
+    labels = clear_labels = obstacle_labels = 0
+    for sample, result in zip(samples, rows, strict=True):
+        if (
+            result.get("sample_id") != sample.get("sample_id")
+            or result.get("raw_sha256") != sample["raw"]["sha256"]
+        ):
+            raise ValueError("analysis_metric_inputs_mismatch")
+        label = approved_label(sample)
+        if label is None:
+            continue
+        labels += 1
+        expected = label.get("expected_state")
+        state = result["state"]
+        if expected in {"clear", "obstacle"}:
+            eligible += 1
+            clear_labels += expected == "clear"
+            obstacle_labels += expected == "obstacle"
+            confusion[expected + "->" + state] += 1
+            false_go += expected == "obstacle" and state == "clear"
+            false_stop += expected == "clear" and state != "clear"
+        side = label.get("obstacle_side", "unknown")
+        if expected == "obstacle" and side in {"left", "right", "centre", "both"}:
+            sides += 1
+            side_errors += result.get("obstacle_side", "unknown") != side
+    return (
+        confusion,
+        sides,
+        side_errors,
+        eligible,
+        false_go,
+        false_stop,
+        labels,
+        clear_labels,
+        obstacle_labels,
+    )
+
+
+def _temporal_scores(samples, rows, order_source):
+    """Count flips only between adjacent source observations."""
+    pairs = flips = 0
+    for index in range(1, len(samples)):
+        if adjacent(samples[index - 1], samples[index], order_source):
+            pairs += 1
+            flips += rows[index - 1]["state"] != rows[index]["state"]
+    return pairs, flips

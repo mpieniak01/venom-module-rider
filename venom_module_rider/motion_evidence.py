@@ -146,6 +146,7 @@ def _identity(record: dict) -> tuple:
 def _angle_reason(
     first: dict, second: dict, dt: float, settings: MotionEvidenceSettings
 ) -> str | None:
+    """Return the first yaw-continuity qualification blocker."""
     if not settings.source_yaw_unit_verified:
         return "calibration_required"
     if dt > settings.max_contiguous_gap_s:
@@ -153,28 +154,9 @@ def _angle_reason(
     if first["source_instance_id"] is None or second["source_instance_id"] is None:
         return "instance_unknown"
     for record in (first, second):
-        if not _fresh(record, "yaw"):
-            return "source_quality_unqualified"
-        if record["values"].get("yaw") is None:
-            return "source_yaw_missing"
-        if record["units"].get("yaw") != settings.source_yaw_unit:
-            return "source_yaw_unit_unqualified"
-        yaw_quality = _channel_quality(record, "yaw")
-        if (
-            "instance_id" in yaw_quality
-            and yaw_quality["instance_id"] != record["source_instance_id"]
-        ):
-            return "source_yaw_instance_mismatch"
-        if (
-            yaw_quality.get("ready") is False
-            or yaw_quality.get("stale") is True
-            or yaw_quality.get("valid") is False
-            or yaw_quality.get("wrapped_display") is True
-        ):
-            return "source_yaw_quality_unqualified"
-        channel_unit = yaw_quality.get("unit")
-        if channel_unit is not None and channel_unit != settings.source_yaw_unit:
-            return "source_yaw_unit_unqualified"
+        reason = _record_angle_reason(record, settings)
+        if reason is not None:
+            return reason
     first_time, second_time = _yaw_source_time(first), _yaw_source_time(second)
     if first_time is None or second_time is None:
         return "source_yaw_timestamp_missing"
@@ -205,85 +187,10 @@ def _yaw_rate(first: dict, second: dict, dt: float, unit: str) -> float | None:
 
 
 def _preflight_records(records: list) -> None:
-    """Bound JSON work before allocating encoded strings or sorting mappings.
-
-    Count the exact compact ensure_ascii JSON byte size, including NaN spelling
-    for rejected numeric rows. Ancestors detect cycles without rejecting shared
-    containers. Every visited node consumes at least one encoded byte, so the
-    session byte budget also bounds total traversal nodes.
-    """
-    remaining = MAX_EVIDENCE_SESSION_BYTES
-    nodes_left = MAX_EVIDENCE_SESSION_BYTES
-    ancestors: set[int] = set()
-
-    def consume(size: int) -> None:
-        nonlocal remaining
-        remaining -= size
-        if remaining < 0:
-            raise ValueError("motion_records_limit")
-
-    def visit(value: Any, depth: int) -> None:
-        nonlocal nodes_left
-        nodes_left -= 1
-        if nodes_left < 0 or depth > MAX_INPUT_DEPTH:
-            raise ValueError("motion_records_limit")
-        kind = type(value)
-        if value is None:
-            consume(4)
-        elif kind is bool:
-            consume(4 if value else 5)
-        elif kind is int:
-            if value.bit_length() > MAX_INPUT_INTEGER_BITS:
-                raise ValueError("motion_records_limit")
-            consume(len(str(value)))
-        elif kind is float:
-            if math.isfinite(value):
-                consume(len(repr(value)))
-            else:
-                consume(3 if math.isnan(value) else 8 if value > 0 else 9)
-        elif kind is str:
-            consume(2)
-            if len(value) > remaining:
-                raise ValueError("motion_records_limit")
-            for character in value:
-                code = ord(character)
-                if character in '"\\\b\f\n\r\t':
-                    consume(2)
-                elif code < 32 or code >= 127:
-                    consume(6 if code <= 0xFFFF else 12)
-                else:
-                    consume(1)
-        elif kind in (dict, list):
-            identity = id(value)
-            if identity in ancestors:
-                raise ValueError("motion_input_invalid")
-            count = len(value)
-            children = count * (2 if kind is dict else 1)
-            # Minimal key/value bytes plus punctuation, without enumerating a
-            # potentially enormous container just to discover it is too large.
-            minimum_size = 2 if not count else count * (5 if kind is dict else 2) + 1
-            if children > nodes_left or minimum_size > remaining:
-                raise ValueError("motion_records_limit")
-            consume(2 + max(0, count - 1))
-            ancestors.add(identity)
-            try:
-                if kind is dict:
-                    for key, child in value.items():
-                        if type(key) is not str:
-                            raise ValueError("motion_input_invalid")
-                        visit(key, depth + 1)
-                        consume(1)  # Colon.
-                        visit(child, depth + 1)
-                else:
-                    for child in value:
-                        visit(child, depth + 1)
-            finally:
-                ancestors.remove(identity)
-        else:
-            raise ValueError("motion_input_invalid")
-
+    """Bound exact compact ensure_ascii JSON bytes and traversal work."""
+    budget = _JsonBudget()
     for record in records:
-        visit(record, 0)
+        budget.visit(record, 0)
 
 
 def _validate_records(records: object) -> tuple[list[dict], dict]:
@@ -362,6 +269,7 @@ def _quality_summary(records: list[dict], channel: str | None = None) -> dict:
 
 
 def _channel_report(records: list[dict]) -> tuple[list[dict], dict]:
+    """Aggregate observed channels and raw vector norms without imputing data."""
     channels: dict[tuple[str, str], list[float]] = defaultdict(list)
     missing: Counter = Counter()
     channel_rows: dict[tuple[str, str], list[dict]] = defaultdict(list)
@@ -380,19 +288,10 @@ def _channel_report(records: list[dict]) -> tuple[list[dict], dict]:
                 missing[key] += 1
             else:
                 channels[key].append(value)
-        axes = ["accel_x", "accel_y", "accel_z"]
-        if any(record["values"].get(axis) is None for axis in axes):
-            incomplete += 1
-            continue
-        units = {record["units"].get(axis, "unknown") for axis in axes}
-        if len(units) != 1:
-            mixed_units += 1
-            continue
-        norm = math.hypot(*(record["values"][axis] for axis in axes))
-        if math.isfinite(norm):
-            norms[units.pop()].append(norm)
-        else:
-            nonfinite += 1
+        a, b, c = _acceleration_norm(record, norms)
+        incomplete += a
+        mixed_units += b
+        nonfinite += c
     channel_report = [
         {
             "channel": channel,
@@ -418,6 +317,7 @@ def _channel_report(records: list[dict]) -> tuple[list[dict], dict]:
 
 
 def _timing_report(records: list[dict], settings: MotionEvidenceSettings) -> dict:
+    """Summarize source/receipt intervals and strictly qualified yaw derivatives."""
     source_gaps: list[float] = []
     receipt_gaps: list[float] = []
     angular_rates: list[float] = []
@@ -426,70 +326,19 @@ def _timing_report(records: list[dict], settings: MotionEvidenceSettings) -> dic
     previous: dict[tuple, dict] = {}
     observed: set[tuple] = set()
     for record in records:
-        if record["kind"] != "imu":
-            continue
-        stream = (record["device_id"], record["kind"])
-        prior = previous.get(stream)
-        previous[stream] = record
-        timestamp = record["source_observed_at"]
-        if record["source_instance_id"] is None:
-            counts["missing_instance_id"] += 1
-        if timestamp is None:
-            counts["missing_source_timestamp"] += 1
-        else:
-            sample = (*_identity(record), timestamp)
-            if sample in observed:
-                counts["repeated_source_timestamps"] += 1
-            else:
-                counts["unique_source_observations"] += 1
-                observed.add(sample)
-        if prior is None:
-            continue
-        if _identity(prior) != _identity(record):
-            counts["identity_discontinuities"] += 1
-            for key in ("source_session", "source_instance_id", "source_clock_domain"):
-                if prior[key] != record[key]:
-                    counts[key + "_changes"] += 1
-            reasons["identity_discontinuity"] += 1
-            continue
-        receipt_dt = record["received_mono"] - prior["received_mono"]
-        if math.isfinite(receipt_dt) and receipt_dt > 0:
-            receipt_gaps.append(receipt_dt)
-        else:
-            counts["nonincreasing_host_receipts"] += 1
-        prior_ts = prior["source_observed_at"]
-        if timestamp is None or prior_ts is None:
-            reasons["source_timestamp_missing"] += 1
-            continue
-        dt = timestamp - prior_ts
-        if not math.isfinite(dt):
-            counts["nonfinite_source_intervals"] += 1
-            reasons["source_interval_invalid"] += 1
-            continue
-        if dt <= 0:
-            if dt < 0:
-                counts["out_of_order_source_timestamps"] += 1
-            reasons["source_timestamp_nonincreasing"] += 1
-            continue
-        source_gaps.append(dt)
-        if dt > settings.max_contiguous_gap_s:
-            counts["source_gaps_over_contiguous_limit"] += 1
-        if not math.isfinite(receipt_dt) or receipt_dt <= 0:
-            reasons["host_receipt_nonincreasing"] += 1
-            continue
-        reason = _angle_reason(prior, record, dt, settings)
-        if reason is not None:
-            reasons[reason] += 1
-            continue
-        first_time, second_time = _yaw_source_time(prior), _yaw_source_time(record)
-        assert first_time is not None and second_time is not None
-        rate = _yaw_rate(
-            prior, record, second_time - first_time, settings.source_yaw_unit or "deg"
+        _timing_observation(
+            record,
+            settings,
+            (
+                previous,
+                observed,
+                counts,
+                reasons,
+                source_gaps,
+                receipt_gaps,
+                angular_rates,
+            ),
         )
-        if rate is None:
-            reasons["yaw_unwrap_ambiguous_or_nonfinite"] += 1
-        else:
-            angular_rates.append(rate)
     larger = sum(gap >= settings.event_duration_s for gap in source_gaps)
     return {
         "samples": {
@@ -668,3 +517,240 @@ def analyze_manifest(
     if len(_canonical(report)) > MAX_REPORT_BYTES:
         raise ValueError("motion_report_limit")
     return report
+
+
+class _JsonBudget:
+    """Bound byte/node work and detect only ancestor cycles during preflight."""
+
+    def __init__(self):
+        """Own one traversal budget without sharing state across requests."""
+        self.remaining = MAX_EVIDENCE_SESSION_BYTES
+        self.nodes_left = MAX_EVIDENCE_SESSION_BYTES
+        self.ancestors: set[int] = set()
+
+    def consume(self, size: int) -> None:
+        """Charge exact JSON bytes."""
+        self.remaining -= size
+        if self.remaining < 0:
+            raise ValueError("motion_records_limit")
+
+    def visit(self, value: Any, depth: int) -> None:
+        """Visit one bounded JSON node in the original traversal order."""
+        self.nodes_left -= 1
+        if self.nodes_left < 0 or depth > MAX_INPUT_DEPTH:
+            raise ValueError("motion_records_limit")
+        kind = type(value)
+        if value is None:
+            self.consume(4)
+        elif kind is bool:
+            self.consume(4 if value else 5)
+        elif kind is int:
+            _visit_json_integer(self, value)
+        elif kind is float:
+            _visit_json_float(self, value)
+        elif kind is str:
+            _visit_json_string(self, value)
+        elif kind in (dict, list):
+            _visit_json_container(self, value, kind, depth)
+        else:
+            raise ValueError("motion_input_invalid")
+
+
+def _visit_json_string(self, value):
+    """Charge exact escaped-string bytes without allocating the JSON representation."""
+    self.consume(2)
+    if len(value) > self.remaining:
+        raise ValueError("motion_records_limit")
+    for character in value:
+        code = ord(character)
+        if character in '"\\\x08\x0c\n\r\t':
+            self.consume(2)
+        elif code < 32 or code >= 127:
+            self.consume(6 if code <= 65535 else 12)
+        else:
+            self.consume(1)
+
+
+def _visit_json_container(self, value, kind, depth):
+    """Preserve ancestor-cycle detection and punctuation/child budget order."""
+    identity = id(value)
+    if identity in self.ancestors:
+        raise ValueError("motion_input_invalid")
+    count = len(value)
+    children = count * (2 if kind is dict else 1)
+    minimum_size = 2 if not count else count * (5 if kind is dict else 2) + 1
+    if children > self.nodes_left or minimum_size > self.remaining:
+        raise ValueError("motion_records_limit")
+    self.consume(2 + max(0, count - 1))
+    self.ancestors.add(identity)
+    try:
+        if kind is dict:
+            _visit_json_mapping(self, value, depth)
+        else:
+            for child in value:
+                self.visit(child, depth + 1)
+    finally:
+        self.ancestors.remove(identity)
+
+
+def _visit_json_mapping(self, value, depth):
+    """Visit each string key, colon and child before proceeding to the next pair."""
+    for key, child in value.items():
+        if type(key) is not str:
+            raise ValueError("motion_input_invalid")
+        self.visit(key, depth + 1)
+        self.consume(1)
+        self.visit(child, depth + 1)
+
+
+def _visit_json_integer(self, value):
+    """Check integer bit budget before decimal conversion."""
+    if value.bit_length() > MAX_INPUT_INTEGER_BITS:
+        raise ValueError("motion_records_limit")
+    self.consume(len(str(value)))
+
+
+def _visit_json_float(self, value):
+    """Charge finite or JSON nonfinite float spelling exactly."""
+    if math.isfinite(value):
+        self.consume(len(repr(value)))
+    elif math.isnan(value):
+        self.consume(3)
+    elif value > 0:
+        self.consume(8)
+    else:
+        self.consume(9)
+
+
+def _record_angle_reason(record, settings):
+    """Check yaw quality and unit for one source record in original order."""
+    if not _fresh(record, "yaw"):
+        return "source_quality_unqualified"
+    if record["values"].get("yaw") is None:
+        return "source_yaw_missing"
+    if record["units"].get("yaw") != settings.source_yaw_unit:
+        return "source_yaw_unit_unqualified"
+    yaw_quality = _channel_quality(record, "yaw")
+    if (
+        "instance_id" in yaw_quality
+        and yaw_quality["instance_id"] != record["source_instance_id"]
+    ):
+        return "source_yaw_instance_mismatch"
+    if (
+        yaw_quality.get("ready") is False
+        or yaw_quality.get("stale") is True
+        or yaw_quality.get("valid") is False
+        or yaw_quality.get("wrapped_display") is True
+    ):
+        return "source_yaw_quality_unqualified"
+    channel_unit = yaw_quality.get("unit")
+    if channel_unit is not None and channel_unit != settings.source_yaw_unit:
+        return "source_yaw_unit_unqualified"
+
+
+def _acceleration_norm(record, norms):
+    """Account complete same-unit vectors without fabricating missing values."""
+    axes = ["accel_x", "accel_y", "accel_z"]
+    if any(record["values"].get(axis) is None for axis in axes):
+        return 1, 0, 0
+    units = {record["units"].get(axis, "unknown") for axis in axes}
+    if len(units) != 1:
+        return 0, 1, 0
+    norm = math.hypot(*(record["values"][axis] for axis in axes))
+    if math.isfinite(norm):
+        norms[units.pop()].append(norm)
+    else:
+        return 0, 0, 1
+    return 0, 0, 0
+
+
+def _timing_observation(record, settings, accumulators):
+    """Account one IMU observation while retaining previous-source and
+    uniqueness order.
+    """
+    previous, observed, counts, _, _, _, _ = accumulators
+    if record["kind"] != "imu":
+        return
+    stream = (record["device_id"], record["kind"])
+    prior = previous.get(stream)
+    previous[stream] = record
+    timestamp = record["source_observed_at"]
+    if record["source_instance_id"] is None:
+        counts["missing_instance_id"] += 1
+    if timestamp is None:
+        counts["missing_source_timestamp"] += 1
+    else:
+        sample = (*_identity(record), timestamp)
+        if sample in observed:
+            counts["repeated_source_timestamps"] += 1
+        else:
+            counts["unique_source_observations"] += 1
+            observed.add(sample)
+    if prior is None:
+        return
+    _timing_pair(prior, record, timestamp, settings, accumulators)
+
+
+def _timing_pair(prior, record, timestamp, settings, accumulators):
+    """Account intervals only after the stream predecessor is established."""
+    _, _, counts, reasons, source_gaps, receipt_gaps, angular_rates = accumulators
+    if _identity(prior) != _identity(record):
+        counts["identity_discontinuities"] += 1
+        for key in ("source_session", "source_instance_id", "source_clock_domain"):
+            if prior[key] != record[key]:
+                counts[key + "_changes"] += 1
+        reasons["identity_discontinuity"] += 1
+        return
+    receipt_dt = record["received_mono"] - prior["received_mono"]
+    if math.isfinite(receipt_dt) and receipt_dt > 0:
+        receipt_gaps.append(receipt_dt)
+    else:
+        counts["nonincreasing_host_receipts"] += 1
+    dt = _timing_source_interval(
+        prior, timestamp, settings, counts, reasons, source_gaps
+    )
+    if dt is None:
+        return
+    if not math.isfinite(receipt_dt) or receipt_dt <= 0:
+        reasons["host_receipt_nonincreasing"] += 1
+        return
+    _timing_yaw(prior, record, dt, settings, reasons, angular_rates)
+
+
+def _timing_yaw(prior, record, dt, settings, reasons, angular_rates):
+    """Report only qualified unambiguous source-yaw rates."""
+    reason = _angle_reason(prior, record, dt, settings)
+    if reason is not None:
+        reasons[reason] += 1
+        return
+    first_time, second_time = _yaw_source_time(prior), _yaw_source_time(record)
+    assert first_time is not None and second_time is not None
+    rate = _yaw_rate(
+        prior, record, second_time - first_time, settings.source_yaw_unit or "deg"
+    )
+    if rate is None:
+        reasons["yaw_unwrap_ambiguous_or_nonfinite"] += 1
+    else:
+        angular_rates.append(rate)
+
+
+def _timing_source_interval(prior, timestamp, settings, counts, reasons, source_gaps):
+    """Preserve missing, nonfinite, nonincreasing and oversized interval counters."""
+    prior_ts = prior["source_observed_at"]
+    if timestamp is None or prior_ts is None:
+        reasons["source_timestamp_missing"] += 1
+        return
+    dt = timestamp - prior_ts
+    if not math.isfinite(dt):
+        counts["nonfinite_source_intervals"] += 1
+        reasons["source_interval_invalid"] += 1
+        return
+    if dt <= 0:
+        if dt < 0:
+            counts["out_of_order_source_timestamps"] += 1
+        reasons["source_timestamp_nonincreasing"] += 1
+        return
+    source_gaps.append(dt)
+    if dt > settings.max_contiguous_gap_s:
+        counts["source_gaps_over_contiguous_limit"] += 1
+    return dt

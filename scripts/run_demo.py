@@ -80,7 +80,61 @@ def resolve_audio_enabled(demo_only: bool, requested: bool = False) -> bool:
     return requested and not demo_only
 
 
+def _print_panel_ready(web_port, demo_only):
+    """Print the existing ready message without altering the selected mode."""
+    print(
+        f"R1 panel ready: http://localhost:{web_port}/rider",
+        flush=True,
+    )
+    print(
+        ("Built-in motion simulation; LLM and physical IoT bridge disabled.")
+        if demo_only
+        else ("Configured Pi via API; no automatic ARM or hardware activation."),
+        flush=True,
+    )
+
+
+def _watch_demo(children, api_url, web_url, web_port, demo_only, is_stopping):
+    """Monitor only owned children and preserve the existing readiness deadline."""
+    opener = local_api_opener()
+    deadline = time.monotonic() + 60
+    ready = False
+    while not is_stopping():
+        if any(process.poll() is not None for process in children):
+            raise RuntimeError("Demo process stopped; inspect logs/r1-demo-*.log.")
+        if not ready:
+            try:
+                with opener.open(api_url + "/api/v1/rider/config", timeout=1):
+                    pass
+                with opener.open(web_url + "/rider", timeout=2):
+                    pass
+                ready = True
+                _print_panel_ready(web_port, demo_only)
+            except OSError:
+                if time.monotonic() > deadline:
+                    raise RuntimeError(
+                        "Demo startup failed; inspect logs/r1-demo-*.log."
+                    ) from None
+        time.sleep(0.5)
+
+
+def _close_demo(children, streams):
+    """Stop owned processes in order, then close their log streams."""
+    for process in children:
+        if process.poll() is None:
+            process.terminate()
+    for process in children:
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+    for stream in streams:
+        stream.close()
+
+
 def main():
+    """Launch the explicitly selected local profile with bounded owned children."""
     module = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--core-root", type=Path, default=module.parent.parent)
@@ -242,53 +296,11 @@ def main():
                 indent=2,
             )
         )
-        opener = local_api_opener()
-        deadline = time.monotonic() + 60
-        ready = False
-        while not stopping:
-            if any(process.poll() is not None for process in children):
-                raise RuntimeError("Demo process stopped; inspect logs/r1-demo-*.log.")
-            if not ready:
-                try:
-                    with opener.open(api_url + "/api/v1/rider/config", timeout=1):
-                        pass
-                    with opener.open(web_url + "/rider", timeout=2):
-                        pass
-                    ready = True
-                    print(
-                        f"R1 panel ready: http://localhost:{args.web_port}/rider",
-                        flush=True,
-                    )
-                    print(
-                        (
-                            "Built-in motion simulation; "
-                            "LLM and physical IoT bridge disabled."
-                        )
-                        if demo_only
-                        else (
-                            "Configured Pi via API; "
-                            "no automatic ARM or hardware activation."
-                        ),
-                        flush=True,
-                    )
-                except OSError:
-                    if time.monotonic() > deadline:
-                        raise RuntimeError(
-                            "Demo startup failed; inspect logs/r1-demo-*.log."
-                        ) from None
-            time.sleep(0.5)
+        _watch_demo(
+            children, api_url, web_url, args.web_port, demo_only, lambda: stopping
+        )
     finally:
-        for process in children:
-            if process.poll() is None:
-                process.terminate()
-        for process in children:
-            try:
-                process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait()
-        for stream in streams:
-            stream.close()
+        _close_demo(children, streams)
     return 0
 
 

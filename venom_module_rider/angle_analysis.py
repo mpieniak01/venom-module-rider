@@ -63,49 +63,8 @@ def channel_time(point, axis):
 
 
 def enrich(points, events):
-    previous: dict[str, tuple] = {}
-    intervals = []
-    for point in points:
-        rates = {}
-        for axis in AXES:
-            semantic = point["angle_semantics"].get(axis)
-            stamp = channel_time(point, axis)
-            value = point["values"].get(axis)
-            prior = previous.get(axis)
-            current = (point, stamp, value, semantic)
-            previous[axis] = current
-            if (
-                not semantic
-                or stamp is None
-                or not finite(value)
-                or abs(value) > 1e9
-                or prior is None
-            ):
-                continue
-            p, before, old, old_semantic = prior
-            if (
-                before is None
-                or not finite(old)
-                or abs(old) > 1e9
-                or semantic != old_semantic
-                or p["instance_id"] != point["instance_id"]
-                or p["segment"] != point["segment"]
-            ):
-                continue
-            dt, host_dt = stamp - before, point["t"] - p["t"]
-            if not 0 < dt <= 1 or not 0 < host_dt <= 1:
-                continue
-            period = 360 if semantic["unit"] == "deg" else 2 * math.pi
-            delta = (value - old + period / 2) % period - period / 2
-            if math.isclose(abs(delta), period / 2, abs_tol=1e-8):
-                continue
-            rate = delta / dt
-            if semantic["unit"] == "rad":
-                rate = math.degrees(rate)
-            if finite(rate):
-                rates[axis] = rate
-                intervals.append(dt)
-        point["angle_rates_deg_s"] = rates
+    """Describe source sampling and pulse sufficiency without inferring latency."""
+    intervals = _angle_rates(points)
     # Sampling describes observed source intervals, never an inferred firmware ODR.
     gaps = []
     for first, second in zip(points, points[1:], strict=False):
@@ -122,6 +81,72 @@ def enrich(points, events):
             gaps.append(b - a)
     ordered = sorted(gaps)
     median = statistics.median(ordered) if ordered else None
+    assessed = _pulse_observations(points, events)
+    return {
+        "source_interval_median_s": median,
+        "observed_hz": 1 / median if median else None,
+        "source_interval_max_s": max(ordered) if ordered else None,
+        "rate_pairs": len(intervals),
+        "pulses": assessed,
+        "physical_latency_s": None,
+    }
+
+
+def _angle_rates(points):
+    """Attach finite source-clock rates to points and retain measured intervals."""
+    previous: dict[str, tuple] = {}
+    intervals: list[float] = []
+    for point in points:
+        rates: dict[str, float] = {}
+        for axis in AXES:
+            _axis_rate(point, axis, previous, rates, intervals)
+        point["angle_rates_deg_s"] = rates
+    return intervals
+
+
+def _axis_rate(point, axis, previous, rates, intervals):
+    """Update previous state before rejecting an invalid angle-rate pair."""
+    semantic = point["angle_semantics"].get(axis)
+    stamp = channel_time(point, axis)
+    value = point["values"].get(axis)
+    prior = previous.get(axis)
+    current = (point, stamp, value, semantic)
+    previous[axis] = current
+    if (
+        not semantic
+        or stamp is None
+        or not finite(value)
+        or abs(value) > 1e9
+        or prior is None
+    ):
+        return
+    p, before, old, old_semantic = prior
+    if (
+        before is None
+        or not finite(old)
+        or abs(old) > 1e9
+        or semantic != old_semantic
+        or p["instance_id"] != point["instance_id"]
+        or p["segment"] != point["segment"]
+    ):
+        return
+    dt, host_dt = stamp - before, point["t"] - p["t"]
+    if not 0 < dt <= 1 or not 0 < host_dt <= 1:
+        return
+    period = 360 if semantic["unit"] == "deg" else 2 * math.pi
+    delta = (value - old + period / 2) % period - period / 2
+    if math.isclose(abs(delta), period / 2, abs_tol=1e-8):
+        return
+    rate = delta / dt
+    if semantic["unit"] == "rad":
+        rate = math.degrees(rate)
+    if finite(rate):
+        rates[axis] = rate
+        intervals.append(dt)
+
+
+def _pulse_observations(points, events):
+    """Describe only valid pulse windows without adding inferred samples."""
     pulses = [
         e
         for e in events
@@ -153,11 +178,4 @@ def enrich(points, events):
                 or any(not p["instance_id"] for p in inside),
             }
         )
-    return {
-        "source_interval_median_s": median,
-        "observed_hz": 1 / median if median else None,
-        "source_interval_max_s": max(ordered) if ordered else None,
-        "rate_pairs": len(intervals),
-        "pulses": assessed,
-        "physical_latency_s": None,
-    }
+    return assessed

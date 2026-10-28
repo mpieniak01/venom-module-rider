@@ -104,7 +104,33 @@ def decode_image(path):
     return image, mean, std, mean >= 0.04 and std >= 0.01
 
 
+def _evaluate_depth(row, model, args, corridor, settings, torch):
+    """Measure one bounded image evaluation with the existing quality gate."""
+    started = time.perf_counter()
+    image, mean, std, quality_passed = decode_image(row["path"])
+    result: dict[str, Any]
+    if not quality_passed and args.quality_mode == "production":
+        result = {"state": "unknown", "reason": "vision_image_quality"}
+    else:
+        depth = model.infer(image)
+        result = assess_depth(depth, corridor, settings)
+        result.pop("_errors")
+    result.update(
+        {
+            "drive_supported": False,
+            "distance_measurement": False,
+            "image_quality_passed": quality_passed,
+            "image_mean_rgb": mean,
+            "image_std_rgb": std,
+        }
+    )
+    if args.device == "cuda":
+        torch.cuda.synchronize()
+    return result, (time.perf_counter() - started) * 1000
+
+
 def benchmark(args):
+    """Benchmark frozen inputs without qualifying live freshness or motion."""
     import torch
 
     torch.set_num_threads(args.threads)
@@ -126,29 +152,6 @@ def benchmark(args):
         torch.cuda.synchronize()
         torch.cuda.reset_peak_memory_stats()
 
-    def evaluate(row):
-        started = time.perf_counter()
-        image, mean, std, quality_passed = decode_image(row["path"])
-        result: dict[str, Any]
-        if not quality_passed and args.quality_mode == "production":
-            result = {"state": "unknown", "reason": "vision_image_quality"}
-        else:
-            depth = model.infer(image)
-            result = assess_depth(depth, corridor, settings)
-            result.pop("_errors")
-        result.update(
-            {
-                "drive_supported": False,
-                "distance_measurement": False,
-                "image_quality_passed": quality_passed,
-                "image_mean_rgb": mean,
-                "image_std_rgb": std,
-            }
-        )
-        if args.device == "cuda":
-            torch.cuda.synchronize()
-        return result, (time.perf_counter() - started) * 1000
-
     # Warm a real inference, not a labelled frame that the quality gate rejects.
     warm = (
         dataset[0]
@@ -158,14 +161,17 @@ def benchmark(args):
     warmup_samples = args.warmup if warm is not None else 0
     start = time.perf_counter()
     for _ in range(warmup_samples):
-        result, _ = evaluate(warm)
+        result, _ = _evaluate_depth(warm, model, args, corridor, settings, torch)
         if result["reason"] == "vision_image_quality":
             raise ValueError("warmup_image_quality")
     warmup_ms = (time.perf_counter() - start) * 1000
     results = []
     # Same input repeated checks deterministic stability, not live video freshness.
     for row in dataset:
-        samples = [evaluate(row) for _ in range(args.repeats)]
+        samples = [
+            _evaluate_depth(row, model, args, corridor, settings, torch)
+            for _ in range(args.repeats)
+        ]
         results.append(
             {
                 "file": row["file"],

@@ -111,133 +111,27 @@ class EventSelector:
         return (first ^ second).bit_count()
 
     def evaluate(self, observation, now):
+        """Evaluate one fresh bound observation and retain existing event cadence."""
         if self.tick(now):
             return None
+        if not _admit_event_observation(self, observation, now):
+            return None
         item = observation
-        if item.device != self.device or item.source_session != self.source_session:
-            self.rejected += 1
-            return None
-        if (
-            item.historical
-            or not math.isfinite(item.at)
-            or not math.isfinite(item.expires_at)
-            or item.at > now
-            or now > item.expires_at
-        ):
-            self.stop("auto_source_stale")
-            return None
-        if (
-            any(
-                type(value) is not str or not value
-                for value in (
-                    item.state,
-                    item.run,
-                    item.frame_id,
-                    item.model,
-                    item.sha256,
-                    item.engine,
-                )
-            )
-            or item.state not in {"clear", "obstacle", "unknown"}
-            or not item.run
-            or not item.frame_id
-            or type(item.sequence) is not int
-            or item.sequence < 0
-            or type(item.revision) is not int
-            or item.revision < 0
-            or re.fullmatch("[a-f0-9]{64}", item.model) is None
-            or re.fullmatch("[a-f0-9]{64}", item.sha256) is None
-            or not item.engine
-            or item.scene_hash is not None
-            and (type(item.scene_hash) is not int or not 0 <= item.scene_hash < 2**64)
-        ):
-            self.rejected += 1
-            return None
-        binding = (item.run, item.revision, item.model, item.engine)
-        if self.binding is None:
-            self.binding = binding
-        elif self.binding != binding:
-            self.stop("auto_source_changed")
-            return None
-        if item.sequence <= self.last_sequence or item.frame_id == self.last_frame:
-            self.rejected += 1
-            return None
-        self.last_sequence, self.last_frame = item.sequence, item.frame_id
-        self.last_seen = now
         if (
             self.burst_left
             and (now - self.last_sample) * 1000 >= self.profile.burst_interval_ms
         ):
-            if item.sha256 == self.last_sha:
-                self.deduplicated += 1
-                return None
-            trigger = self.burst
-            if trigger is None:
-                self.stop("auto_state_invalid")
-                return None
-            self.burst_left -= 1
-            self.attempts += 1
-            self.last_sample, self.last_sha = now, item.sha256
-            return Event(
-                trigger.event_id,
-                trigger.reasons,
-                trigger.trigger,
-                item,
-                self.profile.burst_frames - self.burst_left - 1,
-            )
-        candidate = (item.state, item.scene_hash)
-        compatible = (
-            self.pending is not None
-            and self.pending[0] == item.state
-            and (
-                item.scene_hash is None
-                and self.pending[1] is None
-                or item.scene_hash is not None
-                and self.pending[1] is not None
-                and self.distance(item.scene_hash, self.pending[1]) <= 3
-            )
-        )
-        if not compatible:
-            self.pending, self.pending_since, self.stable_count = candidate, now, 1
-        else:
-            self.stable_count += 1
-        if (
-            self.stable_count < self.profile.stable_frames
-            or (now - self.pending_since) * 1000 < self.profile.stable_ms
-        ):
+            return _burst_event(self, item, now)
+        if not _stable_event_observation(self, item, now):
             return None
-        reasons = []
-        if item.state == "obstacle" and self.stable_state != "obstacle":
-            reasons.append("new_obstacle")
-        if item.state == "unknown" and self.stable_state != "unknown":
-            reasons.append("uncertainty")
-        if self.stable_state is not None and item.state != self.stable_state:
-            reasons.append("state_change")
-        if item.scene_hash is not None and (
-            self.last_scene is None
-            or self.distance(item.scene_hash, self.last_scene)
-            >= self.profile.scene_distance_bits
-        ):
-            reasons.append("new_scene")
-        reasons = [reason for reason in reasons if reason in self.profile.events]
+        reasons = _event_reasons(self, item)
         if not reasons:
             self.stable_state = item.state
             return None
         if (now - self.last_event) * 1000 < self.profile.cooldown_ms:
             self.suppressed += 1
             return None
-        if item.sha256 == self.last_sha or any(
-            state == item.state
-            and (
-                scene is None
-                and item.scene_hash is None
-                or scene is not None
-                and item.scene_hash is not None
-                and self.distance(scene, item.scene_hash)
-                < self.profile.scene_distance_bits
-            )
-            for state, scene in self.seen
-        ):
+        if _event_already_seen(self, item):
             self.deduplicated += 1
             self.stable_state = item.state
             return None
@@ -251,3 +145,158 @@ class EventSelector:
         event = Event(uuid.uuid4().hex, tuple(reasons), item, item, 0)
         self.burst, self.burst_left = event, self.profile.burst_frames - 1
         return event
+
+
+def _invalid_event_metadata(item):
+    """Reject malformed literal source metadata without converting arbitrary values."""
+    return (
+        any(
+            type(value) is not str or not value
+            for value in (
+                item.state,
+                item.run,
+                item.frame_id,
+                item.model,
+                item.sha256,
+                item.engine,
+            )
+        )
+        or item.state not in {"clear", "obstacle", "unknown"}
+        or (not item.run)
+        or (not item.frame_id)
+        or (type(item.sequence) is not int)
+        or (item.sequence < 0)
+        or (type(item.revision) is not int)
+        or (item.revision < 0)
+        or (re.fullmatch("[a-f0-9]{64}", item.model) is None)
+        or (re.fullmatch("[a-f0-9]{64}", item.sha256) is None)
+        or (not item.engine)
+        or (
+            item.scene_hash is not None
+            and (type(item.scene_hash) is not int or not 0 <= item.scene_hash < 2**64)
+        )
+    )
+
+
+def _admit_event_observation(self, observation, now):
+    """Validate source binding before mutating the observed sequence and
+    receipt clock.
+    """
+    item = observation
+    if item.device != self.device or item.source_session != self.source_session:
+        self.rejected += 1
+        return False
+    if (
+        item.historical
+        or not math.isfinite(item.at)
+        or not math.isfinite(item.expires_at)
+        or item.at > now
+        or now > item.expires_at
+    ):
+        self.stop("auto_source_stale")
+        return False
+    if _invalid_event_metadata(item):
+        self.rejected += 1
+        return False
+    binding = (item.run, item.revision, item.model, item.engine)
+    if self.binding is None:
+        self.binding = binding
+    elif self.binding != binding:
+        self.stop("auto_source_changed")
+        return False
+    if item.sequence <= self.last_sequence or item.frame_id == self.last_frame:
+        self.rejected += 1
+        return False
+    self.last_sequence, self.last_frame = item.sequence, item.frame_id
+    self.last_seen = now
+    return True
+
+
+def _burst_event(self, item, now):
+    """Emit one due burst frame after deduplication without renewing its trigger."""
+    if item.sha256 == self.last_sha:
+        self.deduplicated += 1
+        return None
+    trigger = self.burst
+    if trigger is None:
+        self.stop("auto_state_invalid")
+        return None
+    self.burst_left -= 1
+    self.attempts += 1
+    self.last_sample, self.last_sha = now, item.sha256
+    return Event(
+        trigger.event_id,
+        trigger.reasons,
+        trigger.trigger,
+        item,
+        self.profile.burst_frames - self.burst_left - 1,
+    )
+
+
+def _stable_event_observation(self, item, now):
+    """Update causal pending state before testing the original stable
+    count and duration.
+    """
+    candidate = (item.state, item.scene_hash)
+    compatible = (
+        self.pending is not None
+        and self.pending[0] == item.state
+        and (
+            item.scene_hash is None
+            and self.pending[1] is None
+            or item.scene_hash is not None
+            and self.pending[1] is not None
+            and self.distance(item.scene_hash, self.pending[1]) <= 3
+        )
+    )
+    if not compatible:
+        self.pending, self.pending_since, self.stable_count = candidate, now, 1
+    else:
+        self.stable_count += 1
+    if (
+        self.stable_count < self.profile.stable_frames
+        or (now - self.pending_since) * 1000 < self.profile.stable_ms
+    ):
+        return False
+    return True
+
+
+def _event_reasons(self, item):
+    """Preserve new-obstacle, uncertainty, state and scene trigger ordering."""
+    reasons = []
+    if item.state == "obstacle" and self.stable_state != "obstacle":
+        reasons.append("new_obstacle")
+    if item.state == "unknown" and self.stable_state != "unknown":
+        reasons.append("uncertainty")
+    if self.stable_state is not None and item.state != self.stable_state:
+        reasons.append("state_change")
+    if item.scene_hash is not None and (
+        self.last_scene is None
+        or self.distance(item.scene_hash, self.last_scene)
+        >= self.profile.scene_distance_bits
+    ):
+        reasons.append("new_scene")
+    reasons = [reason for reason in reasons if reason in self.profile.events]
+    return reasons
+
+
+def _event_already_seen(self, item):
+    """Apply source-hash and compatible-scene deduplication before event admission."""
+    return item.sha256 == self.last_sha or any(
+        (
+            state == item.state
+            and (
+                scene is None
+                and item.scene_hash is None
+                or (
+                    scene is not None
+                    and item.scene_hash is not None
+                    and (
+                        self.distance(scene, item.scene_hash)
+                        < self.profile.scene_distance_bits
+                    )
+                )
+            )
+            for state, scene in self.seen
+        )
+    )

@@ -8,24 +8,21 @@ import type { Translator } from "../lib/i18n";
 import { Button, Pill } from "./primitives";
 import styles from "../rider.module.css";
 
+/** Give a historical frame its explicit capture label in either panel size. */
+function captureActionLabel(historical:boolean,compact:boolean):string {
+  if(historical)return "samples.saveHistorical";
+  return compact?"cockpitPhoto":"samples.save";
+}
+/** Prefer a current capture error before the last request outcome in the summary. */
+function captureSummary(error:string,outcome:{state:string}|null|undefined,t:Translator):string {
+  if(error)return " · "+t("samples.failure");
+  return outcome?" · "+t("samples.request."+outcome.state):"";
+}
+/** Offer explicit evidence capture actions for the current visible source. */
 export function SampleCapture({sourceSession,deviceId,frame,visible,t,compact=false}:{compact?:boolean;sourceSession:string|null;deviceId:string|null;frame:Frame|null;visible:boolean;t:Translator}) {
-  const data=useSamples(deviceId,visible);
-  const active=data.session?.state==="collecting";
-  const pending=["submitting","queued","running","unknown"].includes(data.outcome?.state??"");
-  const canSave=!!captureIntent(data.session,frame,"preview");
-  const historical=historicalFrame(frame);
-  return <div className={styles.sampleCapture} data-testid="sample-capture" data-compact={compact}>
-    <div className={styles.sampleHeading}><strong>{t("samples.capture")}</strong>
-      {data.session&&<Pill tone={active?"good":undefined}>{t("samples.session."+data.session.state)} · {data.session.counts.saved??0} {t("samples.savedCount")}</Pill>}
-    </div>
-
-    <div className={styles.sampleActions}>
-      {!active?<><Button data-testid="samples-start" disabled={!deviceId||!visible||data.busy} onClick={()=>void data.start("manual")} title={t("samples.captureHint")}><FolderPlus size={15}/>{t(compact?"cockpitCollect":"samples.start")}</Button>
-      <Button data-testid="samples-sequence" disabled={!deviceId||!visible||data.busy} onClick={()=>void data.start("sequence")} title={t("samples.sequence")}><Circle size={15}/>{t(compact?"cockpitSequence":"samples.sequence")}</Button></>:<>
-      <Button data-testid="samples-save" tone="primary" disabled={!canSave||pending||data.busy} onClick={()=>void data.save(frame)}><Camera size={15}/>{t(historical?"samples.saveHistorical":compact?"cockpitPhoto":"samples.save")}</Button>
-      <Button data-testid="samples-end" disabled={data.busy} onClick={()=>void data.end()}><CircleStop size={15}/>{t(compact?"cockpitEndCapture":"samples.end")}</Button></>}
-    </div>
-    <details className={styles.sampleDetails}><summary aria-live="polite">{t("cockpitCaptureDetails")}{data.error ? " · " + t("samples.failure") : data.outcome ? " · " + t("samples.request."+data.outcome.state) : ""}</summary>
+  /** Render CaptureDetails with the captured state and unchanged event handlers. */
+  function renderCaptureDetails(){
+    return (<details className={styles.sampleDetails}><summary aria-live="polite">{t("cockpitCaptureDetails")}{captureSummary(data.error,data.outcome,t)}</summary>
     <p className={styles.hint}>{t("samples.captureHint")}</p>
     {!visible&&<p className={styles.hint}>{t("samples.previewRequired")}</p>}
     {active&&!canSave&&<p className={styles.hint}>{t("samples.frameUnavailable")}</p>}
@@ -36,6 +33,30 @@ export function SampleCapture({sourceSession,deviceId,frame,visible,t,compact=fa
     <EvidenceSummary value={data.session?.evidence} t={t}/>
     <AutomaticCapture collection={active?data.session:null} sourceSession={sourceSession} t={t}/>
     {data.error&&<p role="alert" className={styles.hint}>{t("samples.failure")} · <code>{data.error}</code></p>}
-    </details>
+    </details>);
+  }
+
+  /** Render CaptureActions with the captured state and unchanged event handlers. */
+  function renderCaptureActions(){
+    return (<div className={styles.sampleActions}>
+      {!active?<><Button data-testid="samples-start" disabled={!deviceId||!visible||data.busy} onClick={()=>void data.start("manual")} title={t("samples.captureHint")}><FolderPlus size={15}/>{t(compact?"cockpitCollect":"samples.start")}</Button>
+      <Button data-testid="samples-sequence" disabled={!deviceId||!visible||data.busy} onClick={()=>void data.start("sequence")} title={t("samples.sequence")}><Circle size={15}/>{t(compact?"cockpitSequence":"samples.sequence")}</Button></>:<>
+      <Button data-testid="samples-save" tone="primary" disabled={!canSave||pending||data.busy} onClick={()=>void data.save(frame)}><Camera size={15}/>{t(captureActionLabel(historical,compact))}</Button>
+      <Button data-testid="samples-end" disabled={data.busy} onClick={()=>void data.end()}><CircleStop size={15}/>{t(compact?"cockpitEndCapture":"samples.end")}</Button></>}
+    </div>);
+  }
+
+  const data=useSamples(deviceId,visible);
+  const active=data.session?.state==="collecting";
+  const pending=["submitting","queued","running","unknown"].includes(data.outcome?.state??"");
+  const canSave=!!captureIntent(data.session,frame,"preview");
+  const historical=historicalFrame(frame);
+  return <div className={styles.sampleCapture} data-testid="sample-capture" data-compact={compact}>
+    <div className={styles.sampleHeading}><strong>{t("samples.capture")}</strong>
+      {data.session&&<Pill tone={active?"good":undefined}>{t("samples.session."+data.session.state)} · {data.session.counts.saved??0} {t("samples.savedCount")}</Pill>}
+    </div>
+
+    {renderCaptureActions()}
+    {renderCaptureDetails()}
   </div>;
 }

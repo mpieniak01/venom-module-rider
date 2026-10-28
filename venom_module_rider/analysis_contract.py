@@ -61,6 +61,32 @@ class AnalysisSpec(StrictModel):
 
         if self.input_source == "video" and self.capture_evidence:
             raise ValueError("analysis_video_evidence_unsupported")
+        self._validate_input_region()
+        semantic = self.profile in {SEGFORMER, YOLO, FAST}
+        if semantic and "perception" not in self.model_fields_set:
+            self.perception = self.perception.model_copy(update={"engine": "segformer"})
+        expected = "segformer" if semantic else "depth_plane"
+        if self.perception.engine != expected:
+            raise ValueError("analysis_engine_unsupported")
+        if semantic:
+            self._validate_semantic_profile()
+        elif self.perception.model_id or self.perception.artifact_sha256:
+            raise ValueError("analysis_model_identity_unsupported")
+        return self
+
+    def _validate_semantic_profile(self):
+        """Validate the semantic window, geometry and frozen model identity."""
+        if self.window != 1:
+            raise ValueError("analysis_window_unsupported")
+        if self.geometry.mode != "image":
+            raise ValueError("analysis_geometry_unsupported")
+        model_id = self.perception.model_id
+        artifact = self.perception.artifact_sha256
+        if bool(model_id) != bool(artifact) or model_id and model_id != self.profile:
+            raise ValueError("analysis_model_identity_mismatch")
+
+    def _validate_input_region(self):
+        """Check reference coverage before engine-specific validation."""
         region = self.perception.input_region
         if region is not None:
             if self.profile != "da2-default" or self.window != 1:
@@ -69,28 +95,6 @@ class AnalysisSpec(StrictModel):
                 raise ValueError("navigation_input_region_excludes_reference")
             if self.geometry.mode != "image" and not region.full:
                 raise ValueError("navigation_input_region_requires_image_geometry")
-        semantic = self.profile in {SEGFORMER, YOLO, FAST}
-        if semantic and "perception" not in self.model_fields_set:
-            self.perception = self.perception.model_copy(update={"engine": "segformer"})
-        expected = "segformer" if semantic else "depth_plane"
-        if self.perception.engine != expected:
-            raise ValueError("analysis_engine_unsupported")
-        if semantic:
-            if self.window != 1:
-                raise ValueError("analysis_window_unsupported")
-            if self.geometry.mode != "image":
-                raise ValueError("analysis_geometry_unsupported")
-            model_id = self.perception.model_id
-            artifact = self.perception.artifact_sha256
-            if (
-                bool(model_id) != bool(artifact)
-                or model_id
-                and model_id != self.profile
-            ):
-                raise ValueError("analysis_model_identity_mismatch")
-        elif self.perception.model_id or self.perception.artifact_sha256:
-            raise ValueError("analysis_model_identity_unsupported")
-        return self
 
 
 class AnalysisCreate(StrictModel):

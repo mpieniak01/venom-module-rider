@@ -15,7 +15,38 @@ class OpticalMotion:
         self.previous = None
         self.established = False
 
+    def _affine_result(self, start, end, result):
+        """Confirm affine support before publishing shared camera-motion diagnostics."""
+        import cv2
+        import numpy as np
+
+        transform, inliers = cv2.estimateAffinePartial2D(
+            start, end, method=cv2.RANSAC, ransacReprojThreshold=2.5
+        )
+        if transform is None or inliers is None:
+            self.established = False
+            return result
+        scale = float(np.linalg.norm(transform[:, 0]))
+        inlier_ratio = float(inliers.mean())
+        if not isfinite(scale) or not 0.5 <= scale <= 2.0 or inlier_ratio < 0.4:
+            self.established = False
+            return result
+        predicted = start @ transform[:, :2].T + transform[:, 2]
+        result.update(
+            status="ok",
+            shared_scale=scale,
+            inlier_ratio=inlier_ratio,
+            median_motion_px=float(np.median(np.linalg.norm(end - start, axis=1))),
+            residual_motion_px=float(
+                np.median(np.linalg.norm(end - predicted, axis=1))
+            ),
+            _transform=transform,
+        )
+        self.established = True
+        return result
+
     def update(self, gray: Any, minimum_ratio: float) -> dict[str, Any]:
+        """Track one frame while retaining correspondence failure semantics."""
         import cv2
         import numpy as np
 
@@ -79,27 +110,4 @@ class OpticalMotion:
         if keep.sum() < 8 or ratio < minimum_ratio:
             self.established = False
             return result
-        transform, inliers = cv2.estimateAffinePartial2D(
-            start, end, method=cv2.RANSAC, ransacReprojThreshold=2.5
-        )
-        if transform is None or inliers is None:
-            self.established = False
-            return result
-        scale = float(np.linalg.norm(transform[:, 0]))
-        inlier_ratio = float(inliers.mean())
-        if not isfinite(scale) or not 0.5 <= scale <= 2.0 or inlier_ratio < 0.4:
-            self.established = False
-            return result
-        predicted = start @ transform[:, :2].T + transform[:, 2]
-        result.update(
-            status="ok",
-            shared_scale=scale,
-            inlier_ratio=inlier_ratio,
-            median_motion_px=float(np.median(np.linalg.norm(end - start, axis=1))),
-            residual_motion_px=float(
-                np.median(np.linalg.norm(end - predicted, axis=1))
-            ),
-            _transform=transform,
-        )
-        self.established = True
-        return result
+        return self._affine_result(start, end, result)

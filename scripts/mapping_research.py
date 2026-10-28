@@ -85,6 +85,39 @@ def readiness(manifest):
     }
 
 
+def _overlap_pair(first, a, second, b, cv2, np):
+    """Measure one adjacent feature pair without interpreting a metric pose."""
+    matches = []
+    if a is not None and b is not None and min(len(a), len(b)) >= 2:
+        pairs = cv2.BFMatcher(cv2.NORM_HAMMING).knnMatch(a, b, k=2)
+        matches = [
+            pair[0]
+            for pair in pairs
+            if len(pair) == 2 and pair[0].distance < 0.75 * pair[1].distance
+        ]
+    inliers, residual, displacement = 0, None, None
+    if len(matches) >= 8:
+        src = np.asarray([first[m.queryIdx].pt for m in matches], dtype=np.float32)
+        dst = np.asarray([second[m.trainIdx].pt for m in matches], dtype=np.float32)
+        homography, mask = cv2.findHomography(src, dst, cv2.RANSAC, 3.0)
+        if (
+            homography is not None
+            and mask is not None
+            and np.isfinite(homography).all()
+        ):
+            keep = mask.ravel().astype(bool)
+            inliers = int(keep.sum())
+            if inliers:
+                projected = cv2.perspectiveTransform(src[None], homography)[0]
+                residual = float(
+                    np.median(np.linalg.norm(projected[keep] - dst[keep], axis=1))
+                )
+                displacement = float(
+                    np.median(np.linalg.norm(dst[keep] - src[keep], axis=1))
+                )
+    return matches, inliers, residual, displacement
+
+
 def overlap(images):
     """Bounded ORB/RANSAC overlap probe; homographies are not metric poses."""
     import cv2
@@ -105,34 +138,9 @@ def overlap(images):
         start = time.perf_counter()
         first, a = views[index - 1]
         second, b = views[index]
-        matches = []
-        if a is not None and b is not None and min(len(a), len(b)) >= 2:
-            pairs = cv2.BFMatcher(cv2.NORM_HAMMING).knnMatch(a, b, k=2)
-            matches = [
-                pair[0]
-                for pair in pairs
-                if len(pair) == 2 and pair[0].distance < 0.75 * pair[1].distance
-            ]
-        inliers, residual, displacement = 0, None, None
-        if len(matches) >= 8:
-            src = np.asarray([first[m.queryIdx].pt for m in matches], dtype=np.float32)
-            dst = np.asarray([second[m.trainIdx].pt for m in matches], dtype=np.float32)
-            homography, mask = cv2.findHomography(src, dst, cv2.RANSAC, 3.0)
-            if (
-                homography is not None
-                and mask is not None
-                and np.isfinite(homography).all()
-            ):
-                keep = mask.ravel().astype(bool)
-                inliers = int(keep.sum())
-                if inliers:
-                    projected = cv2.perspectiveTransform(src[None], homography)[0]
-                    residual = float(
-                        np.median(np.linalg.norm(projected[keep] - dst[keep], axis=1))
-                    )
-                    displacement = float(
-                        np.median(np.linalg.norm(dst[keep] - src[keep], axis=1))
-                    )
+        matches, inliers, residual, displacement = _overlap_pair(
+            first, a, second, b, cv2, np
+        )
         rows.append(
             {
                 "first": index - 1,

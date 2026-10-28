@@ -31,21 +31,12 @@ class RoomObjectPolicy:
     def observe(
         self, maps, corridor, *, context, sequence, frame_id, captured_s, params
     ):
+        """Track reliable whole-object support without extending frame authority."""
         import numpy as np
 
         identity = json.dumps(dict(context), sort_keys=True, allow_nan=False)
-        invalid = (
-            maps.get("valid", True) is not True
-            or not math.isfinite(captured_s)
-            or self.sequence is not None
-            and sequence <= self.sequence
-            or self.frame_id is not None
-            and frame_id == self.frame_id
-            or self.captured_s is not None
-            and (
-                captured_s <= self.captured_s
-                or (captured_s - self.captured_s) * 1000 > params["max_gap_ms"]
-            )
+        invalid = _object_context_invalid(
+            self, maps, sequence, frame_id, captured_s, params
         )
         changed = self.identity is not None and identity != self.identity
         if invalid or changed:
@@ -81,81 +72,8 @@ class RoomObjectPolicy:
         entries = []
         supported = np.zeros_like(raw)
         for item in output["objects"]:
-            tid = item["id"]
-            mask = self.tracker.tracks[tid]["mask"]
-            reliable = raw & mask
-            history = self.history.setdefault(
-                tid, {"points": deque(maxlen=5), "approach_streak": 0}
-            )
-            history["points"].append(
-                {
-                    "tick": self.tick,
-                    "time": captured_s,
-                    "area": int(reliable.sum()),
-                    "bbox": list(item["bbox"]),
-                    "clipped": item["clipped"],
-                }
-            )
-            support = [
-                point
-                for point in history["points"]
-                if self.tick - point["tick"] < params["obstacle_window_frames"]
-                and (captured_s - point["time"]) * 1000 <= params["history_ms"]
-                and point["area"] >= params["object_min_area_px"]
-            ]
-            confirmed = (
-                int(reliable.sum()) >= params["object_min_area_px"]
-                and len(support) >= params["obstacle_support_frames"]
-            )
-            trend = list(history["points"])[-params["object_trend_frames"] :]
-            complete = (
-                len(trend) >= params["object_trend_frames"]
-                and all(
-                    point["area"] >= params["object_min_area_px"]
-                    and not point["clipped"]
-                    for point in trend
-                )
-                and (captured_s - trend[0]["time"]) * 1000 <= params["history_ms"]
-            )
-            growth = int(reliable.sum()) / max(1, trend[0]["area"])
-            lower = item["bbox"][3] - trend[0]["bbox"][3]
-            trend_now = (
-                confirmed
-                and complete
-                and growth >= params["object_growth_min"]
-                and lower >= params["object_lower_min_px"]
-            )
-            history["approach_streak"] = (
-                history["approach_streak"] + 1 if trend_now else 0
-            )
-            approaching = history["approach_streak"] >= max(
-                2, params["obstacle_support_frames"]
-            )
-            qualified = confirmed and not item["clipped"]
-            if qualified:
-                supported |= reliable
-            history.update(current_tick=self.tick, current_s=captured_s)
             entries.append(
-                {
-                    **item,
-                    "reliable_area_pixels": int(reliable.sum()),
-                    "raw_route_pixels": int((reliable & route).sum()),
-                    "support_observations": len(support),
-                    "confirmed": bool(confirmed),
-                    "whole_object_qualified": bool(qualified),
-                    "approaching_candidate": bool(approaching),
-                    "growth": float(growth),
-                    "lower_px": float(lower),
-                    "observed_now": True,
-                    "age_ms": 0.0,
-                    "evidence": "approaching"
-                    if approaching
-                    else "confirmed"
-                    if confirmed
-                    else "transient",
-                    "_mask": reliable if confirmed else np.zeros_like(raw),
-                    "_history": history,
-                }
+                _object_support(self, item, raw, route, captured_s, params, supported)
             )
         entries.extend(self._held(route, captured_s, params))
         active = set(self.tracker.tracks)
@@ -269,55 +187,11 @@ def assess_objects(spatial, maps, corridor, diagnostics, params):
     regions = []
     stop_reason = None
     for item in diagnostics.get("objects", []):
-        mask = item.pop("_mask", None)
-        history = item.pop("_history", None)
-        if mask is None:
-            continue
-        held = item["evidence"] == "held"
-        evidence = mask & route
-        if not held:
-            evidence &= maps["obstacle"]
-            if not item.get("whole_object_qualified"):
-                # Clipped/merged borders cannot rescue a rejected tiny component.
-                evidence &= spatial.get("_obstacle_mask", np.zeros_like(route))
-        item["route_pixels"] = int(evidence.sum())
-        item["intersects_route"] = bool(evidence.any())
-        item["near"] = bool((evidence & near).any())
-        if not item.get("confirmed") or not evidence.any():
-            continue
-        if held and not item["near"]:
-            continue
-        if not held and history is not None and item["near"] and spatial.get("valid"):
-            # Arm retention only from an obstacle that actually qualified in route.
-            history.update(
-                last_mask=evidence.copy(),
-                last_tick=history["current_tick"],
-                last_s=history["current_s"],
-                last_item={
-                    key: value for key, value in item.items() if not key.startswith("_")
-                },
-            )
-        y, x = np.nonzero(evidence)
-        regions.append(
-            {
-                "bbox": [
-                    int(x.min()),
-                    int(y.min()),
-                    int(x.max() + 1),
-                    int(y.max() + 1),
-                ],
-                "area_pixels": int(evidence.sum()),
-                "area_fraction": float(evidence.sum() / route.sum()),
-                "near": item["near"],
-                "thin": False,
-                "object_id": item["id"],
-                "whole_object": True,
-            }
+        region, stop_reason = _object_route_region(
+            item, maps, spatial, route, near, stop_reason
         )
-        if item["near"]:
-            stop_reason = "navigation_object_held" if held else "navigation_object_near"
-        elif item["approaching_candidate"]:
-            stop_reason = stop_reason or "navigation_object_approaching"
+        if region is not None:
+            regions.append(region)
     if spatial.get("valid") is not True or spatial.get("hard_stop") is True:
         return spatial
     if not regions:
@@ -342,3 +216,164 @@ def public_objects(diagnostics):
             for item in diagnostics.get("objects", [])[:32]
         ],
     }
+
+
+def _object_context_invalid(self, maps, sequence, frame_id, captured_s, params):
+    """Preserve source validity, sequence, frame and capture-gap reset guards."""
+    return (
+        maps.get("valid", True) is not True
+        or not math.isfinite(captured_s)
+        or (self.sequence is not None and sequence <= self.sequence)
+        or (self.frame_id is not None and frame_id == self.frame_id)
+        or (
+            self.captured_s is not None
+            and (
+                captured_s <= self.captured_s
+                or (captured_s - self.captured_s) * 1000 > params["max_gap_ms"]
+            )
+        )
+    )
+
+
+def _object_support(self, item, raw, route, captured_s, params, supported):
+    """Append one causal object proof before evaluating approach and route support."""
+    import numpy as np
+
+    tid = item["id"]
+    mask = self.tracker.tracks[tid]["mask"]
+    reliable = raw & mask
+    history = self.history.setdefault(
+        tid, {"points": deque(maxlen=5), "approach_streak": 0}
+    )
+    history["points"].append(
+        {
+            "tick": self.tick,
+            "time": captured_s,
+            "area": int(reliable.sum()),
+            "bbox": list(item["bbox"]),
+            "clipped": item["clipped"],
+        }
+    )
+    support = [
+        point
+        for point in history["points"]
+        if self.tick - point["tick"] < params["obstacle_window_frames"]
+        and (captured_s - point["time"]) * 1000 <= params["history_ms"]
+        and point["area"] >= params["object_min_area_px"]
+    ]
+    confirmed = (
+        int(reliable.sum()) >= params["object_min_area_px"]
+        and len(support) >= params["obstacle_support_frames"]
+    )
+    trend = list(history["points"])[-params["object_trend_frames"] :]
+    complete = (
+        len(trend) >= params["object_trend_frames"]
+        and all(
+            point["area"] >= params["object_min_area_px"] and not point["clipped"]
+            for point in trend
+        )
+        and (captured_s - trend[0]["time"]) * 1000 <= params["history_ms"]
+    )
+    growth = int(reliable.sum()) / max(1, trend[0]["area"])
+    lower = item["bbox"][3] - trend[0]["bbox"][3]
+    trend_now = (
+        confirmed
+        and complete
+        and growth >= params["object_growth_min"]
+        and lower >= params["object_lower_min_px"]
+    )
+    history["approach_streak"] = history["approach_streak"] + 1 if trend_now else 0
+    approaching = history["approach_streak"] >= max(
+        2, params["obstacle_support_frames"]
+    )
+    qualified = confirmed and not item["clipped"]
+    if qualified:
+        np.bitwise_or(supported, reliable, out=supported)
+    history.update(current_tick=self.tick, current_s=captured_s)
+    return {
+        **item,
+        "reliable_area_pixels": int(reliable.sum()),
+        "raw_route_pixels": int((reliable & route).sum()),
+        "support_observations": len(support),
+        "confirmed": bool(confirmed),
+        "whole_object_qualified": bool(qualified),
+        "approaching_candidate": bool(approaching),
+        "growth": float(growth),
+        "lower_px": float(lower),
+        "observed_now": True,
+        "age_ms": 0.0,
+        "evidence": "approaching"
+        if approaching
+        else "confirmed"
+        if confirmed
+        else "transient",
+        "_mask": reliable if confirmed else np.zeros_like(raw),
+        "_history": history,
+    }
+
+
+def _object_route_region(item, maps, spatial, route, near, stop_reason):
+    """Evaluate one whole-object route proof without renewing retained captures."""
+    import numpy as np
+
+    mask = item.pop("_mask", None)
+    history = item.pop("_history", None)
+    if mask is None:
+        return None, stop_reason
+    held = item["evidence"] == "held"
+    evidence = _object_route_evidence(mask, route, held, maps, item, spatial)
+    item["route_pixels"] = int(evidence.sum())
+    item["intersects_route"] = bool(evidence.any())
+    item["near"] = bool((evidence & near).any())
+    if not item.get("confirmed") or not evidence.any():
+        return None, stop_reason
+    if held and not item["near"]:
+        return None, stop_reason
+    _remember_object_route(item, held, history, spatial, evidence)
+    y, x = np.nonzero(evidence)
+    region = {
+        "bbox": [
+            int(x.min()),
+            int(y.min()),
+            int(x.max() + 1),
+            int(y.max() + 1),
+        ],
+        "area_pixels": int(evidence.sum()),
+        "area_fraction": float(evidence.sum() / route.sum()),
+        "near": item["near"],
+        "thin": False,
+        "object_id": item["id"],
+        "whole_object": True,
+    }
+    if item["near"]:
+        stop_reason = "navigation_object_held" if held else "navigation_object_near"
+    elif item["approaching_candidate"]:
+        stop_reason = stop_reason or "navigation_object_approaching"
+    return region, stop_reason
+
+
+def _remember_object_route(item, held, history, spatial, evidence):
+    """Arm retention only from a current near-route obstacle that actually qualified."""
+    if not held and history is not None and item["near"] and spatial.get("valid"):
+        # Arm retention only from an obstacle that actually qualified in route.
+        history.update(
+            last_mask=evidence.copy(),
+            last_tick=history["current_tick"],
+            last_s=history["current_s"],
+            last_item={
+                key: value for key, value in item.items() if not key.startswith("_")
+            },
+        )
+
+
+def _object_route_evidence(mask, route, held, maps, item, spatial):
+    """Intersect proof with reliable masks while preserving held-object support."""
+    import numpy as np
+
+    evidence = mask & route
+    if not held:
+        evidence &= maps["obstacle"]
+        if not item.get("whole_object_qualified"):
+            # Clipped/merged borders cannot rescue a rejected tiny component.
+            evidence &= spatial.get("_obstacle_mask", np.zeros_like(route))
+    return evidence

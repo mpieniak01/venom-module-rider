@@ -36,6 +36,25 @@ class PerceptionService:
         else:
             self.runtime.expected.pop(device, None)
 
+    def _snapshot_model_row(self, row, runtime):
+        """Apply runtime and installation state to one independent catalog row."""
+        row["loaded"] = (
+            row["id"] == runtime["active_model_id"] and runtime["state"] == "active"
+        )
+        job = self.installer.status(row["id"])
+        row["job"] = job
+        if job and job["state"] in {
+            "waiting",
+            "downloading",
+            "verifying",
+            "cancelling",
+        }:
+            row.update(selectable=False)
+            if job["state"] in {"downloading", "verifying"}:
+                row["installation"] = job["state"]
+        elif job and job["state"] == "failed" and row["installation"] != "ready":
+            row.update(installation="failed", reason=job["error"])
+
     async def snapshot(self, domain):
         """Describe selected perception settings and available model state."""
         selection, selection_error = None, None
@@ -63,22 +82,7 @@ class PerceptionService:
                     "execution_provider": legacy.get("device", "cpu"),
                 }
         for row in rows:
-            row["loaded"] = (
-                row["id"] == runtime["active_model_id"] and runtime["state"] == "active"
-            )
-            job = self.installer.status(row["id"])
-            row["job"] = job
-            if job and job["state"] in {
-                "waiting",
-                "downloading",
-                "verifying",
-                "cancelling",
-            }:
-                row.update(selectable=False)
-                if job["state"] in {"downloading", "verifying"}:
-                    row["installation"] = job["state"]
-            elif job and job["state"] == "failed" and row["installation"] != "ready":
-                row.update(installation="failed", reason=job["error"])
+            self._snapshot_model_row(row, runtime)
         pipeline = {}
         try:
             pipeline = await domain.pipeline()
@@ -114,6 +118,39 @@ class PerceptionService:
         }
 
     @model_operation
+    async def _commit_selection(self, domain, body, expected, artifact, session):
+        """Recover a lost selection ACK only from its exact committed identity."""
+        try:
+            result = await domain.mutate(
+                "/api/navigation/model-selection", expected, session
+            )
+            payload = result["data"]
+            if (
+                not isinstance(payload, dict)
+                or payload.get("ok") is not True
+                or payload.get("persisted") is not True
+                or not isinstance(payload.get("config"), dict)
+            ):
+                raise RiderError("model_selection_invalid_response", 502)
+            config = payload["config"]
+        except RiderError:
+            # The commit may have succeeded before an ACK was lost.
+            config = (await domain.read(_NAVIGATION_CONFIG_PATH, 0.0, force=True))[
+                "data"
+            ]
+            selected = selected_identity(config)
+            if not (
+                config["revision"] == body["revision"] + 1
+                and selected["model_id"] == body["model_id"]
+                and selected["artifact_sha256"] == artifact["sha256"]
+                and config.get("mode") == "observe"
+                and config.get("verified") is False
+                and not config.get("calibration_id")
+                and not config.get("model_sha256")
+            ):
+                raise
+        return config
+
     async def select(self, domain, body, session):
         """Apply an explicit model selection within the current device session."""
         domain.check_session(session)
@@ -162,35 +199,9 @@ class PerceptionService:
                     "artifact_sha256": artifact["sha256"],
                     "engine": self.catalog.definition(body["model_id"])["engine"],
                 }
-                try:
-                    result = await domain.mutate(
-                        "/api/navigation/model-selection", expected, session
-                    )
-                    payload = result["data"]
-                    if (
-                        not isinstance(payload, dict)
-                        or payload.get("ok") is not True
-                        or payload.get("persisted") is not True
-                        or not isinstance(payload.get("config"), dict)
-                    ):
-                        raise RiderError("model_selection_invalid_response", 502)
-                    config = payload["config"]
-                except RiderError:
-                    # The commit may have succeeded before an ACK was lost.
-                    config = (
-                        await domain.read(_NAVIGATION_CONFIG_PATH, 0.0, force=True)
-                    )["data"]
-                    selected = selected_identity(config)
-                    if not (
-                        config["revision"] == body["revision"] + 1
-                        and selected["model_id"] == body["model_id"]
-                        and selected["artifact_sha256"] == artifact["sha256"]
-                        and config.get("mode") == "observe"
-                        and config.get("verified") is False
-                        and not config.get("calibration_id")
-                        and not config.get("model_sha256")
-                    ):
-                        raise
+                config = await self._commit_selection(
+                    domain, body, expected, artifact, session
+                )
                 domain.check_session(session)
                 selected = selected_identity(config)
                 if (

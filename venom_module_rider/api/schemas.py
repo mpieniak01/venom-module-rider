@@ -87,9 +87,8 @@ class Command(StrictModel):
             return {key: item for key, item in value.items() if key != "turn_mode"}
         return value
 
-    @model_validator(mode="after")
-    def supersession_scope(self):
-        """Validate maneuver and takeover fields within operator scope."""
+    def _validate_supersession_fields(self):
+        """Reject incompatible turn and supersession metadata before consent checks."""
         if self.turn_mode is not None and not (
             self.action == "move"
             and self.device_settings is True
@@ -110,48 +109,71 @@ class Command(StrictModel):
             self.operator_intervention_version == 1 and self.mode == "release"
         ):
             raise ValueError("operator_intervention_cancel_scope")
+
+    def _intervention_shape(self):
+        """Validate action-specific fields separately from common identity."""
+        if self.action == "move":
+            return self.direction is not None and self.mode in {
+                "pulse",
+                "hold",
+                "release",
+            }
+        if self.action == "height":
+            return (
+                self.height is not None
+                and self.direction is None
+                and self.mode is None
+                and self.turn_mode is None
+                and self.enabled is None
+            )
+        if self.action == "balance":
+            return (
+                self.enabled is not None
+                and self.height is None
+                and self.direction is None
+                and self.mode is None
+                and self.turn_mode is None
+            )
+        return False
+
+    def _validate_intervention_fields(self):
+        """Require panel, request and action fields for versioned takeovers."""
+        if not (
+            self.action in {"move", "height", "balance"}
+            and self.intervene is True
+            and self.panel_id is not None
+            and self.request_id is not None
+            and 1 <= len(self.request_id.strip()) <= 128
+            and self.device_settings is True
+            and self._intervention_shape()
+        ):
+            raise ValueError("operator_intervention_scope")
+
+    def _validate_intervention_consent(self):
+        """Distinguish cancellation metadata from manual consent."""
+        if self.mode == "release":
+            if (
+                self.supersedes_operation_id is None
+                or self.operator_consent is not None
+            ):
+                raise ValueError("operator_intervention_cancel_scope")
+        elif not (
+            self.operator_consent is True
+            and self.owner == "manual"
+            and self.arming_mode == "operator"
+            and self.operator_plan is not None
+            and 1 <= len(self.operator_plan.strip()) <= 512
+            and self.lease_s is None
+        ):
+            raise ValueError("operator_intervention_consent_required")
+
+    @model_validator(mode="after")
+    def supersession_scope(self):
+        """Validate maneuver and takeover fields in their original rejection order."""
+        self._validate_supersession_fields()
         if self.operator_intervention_version is not None:
-            if not (
-                self.action in {"move", "height", "balance"}
-                and self.intervene is True
-                and self.panel_id is not None
-                and self.request_id is not None
-                and 1 <= len(self.request_id.strip()) <= 128
-                and self.device_settings is True
-                and (
-                    self.action == "move"
-                    and self.direction is not None
-                    and self.mode in {"pulse", "hold", "release"}
-                    or self.action == "height"
-                    and self.height is not None
-                    and self.direction is None
-                    and self.mode is None
-                    and self.turn_mode is None
-                    and self.enabled is None
-                    or self.action == "balance"
-                    and self.enabled is not None
-                    and self.height is None
-                    and self.direction is None
-                    and self.mode is None
-                    and self.turn_mode is None
-                )
-            ):
-                raise ValueError("operator_intervention_scope")
-            if self.mode == "release":
-                if (
-                    self.supersedes_operation_id is None
-                    or self.operator_consent is not None
-                ):
-                    raise ValueError("operator_intervention_cancel_scope")
-            elif not (
-                self.operator_consent is True
-                and self.owner == "manual"
-                and self.arming_mode == "operator"
-                and self.operator_plan is not None
-                and 1 <= len(self.operator_plan.strip()) <= 512
-                and self.lease_s is None
-            ):
-                raise ValueError("operator_intervention_consent_required")
+            self._validate_intervention_fields()
+            self._validate_intervention_consent()
         return self
 
 

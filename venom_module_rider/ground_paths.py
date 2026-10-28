@@ -78,160 +78,18 @@ def assess(depth, reference, camera, tolerance, outlier_limit, *, params=None):
     candidates: list[dict[str, Any]] = []
     navigation_maps = None
     for angle in headings:
-        a = math.radians(float(angle))
-        x = s * math.sin(a) + t * math.cos(a)
-        z = s * math.cos(a) - t * math.sin(a)
-        points = (
-            reference["normal"][:, None]
-            + reference["right"][:, None] * x
-            + reference["forward"][:, None] * z
-        ) * reference["height"]
-        valid = points[2] > 1e-6
-        projected_u = (
-            np.divide(points[0], points[2], out=np.zeros_like(x), where=valid)
-            * camera.fx
-            + camera.cx
+        candidate, navigation_maps = _ground_heading_candidate(
+            angle,
+            depth,
+            reference,
+            camera,
+            (tolerance, outlier_limit, params),
+            (s, t, radius, signed, ox, oz, hole, occupied),
+            navigation_maps,
         )
-        projected_v = (
-            np.divide(points[1], points[2], out=np.zeros_like(x), where=valid)
-            * camera.fy
-            + camera.cy
-        )
-        h, w = depth.shape
-        valid &= (
-            (projected_u >= 0)
-            & (projected_u < 1)
-            & (projected_v >= 0)
-            & (projected_v < 1)
-        )
-        complete = bool(valid.all()) and valid.size > 0
-        ix = np.clip((projected_u * w).astype(int), 0, w - 1)
-        iy = np.clip((projected_v * h).astype(int), 0, h - 1)
-        coefficients = reference["coefficients"]
-        residual = 1 - depth[iy, ix] * (
-            coefficients[0] * projected_u
-            + coefficients[1] * projected_v
-            + coefficients[2]
-        )
-        blocked = abs(residual) > tolerance
-        if params is not None and angle == 0:
-            import cv2
-
-            from .navigation_maps import depth_maps
-
-            route = np.zeros(depth.shape, dtype=np.uint8)
-            projected = np.column_stack((ix[valid], iy[valid])).astype(np.int32)
-            if len(projected) >= 3:
-                cv2.fillConvexPoly(route, cv2.convexHull(projected), (1,))
-            if route.any():
-                navigation_maps = depth_maps(
-                    abs(signed), signed, tolerance, valid=complete
-                )
-                navigation_maps["corridor"] = route.astype(bool)
-        near = s <= radius + min(0.25, camera.lookahead_ratio / 3)
-        guard_clear = (
-            bool(valid[near].all() and not blocked[near].any()) if near.any() else False
-        )
-        fraction = float(blocked.mean()) if blocked.size else 1.0
-        allowed = math.floor(outlier_limit * blocked.size)
-        state = (
-            "clear"
-            if complete and int(blocked.sum()) <= allowed
-            else "obstacle"
-            if complete
-            else "unknown"
-        )
-        os = ox * math.sin(a) + oz * math.cos(a)
-        ot = ox * math.cos(a) - oz * math.sin(a)
-        distances = (os - np.clip(os, 0, camera.lookahead_ratio)) ** 2 + ot * ot
-        collisions = (distances <= radius * radius) & (oz >= 0)
-        near_distance = (
-            os - np.clip(os, 0, min(0.25, camera.lookahead_ratio / 3))
-        ) ** 2 + ot * ot
-        if ((near_distance <= radius * radius) & (oz >= 0)).any():
-            guard_clear = False
-        if collisions.any() and complete:
-            state = "obstacle"
-        clearance = (
-            float(min(1.0, np.sqrt(distances[oz >= 0].min()) / radius))
-            if (oz >= 0).any()
-            else 1.0
-        )
-        if params is not None and angle == 0 and navigation_maps is not None:
-            # Source-floor masks do not represent the volume swept by the body.
-            # Keep established 3D collision/near-guard as independent evidence,
-            # including elevated obstacles above the projected ground footprint.
-            navigation_maps.update(
-                geometry_guard_clear=bool(guard_clear),
-                geometry_collision=bool(collisions.any()),
-                geometry_blocked=state == "obstacle",
-                geometry_complete=bool(complete),
-            )
-        candidates.append(
-            {
-                "heading_deg": float(angle),
-                "state": state,
-                "coverage_complete": complete,
-                "outlier_fraction": fraction,
-                "clear_fraction": float((valid & ~blocked).mean()),
-                "clearance": clearance,
-                "obstacle_points": int(collisions.sum()),
-                "guard_clear": guard_clear,
-                "farther_outlier_pixels": int((residual < -tolerance).sum())
-                + int((hole[occupied] & collisions).sum()),
-            }
-        )
-    gaps: list[dict[str, Any]] = []
-    start = None
-    for index, row in enumerate(candidates + [{"state": "end"}]):
-        if row["state"] == "clear" and row.get("guard_clear") and start is None:
-            start = index
-        elif (
-            row["state"] != "clear" or not row.get("guard_clear")
-        ) and start is not None:
-            group = candidates[start:index]
-            gaps.append(
-                {
-                    "start_deg": group[0]["heading_deg"],
-                    "end_deg": group[-1]["heading_deg"],
-                    "width_deg": group[-1]["heading_deg"] - group[0]["heading_deg"],
-                    "samples": len(group),
-                }
-            )
-            start = None
-    for row in candidates:
-        row["gap_width_deg"] = max(
-            (
-                gap["width_deg"]
-                for gap in gaps
-                if gap["start_deg"] <= row["heading_deg"] <= gap["end_deg"]
-            ),
-            default=0.0,
-        )
-    paths = {}
-    for side, sign in (("left", -1), ("right", 1)):
-        choices = [
-            row
-            for row in candidates
-            if row["heading_deg"] * sign > 0
-            and row["state"] == "clear"
-            and row["guard_clear"]
-        ]
-        if choices:
-            row = min(choices, key=lambda item: abs(item["heading_deg"]))
-            paths[side] = {**row, "geometry": "ground_capsule"}
-        else:
-            paths[side] = {
-                "state": "unknown",
-                "coverage_complete": False,
-                "geometry": "ground_capsule",
-            }
-    center = candidates[len(candidates) // 2]
-    paths["guard"] = {
-        "state": "clear" if center["guard_clear"] else "obstacle",
-        "coverage_complete": center["coverage_complete"],
-        "geometry": "ground_capsule",
-    }
+        candidates.append(candidate)
+    gaps = _ground_heading_gaps(candidates)
+    paths, center = _ground_side_paths(candidates)
     return {
         **(
             {"_navigation_maps": navigation_maps} if navigation_maps is not None else {}
@@ -278,3 +136,190 @@ def envelope(reference, camera, heading):
         v = column[1] / column[2] * camera.fy + camera.cy
         outline.append((float(u), float(v)) if 0 <= u < 1 and 0 <= v < 1 else None)
     return outline
+
+
+def _ground_heading_candidate(
+    angle, depth, reference, camera, policy, projection, navigation_maps
+):
+    """Evaluate one ordered swept heading against the same projected occupancy."""
+    tolerance, outlier_limit, params = policy
+    s, t, radius, signed, ox, oz, hole, occupied = projection
+    a = math.radians(float(angle))
+    x = s * math.sin(a) + t * math.cos(a)
+    z = s * math.cos(a) - t * math.sin(a)
+    points = (
+        reference["normal"][:, None]
+        + reference["right"][:, None] * x
+        + reference["forward"][:, None] * z
+    ) * reference["height"]
+    valid = points[2] > 1e-6
+    projected_u = (
+        np.divide(points[0], points[2], out=np.zeros_like(x), where=valid) * camera.fx
+        + camera.cx
+    )
+    projected_v = (
+        np.divide(points[1], points[2], out=np.zeros_like(x), where=valid) * camera.fy
+        + camera.cy
+    )
+    h, w = depth.shape
+    valid &= (
+        (projected_u >= 0) & (projected_u < 1) & (projected_v >= 0) & (projected_v < 1)
+    )
+    complete = bool(valid.all()) and valid.size > 0
+    ix = np.clip((projected_u * w).astype(int), 0, w - 1)
+    iy = np.clip((projected_v * h).astype(int), 0, h - 1)
+    coefficients = reference["coefficients"]
+    residual = 1 - depth[iy, ix] * (
+        coefficients[0] * projected_u + coefficients[1] * projected_v + coefficients[2]
+    )
+    blocked = abs(residual) > tolerance
+    navigation_maps = _ground_navigation_maps(
+        params,
+        angle,
+        depth,
+        (ix, iy, valid),
+        (signed, tolerance, complete),
+        navigation_maps,
+    )
+    near = s <= radius + min(0.25, camera.lookahead_ratio / 3)
+    guard_clear = (
+        bool(valid[near].all() and not blocked[near].any()) if near.any() else False
+    )
+    fraction = float(blocked.mean()) if blocked.size else 1.0
+    allowed = math.floor(outlier_limit * blocked.size)
+    state = (
+        "clear"
+        if complete and int(blocked.sum()) <= allowed
+        else "obstacle"
+        if complete
+        else "unknown"
+    )
+    guard_clear, state, collisions, clearance = _ground_heading_collisions(
+        a, ox, oz, camera, radius, guard_clear, complete, state
+    )
+    if params is not None and angle == 0 and navigation_maps is not None:
+        # Source-floor masks do not represent the volume swept by the body.
+        # Keep established 3D collision/near-guard as independent evidence,
+        # including elevated obstacles above the projected ground footprint.
+        navigation_maps.update(
+            geometry_guard_clear=bool(guard_clear),
+            geometry_collision=bool(collisions.any()),
+            geometry_blocked=state == "obstacle",
+            geometry_complete=bool(complete),
+        )
+    candidate = {
+        "heading_deg": float(angle),
+        "state": state,
+        "coverage_complete": complete,
+        "outlier_fraction": fraction,
+        "clear_fraction": float((valid & ~blocked).mean()),
+        "clearance": clearance,
+        "obstacle_points": int(collisions.sum()),
+        "guard_clear": guard_clear,
+        "farther_outlier_pixels": int((residual < -tolerance).sum())
+        + int((hole[occupied] & collisions).sum()),
+    }
+    return candidate, navigation_maps
+
+
+def _ground_heading_gaps(candidates):
+    """Preserve contiguous clear/guarded intervals and assign exact gap widths."""
+    gaps: list[dict[str, Any]] = []
+    start = None
+    for index, row in enumerate(candidates + [{"state": "end"}]):
+        if row["state"] == "clear" and row.get("guard_clear") and start is None:
+            start = index
+        elif (
+            row["state"] != "clear" or not row.get("guard_clear")
+        ) and start is not None:
+            group = candidates[start:index]
+            gaps.append(
+                {
+                    "start_deg": group[0]["heading_deg"],
+                    "end_deg": group[-1]["heading_deg"],
+                    "width_deg": group[-1]["heading_deg"] - group[0]["heading_deg"],
+                    "samples": len(group),
+                }
+            )
+            start = None
+    for row in candidates:
+        row["gap_width_deg"] = max(
+            (
+                gap["width_deg"]
+                for gap in gaps
+                if gap["start_deg"] <= row["heading_deg"] <= gap["end_deg"]
+            ),
+            default=0.0,
+        )
+    return gaps
+
+
+def _ground_side_paths(candidates):
+    """Choose the nearest clear heading on each side and retain center guard state."""
+    paths = {}
+    for side, sign in (("left", -1), ("right", 1)):
+        choices = [
+            row
+            for row in candidates
+            if row["heading_deg"] * sign > 0
+            and row["state"] == "clear"
+            and row["guard_clear"]
+        ]
+        if choices:
+            row = min(choices, key=lambda item: abs(item["heading_deg"]))
+            paths[side] = {**row, "geometry": "ground_capsule"}
+        else:
+            paths[side] = {
+                "state": "unknown",
+                "coverage_complete": False,
+                "geometry": "ground_capsule",
+            }
+    center = candidates[len(candidates) // 2]
+    paths["guard"] = {
+        "state": "clear" if center["guard_clear"] else "obstacle",
+        "coverage_complete": center["coverage_complete"],
+        "geometry": "ground_capsule",
+    }
+    return paths, center
+
+
+def _ground_navigation_maps(params, angle, depth, projected, evidence, navigation_maps):
+    """Build forward source masks only when requested and the hull exists."""
+    ix, iy, valid = projected
+    signed, tolerance, complete = evidence
+    if params is not None and angle == 0:
+        import cv2
+
+        from .navigation_maps import depth_maps
+
+        route = np.zeros(depth.shape, dtype=np.uint8)
+        projected = np.column_stack((ix[valid], iy[valid])).astype(np.int32)
+        if len(projected) >= 3:
+            cv2.fillConvexPoly(route, cv2.convexHull(projected), (1,))
+        if route.any():
+            navigation_maps = depth_maps(abs(signed), signed, tolerance, valid=complete)
+            navigation_maps["corridor"] = route.astype(bool)
+    return navigation_maps
+
+
+def _ground_heading_collisions(
+    angle_rad, ox, oz, camera, radius, guard_clear, complete, state
+):
+    """Keep body-volume collision and near-guard evidence independent of floor masks."""
+    os = ox * math.sin(angle_rad) + oz * math.cos(angle_rad)
+    ot = ox * math.cos(angle_rad) - oz * math.sin(angle_rad)
+    distances = (os - np.clip(os, 0, camera.lookahead_ratio)) ** 2 + ot * ot
+    collisions = (distances <= radius * radius) & (oz >= 0)
+    near_distance = (
+        os - np.clip(os, 0, min(0.25, camera.lookahead_ratio / 3))
+    ) ** 2 + ot * ot
+    if ((near_distance <= radius * radius) & (oz >= 0)).any():
+        guard_clear = False
+    if collisions.any() and complete:
+        state = "obstacle"
+    clearance = (
+        float(min(1.0, np.sqrt(distances[oz >= 0].min()) / radius))
+        if (oz >= 0).any()
+        else 1.0
+    )
+    return guard_clear, state, collisions, clearance

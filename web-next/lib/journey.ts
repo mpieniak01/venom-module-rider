@@ -21,6 +21,24 @@ export function journeyBlocks(policy: JsonRecord | null, runtime: JsonRecord, de
   return [...new Set(blocks)];
 }
 
+/** Preserve the idle/unknown distinction before interpreting a known journey phase. */
+function journeyPhase(journey:JsonRecord,supported:boolean,current:boolean,active:boolean):string {
+  const known = ["qualifying", "forward", "steer_left", "steer_right", "waiting", "blocked", "stopped", "failed"];
+  if(!supported){
+  return ("idle");
+}
+if(!current && active){
+  return ("unknown");
+}
+if(known.includes(str(journey.state))){
+  return (str(journey.state));
+}
+if(active){
+  return ("unknown");
+}
+return ("idle");
+
+}
 /** Stale status never represents a currently travelling robot. */
 export function journeyView(state: JsonRecord) {
   const currentJourney=record(state.journey), previous=record(record(state.last_trial).journey);
@@ -29,8 +47,7 @@ export function journeyView(state: JsonRecord) {
   const supported = journey.version === 1 && !!str(journey.id);
   const current = state.stale !== true;
   const active = supported && journey.active === true;
-  const known = ["qualifying", "forward", "steer_left", "steer_right", "waiting", "blocked", "stopped", "failed"];
-  const phase = !supported ? "idle" : !current && active ? "unknown" : known.includes(str(journey.state)) ? str(journey.state) : active ? "unknown" : "idle";
+  const phase=journeyPhase(journey,supported,current,active);
   return { active, phase, historical, reason: supported ? str(journey.reason) : "", id: supported ? str(journey.id) : "",
     elapsed: supported && typeof journey.elapsed_s === "number" && Number.isFinite(journey.elapsed_s) ? journey.elapsed_s : null,
     maneuver: supported && Number.isInteger(journey.maneuver_epoch) ? Number(journey.maneuver_epoch) : null };

@@ -23,6 +23,7 @@ class SampleImporter:
         self.store = registry.store
 
     def inspect(self, source: Path):
+        """Preflight an explicit ZIP, manifest directory or historical image folder."""
         if source.is_symlink():
             raise RiderError("samples_import_path", 400)
         if source.is_file():
@@ -61,43 +62,7 @@ class SampleImporter:
                 "items": manifest["samples"],
             }
         else:
-            files = sorted(
-                path
-                for path in source.iterdir()
-                if path.suffix.lower() in {".jpg", ".jpeg", ".png"}
-            )
-            if not files or len(files) > self.store.limits.session_samples:
-                raise RiderError("samples_import_size", 413)
-            items = []
-            for path in files:
-                actual = SampleArchive.safe_file(source, path.name)
-                if not 0 < actual.stat().st_size <= 512 * 1024:
-                    raise RiderError("samples_import_size", 413)
-                payload = actual.read_bytes()
-                with Image.open(io.BytesIO(payload)) as image:
-                    mime = {"JPEG": "image/jpeg", "PNG": "image/png"}.get(
-                        image.format or ""
-                    )
-                if mime is None:
-                    raise RiderError("samples_image_invalid", 415)
-                items.append(
-                    {
-                        "file_name": path.name,
-                        "raw": {
-                            "file": path.name,
-                            "sha256": hashlib.sha256(payload).hexdigest(),
-                            "bytes": len(payload),
-                            "format": mime,
-                        },
-                    }
-                )
-            catalog = {
-                "kind": "history",
-                "path": source,
-                "manifest": None,
-                "items": items,
-                "digest": hashlib.sha256(canonical(items)).hexdigest(),
-            }
+            catalog = _history_catalog(self, source)
         return self.preflight(catalog)
 
     def preflight(self, catalog):
@@ -119,6 +84,7 @@ class SampleImporter:
         return catalog
 
     def read(self, catalog, index):
+        """Read immutable RAW bytes and retain original source/label provenance."""
         item = catalog["items"][index]
         raw = item["raw"]
         if catalog["kind"] == "zip":
@@ -182,30 +148,11 @@ class SampleImporter:
             encode(context).encode(),
         )
         self.store.quality(checked)
-        for position, label in enumerate(item.get("labels") or [], 1):
-            try:
-                LabelValues.model_validate(
-                    {
-                        key: value
-                        for key, value in label.items()
-                        if key in LabelValues.model_fields
-                    }
-                )
-                if label["revision"] != position or label["author"]["kind"] not in {
-                    "operator",
-                    "auto",
-                }:
-                    raise ValueError("label provenance")
-                if (
-                    label["author"]["kind"] == "auto"
-                    and label.get("review") != "pending"
-                ):
-                    raise ValueError("automatic review")
-            except (KeyError, TypeError, ValueError, ValidationError) as exc:
-                raise RiderError("samples_import_invalid", 400) from exc
+        _validate_import_labels(item)
         return payload, raw["format"], context
 
     async def run(self, source: Path, request_id: str, *, device_id=None):
+        """Import ordered historical frames and finalize the session on every exit."""
         catalog = await self.registry.read(self.inspect, source)
         original_policy = (catalog["manifest"] or {}).get("session", {}).get(
             "policy"
@@ -252,27 +199,94 @@ class SampleImporter:
                 result = await self.registry.read(self.store.request, job_id)
                 if result["state"] != "saved":
                     raise RiderError("samples_import_incomplete", 409)
-                for label in item.get("labels") or []:
-                    values = {
-                        key: value
-                        for key, value in label.items()
-                        if key in LabelValues.model_fields
-                    }
-                    await self.registry.read(
-                        self.store.label,
-                        result["sample_id"],
-                        values,
-                        expected_revision=label["revision"] - 1,
-                        author_kind=label["author"]["kind"],
-                        origin={
-                            "dataset_revision": catalog["digest"],
-                            "sample_id": item.get("sample_id"),
-                            "label": label,
-                        },
-                    )
+                await _import_labels(self, item, result, catalog)
         except BaseException:
             failed = True
             raise
         finally:
             session = await self.registry.end(sid, incomplete=failed)
         return session
+
+
+def _history_catalog(self, source):
+    """Build a bounded historical-image catalog in sorted filesystem order."""
+    files = sorted(
+        path
+        for path in source.iterdir()
+        if path.suffix.lower() in {".jpg", ".jpeg", ".png"}
+    )
+    if not files or len(files) > self.store.limits.session_samples:
+        raise RiderError("samples_import_size", 413)
+    items = []
+    for path in files:
+        actual = SampleArchive.safe_file(source, path.name)
+        if not 0 < actual.stat().st_size <= 512 * 1024:
+            raise RiderError("samples_import_size", 413)
+        payload = actual.read_bytes()
+        with Image.open(io.BytesIO(payload)) as image:
+            mime = {"JPEG": "image/jpeg", "PNG": "image/png"}.get(image.format or "")
+        if mime is None:
+            raise RiderError("samples_image_invalid", 415)
+        items.append(
+            {
+                "file_name": path.name,
+                "raw": {
+                    "file": path.name,
+                    "sha256": hashlib.sha256(payload).hexdigest(),
+                    "bytes": len(payload),
+                    "format": mime,
+                },
+            }
+        )
+    catalog = {
+        "kind": "history",
+        "path": source,
+        "manifest": None,
+        "items": items,
+        "digest": hashlib.sha256(canonical(items)).hexdigest(),
+    }
+    return catalog
+
+
+def _validate_import_labels(item):
+    """Validate label revision and automatic-review provenance after image quality."""
+    for position, label in enumerate(item.get("labels") or [], 1):
+        try:
+            LabelValues.model_validate(
+                {
+                    key: value
+                    for key, value in label.items()
+                    if key in LabelValues.model_fields
+                }
+            )
+            if label["revision"] != position or label["author"]["kind"] not in {
+                "operator",
+                "auto",
+            }:
+                raise ValueError("label provenance")
+            if label["author"]["kind"] == "auto" and label.get("review") != "pending":
+                raise ValueError("automatic review")
+        except (KeyError, TypeError, ValueError, ValidationError) as exc:
+            raise RiderError("samples_import_invalid", 400) from exc
+
+
+async def _import_labels(self, item, result, catalog):
+    """Apply imported labels only after the corresponding capture durably saves."""
+    for label in item.get("labels") or []:
+        values = {
+            key: value
+            for key, value in label.items()
+            if key in LabelValues.model_fields
+        }
+        await self.registry.read(
+            self.store.label,
+            result["sample_id"],
+            values,
+            expected_revision=label["revision"] - 1,
+            author_kind=label["author"]["kind"],
+            origin={
+                "dataset_revision": catalog["digest"],
+                "sample_id": item.get("sample_id"),
+                "label": label,
+            },
+        )

@@ -380,3 +380,50 @@ async def test_canonical_frame_uses_its_own_lane_not_the_global_queue(monkeypatc
             assert await hub.canonical_frame(connection, current) == current.payload
     finally:
         await hub.close()
+
+
+async def test_accepted_frame_resets_backoff_even_when_its_iterator_then_fails(
+    monkeypatch,
+):
+    """A delivered frame resets reconnect delay before its peer iterator can fail."""
+    now = 10.0
+    client, domain, profile, hub = setup(clock=lambda: now)
+    attempts = 0
+    delays = []
+    third_sleep = asyncio.Event()
+    blocked = asyncio.Event()
+    real_sleep = asyncio.sleep
+    connection = None
+
+    async def reconnecting():
+        """Fail twice, admit a real fixture frame, then fail before normal return."""
+        nonlocal attempts
+        attempts += 1
+        if attempts == 3:
+            yield native(now=now)
+        raise RiderError("stream_disconnected", 503)
+
+    async def tracked_sleep(delay):
+        """Observe only this hub reader and pause before an unwanted fourth retry."""
+        if connection is not None and asyncio.current_task() is connection.reader:
+            delays.append(delay)
+            if len(delays) == 3:
+                third_sleep.set()
+                await blocked.wait()
+            else:
+                await real_sleep(0)
+        else:
+            await real_sleep(delay)
+
+    monkeypatch.setattr(client, "mjpeg", reconnecting)
+    monkeypatch.setattr("venom_module_rider.stream_hub.asyncio.sleep", tracked_sleep)
+    try:
+        async with hub.lease(domain, profile) as connection:
+            await asyncio.wait_for(third_sleep.wait(), 1)
+            assert attempts == 3
+            assert connection.received == 1
+            assert connection.sequence == 1
+            assert connection.reconnects == 3
+            assert delays == pytest.approx([0.1, 0.2, 0.1])
+    finally:
+        await hub.close()

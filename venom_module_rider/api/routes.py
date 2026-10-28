@@ -95,26 +95,7 @@ async def lifespan(app):
     )
     app.state.rider_analysis = None
     if samples is not None:
-        from ..analysis_manager import AnalysisManager
-        from ..analysis_priority import AnalysisPriority
-
-        analysis = None
-        priority = AnalysisPriority(
-            busy=lambda: bool(
-                app.state.rider_vision.busy or app.state.rider_vision.depth_busy
-            )
-        )
-        try:
-            analysis = await asyncio.to_thread(
-                AnalysisManager, samples, priority=priority
-            )
-            await analysis.initialize()
-            app.state.rider_analysis = analysis
-            app.state.rider_vision.priority = priority
-        except (OSError, sqlite3.Error, RiderError):
-            if analysis is not None:
-                await analysis.close()
-            app.state.rider_analysis_error = "analysis_unavailable"
+        await _initialize_analysis(app, samples)
     from ..perception_service import PerceptionService
 
     app.state.rider_models = PerceptionService(app.state.rider_vision)
@@ -146,17 +127,7 @@ async def lifespan(app):
 
 async def guard(request: Request):
     if compute_routes.device_path(request.url.path):
-        compute_routes.authenticate(request)
-        if request.headers.get("Origin") or request.headers.get("Sec-Fetch-Site"):
-            raise RiderError("origin_denied", 403)
-        if request.method in {"GET", "DELETE"}:
-            return
-        try:
-            ensure_module_mutation_allowed(
-                module_id="rider", operation_name="compute:" + request.method.lower()
-            )
-        except PermissionError as exc:
-            raise RiderError("environment_read_only", 403) from exc
+        _guard_compute_device(request)
         return
     token = os.getenv("RIDER_ACCESS_TOKEN")
     if token and not hmac.compare_digest(
@@ -166,23 +137,7 @@ async def guard(request: Request):
         raise RiderError("access_denied", 403)
     if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
         return
-    content_length = request.headers.get("Content-Length", "")
-    if (
-        content_length and (not content_length.isdigit() or int(content_length) > 65536)
-    ) or (request.method != "DELETE" and not content_length):
-        raise RiderError("request_too_large", 413)
-    origin = request.headers.get("Origin")
-    allowed = {
-        item.strip() for item in os.getenv("RIDER_ALLOWED_ORIGINS", "").split(",")
-    }
-    if origin and origin not in allowed:
-        parsed = urlsplit(origin)
-        if parsed.scheme not in {"http", "https"} or (
-            (parsed.scheme, parsed.netloc) != (request.url.scheme, request.url.netloc)
-        ):
-            raise RiderError("origin_denied", 403)
-    if request.headers.get("Sec-Fetch-Site") == "cross-site" and not origin:
-        raise RiderError("origin_denied", 403)
+    _guard_browser_headers(request)
     try:
         payload = await request.json() if request.method != "DELETE" else {}
     except ValueError as exc:
@@ -190,14 +145,7 @@ async def guard(request: Request):
     if not isinstance(payload, dict):
         raise RiderError("invalid_request", 400)
     # A safety STOP must work in read-only environments as well.
-    if request.url.path.endswith("/control") and (
-        payload.get("action") in {"stop", "disarm"}
-        or payload.get("action") == "move"
-        and payload.get("mode") == "release"
-        and payload.get("intervene") is True
-        and type(payload.get("operator_intervention_version")) is int
-        and payload["operator_intervention_version"] == 1
-    ):
+    if _read_only_stop(request.url.path, payload):
         # A scoped cancellation cannot grant authority or start output. Pi
         # still requires the exact operation/panel; shape validation follows.
         return
@@ -449,3 +397,76 @@ async def face_frame(request: Request):
     return image_response(
         await service(request).transport().image("/api/face-studio/runtime/frame")
     )
+
+
+def _guard_compute_device(request: Request):
+    """Authenticate device compute before the original origin and mutation checks."""
+    compute_routes.authenticate(request)
+    if request.headers.get("Origin") or request.headers.get("Sec-Fetch-Site"):
+        raise RiderError("origin_denied", 403)
+    if request.method in {"GET", "DELETE"}:
+        return
+    try:
+        ensure_module_mutation_allowed(
+            module_id="rider", operation_name="compute:" + request.method.lower()
+        )
+    except PermissionError as exc:
+        raise RiderError("environment_read_only", 403) from exc
+
+
+def _guard_browser_headers(request: Request):
+    """Validate mutation bounds and browser origin before decoding its body."""
+    content_length = request.headers.get("Content-Length", "")
+    if (
+        content_length and (not content_length.isdigit() or int(content_length) > 65536)
+    ) or (request.method != "DELETE" and not content_length):
+        raise RiderError("request_too_large", 413)
+    origin = request.headers.get("Origin")
+    allowed = {
+        item.strip() for item in os.getenv("RIDER_ALLOWED_ORIGINS", "").split(",")
+    }
+    if origin and origin not in allowed:
+        parsed = urlsplit(origin)
+        if parsed.scheme not in {"http", "https"} or (
+            (parsed.scheme, parsed.netloc) != (request.url.scheme, request.url.netloc)
+        ):
+            raise RiderError("origin_denied", 403)
+    if request.headers.get("Sec-Fetch-Site") == "cross-site" and not origin:
+        raise RiderError("origin_denied", 403)
+
+
+def _read_only_stop(path, payload):
+    """Recognize only the existing STOP, disarm and scoped release exceptions."""
+    return path.endswith("/control") and (
+        payload.get("action") in {"stop", "disarm"}
+        or payload.get("action") == "move"
+        and payload.get("mode") == "release"
+        and payload.get("intervene") is True
+        and type(payload.get("operator_intervention_version")) is int
+        and payload["operator_intervention_version"] == 1
+    )
+
+
+async def _initialize_analysis(app, samples):
+    """Initialize the same optional analysis lane before model resources attach."""
+    import asyncio
+    import sqlite3
+
+    from ..analysis_manager import AnalysisManager
+    from ..analysis_priority import AnalysisPriority
+
+    analysis = None
+    priority = AnalysisPriority(
+        busy=lambda: bool(
+            app.state.rider_vision.busy or app.state.rider_vision.depth_busy
+        )
+    )
+    try:
+        analysis = await asyncio.to_thread(AnalysisManager, samples, priority=priority)
+        await analysis.initialize()
+        app.state.rider_analysis = analysis
+        app.state.rider_vision.priority = priority
+    except (OSError, sqlite3.Error, RiderError):
+        if analysis is not None:
+            await analysis.close()
+        app.state.rider_analysis_error = "analysis_unavailable"

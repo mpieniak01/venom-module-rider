@@ -486,7 +486,7 @@ test("confirmed ARM-window completion is stopped and neutral; faults remain erro
  const outcome=trialDiagnostics({mode:"observe",running:true,stale:false,last_trial:{...completed,run_id:"completed-run",observed_at:100}});
  assert.equal(outcome.outcome?.stop_reason,"trial_completed");
  const panel=jsxByTestId("trial-stop-reason");
- assert.equal(jsxAttribute(panel,"className"),'{trialOutcomeTone(displayedStopReason)==="neutral"?styles.hint:styles.loopError}');
+ assert.match(jsxAttribute(panel,"className")??"",/trialOutcomeTone\(displayedStopReason\)==="neutral"\?styles\.hint:styles\.loopError/);
  for(const language of ["pl","en","de"] as const){
   const message=translate(language,"vision.reason.trial_completed");
   assert.notEqual(message,"vision.reason.trial_completed");

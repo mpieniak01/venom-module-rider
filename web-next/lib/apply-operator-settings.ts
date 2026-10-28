@@ -1,4 +1,4 @@
-import { record, safetyOf, settingsOf, type JsonRecord, type RiderStatus } from "./model";
+import { record, safetyOf, settingsOf, str, type JsonRecord, type RiderStatus } from "./model";
 
 type Request = { navigation?:{revision:number;values:JsonRecord}; manual?:{revision:number;values:JsonRecord;directions:Record<string,JsonRecord>} };
 type Dependencies = {
@@ -8,6 +8,18 @@ type Dependencies = {
  onNavigation:(policy:JsonRecord)=>void; onManual:()=>void;
 };
 const fail=(code:string):never=>{throw Object.assign(new Error(code),{data:{error:code}});};
+/** Reject conflicts and stale authority before deciding whether STOP is necessary. */
+function settingsSafety(request:Request,policy:JsonRecord,observed:JsonRecord,generation:string):JsonRecord {
+ if(request.navigation&&policy.revision!==request.navigation.revision)fail("navigation_configuration_conflict");
+ if(request.manual&&settingsOf(observed as RiderStatus).revision!==request.manual.revision)fail("manual_settings_conflict");
+ const safety=safetyOf(observed as RiderStatus);
+ if(safety.generation!==generation||typeof safety.moving!=="boolean"||safety.stale!==false||!['ARMED','DISARMED'].includes(str(safety.state))||record(observed.errors).control)fail("stale_control");
+ return safety;
+}
+/** Read the current snapshot goals without caching them across an asynchronous mutation. */
+function observingGoals(goals:JsonRecord):boolean {
+ return goals.observe===true||goals.drive===true;
+}
 /** One explicit settings action. Never ARM, replay movement or restore a drive goal. */
 export async function applyOperatorSettings(request:Request,d:Dependencies,resumeObservation=true) {
  const origin=d.session();let epoch=d.epoch(),generation=d.generation();
@@ -16,10 +28,7 @@ export async function applyOperatorSettings(request:Request,d:Dependencies,resum
  const loaded=await d.read("/navigation/config");check();
  let observed=await d.read("/status?section=calibration");check();
  const policy=record(loaded.config),goals=record(loaded.goals);
- if(request.navigation&&policy.revision!==request.navigation.revision)fail("navigation_configuration_conflict");
- if(request.manual&&settingsOf(observed as RiderStatus).revision!==request.manual.revision)fail("manual_settings_conflict");
- let safety=safetyOf(observed as RiderStatus);
- if(safety.generation!==generation||typeof safety.moving!=="boolean"||safety.stale!==false||!['ARMED','DISARMED'].includes(String(safety.state))||record(observed.errors).control)fail("stale_control");
+ let safety=settingsSafety(request,policy,observed,generation);
  const stopping=safety.state==='ARMED'||safety.moving===true||goals.drive===true;
  if(stopping){
   const nextEpoch=epoch+1;await d.stop();
@@ -29,7 +38,8 @@ export async function applyOperatorSettings(request:Request,d:Dependencies,resum
  for(const [key,name] of [['drive','s14_venom_navigation'],['observe','s15_venom_perception']] as const){
   if(goals[key]===true){check();await d.mutate('/goal/'+name,{enabled:false});check();}
  }
- if(stopping){
+ /** Observe the captured stopped generation before allowing any settings mutation. */
+ const waitForIdle=async()=>{
   for(let attempt=0;attempt<20;attempt++){
    observed=await d.read('/status?section=control');check();safety=safetyOf(observed as RiderStatus);
    if(safety.generation!==generation)fail("navigation_trial_cancelled");
@@ -37,7 +47,8 @@ export async function applyOperatorSettings(request:Request,d:Dependencies,resum
    if(attempt===19)fail('manual_settings_requires_idle');
    await (d.sleep??(ms=>new Promise(resolve=>setTimeout(resolve,ms))))(50);check();
   }
- }
+ };
+ if(stopping)await waitForIdle();
  const verifyIdle=async()=>{
   const fresh=await d.read('/status?section=control');check();const now=safetyOf(fresh as RiderStatus);
   if(now.generation!==generation||now.state!=='DISARMED'||now.moving!==false||now.stale!==false||record(fresh.errors).control)fail('navigation_trial_cancelled');
@@ -51,9 +62,13 @@ export async function applyOperatorSettings(request:Request,d:Dependencies,resum
   if(!Number.isSafeInteger(saved.revision))fail('navigation_configuration_unconfirmed');
   d.onNavigation(saved);
  }
+ /** Resume observation only after a fresh idle check; never restore drive. */
+ const resume=async():Promise<unknown>=>{
+  await verifyIdle();check();
+  try{await d.mutate('/goal/s15_venom_perception',{enabled:true});check();return null;}
+  catch(error){check();return error;}
+ };
  let observationError:unknown=null;
- if(resumeObservation&&(goals.observe===true||goals.drive===true)){
-  await verifyIdle();check();try{await d.mutate('/goal/s15_venom_perception',{enabled:true});check();}catch(error){check();observationError=error;}
- }
- return {policy:saved,observationError,token:{session:origin,epoch,generation},wasObserving:goals.observe===true||goals.drive===true};
+ if(resumeObservation&&observingGoals(goals))observationError=await resume();
+ return {policy:saved,observationError,token:{session:origin,epoch,generation},wasObserving:observingGoals(goals)};
 }

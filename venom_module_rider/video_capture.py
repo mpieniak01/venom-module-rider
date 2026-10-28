@@ -226,29 +226,7 @@ def extract(source, output):
     offset, last = 0, None
     with (source / _CAPTURE_FILENAME).open("rb") as video:
         for i, row in enumerate(rows):
-            if (
-                row["index"] != i
-                or row["offset"] != offset
-                or type(row["bytes"]) is not int
-                or not 4 <= row["bytes"] <= 512 * 1024
-            ):
-                raise ValueError("recording_offsets")
-            payload = video.read(row["bytes"])
-            sha = hashlib.sha256(payload).hexdigest()
-            if (
-                sha != row["sha256"]
-                or not payload.startswith(b"\xff\xd8")
-                or not payload.endswith(b"\xff\xd9")
-            ):
-                raise ValueError("recording_hash")
-            desc = SourceDescription.model_validate(row["source"])
-            key = (desc.camera_session, desc.transport_epoch, desc.pipeline_revision)
-            if last and (
-                key != last[0]
-                or desc.sequence <= last[1]
-                or desc.captured_monotonic_ns <= last[2]
-            ):
-                raise ValueError("recording_identity")
+            payload, sha, desc, key = _recorded_frame(video, row, i, offset, last)
             last = key, desc.sequence, desc.captured_monotonic_ns
             offset += len(payload)
             raw = root / "raw" / (sha + ".bin")
@@ -371,6 +349,34 @@ def main(argv=None):
             reason = str(exc)
         print(json.dumps({"error": type(exc).__name__, "reason": reason}))
         return 1
+
+
+def _recorded_frame(video, row, i, offset, last):
+    """Validate offsets, JPEG hash and increasing source identity before exporting."""
+    if (
+        row["index"] != i
+        or row["offset"] != offset
+        or type(row["bytes"]) is not int
+        or not 4 <= row["bytes"] <= 512 * 1024
+    ):
+        raise ValueError("recording_offsets")
+    payload = video.read(row["bytes"])
+    sha = hashlib.sha256(payload).hexdigest()
+    if (
+        sha != row["sha256"]
+        or not payload.startswith(b"\xff\xd8")
+        or not payload.endswith(b"\xff\xd9")
+    ):
+        raise ValueError("recording_hash")
+    desc = SourceDescription.model_validate(row["source"])
+    key = (desc.camera_session, desc.transport_epoch, desc.pipeline_revision)
+    if last and (
+        key != last[0]
+        or desc.sequence <= last[1]
+        or desc.captured_monotonic_ns <= last[2]
+    ):
+        raise ValueError("recording_identity")
+    return payload, sha, desc, key
 
 
 if __name__ == "__main__":

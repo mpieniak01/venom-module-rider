@@ -34,144 +34,25 @@ def number(value):
 
 
 def observations(path, payload, device, source_session, mono, wall):
+    """Build immutable evidence records from already received device envelopes."""
     if not isinstance(payload, dict) or not isinstance(payload.get("data"), dict):
         return []
     data = payload["data"]
     identity: object
     if path == "/state":
-        source = data.get("devices", {}).get("xgo", {})
-        if not isinstance(source, dict):
+        observed_row = _imu_observation(data)
+        if observed_row is None:
             return []
-        observation = source.get("observation")
-        observation = observation if isinstance(observation, dict) else {}
-        quality = observation.get("sensor_quality", source.get("sensor_quality", {}))
-        quality = quality if isinstance(quality, dict) else {}
-        sensors = quality.get("sensors", quality)
-        if not isinstance(sensors, dict):
-            return []
-        selected = {
-            key: sensors[key]
-            for key in ("accel_x", "accel_y", "accel_z", "roll", "pitch", "yaw")
-            if isinstance(sensors.get(key), dict)
-        }
-        if not selected:
-            return []
-        values = {key: number(row.get("value")) for key, row in selected.items()}
-        units = {
-            key: str(row.get("unit", "unknown"))[:128] for key, row in selected.items()
-        }
-        stamps = [number(row.get("observed_at")) for row in selected.values()]
-        observed = max(
-            (value for value in stamps if value is not None),
-            default=number(source.get("observed_at")),
+        values, units, observed, details, instance, kind, executor, identity = (
+            observed_row
         )
-
-        def flag(name, *, every=False):
-            if name in quality:
-                return quality[name]
-            if name in observation:
-                return observation[name]
-            if name in source:
-                return source[name]
-            flags = [row.get(name) for row in selected.values()]
-            if all(type(value) is bool for value in flags):
-                return all(flags) if every else any(flags)
-            return "unknown"
-
-        physical = quality.get("physical_validation")
-        if physical is None:
-            validations = {
-                row.get("physical_validation", "unverified")
-                for row in selected.values()
-            }
-            physical = (
-                next(iter(validations)) if len(validations) == 1 else "unverified"
-            )
-        details = {
-            "sensors": selected,
-            "ready": flag("ready", every=True),
-            "offline": flag("offline"),
-            "simulated": True if source.get("source") == "demo" else flag("simulated"),
-            "physical_validation": physical,
-            "stale": flag("stale"),
-            "source": observation.get("source", source.get("source", "unknown")),
-            "clock_sync_uncertainty_ms": None,
-        }
-        telemetry: dict[str, object] = {}
-        for key in ("contract_id", "uart_owner"):
-            value = observation.get(key, source.get(key))
-            if isinstance(value, str) and 0 < len(value) <= 64:
-                telemetry[key] = value
-        firmware = observation.get("fw", source.get("fw"))
-        if isinstance(firmware, str) and 0 < len(firmware) <= 32:
-            telemetry["firmware"] = firmware
-        version = observation.get("contract_version", source.get("contract_version"))
-        if type(version) is int and 0 <= version <= 1000:
-            telemetry["contract_version"] = version
-        if telemetry:
-            details["telemetry"] = telemetry
-        orientation = quality.get("orientation", observation.get("orientation"))
-        if isinstance(orientation, dict):
-            details["orientation"] = {
-                key: value
-                for key in ("convention", "qualification_ref", "instance_id", "unit")
-                if isinstance(value := orientation.get(key), str)
-                and 0 < len(value) <= 128
-            }
-            for key, value_type in (("revision", int), ("verified", bool)):
-                if type(orientation.get(key)) is value_type and (
-                    key != "revision" or 0 <= orientation[key] <= 1000000
-                ):
-                    details["orientation"][key] = orientation[key]
-        instance = observation.get("instance_id", source.get("instance_id"))
-        if not isinstance(instance, str):
-            instances = {row.get("instance_id") for row in selected.values()}
-            instance = next(iter(instances)) if len(instances) == 1 else None
-        kind, executor = "imu", None
-        identity = [values, units, stamps]
-        if "orientation" in details:
-            identity.append(details["orientation"])
-        if "telemetry" in details:
-            identity.append(details["telemetry"])
     elif path == "/api/control/state":
-        source = data.get("safety", data)
-        if not isinstance(source, dict):
+        observed_row = _executor_observation(data)
+        if observed_row is None:
             return []
-        observed = number(source.get("observed_at"))
-        names = (
-            "state",
-            "owner",
-            "generation",
-            "last_seq",
-            "last_ack",
-            "execution_context",
-            "arming_mode",
-            "output",
-            "target",
-            "moving",
-            "deadline",
-            "lease_remaining_s",
-            "actuators",
-            "operator_control",
+        values, units, observed, details, instance, kind, executor, identity = (
+            observed_row
         )
-        executor = {key: source[key] for key in names if key in source}
-        trial = source.get("pulse_trials", {}).get("current")
-        if trial is not None:
-            from .pulse_trials import trial_evidence
-
-            executor["pulse_trial"] = trial_evidence(trial)
-
-        values, units = {}, {}
-        details = {
-            "ready": source.get("ready", "unknown"),
-            "stale": source.get("stale", "unknown"),
-            "physical_validation": "unverified",
-            "clock_sync_uncertainty_ms": None,
-            "offline": source.get("offline", "unknown"),
-            "simulated": source.get("simulated", "unknown"),
-        }
-        instance = source.get("instance_id")
-        kind, identity = "executor", executor
     else:
         return []
     instance = instance if isinstance(instance, str) else None
@@ -289,6 +170,7 @@ class SampleEvidenceCollector:
         *,
         retain=False,
     ):
+        """Admit bounded observations under the existing lock and sampling slot."""
         with self.lock:
             if (
                 self.registry.closed
@@ -299,31 +181,7 @@ class SampleEvidenceCollector:
             mono = self.registry.frames.clock() if mono is None else mono
             wall = self.registry.store.wall() if wall is None else wall
             self.purge()
-            eligible = []
-            for sid, state in self.sessions.items():
-                if (
-                    sid not in self.registry.active
-                    or sid in self.registry.closing
-                    or state["retired"]
-                    or state["device"] != device
-                ):
-                    continue
-                if (
-                    self.registry.frames.clock() - state["started_mono"]
-                    > self.registry.store.limits.session_seconds
-                ):
-                    state["retired"] = True
-                    state["retired_reason"] = "session_expired"
-                    continue
-                if state["source_session"] is None:
-                    state["source_session"] = source_session
-                elif state["source_session"] != source_session:
-                    state["retired"] = True
-                    state["retired_reason"] = "source_changed"
-                    self.window.clear()
-                    self.bytes = 0
-                    continue
-                eligible.append((sid, state))
+            eligible = _eligible_evidence(self, device, source_session)
             if not eligible:
                 return
             try:
@@ -331,88 +189,28 @@ class SampleEvidenceCollector:
                     path, payload, device, source_session, float(mono), float(wall)
                 )
             except (ValueError, TypeError, AttributeError):
-                for _, state in eligible:
-                    state["dropped"] += 1
+                _drop_observation_sessions(eligible)
                 return
-            jobs = []
-            for record in records:
-                size = len(canonical(record).encode())
-                targets = []
-                for sid, state in eligible:
-                    seen = record["record_id"] in state["seen"]
-                    if seen and (
-                        not retain or record["record_id"] in state["retained"]
-                    ):
-                        continue
-                    if not seen and (
-                        len(state["seen"]) >= MAX_EVIDENCE_SESSION_RECORDS
-                        or state["admitted_bytes"] + size > MAX_EVIDENCE_SESSION_BYTES
-                    ):
-                        state["dropped"] += 1
-                        state["retired"] = True
-                        state["retired_reason"] = "evidence_limit"
-                        continue
-                    state["seen"].add(record["record_id"])
-                    if not seen:
-                        state["admitted_bytes"] += size
-                    if retain:
-                        state["retained"].add(record["record_id"])
-                    targets.append((sid, state))
-                if not targets:
-                    continue
-                jobs.append((record, targets))
+            jobs = _observation_jobs(records, eligible, retain)
             if not jobs:
                 return
             acquired = self.slot.acquire(blocking=False)
             # An explicit terminal receipt must survive a busy sampling slot.
             # The existing registry queue still bounds admission and serialises IO.
             if not acquired and not retain:
-                for _, targets in jobs:
-                    for _, state in targets:
-                        state["dropped"] += 1
+                _drop_observation_jobs(jobs)
                 return
 
             def persist():
-                try:
-                    for record, targets in jobs:
-                        for sid, state in targets:
-                            with self.lock:
-                                if state["retired"]:
-                                    state["dropped"] += 1
-                                    continue
-                            try:
-                                saved, size = self.registry.store.evidence.append(
-                                    sid, [record]
-                                )
-                                with self.lock:
-                                    state["saved"] += saved
-                                    state["bytes"] += size
-                                    if not state["retired"]:
-                                        self._remember(record)
-                            except Exception:
-                                with self.lock:
-                                    state["failed"] += 1
-                            finally:
-                                with self.lock:
-                                    status = self.session_status(state)
-                                try:
-                                    self.registry.store.evidence.status(sid, status)
-                                except Exception:
-                                    with self.lock:
-                                        state["failed"] += 1
-                finally:
-                    if acquired:
-                        self.slot.release()
+                """Persist this captured admission on the existing writer lane."""
+                _persist_observations(self, jobs, acquired)
 
             try:
                 self.registry._submit(persist)
             except Exception:
                 if acquired:
                     self.slot.release()
-                for record, targets in jobs:
-                    for _, state in targets:
-                        state["retained"].discard(record["record_id"])
-                        state["dropped"] += 1
+                _rollback_observation_jobs(jobs)
 
     def _remember(self, record):
         """Only durable records can become image references; never renew a receipt."""
@@ -499,3 +297,301 @@ class SampleEvidenceCollector:
                     for key in ("saved", "dropped", "failed", "bytes")
                 },
             }
+
+
+def _imu_observation(data):
+    """Decode already received imu observations without transport IO."""
+    source = data.get("devices", {}).get("xgo", {})
+    if not isinstance(source, dict):
+        return None
+    observation = source.get("observation")
+    observation = observation if isinstance(observation, dict) else {}
+    quality = observation.get("sensor_quality", source.get("sensor_quality", {}))
+    quality = quality if isinstance(quality, dict) else {}
+    sensors = quality.get("sensors", quality)
+    if not isinstance(sensors, dict):
+        return None
+    selected = {
+        key: sensors[key]
+        for key in ("accel_x", "accel_y", "accel_z", "roll", "pitch", "yaw")
+        if isinstance(sensors.get(key), dict)
+    }
+    if not selected:
+        return None
+    values = {key: number(row.get("value")) for key, row in selected.items()}
+    units = {
+        key: str(row.get("unit", "unknown"))[:128] for key, row in selected.items()
+    }
+    stamps = [number(row.get("observed_at")) for row in selected.values()]
+    observed = max(
+        (value for value in stamps if value is not None),
+        default=number(source.get("observed_at")),
+    )
+
+    details = _imu_details(quality, observation, source, selected)
+    _imu_telemetry(observation, source, details)
+    _imu_orientation(quality, observation, details)
+    instance = observation.get("instance_id", source.get("instance_id"))
+    if not isinstance(instance, str):
+        instances = {row.get("instance_id") for row in selected.values()}
+        instance = next(iter(instances)) if len(instances) == 1 else None
+    kind, executor = "imu", None
+    identity = [values, units, stamps]
+    if "orientation" in details:
+        identity.append(details["orientation"])
+    if "telemetry" in details:
+        identity.append(details["telemetry"])
+    return values, units, observed, details, instance, kind, executor, identity
+
+
+def _executor_observation(data):
+    """Decode already received executor observations without transport IO."""
+    source = data.get("safety", data)
+    if not isinstance(source, dict):
+        return None
+    observed = number(source.get("observed_at"))
+    names = (
+        "state",
+        "owner",
+        "generation",
+        "last_seq",
+        "last_ack",
+        "execution_context",
+        "arming_mode",
+        "output",
+        "target",
+        "moving",
+        "deadline",
+        "lease_remaining_s",
+        "actuators",
+        "operator_control",
+    )
+    executor = {key: source[key] for key in names if key in source}
+    trial = source.get("pulse_trials", {}).get("current")
+    if trial is not None:
+        from .pulse_trials import trial_evidence
+
+        executor["pulse_trial"] = trial_evidence(trial)
+
+    values: dict[str, object] = {}
+    units: dict[str, object] = {}
+    details = {
+        "ready": source.get("ready", "unknown"),
+        "stale": source.get("stale", "unknown"),
+        "physical_validation": "unverified",
+        "clock_sync_uncertainty_ms": None,
+        "offline": source.get("offline", "unknown"),
+        "simulated": source.get("simulated", "unknown"),
+    }
+    instance = source.get("instance_id")
+    kind, identity = "executor", executor
+    return values, units, observed, details, instance, kind, executor, identity
+
+
+def _imu_details(quality, observation, source, selected):
+    """Preserve per-source fallback quality flags and physical-validation
+    uncertainty.
+    """
+
+    physical = quality.get("physical_validation")
+    if physical is None:
+        validations = {
+            row.get("physical_validation", "unverified") for row in selected.values()
+        }
+        physical = next(iter(validations)) if len(validations) == 1 else "unverified"
+    details = {
+        "sensors": selected,
+        "ready": _observation_flag(
+            quality, observation, source, selected, "ready", every=True
+        ),
+        "offline": _observation_flag(quality, observation, source, selected, "offline"),
+        "simulated": True
+        if source.get("source") == "demo"
+        else _observation_flag(quality, observation, source, selected, "simulated"),
+        "physical_validation": physical,
+        "stale": _observation_flag(quality, observation, source, selected, "stale"),
+        "source": observation.get("source", source.get("source", "unknown")),
+        "clock_sync_uncertainty_ms": None,
+    }
+    return details
+
+
+def _observation_flag(quality, observation, source, selected, name, *, every=False):
+    """Resolve one quality flag in original source-precedence order."""
+    if name in quality:
+        return quality[name]
+    if name in observation:
+        return observation[name]
+    if name in source:
+        return source[name]
+    flags = [row.get(name) for row in selected.values()]
+    if all(type(value) is bool for value in flags):
+        return all(flags) if every else any(flags)
+    return "unknown"
+
+
+def _imu_telemetry(observation, source, details):
+    """Copy bounded telemetry identity metadata before orientation enrichment."""
+    telemetry: dict[str, object] = {}
+    for key in ("contract_id", "uart_owner"):
+        value = observation.get(key, source.get(key))
+        if isinstance(value, str) and 0 < len(value) <= 64:
+            telemetry[key] = value
+    firmware = observation.get("fw", source.get("fw"))
+    if isinstance(firmware, str) and 0 < len(firmware) <= 32:
+        telemetry["firmware"] = firmware
+    version = observation.get("contract_version", source.get("contract_version"))
+    if type(version) is int and 0 <= version <= 1000:
+        telemetry["contract_version"] = version
+    if telemetry:
+        details["telemetry"] = telemetry
+
+
+def _imu_orientation(quality, observation, details):
+    """Copy only bounded orientation identity, revision and verification metadata."""
+    orientation = quality.get("orientation", observation.get("orientation"))
+    if isinstance(orientation, dict):
+        details["orientation"] = {
+            key: value
+            for key in ("convention", "qualification_ref", "instance_id", "unit")
+            if isinstance(value := orientation.get(key), str) and 0 < len(value) <= 128
+        }
+        for key, value_type in (("revision", int), ("verified", bool)):
+            if type(orientation.get(key)) is value_type and (
+                key != "revision" or 0 <= orientation[key] <= 1000000
+            ):
+                details["orientation"][key] = orientation[key]
+
+
+def _eligible_evidence(self, device, source_session):
+    """Select sessions and retire expired or replaced sources under the
+    existing lock.
+    """
+    eligible = []
+    for sid, state in self.sessions.items():
+        if not _session_evidence_eligible(self, sid, state, device, source_session):
+            continue
+        eligible.append((sid, state))
+    return eligible
+
+
+def _session_evidence_eligible(self, sid, state, device, source_session):
+    """Check a session before admission and preserve source-change invalidation."""
+    if (
+        sid not in self.registry.active
+        or sid in self.registry.closing
+        or state["retired"]
+        or state["device"] != device
+    ):
+        return False
+    if (
+        self.registry.frames.clock() - state["started_mono"]
+        > self.registry.store.limits.session_seconds
+    ):
+        state["retired"] = True
+        state["retired_reason"] = "session_expired"
+        return False
+    if state["source_session"] is None:
+        state["source_session"] = source_session
+    elif state["source_session"] != source_session:
+        state["retired"] = True
+        state["retired_reason"] = "source_changed"
+        self.window.clear()
+        self.bytes = 0
+        return False
+    return True
+
+
+def _observation_jobs(records, eligible, retain):
+    """Prepare bounded record targets without changing receipt-byte accounting."""
+    jobs = []
+    for record in records:
+        size = len(canonical(record).encode())
+        targets = []
+        for sid, state in eligible:
+            if not _admit_evidence_record(state, record, size, retain):
+                continue
+            targets.append((sid, state))
+        if not targets:
+            continue
+        jobs.append((record, targets))
+    return jobs
+
+
+def _admit_evidence_record(state, record, size, retain):
+    """Apply duplicate/retention and record/byte limits before admitting one target."""
+    seen = record["record_id"] in state["seen"]
+    if seen and (not retain or record["record_id"] in state["retained"]):
+        return False
+    if not seen and (
+        len(state["seen"]) >= MAX_EVIDENCE_SESSION_RECORDS
+        or state["admitted_bytes"] + size > MAX_EVIDENCE_SESSION_BYTES
+    ):
+        state["dropped"] += 1
+        state["retired"] = True
+        state["retired_reason"] = "evidence_limit"
+        return False
+    state["seen"].add(record["record_id"])
+    if not seen:
+        state["admitted_bytes"] += size
+    if retain:
+        state["retained"].add(record["record_id"])
+    return True
+
+
+def _persist_observations(self, jobs, acquired):
+    """Write admitted records and release only an acquired sampling slot."""
+    try:
+        for record, targets in jobs:
+            for sid, state in targets:
+                _persist_observation(self, sid, state, record)
+    finally:
+        if acquired:
+            self.slot.release()
+
+
+def _persist_observation(self, sid, state, record):
+    """Persist one target and publish durable status on every append outcome."""
+    with self.lock:
+        if state["retired"]:
+            state["dropped"] += 1
+            return
+    try:
+        saved, size = self.registry.store.evidence.append(sid, [record])
+        with self.lock:
+            state["saved"] += saved
+            state["bytes"] += size
+            if not state["retired"]:
+                self._remember(record)
+    except Exception:
+        with self.lock:
+            state["failed"] += 1
+    finally:
+        with self.lock:
+            status = self.session_status(state)
+        try:
+            self.registry.store.evidence.status(sid, status)
+        except Exception:
+            with self.lock:
+                state["failed"] += 1
+
+
+def _drop_observation_sessions(eligible):
+    """Count one rejected observation for every eligible session."""
+    for _, state in eligible:
+        state["dropped"] += 1
+
+
+def _drop_observation_jobs(jobs):
+    """Count each target rejected by a busy non-retaining sampling slot."""
+    for _, targets in jobs:
+        for _, state in targets:
+            state["dropped"] += 1
+
+
+def _rollback_observation_jobs(jobs):
+    """Release retained identities and count dropped targets when enqueueing fails."""
+    for record, targets in jobs:
+        for _, state in targets:
+            state["retained"].discard(record["record_id"])
+            state["dropped"] += 1

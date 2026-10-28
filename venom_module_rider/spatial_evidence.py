@@ -119,32 +119,9 @@ def assess_maps(
     import cv2
     import numpy as np
 
-    masks = (floor_mask, obstacle_mask, uncertain_mask)
-    if any(not isinstance(mask, np.ndarray) for mask in masks):
-        raise ValueError("navigation_maps")
-    shape = floor_mask.shape
-    if (
-        len(shape) != 2
-        or min(shape) < 1
-        or shape[0] > 720
-        or shape[1] > 1280
-        or any(mask.shape != shape or mask.dtype != np.bool_ for mask in masks)
-    ):
-        raise ValueError("navigation_maps")
-    floor, obstacle, uncertain = masks
-    if (
-        (floor & obstacle).any()
-        or (floor & uncertain).any()
-        or (obstacle & uncertain).any()
-        or not (floor | obstacle | uncertain).all()
-    ):
-        raise ValueError("navigation_maps_partition")
-    if critical_mask is not None and (
-        not isinstance(critical_mask, np.ndarray)
-        or critical_mask.shape != shape
-        or critical_mask.dtype != np.bool_
-    ):
-        raise ValueError("navigation_critical_mask")
+    _, shape, floor, obstacle, uncertain = _validate_spatial_masks(
+        floor_mask, obstacle_mask, uncertain_mask, critical_mask
+    )
     minimum = _fraction(params, "min_region_fraction")
     thin_span = _fraction(params, "thin_span_fraction")
     near_fraction = _fraction(params, "near_zone_fraction")
@@ -200,34 +177,19 @@ def assess_maps(
         and near_floor >= required_near
         and near_uncertain <= max_uncertain
     )
-    if hard_stop:
-        candidate, reason = "obstacle", "navigation_near_obstacle"
-        if critical_pixels:
-            reason = "navigation_critical_support"
-    elif kept_ids.size:
-        candidate, reason = "obstacle", "navigation_region_in_corridor"
-    elif (
-        guard_clear
-        and floor_fraction >= required_floor
-        and uncertain_fraction <= max_uncertain
-    ):
-        candidate, reason = "clear", "navigation_floor_supported"
-    else:
-        candidate, reason = "uncertain", "navigation_local_uncertainty"
+    candidate, reason = _spatial_candidate(
+        hard_stop,
+        critical_pixels,
+        kept_ids,
+        guard_clear,
+        floor_fraction,
+        required_floor,
+        uncertain_fraction,
+        max_uncertain,
+    )
     # A diagnostic floor boundary follows connected floor up from the bottom.
     # It is image geometry, not calibrated distance or evidence of obstacle height.
-    boundary = []
-    for x in np.linspace(left, right - 1, min(33, right - left), dtype=int):
-        column = np.flatnonzero(route[:, x])
-        if column.size == 0:
-            continue
-        y = int(column[-1])
-        if not floor[y, x]:
-            boundary.append({"x": int(x), "y": y})
-            continue
-        while y > int(column[0]) and route[y - 1, x] and floor[y - 1, x]:
-            y -= 1
-        boundary.append({"x": int(x), "y": y})
+    boundary = _spatial_floor_boundary(floor, route, left, right)
     return {
         "valid": True,
         "reason": reason,
@@ -259,3 +221,83 @@ def assess_maps(
         "_obstacle_mask": accepted,
         "_uncertain_mask": uncertain.copy(),
     }
+
+
+def _spatial_floor_boundary(floor, route, left, right):
+    """Follow connected floor upward without inventing geometric distance."""
+    import numpy as np
+
+    boundary = []
+    for x in np.linspace(left, right - 1, min(33, right - left), dtype=int):
+        column = np.flatnonzero(route[:, x])
+        if column.size == 0:
+            continue
+        y = int(column[-1])
+        if not floor[y, x]:
+            boundary.append({"x": int(x), "y": y})
+            continue
+        while y > int(column[0]) and route[y - 1, x] and floor[y - 1, x]:
+            y -= 1
+        boundary.append({"x": int(x), "y": y})
+    return boundary
+
+
+def _spatial_candidate(
+    hard_stop,
+    critical_pixels,
+    kept_ids,
+    guard_clear,
+    floor_fraction,
+    required_floor,
+    uncertain_fraction,
+    max_uncertain,
+):
+    """Preserve critical/near, region, supported-floor and uncertainty precedence."""
+    if hard_stop:
+        candidate, reason = "obstacle", "navigation_near_obstacle"
+        if critical_pixels:
+            reason = "navigation_critical_support"
+    elif kept_ids.size:
+        candidate, reason = "obstacle", "navigation_region_in_corridor"
+    elif (
+        guard_clear
+        and floor_fraction >= required_floor
+        and uncertain_fraction <= max_uncertain
+    ):
+        candidate, reason = "clear", "navigation_floor_supported"
+    else:
+        candidate, reason = "uncertain", "navigation_local_uncertainty"
+    return candidate, reason
+
+
+def _validate_spatial_masks(floor_mask, obstacle_mask, uncertain_mask, critical_mask):
+    """Validate bounded disjoint source masks before parameter or geometry work."""
+    import numpy as np
+
+    masks = (floor_mask, obstacle_mask, uncertain_mask)
+    if any(not isinstance(mask, np.ndarray) for mask in masks):
+        raise ValueError("navigation_maps")
+    shape = floor_mask.shape
+    if (
+        len(shape) != 2
+        or min(shape) < 1
+        or shape[0] > 720
+        or shape[1] > 1280
+        or any(mask.shape != shape or mask.dtype != np.bool_ for mask in masks)
+    ):
+        raise ValueError("navigation_maps")
+    floor, obstacle, uncertain = masks
+    if (
+        (floor & obstacle).any()
+        or (floor & uncertain).any()
+        or (obstacle & uncertain).any()
+        or not (floor | obstacle | uncertain).all()
+    ):
+        raise ValueError("navigation_maps_partition")
+    if critical_mask is not None and (
+        not isinstance(critical_mask, np.ndarray)
+        or critical_mask.shape != shape
+        or critical_mask.dtype != np.bool_
+    ):
+        raise ValueError("navigation_critical_mask")
+    return masks, shape, floor, obstacle, uncertain
