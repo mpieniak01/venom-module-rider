@@ -656,6 +656,7 @@ async def test_external_worker_cancellation_propagates_after_job_cleanup():
             await worker
         assert service.jobs["job"].state == "cancelled"
         assert service.jobs["job"].payload == b""
-        assert service.running is None and service.inference is None
+        assert service.running is None
+        assert service.inference is None
     finally:
         await service.close()

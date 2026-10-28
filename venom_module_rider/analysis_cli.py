@@ -103,7 +103,7 @@ def main(argv=None):
     except urllib.error.HTTPError as exc:
         try:
             error = json.loads(exc.read())
-        except (ValueError, UnicodeDecodeError):
+        except ValueError:
             error = "analysis_http_error"
         print(json.dumps({"error": error, "status": exc.code}))
         return 1

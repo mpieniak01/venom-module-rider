@@ -308,4 +308,5 @@ async def test_recorder_uses_normalized_loopback_without_proxy(monkeypatch):
     )
     assert result == {"fixture": True}
     assert seen["base_url"] == "http://127.0.0.1:8800"
-    assert seen["trust_env"] is False and seen["follow_redirects"] is False
+    assert seen["trust_env"] is False
+    assert seen["follow_redirects"] is False

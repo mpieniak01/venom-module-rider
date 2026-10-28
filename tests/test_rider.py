@@ -1140,6 +1140,7 @@ async def test_external_cancellation_is_not_misreported_as_device_change(
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-    assert not service.commands and not service.operations
+    assert not service.commands
+    assert not service.operations
     assert service.native_admission_mutating == 0
     await service.close()

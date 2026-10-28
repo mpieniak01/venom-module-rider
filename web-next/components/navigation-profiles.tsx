@@ -106,7 +106,9 @@ export function NavigationProfiles({ client, policy, goals, locked, t, onApplied
           {group === "objects" && <p className={styles.hint}>{t(selected === "room_fluid" ? "behavior.roomObjectsHint" : "behavior.objectsHint")}</p>}
           <div className={styles.grid3}>{Object.entries(catalog.parameterSchema ?? {}).filter(([key, spec]) => spec.group === group && Object.hasOwn(values,key) && (key !== "pixel_confidence" || (policy?.perception as JsonRecord)?.engine === "segformer")).map(([key, spec]) => {
             const translated = t(key === "object_tracking_enabled" && selected === "room_fluid" ? "behavior.param.roomTrackingEnabled" : "behavior.param." + key);
-            const label = spec.kind === "bool" ? translated : `${withoutTrailingUnit(translated)} (${spec.min}–${spec.max}${key.endsWith("_ms") ? " ms" : ""})`;
+            const unit = key.endsWith("_ms") ? " ms" : "";
+            const rangeLabel = `${withoutTrailingUnit(translated)} (${spec.min}–${spec.max}${unit})`;
+            const label = spec.kind === "bool" ? translated : rangeLabel;
             return <Field key={key} label={label}>
             {spec.kind === "bool" ? <input data-testid={"behavior-param-" + key} type="checkbox" checked={values[key] === true} onChange={e => editParameter(key, e.target.checked)}/>
               : <Input data-testid={"behavior-param-" + key} type="number" min={spec.min} max={spec.max} step={spec.step} value={typeof values[key] === "number" && Number.isFinite(values[key]) ? Number(values[key]) : ""} onChange={e => editParameter(key, e.target.value === "" ? Number.NaN : Number(e.target.value))}/>}

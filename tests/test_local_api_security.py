@@ -44,7 +44,7 @@ def test_normalizes_loopback_origin(url, expected):
     assert local_api_origin(url) == expected
 
 
-def test_cli_rejects_redirect_and_ignores_proxy(monkeypatch):
+def test_cli_rejects_redirect_and_ignores_proxy(monkeypatch, capsys):
     calls = []
 
     class Handler(http.server.BaseHTTPRequestHandler):
@@ -58,6 +58,13 @@ def test_cli_rejects_redirect_and_ignores_proxy(monkeypatch):
                 self.send_response(200)
                 self.end_headers()
                 self.wfile.write(json.dumps({"ok": True}).encode())
+
+        def do_POST(self):
+            size = int(self.headers.get("Content-Length", 0))
+            calls.append((self.path, json.loads(self.rfile.read(size))))
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'{"id":"fixture-run"}')
 
         def log_message(self, *args):
             pass
@@ -75,6 +82,22 @@ def test_cli_rejects_redirect_and_ignores_proxy(monkeypatch):
         assert calls == [
             ("/api/v1/rider/analysis/profiles", "Bearer fixture-only-credential")
         ]
+        origin = f"http://127.0.0.1:{server.server_port}"
+        assert analysis_cli.main(["--url", origin, "profiles"]) == 1
+        assert json.loads(capsys.readouterr().out) == {
+            "error": "analysis_http_error",
+            "status": 302,
+        }
+        assert (
+            analysis_cli.main(
+                ["--url", origin, "submit", "fixture-session", "--request-id", "intent"]
+            )
+            == 0
+        )
+        assert calls[-1] == (
+            "/api/v1/rider/analysis/runs",
+            {"session_id": "fixture-session", "request_id": "intent", "spec": {}},
+        )
     finally:
         server.shutdown()
         server.server_close()

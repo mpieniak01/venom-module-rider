@@ -51,12 +51,20 @@ jobs:
           # These cases launch the real CUDA-only analysis worker; see README.
           export PYTEST_ADDOPTS="--deselect=tests/test_analysis_cli.py::test_cli_end_to_end_http_submit_recover_report_compare_and_errors --deselect=tests/test_analysis_cli.py::test_llm_off_reuses_host_state_and_existing_queue_classes --deselect=tests/test_analysis_execution.py::test_real_worker_quality_report_idempotency_and_host_task_no_pi --deselect=tests/test_analysis_execution.py::test_worker_source_corruption_fails_without_replacing_original_or_old_report --deselect=tests/test_analysis_execution.py::test_analysis_api_offline_recovery_compare_cancel_and_guards --deselect=tests/test_analysis_execution.py::test_lost_http_cancellation_keeps_one_server_owned_admission --deselect=tests/test_analysis_execution.py::test_full_disk_preserves_previous_report_and_raw --deselect=tests/test_analysis_worker.py::test_paused_worker_dies_with_parent_and_is_reaped_by_owned_harness"
           make check-python
+      - name: Measure coverage of tested offline scripts
+        working-directory: host/modules/venom-module-rider
+        run: |
+          PYTHONPATH=../..:. ../../.venv/bin/python -m pytest -q \
+            --cov=scripts --cov-report=xml:test-results/scripts-coverage.xml \
+            tests/test_runner.py tests/test_depth_candidates.py tests/test_depth_video.py
       - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: rider-python-coverage
-          path: host/modules/venom-module-rider/test-results/coverage.xml
+          path: |
+            host/modules/venom-module-rider/test-results/coverage.xml
+            host/modules/venom-module-rider/test-results/scripts-coverage.xml
           if-no-files-found: error
       - name: Verify SonarCloud credentials
         env:

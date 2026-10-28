@@ -258,8 +258,10 @@ quality gate without analysis. Run it separately in an approved trusted workflow
 The runner is CPU-only. Eight tests that start the real CUDA-only analysis
 worker are explicitly deselected in this workflow; CUDA and physical-device
 acceptance require separate, explicitly authorized local checks. Other tests run
-with GPU visibility disabled. The XML covers Python module code only; it does not
-claim frontend or scripts coverage. See the workflow for the exact exclusions.
+with GPU visibility disabled. Separate XML reports cover the Python module and
+the tested offline scripts; they do not claim frontend coverage. The existing
+90% module coverage floor remains unchanged. See the workflow for the exact
+exclusions.
 
 ## Camera, decisions and a forward trial
 
