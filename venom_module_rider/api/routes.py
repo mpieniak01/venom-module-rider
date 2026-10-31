@@ -94,8 +94,7 @@ async def lifespan(app):
         samples=samples, source_session=lambda: service.session
     )
     app.state.rider_analysis = None
-    if samples is not None:
-        await _initialize_analysis(app, samples)
+    app.state.rider_analysis_error = None
     from ..perception_service import PerceptionService
 
     app.state.rider_models = PerceptionService(app.state.rider_vision)
@@ -108,14 +107,17 @@ async def lifespan(app):
     default = os.getenv("RIDER_DEFAULT_DEVICE")
     if existing is None:
         await service.restore(default)
+    from ..analysis_startup import AnalysisStartup
+
+    analysis_startup = AnalysisStartup(app, samples) if samples is not None else None
     try:
         yield
     finally:
         provider = getattr(app.state, "rider_conversation", None)
         if provider:
             await provider.close()
-        if app.state.rider_analysis is not None:
-            await app.state.rider_analysis.close()
+        if analysis_startup is not None:
+            await analysis_startup.close()
         if samples is not None:
             await samples.close()
         await app.state.rider_stream.close()
@@ -445,28 +447,3 @@ def _read_only_stop(path, payload):
         and type(payload.get("operator_intervention_version")) is int
         and payload["operator_intervention_version"] == 1
     )
-
-
-async def _initialize_analysis(app, samples):
-    """Initialize the same optional analysis lane before model resources attach."""
-    import asyncio
-    import sqlite3
-
-    from ..analysis_manager import AnalysisManager
-    from ..analysis_priority import AnalysisPriority
-
-    analysis = None
-    priority = AnalysisPriority(
-        busy=lambda: bool(
-            app.state.rider_vision.busy or app.state.rider_vision.depth_busy
-        )
-    )
-    try:
-        analysis = await asyncio.to_thread(AnalysisManager, samples, priority=priority)
-        await analysis.initialize()
-        app.state.rider_analysis = analysis
-        app.state.rider_vision.priority = priority
-    except (OSError, sqlite3.Error, RiderError):
-        if analysis is not None:
-            await analysis.close()
-        app.state.rider_analysis_error = "analysis_unavailable"

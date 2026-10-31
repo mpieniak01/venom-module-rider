@@ -5,6 +5,12 @@ choose a stored session, select a retained profile and click **Analyse session**
 The Pi can be disconnected. Collection, analysis and future mapping are separate
 operations. Analysis never selects a device, starts a camera, arms, or moves it.
 
+Stored-analysis recovery runs in a supervised background task at module startup.
+The manual panel and device status are available while recovery is pending;
+analysis endpoints return `503 analysis_unavailable` until their manager is ready.
+A recovery failure leaves the panel available and is logged. Shutdown drains
+recovery before closing its manager and sample storage.
+
 ## Inputs and models
 
 The sample registry remains the only source of original bytes and labels.
