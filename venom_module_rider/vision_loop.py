@@ -1050,6 +1050,15 @@ def _temporal_maneuver_allowed(signals, temporal):
     )
 
 
+def _apply_guidance_temporal_gate(result, signals, temporal):
+    """Keep guidance corrections stopped unless temporal evidence admits them."""
+    if not result.get("guidance") or signals.action == "go":
+        return False
+    if not _temporal_maneuver_allowed(signals, temporal):
+        signals.action = "stop"
+    return True
+
+
 def _apply_temporal_decision(run, result, signals, temporal):
     """Retain temporal STOP precedence and the qualified side-path exception."""
     if temporal is None:
@@ -1071,10 +1080,7 @@ def _apply_temporal_decision(run, result, signals, temporal):
     ):
         signals.action, signals.vision_action = "stop", "stop"
         return
-    if result.get("guidance") and signals.action != "go":
-        qualified = _temporal_maneuver_allowed(signals, temporal)
-        if not qualified:
-            signals.action = "stop"
+    if _apply_guidance_temporal_gate(result, signals, temporal):
         return
     if (
         signals.vision_action == "slow"
