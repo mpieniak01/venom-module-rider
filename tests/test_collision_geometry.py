@@ -301,6 +301,26 @@ def test_near_veto_cannot_be_overridden_by_temporal_slow():
     assert signals.action == signals.vision_action == "stop"
 
 
+def test_temporal_slow_cannot_bypass_a_blocked_collision_corridor():
+    from types import SimpleNamespace
+
+    from venom_module_rider.vision_loop import _apply_temporal_decision
+
+    result = assess(scene(FRONT))
+    assert result["paths"]["center"]["state"] == "obstacle"
+    signals = SimpleNamespace(
+        action="stop",
+        reason="avoidance_no_clear_maneuver",
+        vision_action="go",
+        permitted=True,
+    )
+    run = SimpleNamespace(count=3, frame=SimpleNamespace(motion_phase="ready"))
+    _apply_temporal_decision(
+        run, result, signals, {"action": "slow", "reason": "noise"}
+    )
+    assert signals.action == signals.vision_action == "stop"
+
+
 def test_raster_export_uses_the_same_path_geometry():
     import io
 

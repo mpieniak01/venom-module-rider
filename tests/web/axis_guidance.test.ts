@@ -28,7 +28,7 @@ test("saving an observation draft does not qualify an uncalibrated rotation",()=
 
 test("v3 rotation display requires a distinct rotation footprint and matching motion mode",()=>{
  const p=policy();p.avoidance.geometry.collision.guidance!.rotation_bounds=[.2,.88,.8,.95];
- const path={state:"clear",coverage_complete:true,geometry:"image_collision_corridor"};
+ const path={state:"clear",coverage_complete:true,geometry:"image_collision_corridor",zone_pixels:100};
  const decision:JsonRecord={protocol_version:3,state:"obstacle",vision_action:"stop",action:"turn_right",valid_for_ms:150,clear_count:3,geometry:"image_collision_corridor",collision_geometry:{version:1,sha256:"c".repeat(64)},guidance:{version:1,motion_mode:"rotate_then_drive"},paths:{center:{...path,state:"obstacle"},right:path,guard:path,rotation:path}};
  const check=(d:JsonRecord)=>motionPermission({running:true,mode:"drive",decision:d},{drive:true},p,detector,status).venom;
  assert.equal(check(decision),true);

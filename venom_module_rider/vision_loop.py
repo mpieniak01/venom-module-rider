@@ -803,7 +803,7 @@ class VisionLoop:
         self._update_decision_sectors(run, result, depth_mode)
         # Preview sectors precede command-side mirroring and planner mutations.
         image_sectors, sector_space = _decision_preview_space(result)
-        guidance_prior = dict(run.planner) if result.get("guidance") else None
+        guidance_prior = dict(run.planner) if result.get("collision_geometry") else None
         if frame.protocol_version == 2:
             _plan_decision_v2(run, result, signals, depth_mode)
         if frame.protocol_version == 3:
@@ -1029,11 +1029,12 @@ def _reconcile_guidance(run, result, signals, planned, previous):
         maneuver_clear_count=0,
         maneuver_phase=signals.reason,
     )
-    result["guidance_state"] = {
-        "selected_side": previous.get("side"),
-        "maneuver_kind": None,
-        "reason": signals.reason,
-    }
+    if result.get("guidance"):
+        result["guidance_state"] = {
+            "selected_side": previous.get("side"),
+            "maneuver_kind": None,
+            "reason": signals.reason,
+        }
 
 
 def _apply_temporal_decision(run, result, signals, temporal):
@@ -1050,6 +1051,13 @@ def _apply_temporal_decision(run, result, signals, temporal):
         signals.action, signals.vision_action = "stop", "stop"
         return
     signals.vision_action = temporal["action"] if run.count >= 3 else "stop"
+    if (
+        result.get("collision_geometry")
+        and temporal["action"] == "slow"
+        and signals.action != "go"
+    ):
+        signals.action, signals.vision_action = "stop", "stop"
+        return
     if result.get("guidance") and signals.action != "go":
         qualified = (
             signals.action.startswith(("turn_", "steer_"))

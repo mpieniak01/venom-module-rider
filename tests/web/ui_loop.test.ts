@@ -570,7 +570,7 @@ test("v3 steering needs clear near guard and connecting path in addition to side
 test("collision steering displays the qualified path despite occupied lateral sectors",()=>{
  const corridor=[.35,.8,.65,.95],collision={version:1,far_width_ratio:1,left_shift:.3,right_shift:.3,end_fraction:.2,reference_corridor:[.35,.65,.65,.95]};
  const policy={...permissionPolicy,corridor,collision_geometry_supported:true,avoidance:{enabled:true,sweep_verified:true,protocol_version:3,geometry:{mode:"image",collision}}};
- const path={state:"clear",coverage_complete:true,geometry:"image_collision_corridor"};
+ const path={state:"clear",coverage_complete:true,geometry:"image_collision_corridor",zone_pixels:100};
  const decision={...permissionLoop.decision,protocol_version:3,action:"steer_right",state:"obstacle",vision_action:"stop",geometry:"image_collision_corridor",collision_geometry:{version:1,sha256:"c".repeat(64)},sectors:{right:{state:"obstacle",coverage_complete:true}},paths:{center:{...path,state:"obstacle"},right:path,guard:path}};
  const state={...permissionLoop,decision};
  assert.equal(motionPermission(state,{drive:true},policy,permissionDetector,permissionStatus()).venom,true);

@@ -37,10 +37,13 @@ export function collisionNavigationValid(base:JsonRecord,draft:JsonRecord):boole
 export function collisionDecisionValid(policy:JsonRecord|null,decision:JsonRecord):boolean {
  const avoidance=record(policy?.avoidance),geometry=record(avoidance.geometry);
  if(!("collision" in geometry))return decision.geometry!=="image_collision_corridor"&&!("collision_geometry" in decision);
- const proof=record(decision.collision_geometry),paths=record(decision.paths),center=record(paths.center),guard=record(paths.guard);
+ const proof=record(decision.collision_geometry),paths=record(decision.paths),center=record(paths.center),guard=record(paths.guard),action=String(decision.action);
+ const qualified=(path:JsonRecord,clear:boolean)=>path.coverage_complete===true&&path.geometry==="image_collision_corridor"&&typeof path.zone_pixels==="number"&&Number.isInteger(path.zone_pixels)&&path.zone_pixels>=64&&(!clear||path.state==="clear");
+ const side=action==="steer_left"?"left":action==="steer_right"?"right":action==="turn_left"||action==="turn_right"?"rotation":null;
  return avoidance.enabled===true&&avoidance.protocol_version===3&&geometry.mode==="image"&&validCollision(geometry.collision,policy?.corridor)
   &&decision.protocol_version===3&&decision.geometry==="image_collision_corridor"&&proof.version===1&&typeof proof.sha256==="string"&&/^[0-9a-f]{64}$/.test(proof.sha256)
-  &&[center,guard].every(path=>path.coverage_complete===true&&path.geometry==="image_collision_corridor")&&guard.state==="clear"
+  &&qualified(center,["go","slow"].includes(action))&&qualified(guard,true)
+  &&(side===null||qualified(record(paths[side]),true))
   &&guidanceDecisionValid(geometry,decision);
 }
 

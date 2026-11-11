@@ -302,6 +302,22 @@ def test_vetoed_rotation_does_not_consume_an_attempt_or_create_progress_evidence
     assert result["maneuver_clear_count"] == 0
 
 
+def test_vetoed_legacy_collision_steer_is_not_counted_as_executed():
+    from venom_module_rider.vision_loop import _reconcile_guidance
+
+    run = SimpleNamespace(state={"avoidance": {"turns": 2}})
+    result = {"turn_count": 2, "maneuver_clear_count": 3}
+    _reconcile_guidance(
+        run,
+        result,
+        SimpleNamespace(action="stop", reason="temporal_uncertainty"),
+        "steer_left",
+        {"turns": 1},
+    )
+    assert run.state["avoidance"]["turns"] == result["turn_count"] == 1
+    assert "guidance_state" not in result
+
+
 @pytest.mark.parametrize(
     "patch",
     [

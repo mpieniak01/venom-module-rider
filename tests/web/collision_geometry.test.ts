@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import {test} from "node:test";
-import {collisionDraft,validCollision,collisionNavigationValid,geometryMode} from "../../web-next/lib/collision-geometry";
+import {collisionDraft,validCollision,collisionNavigationValid,collisionDecisionValid,geometryMode} from "../../web-next/lib/collision-geometry";
 import {riderAnalysisSettings,analysisProfileSettings} from "../../web-next/lib/analysis-profile";
 const roi=[.35,.8,.65,.95],geometry={mode:"image",collision:collisionDraft(roi)};
 test("corridor edits leave floor support fixed and invalid geometry cannot be submitted",()=>{
@@ -18,6 +18,18 @@ test("both peers and explicit avoidance are required for geometry changes",()=>{
  assert(collisionNavigationValid({}, {...draft,avoidance:{geometry:{mode:"image"}}}));
  assert(!("collision" in geometryMode(geometry,"ground")));
  assert("collision" in geometry);
+});
+test("forward and slow displays reject a blocked center path",()=>{
+ const policy={corridor:roi,avoidance:{enabled:true,protocol_version:3,geometry}};
+ const path={state:"clear",coverage_complete:true,geometry:"image_collision_corridor",zone_pixels:100};
+ const decision={protocol_version:3,geometry:"image_collision_corridor",collision_geometry:{version:1,sha256:"a".repeat(64)},paths:{center:path,guard:path}};
+ for(const action of ["go","slow"]){
+  assert(collisionDecisionValid(policy,{...decision,action}));
+  assert(!collisionDecisionValid(policy,{...decision,action,paths:{...decision.paths,center:{...path,state:"obstacle"}}}));
+ }
+ assert(collisionDecisionValid(policy,{...decision,action:"steer_left",paths:{...decision.paths,left:path,center:{...path,state:"obstacle"}}}));
+ assert(!collisionDecisionValid(policy,{...decision,action:"go",paths:{...decision.paths,center:{...path,zone_pixels:63}}}));
+ assert(!collisionDecisionValid(policy,{...decision,action:"steer_left",paths:{...decision.paths,left:{...path,zone_pixels:63}}}));
 });
 test("recorded analysis inherits exact geometry without motion authority",()=>{
  const source={revision:1,corridor:roi,avoidance:{geometry,sweep_verified:true},verified:true};
