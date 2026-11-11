@@ -332,6 +332,10 @@ def profile_presentation(config, detector):
         config.get("collision_geometry_v1") is True
         and detector.get("collision_geometry_v1") is True
     )
+    result["axis_guidance_supported"] = (
+        config.get("axis_guidance_v1") is True
+        and detector.get("axis_guidance_v1") is True
+    )
     result["input_region_supported"] = (
         type(config.get("input_region_version")) is int
         and config["input_region_version"] == 1
@@ -418,6 +422,13 @@ async def configure(request: Request):
         and detector.get("collision_geometry_v1") is not True
     ):
         raise RiderError("navigation_collision_update_required", 409)
+    if (
+        isinstance(geometry, dict)
+        and isinstance(geometry.get("collision"), dict)
+        and "guidance" in geometry["collision"]
+        and detector.get("axis_guidance_v1") is not True
+    ):
+        raise RiderError("navigation_guidance_update_required", 409)
     behavior = values.get("behavior")
     if (
         isinstance(behavior, dict)

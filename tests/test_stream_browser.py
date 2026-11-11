@@ -326,6 +326,10 @@ async def test_diagnostic_revision_change_without_camera_restart_recovers_previe
     from venom_module_rider.api.vision_preview import processed_camera
 
     pi, domain, hub, loop, state = await setup()
+    # This regression checks revision/source identity. Simulate zero inference
+    # time so a loaded CI worker cannot turn JPEG creation into TTL expiry.
+    decision_now = loop.clock()
+    loop.clock = lambda: decision_now
     revision = [4]
     original = pi.json
 

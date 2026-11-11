@@ -62,6 +62,15 @@ def analysis_geometry(size, assessment, corridor, input_bounds=None):
     if assessment.get("geometry") == "image_collision_corridor":
         masks = assessment.pop("_collision_overlay", {})
         result["paths"] = {side: masks[side] for side in SIDES if side in masks}
+        if "rotation" in masks:
+            result["paths"]["rotation"] = masks["rotation"]
+        evidence = assessment.get("axis_evidence", {})
+        if "axis_x" in evidence:
+            axis = min(w - 1, max(0, round(evidence["axis_x"] * w)))
+            result["axis"] = [
+                [axis, min(h - 1, max(0, round(corridor[1] * h)))],
+                [axis, min(h - 1, max(0, round(corridor[3] * h) - 1))],
+            ]
         result["near"] = masks.get("guard", [])
         result["guard_clear"] = (
             assessment.get("paths", {}).get("guard", {}).get("state") == "clear"
@@ -227,11 +236,11 @@ def validate_geometry(value, size):
     if "input_bounds" not in value:
         raise ValueError("vision_overlay_geometry_invalid")
     paths = value.get("paths", {})
-    if not isinstance(paths, dict) or set(paths) - SIDES:
+    if not isinstance(paths, dict) or set(paths) - (SIDES | {"rotation"}):
         raise ValueError("vision_overlay_geometry_invalid")
     for points in [
         *paths.values(),
-        *[value[k] for k in ("near", "floor_boundary") if k in value],
+        *[value[k] for k in ("near", "floor_boundary", "axis") if k in value],
     ]:
         _validate_geometry_points(points, w, h)
     objects = value.get("objects", [])

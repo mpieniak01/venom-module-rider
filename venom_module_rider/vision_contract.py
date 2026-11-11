@@ -79,6 +79,17 @@ class VisionFrame(BaseModel):
                 raise ValueError("navigation_collision_requires_avoidance_v3")
             collision.validate_corridor(self.corridor)
             collision.validate_input(self.perception.input_region)
+            if (
+                self.mode == "drive"
+                and collision.guidance is not None
+                and collision.guidance.motion_mode == "rotate_then_drive"
+            ):
+                bounds = collision.guidance.rotation_bounds
+                if bounds is None:
+                    raise ValueError("navigation_rotation_calibration_missing")
+                region = self.perception.input_region
+                if region is not None and not region.covers(bounds):
+                    raise ValueError("navigation_rotation_input_incomplete")
         if self.avoidance.enabled and (
             self.protocol_version != self.avoidance.protocol_version
             or self.perception.engine != "depth_plane"

@@ -181,6 +181,7 @@ class VisionLoop:
             "supported_protocol_versions": [1, 2, 3],
             "navigation_journey_version": 1,
             "collision_geometry_v1": True,
+            "axis_guidance_v1": True,
             "temporal_navigation_v1": importlib.util.find_spec("cv2") is not None,
             "input_region_version": 1,
             "semantic_model_policy_v1": importlib.util.find_spec("cv2") is not None,
@@ -802,11 +803,14 @@ class VisionLoop:
         self._update_decision_sectors(run, result, depth_mode)
         # Preview sectors precede command-side mirroring and planner mutations.
         image_sectors, sector_space = _decision_preview_space(result)
+        guidance_prior = dict(run.planner) if result.get("guidance") else None
         if frame.protocol_version == 2:
             _plan_decision_v2(run, result, signals, depth_mode)
         if frame.protocol_version == 3:
             _plan_decision_v3(run, result, signals, depth_mode)
+        planned_action = signals.action
         _apply_temporal_decision(run, result, signals, temporal)
+        _reconcile_guidance(run, result, signals, planned_action, guidance_prior)
         record_result(run.state, frame, signals.action, result)
         journey_result = (
             {"journey": frame.journey.model_dump(), "host_session": self.host_session}
@@ -977,6 +981,9 @@ def _plan_decision_v3(run, result, signals, depth_mode):
     prior = run.planner
     if run.previous and run.now - run.previous["at"] > 0.5:
         prior.update(counts={"left": 0, "right": 0}, front=0)
+        from .axis_guidance import reset_history
+
+        reset_history(prior)
     signals.action, signals.reason, planner, sectors, paths, terminal = steering_plan(
         result,
         prior,
@@ -990,13 +997,43 @@ def _plan_decision_v3(run, result, signals, depth_mode):
         sectors=sectors,
         paths=paths,
         terminal_stop=terminal,
-        maneuver_clear_count=3 if signals.action.startswith("steer_") else 0,
+        maneuver_clear_count=3 if signals.action.startswith(("steer_", "turn_")) else 0,
         maneuver_phase=signals.reason,
         turn_count=planner["turns"],
         stalled_corrections=planner.get("stalled", 0),
         progress_delta=planner.get("progress_delta"),
         pose_resets=planner.get("pose_resets", 0),
     )
+    if result.get("guidance"):
+        result["guidance_state"] = {
+            "selected_side": planner.get("side"),
+            "maneuver_kind": planner.get("maneuver_kind"),
+            "reason": signals.reason,
+        }
+
+
+def _reconcile_guidance(run, result, signals, planned, previous):
+    """A policy-vetoed correction must not count as an executed attempt."""
+    if (
+        previous is None
+        or not planned.startswith(("turn_", "steer_"))
+        or planned == signals.action
+    ):
+        return
+    from .axis_guidance import reset_history
+
+    reset_history(previous)
+    run.state["avoidance"] = previous
+    result.update(
+        turn_count=previous.get("turns", 0),
+        maneuver_clear_count=0,
+        maneuver_phase=signals.reason,
+    )
+    result["guidance_state"] = {
+        "selected_side": previous.get("side"),
+        "maneuver_kind": None,
+        "reason": signals.reason,
+    }
 
 
 def _apply_temporal_decision(run, result, signals, temporal):
@@ -1013,6 +1050,19 @@ def _apply_temporal_decision(run, result, signals, temporal):
         signals.action, signals.vision_action = "stop", "stop"
         return
     signals.vision_action = temporal["action"] if run.count >= 3 else "stop"
+    if result.get("guidance") and signals.action != "go":
+        qualified = (
+            signals.action.startswith(("turn_", "steer_"))
+            and temporal.get("action") == "stop"
+            and temporal.get("state") == "obstacle"
+            and temporal.get("near_guard_clear") is True
+            and temporal.get("evidence_frames", 0) >= 3
+            and temporal.get("spatial", {}).get("valid") is True
+            and temporal.get("spatial", {}).get("hard_stop") is not True
+        )
+        if not qualified:
+            signals.action = "stop"
+        return
     if (
         signals.vision_action == "slow"
         and signals.permitted

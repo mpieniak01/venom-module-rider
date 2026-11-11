@@ -96,7 +96,8 @@ return (t("decisionNoReply"));
     </div>
     <p className={styles.hint} data-testid="decision-timing">{t("decisionTiming",{sequence:scalarText(decision.sequence??"—"),revision:scalarText(decision.config_revision??state.config_revision??"—"),inference:scalarText(decision.inference_ms??"—"),roundtrip:scalarText(state.request_roundtrip_ms??"—"),age:scalarText(state.decision_age_ms??"—"),remaining:scalarText(state.permit_remaining_ms??"—")})}</p>
     <NavigationTemporal view={temporalView(state)} t={t}/>
-    {decision.geometry==="image_collision_corridor"&&<div className={styles.metrics} data-testid="collision-decision"><p>{t("collision.evaluated")}</p>{["center","left","right","guard"].map(side=><span key={side}>{t("collision."+side)}: <b>{t("vision."+str(record(record(decision.paths)[side]).state||"unknown"))}</b></span>)}</div>}
+    {decision.guidance!==undefined&&<p className={styles.hint} data-testid="axis-guidance-decision">{t("guidance.mode")}: {t("guidance.mode."+str(record(decision.guidance).motion_mode))} · {t("guidance.obstacle")}: {t("guidance.obstacle."+str(record(decision.axis_evidence).obstacle_side||"none"))}</p>}
+    {decision.geometry==="image_collision_corridor"&&<div className={styles.metrics} data-testid="collision-decision"><p>{t("collision.evaluated")}</p>{["center","left","right","guard",...(decision.guidance!==undefined?["rotation"]:[])].map(side=><span key={side}>{t("collision."+side)}: <b>{t("vision."+str(record(record(decision.paths)[side]).state||"unknown"))}</b></span>)}</div>}
     {renderDecisionDiagnostics()}
   </section>;
 }

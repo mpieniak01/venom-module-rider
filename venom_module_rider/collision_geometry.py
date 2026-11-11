@@ -8,7 +8,16 @@ import hashlib
 import json
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictInt,
+    model_serializer,
+    model_validator,
+)
+
+from .axis_guidance import AxisGuidance
 
 
 class CollisionGeometry(BaseModel):
@@ -20,15 +29,27 @@ class CollisionGeometry(BaseModel):
     right_shift: float = Field(ge=0, le=1)
     end_fraction: float = Field(ge=0.05, le=0.5)
     reference_corridor: list[float] = Field(min_length=4, max_length=4)
+    guidance: AxisGuidance | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize(self, handler):
+        value = handler(self)
+        if self.guidance is None:
+            value.pop("guidance", None)
+        return value
 
     @model_validator(mode="after")
     def reference_valid(self):
+        if self.guidance is None and "guidance" in self.model_fields_set:
+            raise ValueError("navigation_guidance_invalid")
         a, b, c, d = self.reference_corridor
         if not 0 <= a < c <= 1 or not 0 <= b < d <= 1:
             raise ValueError("navigation_collision_geometry_invalid")
         return self
 
     def validate_corridor(self, corridor):
+        if self.guidance is not None:
+            self.guidance.validate_corridor(corridor)
         a, b, c, d = self.reference_corridor
         x0, y0, x1, y1 = corridor
         if not (a <= x0 < x1 <= c and b <= y0 < y1 <= d):
@@ -101,6 +122,13 @@ def envelopes(collision, corridor, shape, *, near_fraction=0.35):
             )
         ] = False
     result["guard"] = {"mask": near, "complete": True}
+    if collision.guidance is not None:
+        rectangle = collision.guidance.rotation_bounds
+        rotation = np.zeros((h, w), dtype=bool)
+        if rectangle is not None:
+            a, b, c, d = rectangle
+            rotation = (xs / w >= a) & (xs / w < c) & (ys / h >= b) & (ys / h < d)
+        result["rotation"] = {"mask": rotation, "complete": rectangle is not None}
     return result
 
 
@@ -172,6 +200,9 @@ def draw_overlay(draw, assessment, corridor, size):
                 width=2,
             )
     near = geometry.get("near", [])
+    axis = geometry.get("axis", [])
+    if len(axis) == 2:
+        draw.line([tuple(point) for point in axis], fill=(255, 255, 255), width=1)
     if len(near) > 1:
         draw.line([tuple(point) for point in near], fill=(255, 185, 35), width=2)
     a, b, c, d = geometry["reference_bounds"]

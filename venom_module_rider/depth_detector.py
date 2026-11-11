@@ -162,6 +162,7 @@ def assess_depth(
         "_errors": error_map,
     }
     if masks is not None:
+        from .axis_guidance import axis_evidence
         from .collision_geometry import assess_envelopes, display_geometry, proof
 
         assessment.update(
@@ -177,7 +178,19 @@ def assess_depth(
                 observed,
             ),
             _collision_overlay=display_geometry(masks),
+            axis_evidence=axis_evidence(
+                error_map,
+                mask,
+                settings.residual_limit,
+                corridor,
+                collision.guidance.center_deadband if collision.guidance else 0.1,
+            ),
         )
+        if collision.guidance is not None:
+            assessment["guidance"] = {
+                "version": 1,
+                "motion_mode": collision.guidance.motion_mode,
+            }
     if evidence:
         _depth_evidence_maps(
             assessment,

@@ -23,7 +23,7 @@ export function journeyBlocks(policy: JsonRecord | null, runtime: JsonRecord, de
 
 /** Preserve the idle/unknown distinction before interpreting a known journey phase. */
 function journeyPhase(journey:JsonRecord,supported:boolean,current:boolean,active:boolean):string {
-  const known = ["qualifying", "forward", "steer_left", "steer_right", "waiting", "blocked", "stopped", "failed"];
+  const known = ["qualifying", "forward", "steer_left", "steer_right", "turn_left", "turn_right", "waiting", "blocked", "stopped", "failed"];
   if(!supported){
   return ("idle");
 }

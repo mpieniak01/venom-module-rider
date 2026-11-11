@@ -5,6 +5,14 @@ async page=>{
  check(!(await enabled.isChecked()),"new mode must be explicit");
  await enabled.check();
  check(await page.getByTestId("save-collision").isEnabled(),"valid draft rejected");
+ check(await page.getByTestId("guidance-mode").inputValue()==="rotate_then_drive","new mode must be stop/rotate/reobserve");
+ check(await page.getByTestId("start-guidance").isDisabled(),"rotation has no calibrated footprint");
+ for(const [key,value] of [["left","20"],["top","88"],["right","80"],["bottom","95"]])await page.getByTestId("guidance-rotation-"+key).fill(value);
+ check(await page.getByTestId("start-guidance").isEnabled(),"complete rotation calibration rejected");
+ await page.getByTestId("guidance-mode").selectOption("steer");
+ check(await page.getByTestId("guidance-rotation-left").count()===0,"steering mode exposes unrelated rotation fields");
+ await page.getByTestId("guidance-mode").selectOption("auto");
+ check(await page.getByTestId("start-guidance").isEnabled(),"auto mode unavailable");
  await page.getByTestId("collision-far_width_ratio").fill("60");
  const draft=JSON.parse(await page.getByTestId("geometry-draft").textContent());
  check(draft.collision.far_width_ratio===.6,"percentage not persisted in draft");
@@ -13,6 +21,10 @@ async page=>{
  check(await page.getByTestId("save-collision").isDisabled(),"empty endpoint footprint accepted");
  await page.getByTestId("collision-end_fraction").fill("20");
  check(await page.getByTestId("model-geometry-overlay").locator("path").count()===3,"actual paths/guard missing");
+ await page.getByTestId("load-legacy").click();
+ check(await page.getByTestId("guidance-mode").inputValue()==="legacy","legacy config silently presented as new guidance");
+ await page.getByTestId("guidance-mode").selectOption("steer");
+ check(JSON.parse(await page.getByTestId("geometry-draft").textContent()).collision.guidance.motion_mode==="steer","cannot explicitly upgrade legacy steering");
  await page.getByTestId("capability").click();
  check(await enabled.isEnabled(),"operator cannot disable unsupported geometry");
  check(await page.getByTestId("save-collision").isDisabled(),"unsupported peer can save new mode");

@@ -6,8 +6,8 @@ export function GeometryShapes({geometry:g}:{geometry:Geometry}){
  const path=(p:(number[]|null)[])=>p.map((v,i)=>v?`${i===0||p[i-1]===null?"M":"L"}${v[0]},${v[1]}`:"").join(" ");
  return <g fill="none" data-testid="model-geometry-shapes">
  {box(g.input_bounds,"#7edcff","5 4")}{g.reference_bounds&&box(g.reference_bounds,"#7edcff","5 4")}{g.score_bounds&&box(g.score_bounds,"white")}
- {Object.entries(g.paths??{}).map(([k,p])=><path key={k} d={path(p)} stroke={k==="center"?"white":"#7edcff"} {...GEOMETRY_STROKE}/>)}
- {g.near&&<path d={path(g.near)} stroke={g.guard_clear?"#23d264":"#ffb923"} {...GEOMETRY_STROKE}/>}{g.floor_boundary&&<path d={path(g.floor_boundary)} stroke="#7edcff" {...GEOMETRY_STROKE}/>}
+ {Object.entries(g.paths??{}).map(([k,p])=><path key={k} d={path(p)} stroke={k==="center"?"white":k==="rotation"?"#cf9bff":"#7edcff"} {...GEOMETRY_STROKE}/>)}
+ {g.axis&&<path data-testid="guidance-axis" d={path(g.axis)} stroke="white" strokeDasharray="4 3" {...GEOMETRY_STROKE}/>}{g.near&&<path d={path(g.near)} stroke={g.guard_clear?"#23d264":"#ffb923"} {...GEOMETRY_STROKE}/>}{g.floor_boundary&&<path d={path(g.floor_boundary)} stroke="#7edcff" {...GEOMETRY_STROKE}/>}
  {g.objects?.map(o=><g key={o.id}>{box(o.bounds,o.evidence==="approaching"?"#f03c41":"#ffb923","5 4")}</g>)}</g>;
 }
 /** Render a display-only SVG when its geometry matches the visible source. */

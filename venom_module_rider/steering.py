@@ -5,6 +5,10 @@ from .ground_fit import pose_change
 
 def plan(result, previous, settings, phase, eligible, *, corridor=None):
     """Advance bounded side history and select a qualified correction."""
+    if settings.geometry.collision is not None:
+        from .axis_guidance import plan_collision
+
+        return plan_collision(result, previous, settings, phase, eligible, corridor)
     state = dict(previous or {})
     sectors = result.get("sectors", {})
     paths = result.get("paths", {})
