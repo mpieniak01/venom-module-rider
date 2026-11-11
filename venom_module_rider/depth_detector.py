@@ -46,7 +46,14 @@ class PerceptionSettings(BaseModel):
 
 
 def assess_depth(
-    depth, corridor, settings, *, evidence=False, input_bounds=None, collision=None
+    depth,
+    corridor,
+    settings,
+    *,
+    evidence=False,
+    input_bounds=None,
+    collision=None,
+    near_zone_fraction=None,
 ):
     """Fit with broad support; score the STOP zone. No physical distance."""
     import numpy as np
@@ -59,7 +66,9 @@ def assess_depth(
         from .collision_geometry import envelopes
 
         near_fraction = (
-            evidence.get("near_zone_fraction", 0.35)
+            near_zone_fraction
+            if near_zone_fraction is not None
+            else evidence.get("near_zone_fraction", 0.35)
             if isinstance(evidence, dict)
             else 0.35
         )

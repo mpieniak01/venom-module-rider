@@ -7,10 +7,17 @@ async page=>{
  check(await page.getByTestId("save-collision").isEnabled(),"valid draft rejected");
  check(await page.getByTestId("guidance-mode").inputValue()==="rotate_then_drive","new mode must be stop/rotate/reobserve");
  check(await page.getByTestId("start-guidance").isDisabled(),"rotation has no calibrated footprint");
+ await page.getByTestId("guidance-rotation-left").fill("20");
+ check(await page.getByTestId("save-collision").isDisabled(),"incomplete rotation accepted");
+ await page.getByTestId("guidance-mode").selectOption("steer");
+ check(await page.getByTestId("save-collision").isEnabled(),"steering could not clear incomplete rotation");
+ check(JSON.parse(await page.getByTestId("geometry-draft").textContent()).collision.guidance.rotation_bounds===null,"invalid hidden rotation was retained");
+ await page.getByTestId("guidance-mode").selectOption("rotate_then_drive");
  for(const [key,value] of [["left","20"],["top","88"],["right","80"],["bottom","95"]])await page.getByTestId("guidance-rotation-"+key).fill(value);
  check(await page.getByTestId("start-guidance").isEnabled(),"complete rotation calibration rejected");
  await page.getByTestId("guidance-mode").selectOption("steer");
  check(await page.getByTestId("guidance-rotation-left").count()===0,"steering mode exposes unrelated rotation fields");
+ check(Array.isArray(JSON.parse(await page.getByTestId("geometry-draft").textContent()).collision.guidance.rotation_bounds),"complete rotation was discarded");
  await page.getByTestId("guidance-mode").selectOption("auto");
  check(await page.getByTestId("start-guidance").isEnabled(),"auto mode unavailable");
  await page.getByTestId("collision-far_width_ratio").fill("60");

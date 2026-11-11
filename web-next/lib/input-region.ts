@@ -15,3 +15,9 @@ export function inputCovers(value:unknown,corridor:unknown):boolean{
   return b[0]<=a&&b[1]<=Math.min(y,Math.max(0,Math.round((d-.3)*1e12)/1e12))&&b[2]>=c&&b[3]>=d;
 }
 export const region=(bounds:number[]):JsonRecord=>({version:1,bounds:[...bounds]});
+
+/** Require the whole explicit floor reference inside the model input. */
+export function inputCoversReference(value:unknown,reference:unknown):boolean {
+  const b=inputBounds(value);
+  return b.length===4&&Array.isArray(reference)&&reference.length===4&&reference.every(v=>typeof v==="number"&&Number.isFinite(v))&&b[0]<=reference[0]&&b[1]<=reference[1]&&b[2]>=reference[2]&&b[3]>=reference[3];
+}

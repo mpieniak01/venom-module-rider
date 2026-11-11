@@ -400,3 +400,39 @@ def test_crop_rejects_a_missing_floor_reference_before_inference():
                 "input_region": {"version": 1, "bounds": [0.3, 0.6, 0.7, 1.0]},
             },
         )
+
+
+@pytest.mark.parametrize(
+    "capture_evidence,video", [(False, False), (True, False), (False, True)]
+)
+def test_offline_near_zone_matches_live_policy(capture_evidence, video):
+    from types import SimpleNamespace
+
+    from venom_module_rider.analysis_worker import _worker_depth_geometry
+
+    behavior = {
+        "version": 1,
+        "profile_id": "balanced",
+        "profile_revision": 2,
+        "overrides": {"near_zone_fraction": 0.5},
+    }
+    config = settings()
+    state = SimpleNamespace(
+        geometry=config.geometry,
+        depth=scene(),
+        spec={"corridor": ROI},
+        settings=PERCEPTION,
+        box=None,
+        behavior=behavior,
+        capture_evidence=capture_evidence,
+        video=video,
+    )
+    _worker_depth_geometry(state)
+    live = assess(scene(), evidence=parameters(behavior, PERCEPTION.model_dump()))
+    default = assess(scene())
+    assert state.assessment["paths"] == live["paths"]
+    assert (
+        live["paths"]["guard"]["zone_pixels"]
+        != default["paths"]["guard"]["zone_pixels"]
+    )
+    assert ("_navigation_maps" in state.assessment) is (capture_evidence or video)

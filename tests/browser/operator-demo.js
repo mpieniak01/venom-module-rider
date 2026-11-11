@@ -48,7 +48,7 @@ async page=>{
   if(path.startsWith("/navigation/"))return reply({config:{revision:1,mode:"observe",speed:.1,max_motion_ms:150,corridor:[.35,.8,.65,.95],perception:{engine:"depth_plane"}},status:{running:false,stale:false},goals:{},runtime:{known:true},detector:{configured:false}});
   return reply({});
  });
- try{
+ {
   await page.goto(origin+"/rider");await page.getByTestId("rider-environment").waitFor();
   await page.getByTestId("rider-environment").selectOption("demo");
   await page.getByTestId("simulation-preview").waitFor();
@@ -131,5 +131,5 @@ async page=>{
    check(aligned,"recording actions do not share one row");
   }
   return {result:"PASS",fixtureOnly:true,cases:["offline Prod to Demo","inert recording","single toolbar actions","no ARM","one full STOP","Escape cancels pending figure","hidden page","leaving panel before/after dispatch","simulated movement","height","balance","desktop/mobile"]};
- }finally{await page.goto("about:blank");await page.unroute("**/api/v1/rider/**");}
+ }
 }

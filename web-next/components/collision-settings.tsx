@@ -1,4 +1,4 @@
-import {collisionDraft,guidanceDraft} from "../lib/collision-geometry";
+import {collisionDraft,guidanceDraft,validGuidance} from "../lib/collision-geometry";
 import {record,type JsonRecord} from "../lib/model";
 import type {Translator} from "../lib/i18n";
 import {Checkbox,Field,Input,Select,Button} from "./primitives";
@@ -18,7 +18,7 @@ export function CollisionSettings({geometry,corridor,supported,guidanceSupported
   }}/>{t("collision.enabled")}</label>
   <p className={styles.hint}>{t(supported?"collision.help":"collision.unsupported")}</p>
   {enabled&&<>
-   <Field label={t("guidance.mode")}><Select data-testid="guidance-mode" disabled={!guidanceSupported} value={String(guidance.motion_mode??"legacy")} onChange={event=>setGuidance({motion_mode:event.target.value})}>{collision.guidance===undefined&&<option value="legacy">{t("guidance.mode.legacy")}</option>}{["rotate_then_drive","steer","auto"].map(mode=><option key={mode} value={mode}>{t("guidance.mode."+mode)}</option>)}</Select></Field>
+   <Field label={t("guidance.mode")}><Select data-testid="guidance-mode" disabled={!guidanceSupported} value={String(guidance.motion_mode??"legacy")} onChange={event=>{const mode=event.target.value,complete=validGuidance({...guidanceDraft(),...guidance,motion_mode:mode,center_deadband:.1},corridor);setGuidance({motion_mode:mode,...(mode==="steer"&&!complete?{rotation_bounds:null}:{})});}}>{collision.guidance===undefined&&<option value="legacy">{t("guidance.mode.legacy")}</option>}{["rotate_then_drive","steer","auto"].map(mode=><option key={mode} value={mode}>{t("guidance.mode."+mode)}</option>)}</Select></Field>
    <p className={styles.hint}>{t(guidanceSupported?"guidance.help":"guidance.unsupported")}</p>
    {collision.guidance!==undefined&&<>
     <Field label={t("guidance.deadband")}><Input data-testid="guidance-deadband" type="number" min="0" max="25" value={Number(guidance.center_deadband)*100} onChange={event=>setGuidance({center_deadband:Number(event.target.value)/100})}/></Field>

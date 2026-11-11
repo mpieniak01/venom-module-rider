@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {test} from "node:test";
 import {collisionDraft,validCollision,collisionNavigationValid,collisionDecisionValid,geometryMode} from "../../web-next/lib/collision-geometry";
+import {inputCovers,inputCoversReference,region} from "../../web-next/lib/input-region";
 import {riderAnalysisSettings,analysisProfileSettings} from "../../web-next/lib/analysis-profile";
 const roi=[.35,.8,.65,.95],geometry={mode:"image",collision:collisionDraft(roi)};
 test("corridor edits leave floor support fixed and invalid geometry cannot be submitted",()=>{
@@ -40,4 +41,13 @@ test("recorded analysis inherits exact geometry without motion authority",()=>{
  assert.notEqual(snapshot.collision!.left_shift,geometry.collision.left_shift);
  const semantic=analysisProfileSettings({id:"segformer-b0-ade20k",task:"semantic",installed:true,windows:[1]},1,geometry,{});
  assert(!("collision" in semantic.geometry));
+});
+
+test("analysis input includes the complete explicit collision reference",()=>{
+ const input=region([0,.4,1,1]),roi=[.35,.8,.65,.95];
+ assert(inputCovers(input,roi));
+ assert(!inputCoversReference(input,[.35,.3,.65,.95]));
+ assert(inputCoversReference(input,[.35,.4,.65,.95]));
+ assert(inputCoversReference(undefined,[.35,.3,.65,.95]));
+ assert(!inputCoversReference(input,[.35,.3,.65]));
 });

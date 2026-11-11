@@ -490,12 +490,16 @@ def _worker_depth_geometry(state: _AnalysisState):
     )
 
     if state.geometry.mode == "image":
+        from .navigation_profiles import parameters
+
+        effective = parameters(state.behavior, state.settings.model_dump())
         state.assessment = assess_depth(
             state.depth,
             tuple(state.spec["corridor"]),
             state.settings,
             input_bounds=state.box if state.settings.input_region is not None else None,
             collision=state.geometry.collision,
+            near_zone_fraction=effective.get("near_zone_fraction", 0.35),
             **{"evidence": True} if state.capture_evidence or state.video else {},
         )
     else:

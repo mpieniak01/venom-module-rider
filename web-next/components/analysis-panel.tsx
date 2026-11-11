@@ -1,7 +1,7 @@
 import {InputRegionControls} from "./input-region";
 import {CollisionSettings} from "./collision-settings";
 import {validCollision} from "../lib/collision-geometry";
-import {inputCovers,inputBounds,region,RECOMMENDED_INPUT} from "../lib/input-region";
+import {inputCovers,inputBounds,inputCoversReference,region,RECOMMENDED_INPUT} from "../lib/input-region";
 import { createBrowserUuid } from "@/lib/optional-modules/transport";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { apiFetch } from "@/lib/api-client";
@@ -48,7 +48,7 @@ return ([]);
 }
 
   /** Derive validInput from the current captured render without effects. */
-  function validAnalysisInput(){return (profile!=="da2-default"||(inputCovers(inputRegion,roi)&&(geometry!=="ground"||JSON.stringify(inputBounds(inputRegion))===JSON.stringify([0,0,1,1]))&&(geometry!=="image"||collision===undefined||validCollision(collision,roi))));}
+  function validAnalysisInput(){return (profile!=="da2-default"||(inputCovers(inputRegion,roi)&&(geometry!=="ground"||JSON.stringify(inputBounds(inputRegion))===JSON.stringify([0,0,1,1]))&&(geometry!=="image"||collision===undefined||(validCollision(collision,roi)&&inputCoversReference(inputRegion,record(collision).reference_corridor)))));}
 
   /** Derive settings from the current captured render without effects. */
   function analysisSettings(){return (analysisProfileSettings(available,windowSize,{mode:geometry,...(profile==="da2-default"&&geometry==="image"&&collision?{collision}:{}),fx:Number.isFinite(fx)?fx:null,fy:Number.isFinite(fy)?fy:null,radius_ratio:Number.isFinite(radius)?radius:null,lookahead_ratio:lookahead},{input_region:inputRegion,residual_limit:residual,outlier_limit:outliers,slope_min:slope,...(Object.keys(semanticModels).length?{semantic_models:semanticModels}:{})}));}

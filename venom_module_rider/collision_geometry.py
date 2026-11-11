@@ -21,6 +21,8 @@ from .axis_guidance import AxisGuidance
 
 
 class CollisionGeometry(BaseModel):
+    """Image-space collision envelope and floor-reference settings."""
+
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
     version: Annotated[StrictInt, Field(ge=1, le=1)]
@@ -33,6 +35,7 @@ class CollisionGeometry(BaseModel):
 
     @model_serializer(mode="wrap")
     def serialize(self, handler):
+        """Keep absent guidance out of legacy geometry identities."""
         value = handler(self)
         if self.guidance is None:
             value.pop("guidance", None)
@@ -40,6 +43,7 @@ class CollisionGeometry(BaseModel):
 
     @model_validator(mode="after")
     def reference_valid(self):
+        """Validate the floor reference rectangle."""
         if self.guidance is None and "guidance" in self.model_fields_set:
             raise ValueError("navigation_guidance_invalid")
         a, b, c, d = self.reference_corridor
@@ -48,6 +52,7 @@ class CollisionGeometry(BaseModel):
         return self
 
     def validate_corridor(self, corridor):
+        """Require the floor reference to cover the forward corridor."""
         if self.guidance is not None:
             self.guidance.validate_corridor(corridor)
         a, b, c, d = self.reference_corridor
@@ -58,6 +63,7 @@ class CollisionGeometry(BaseModel):
             raise ValueError("navigation_collision_reference_insufficient")
 
     def validate_input(self, region):
+        """Require model input to include the full floor reference."""
         if region is not None:
             a, b, c, d = region.bounds
             x0, y0, x1, y1 = self.reference_corridor
@@ -66,6 +72,7 @@ class CollisionGeometry(BaseModel):
 
 
 def proof(collision, corridor):
+    """Bind collision geometry and corridor to a deterministic identity."""
     value = {"collision": collision.model_dump(), "corridor": list(corridor)}
     # Normalize numeric representations exactly like the stdlib-only Pi peer.
     value["corridor"] = [float(v) for v in corridor]
@@ -74,6 +81,7 @@ def proof(collision, corridor):
 
 
 def proof_matches(result, collision, corridor):
+    """Check whether a result matches the selected geometry identity."""
     actual = result.get("collision_geometry")
     if collision is None:
         return actual is None
@@ -181,6 +189,7 @@ def mask_outline(mask):
 
 
 def display_geometry(masks):
+    """Prepare collision masks for presentation."""
     return {name: mask_outline(item["mask"]) for name, item in masks.items()}
 
 

@@ -6,6 +6,8 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 
 
 class AxisGuidance(BaseModel):
+    """Explicit guidance mode and optional swept rotation bounds."""
+
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
     version: Annotated[StrictInt, Field(ge=1, le=1)]
     motion_mode: Literal["rotate_then_drive", "steer", "auto"]
@@ -14,6 +16,7 @@ class AxisGuidance(BaseModel):
 
     @model_validator(mode="after")
     def valid_bounds(self):
+        """Reject incomplete or inverted rotation rectangles."""
         if self.rotation_bounds is not None:
             a, b, c, d = self.rotation_bounds
             if not (0 <= a < c <= 1 and 0 <= b < d <= 1):
@@ -21,6 +24,7 @@ class AxisGuidance(BaseModel):
         return self
 
     def validate_corridor(self, corridor):
+        """Require the rotation footprint to cover the forward corridor."""
         if self.rotation_bounds is not None:
             a, b, c, d = self.rotation_bounds
             x0, _, x1, y1 = corridor
@@ -85,6 +89,7 @@ def _advance(state, paths, result):
 
 
 def reset_history(state):
+    """Clear transient guidance state after an incompatible observation."""
     state.update(
         counts={"left": 0, "right": 0},
         front=0,
@@ -197,6 +202,7 @@ def _obstacle(result, state, paths, settings, guidance):
 
 
 def plan_collision(result, previous, settings, phase, eligible, corridor):
+    """Plan bounded motion from collision and axis evidence."""
     from .collision_geometry import proof_matches
 
     state = dict(previous or {})
