@@ -1,6 +1,9 @@
 // Module-owned translations. Every key contains PL, EN and DE by construction.
 export const messages = {
   "guidance.mode": ["Sposób korekty kierunku","Heading correction","Richtungskorrektur"],
+  "collision.useReference": ["Wyznacz korytarz z zapisanej referencji","Derive corridor from saved reference","Korridor aus gespeicherter Referenz ableiten"],
+  "collision.useReferenceHelp": ["Używa wymiarów i krawędzi zapisanych na Pi dla najniższej pozycji oraz dodaje 1 cm zapasu po każdej stronie. Sprawdź zgodność pozycji i obrazu. Obrót wymaga osobnego obrysu.","Uses dimensions and edges saved on Pi for the lowest pose, adding a 1 cm margin on each side. Check pose and image alignment. Rotation requires its own footprint.","Verwendet auf dem Pi gespeicherte Maße und Kanten für die niedrigste Position und ergänzt 1 cm Sicherheitsabstand je Seite. Position und Bild prüfen. Die Drehung benötigt einen eigenen Bereich."],
+  "collision.referenceUnavailable": ["Brak zapisanej referencji lub korytarz wykracza poza jej zakres. Sprawdź referencję i obszar obrazu.","No saved reference, or the corridor extends beyond it. Check the reference and image area.","Keine gespeicherte Referenz oder der Korridor liegt außerhalb ihres Bereichs. Referenz und Bildbereich prüfen."],
   "guidance.mode.legacy": ["Dotychczasowy tryb skrętu","Existing steering mode","Bisheriger Lenkmodus"],
   "guidance.mode.rotate_then_drive": ["Zatrzymaj, obróć i oceń ponownie","Stop, rotate and reassess","Anhalten, drehen und erneut prüfen"],
   "guidance.mode.steer": ["Skręcaj podczas jazdy","Steer while driving","Während der Fahrt lenken"],

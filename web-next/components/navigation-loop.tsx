@@ -1,6 +1,7 @@
 import {SimulationPreview} from "./simulation";
 import {CollisionSettings} from "./collision-settings";
 import {geometryMode,withoutCollision} from "../lib/collision-geometry";
+import {geometryFromSavedReference} from "../lib/reference-corridor";
 import { useOperatorTuning } from "../lib/operator-tuning";
 import { useOperatorApply } from "../lib/use-operator-apply";
 import { createBrowserUuid } from "@/lib/optional-modules/transport";
@@ -135,6 +136,7 @@ export function NavigationLoop({client,t,language,recording,operatorDetails,stud
           <Field label={t("geometryMode")}><Select data-testid="geometry-mode" value={scalarText(record(record(draft?.avoidance).geometry).mode??"image")} onChange={e=>draft&&setDraft({...draft,avoidance:{...record(draft.avoidance),geometry:geometryMode(record(record(draft.avoidance).geometry),e.target.value),sweep_verified:false}})}><option value="ground">{t("geometryGround")}</option><option value="image">{t("geometryImage")}</option></Select></Field>
           <p className={styles.hint} data-testid="geometry-mode-help">{t(record(record(draft?.avoidance).geometry).mode==="ground"?"geometryCalibrationHelp":"geometryImageHelp")}</p>
           {draft&&Array.isArray(draft.corridor)&&<CollisionSettings geometry={record(record(draft.avoidance).geometry)} corridor={draft.corridor as number[]} supported={policy?.collision_geometry_supported===true&&record(draft.avoidance).enabled===true} guidanceSupported={policy?.axis_guidance_supported===true} disabled={settingsLocked} t={t} onChange={geometry=>setDraft({...draft,mode:"observe",verified:false,avoidance:{...record(draft.avoidance),geometry,sweep_verified:false}})}/>}
+          {draft&&"collision" in record(record(draft.avoidance).geometry)&&<><Button data-testid="collision-use-reference" disabled={settingsLocked||referenceBusy} onClick={()=>void applySavedReference()}>{t("collision.useReference")}</Button><p className={styles.hint}>{t("collision.useReferenceHelp")}</p>{referenceError&&<p className={styles.loopError} role="alert">{t(referenceError)}</p>}</>}
           {record(record(draft?.avoidance).geometry).mode==="ground"&&<><p className={styles.hint}>{t("geometryHelp")}</p>{(["fx","fy","cx","cy","radius_ratio","lookahead_ratio","max_heading_deg"] as const).map(key=><Field key={key} label={t("geometry."+key)+` (${geometryRanges[key][0]}–${geometryRanges[key][1]})`}><Input type="number" min={geometryRanges[key][0]} max={geometryRanges[key][1]} step=".01" value={record(record(draft?.avoidance).geometry)[key]===null?"":Number(record(record(draft?.avoidance).geometry)[key])} onChange={e=>draft&&setDraft({...draft,avoidance:{...record(draft.avoidance),geometry:{...record(record(draft.avoidance).geometry),[key]:e.target.value===""?null:Number(e.target.value)},sweep_verified:false}})}/></Field>)}</>}
         </fieldset>);
   }
@@ -435,6 +437,8 @@ return (calibrationFrameBlock(client.camera,client.cameraStream,loopState,policy
   const [profileSnapshot,setProfileSnapshot]=useState<{policy:JsonRecord|null;session:string}>({policy:null,session:""});
   const [profileBusy,setProfileBusy]=useState(false);
   const draft=operatorDraft.draft;
+  const latestDraft=useRef(draft);latestDraft.current=draft;
+  const [referenceBusy,setReferenceBusy]=useState(false),[referenceError,setReferenceError]=useState("");
   const setDraft=useCallback((value:JsonRecord|null)=>setOperatorDraft(previous=>({...previous,draft:value})),[setOperatorDraft]);
   const operatorApply=useOperatorApply(workspace,client);
   const [editingZone,setEditingZone]=useState(false);
@@ -540,6 +544,21 @@ return (calibrationFrameBlock(client.camera,client.cameraStream,loopState,policy
   const phase=loopPhase(connected,loopState,goals);
   const active=goals.observe===true||goals.drive===true;
   const settingsLocked=!!operation||loading;
+  const latestLocked=useRef(settingsLocked);latestLocked.current=settingsLocked;
+  async function applySavedReference(){
+    const before=latestDraft.current,origin=client.currentSession();
+    if(!before||!Array.isArray(before.corridor)||!origin||latestLocked.current||referenceBusy)return;
+    setReferenceBusy(true);setReferenceError("");
+    try{
+      const row=await apiFetch("/api/v1/rider/navigation/image-reference");
+      if(client.currentSession()!==origin||latestDraft.current!==before||latestLocked.current)return;
+      const result=geometryFromSavedReference(data(row),before.corridor as number[],record(record(before.avoidance).geometry));
+      if(!result){setReferenceError("collision.referenceUnavailable");return;}
+      setDraft({...before,corridor:result.corridor,mode:"observe",verified:false,avoidance:{...record(before.avoidance),geometry:result.geometry,sweep_verified:false}});
+    }catch{
+      if(client.currentSession()===origin)setReferenceError("collision.referenceUnavailable");
+    }finally{setReferenceBusy(false);}
+  }
   const groundDraft=record(draft?.avoidance).enabled===true&&record(record(draft?.avoidance).geometry).mode==="ground";
   const groundActive=record(policy?.avoidance).enabled===true&&record(record(policy?.avoidance).geometry).mode==="ground";
   const {cameraStream,setCameraStream}=client;

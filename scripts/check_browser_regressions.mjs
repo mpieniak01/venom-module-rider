@@ -34,6 +34,7 @@ const fixtures={
 };
 const cases=[
   {name:"collision-geometry",fixture:"collision-geometry",file:"collision-geometry.js"},
+  {name:"reference-corridor",fixture:"workspace",file:"reference-corridor.js"},
   {name:"in-place-turn",fixture:"in-place-turn",file:"in-place-turn.js"},
   {name:"figures",fixture:"figures",file:"figures.js"},
   {name:"height",fixture:"height",file:"height.js"},
