@@ -2,6 +2,8 @@
 
 An optional Venom module for manual operation of Rider-Pi. Venom supplies the UI, language/theme system and host API; Pi owns hardware, calibration, profiles, motion sequencing and resource orchestration.
 
+Established robot dimensions and camera reference: [ROBOT_GEOMETRY_PL.md](docs/ROBOT_GEOMETRY_PL.md).
+
 ## R1
 
 - Manual arrows: click for a pulse, hold for continuous intent, release for braking. The pad STOP cancels the current motion or sequence; Escape provides the same global STOP. Explicit gestures obtain Pi authority without a separate ARM button. Recording controls occupy the main toolbar.
