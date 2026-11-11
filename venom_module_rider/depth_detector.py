@@ -45,6 +45,49 @@ class PerceptionSettings(BaseModel):
         return validate_semantic_models(value)
 
 
+def _collision_masks(collision, corridor, shape, evidence, near_fraction):
+    """Build and validate the collision scoring footprint when configured."""
+    if collision is None:
+        return None
+    from .collision_geometry import envelopes
+
+    if near_fraction is None:
+        near_fraction = (
+            evidence.get("near_zone_fraction", 0.35)
+            if isinstance(evidence, dict)
+            else 0.35
+        )
+    masks = envelopes(collision, corridor, shape, near_fraction=near_fraction)
+    if masks["center"]["mask"].sum() < 64:
+        raise ValueError("navigation_collision_pixels_insufficient")
+    return masks
+
+
+def _depth_state(reference_valid, oriented, outlier_pixels, allowed_pixels):
+    """Choose depth state in the original reference, orientation, obstacle order."""
+    if not reference_valid:
+        return "unknown", "ground_reference_uncertain"
+    if not oriented:
+        return "unknown", "depth_ground_orientation"
+    if outlier_pixels > allowed_pixels:
+        return "obstacle", "depth_ground_deviation"
+    return "clear", "depth_plane_candidate"
+
+
+def _reference_mask(collision, corridor, coordinates):
+    """Keep broad floor support while scoring the chosen STOP zone."""
+    x, y, w, h = coordinates
+    x0, y0, x1, y1 = corridor
+    reference_y0 = min(y0, max(0.0, round(y1 - 0.30, 12)))
+    reference = (x >= x0 * w) & (x < x1 * w) & (y >= reference_y0 * h) & (y < y1 * h)
+    reference_corridor = (x0, reference_y0, x1, y1)
+    if collision is not None:
+        a, b, c, d = collision.reference_corridor
+        reference = (x >= a * w) & (x < c * w) & (y >= b * h) & (y < d * h)
+        reference_corridor = (a, b, c, d)
+    return reference, reference_corridor
+
+
 def assess_depth(
     depth,
     corridor,
@@ -61,31 +104,14 @@ def assess_depth(
     h, w, x0, y0, x1, y1, y, x, mask, observed = _depth_scoring_mask(
         depth, corridor, input_bounds
     )
-    masks = None
-    if collision is not None:
-        from .collision_geometry import envelopes
-
-        near_fraction = (
-            near_zone_fraction
-            if near_zone_fraction is not None
-            else evidence.get("near_zone_fraction", 0.35)
-            if isinstance(evidence, dict)
-            else 0.35
-        )
-        masks = envelopes(collision, corridor, depth.shape, near_fraction=near_fraction)
+    masks = _collision_masks(
+        collision, corridor, depth.shape, evidence, near_zone_fraction
+    )
+    if masks is not None:
         mask = masks["center"]["mask"]
-        if mask.sum() < 64:
-            raise ValueError("navigation_collision_pixels_insufficient")
-    # A shorter STOP horizon must not also shrink the plane-fitting support:
-    # a flat obstacle could otherwise become the fitted ground. Keep at least
-    # the original 30% image-height support, while scoring only the chosen zone.
-    reference_y0 = min(y0, max(0.0, round(y1 - 0.30, 12)))
-    reference = (x >= x0 * w) & (x < x1 * w) & (y >= reference_y0 * h) & (y < y1 * h)
-    reference_corridor = (x0, reference_y0, x1, y1)
-    if collision is not None:
-        a, b, c, d = collision.reference_corridor
-        reference = (x >= a * w) & (x < c * w) & (y >= b * h) & (y < d * h)
-        reference_corridor = (a, b, c, d)
+    reference, reference_corridor = _reference_mask(
+        collision, (x0, y0, x1, y1), (x, y, w, h)
+    )
     if (reference & ~observed).any():
         raise ValueError("navigation_input_region_excludes_reference")
     inverse_reference = 1.0 / depth[reference]
@@ -114,14 +140,9 @@ def assess_depth(
     # This is a reference-quality gate, not a relaxed obstacle tolerance.
     reference_valid = reference_outliers <= 0.20
     oriented = settings.slope_min <= slope <= 6.0
-    if not reference_valid:
-        state, reason = "unknown", "ground_reference_uncertain"
-    elif not oriented:
-        state, reason = "unknown", "depth_ground_orientation"
-    elif outlier_pixels > allowed_pixels:
-        state, reason = "obstacle", "depth_ground_deviation"
-    else:
-        state, reason = "clear", "depth_plane_candidate"
+    state, reason = _depth_state(
+        reference_valid, oriented, outlier_pixels, allowed_pixels
+    )
     error_map = np.full(depth.shape, np.nan)
     error_map[mask] = errors
     assessment = {

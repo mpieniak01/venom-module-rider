@@ -50,6 +50,27 @@ def outline(points, size, count=25):
     return result if len(result) <= 32 else []
 
 
+def _collision_overlay(result, assessment, corridor, size):
+    """Add source-aligned collision paths and axis to display geometry."""
+    w, h = size
+    masks = assessment.pop("_collision_overlay", {})
+    result["paths"] = {side: masks[side] for side in SIDES if side in masks}
+    if "rotation" in masks:
+        result["paths"]["rotation"] = masks["rotation"]
+    evidence = assessment.get("axis_evidence", {})
+    if "axis_x" in evidence:
+        axis = min(w - 1, max(0, round(evidence["axis_x"] * w)))
+        result["axis"] = [
+            [axis, min(h - 1, max(0, round(corridor[1] * h)))],
+            [axis, min(h - 1, max(0, round(corridor[3] * h) - 1))],
+        ]
+    result["near"] = masks.get("guard", [])
+    result["guard_clear"] = (
+        assessment.get("paths", {}).get("guard", {}).get("state") == "clear"
+    )
+    result["reference_bounds"] = bounds(assessment["plane_reference_corridor"], size)
+
+
 def analysis_geometry(size, assessment, corridor, input_bounds=None):
     """Extract bounded display geometry in the decoded source coordinate system."""
     w, h = size
@@ -60,24 +81,7 @@ def analysis_geometry(size, assessment, corridor, input_bounds=None):
         "input_bounds": list(input_bounds or (0, 0, w, h)),
     }
     if assessment.get("geometry") == "image_collision_corridor":
-        masks = assessment.pop("_collision_overlay", {})
-        result["paths"] = {side: masks[side] for side in SIDES if side in masks}
-        if "rotation" in masks:
-            result["paths"]["rotation"] = masks["rotation"]
-        evidence = assessment.get("axis_evidence", {})
-        if "axis_x" in evidence:
-            axis = min(w - 1, max(0, round(evidence["axis_x"] * w)))
-            result["axis"] = [
-                [axis, min(h - 1, max(0, round(corridor[1] * h)))],
-                [axis, min(h - 1, max(0, round(corridor[3] * h) - 1))],
-            ]
-        result["near"] = masks.get("guard", [])
-        result["guard_clear"] = (
-            assessment.get("paths", {}).get("guard", {}).get("state") == "clear"
-        )
-        result["reference_bounds"] = bounds(
-            assessment["plane_reference_corridor"], size
-        )
+        _collision_overlay(result, assessment, corridor, size)
     elif assessment.get("geometry") == "ground_capsule":
         paths = assessment.pop("_path_overlay", {})
         result["paths"] = {

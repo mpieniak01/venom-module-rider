@@ -173,7 +173,6 @@ def mask_outline(mask):
     """Trace the actual raster support without rounding a separate ideal polygon."""
     import numpy as np
 
-    h, w = mask.shape
     rows = np.flatnonzero(mask.any(axis=1))
     if not rows.size:
         return []

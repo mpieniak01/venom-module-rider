@@ -4,7 +4,7 @@ export type Guidance = {version:1;motion_mode:"rotate_then_drive"|"steer"|"auto"
 export type Collision = {version:1;far_width_ratio:number;left_shift:number;right_shift:number;end_fraction:number;reference_corridor:number[];guidance?:Guidance};
 export function guidanceDraft():Guidance{return {version:1,motion_mode:"rotate_then_drive",center_deadband:.1,rotation_bounds:null};}
 export function geometryMode(geometry:JsonRecord,mode:string):JsonRecord {
- const next:JsonRecord={...geometry,mode};if(mode!=="image")delete next.collision;return next;
+ const next:JsonRecord={...geometry,mode};if(mode!=="image"){delete next.collision;}return next;
 }
 export function withoutCollision(geometry:JsonRecord):JsonRecord {
  const next={...geometry};delete next.collision;return next;
@@ -37,9 +37,9 @@ export function collisionNavigationValid(base:JsonRecord,draft:JsonRecord):boole
 export function collisionDecisionValid(policy:JsonRecord|null,decision:JsonRecord):boolean {
  const avoidance=record(policy?.avoidance),geometry=record(avoidance.geometry);
  if(!("collision" in geometry))return decision.geometry!=="image_collision_corridor"&&!("collision_geometry" in decision);
- const proof=record(decision.collision_geometry),paths=record(decision.paths),center=record(paths.center),guard=record(paths.guard),action=String(decision.action);
+ const proof=record(decision.collision_geometry),paths=record(decision.paths),center=record(paths.center),guard=record(paths.guard),action=typeof decision.action==="string"?decision.action:"";
  const qualified=(path:JsonRecord,clear:boolean)=>path.coverage_complete===true&&path.geometry==="image_collision_corridor"&&typeof path.zone_pixels==="number"&&Number.isInteger(path.zone_pixels)&&path.zone_pixels>=64&&(!clear||path.state==="clear");
- const side=action==="steer_left"?"left":action==="steer_right"?"right":action==="turn_left"||action==="turn_right"?"rotation":null;
+ const side=({steer_left:"left",steer_right:"right",turn_left:"rotation",turn_right:"rotation"} as Record<string,string>)[action]??null;
  return avoidance.enabled===true&&avoidance.protocol_version===3&&geometry.mode==="image"&&validCollision(geometry.collision,policy?.corridor)
   &&decision.protocol_version===3&&decision.geometry==="image_collision_corridor"&&proof.version===1&&typeof proof.sha256==="string"&&/^[0-9a-f]{64}$/.test(proof.sha256)
   &&qualified(center,["go","slow"].includes(action))&&qualified(guard,true)
@@ -49,7 +49,7 @@ export function collisionDecisionValid(policy:JsonRecord|null,decision:JsonRecor
 
 export function validGuidance(value:unknown,corridor:number[]):boolean {
  const g=record(value),b=g.rotation_bounds;
- if(g.version!==1||Object.keys(g).length!==4||!["rotate_then_drive","steer","auto"].includes(String(g.motion_mode))||typeof g.center_deadband!=="number"||!Number.isFinite(g.center_deadband)||g.center_deadband<0||g.center_deadband>.25)return false;
+ if(g.version!==1||Object.keys(g).length!==4||(typeof g.motion_mode!=="string"||!["rotate_then_drive","steer","auto"].includes(g.motion_mode))||typeof g.center_deadband!=="number"||!Number.isFinite(g.center_deadband)||g.center_deadband<0||g.center_deadband>.25)return false;
  return b===null||Array.isArray(b)&&b.length===4&&b.every(v=>typeof v==="number"&&Number.isFinite(v)&&v>=0&&v<=1)&&b[0]<b[2]&&b[1]<b[3]&&b[0]<=corridor[0]&&b[2]>=corridor[2]&&b[1]<corridor[3]&&b[3]>=corridor[3];
 }
 export function guidanceReady(policy:JsonRecord):boolean {
@@ -62,8 +62,8 @@ function guidanceDecisionValid(geometry:JsonRecord,decision:JsonRecord):boolean 
  const g=record(record(geometry.collision).guidance),proof=record(decision.guidance);
  if(!("version" in g))return !("guidance" in decision);
  if(proof.version!==1||proof.motion_mode!==g.motion_mode)return false;
- if(String(decision.action).startsWith("steer_")&&g.motion_mode==="rotate_then_drive")return false;
- if(String(decision.action).startsWith("turn_")){
+ if(typeof decision.action==="string"&&decision.action.startsWith("steer_")&&g.motion_mode==="rotate_then_drive")return false;
+ if(typeof decision.action==="string"&&decision.action.startsWith("turn_")){
   const rotation=record(record(decision.paths).rotation);
   return g.motion_mode!=="steer"&&Array.isArray(g.rotation_bounds)&&rotation.state==="clear"&&rotation.coverage_complete===true&&rotation.geometry==="image_collision_corridor";
  }

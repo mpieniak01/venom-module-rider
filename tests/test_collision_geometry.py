@@ -385,6 +385,7 @@ def test_explicit_invalid_geometry_is_not_interpreted_as_legacy(geometry):
 def test_crop_rejects_a_missing_floor_reference_before_inference():
     from venom_module_rider.vision_contract import VisionFrame
 
+    avoidance = settings(reference_corridor=[0.2, 0.5, 0.8, 0.95])
     with pytest.raises(ValueError, match="navigation_input_region_excludes_reference"):
         VisionFrame(
             protocol_version=3,
@@ -394,7 +395,7 @@ def test_crop_rejects_a_missing_floor_reference_before_inference():
             config_revision=0,
             age_ms=0.0,
             deadline_ms=300,
-            avoidance=settings(reference_corridor=[0.2, 0.5, 0.8, 0.95]),
+            avoidance=avoidance,
             perception={
                 "engine": "depth_plane",
                 "input_region": {"version": 1, "bounds": [0.3, 0.6, 0.7, 1.0]},

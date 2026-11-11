@@ -80,7 +80,8 @@ def test_auto_uses_curve_if_clear_and_rotation_only_with_own_evidence():
     assert advance(result, config)[0][-1] == "steer_right"
     result["paths"]["right"]["state"] = "obstacle"
     actions, reason, state, _ = advance(result, config)
-    assert actions[-1] == "stop" and reason == "avoidance_stop_before_rotation"
+    assert actions[-1] == "stop"
+    assert reason == "avoidance_stop_before_rotation"
     assert advance(result, config, state, count=1)[0] == ["turn_right"]
 
 
@@ -99,7 +100,8 @@ def test_image_no_progress_ends_corrections_before_independent_pulse_limit():
     state = None
     for _ in range(3):
         actions, reason, state, terminal = advance(result, config, state)
-    assert terminal and reason == "avoidance_no_progress"
+    assert terminal
+    assert reason == "avoidance_no_progress"
     assert state["turns"] == 2
 
 
@@ -113,7 +115,9 @@ def test_obstacle_moving_toward_exit_is_progress_before_it_leaves_the_corridor()
     # Still fully inside the corridor, but moving away from the driving axis.
     shifted = assess(scene((135, 196, 145, 202, 0.5)), config)
     _, _, state, terminal = advance(shifted, config, state)
-    assert not terminal and state["stalled"] == 0 and state["progress_delta"] > 0.03
+    assert not terminal
+    assert state["stalled"] == 0
+    assert state["progress_delta"] > 0.03
 
 
 @pytest.mark.parametrize("mirrored", [False, True])
@@ -328,9 +332,13 @@ def test_vetoed_legacy_collision_steer_is_not_counted_as_executed():
     ],
 )
 def test_invalid_guidance_is_rejected(patch):
-    with pytest.raises(ValueError):
+    if "rotation_bounds" in patch:
         config = guided(**patch)
-        config.geometry.collision.validate_corridor(ROI)
+        with pytest.raises(ValueError):
+            config.geometry.collision.validate_corridor(ROI)
+    else:
+        with pytest.raises(ValueError):
+            guided(**patch)
 
 
 def test_rotation_overlay_roundtrips_through_saved_analysis_validator():

@@ -10,6 +10,15 @@ import { record, settingsOf, type JsonRecord } from "./model";
 import type { useOperatorTuning } from "./operator-tuning";
 import type { RiderClient } from "./use-rider";
 
+function validPerceptionChange(base:JsonRecord,draft:JsonRecord,roi:number[],avoidance:JsonRecord):boolean {
+ if(JSON.stringify(base.perception)!==JSON.stringify(draft.perception)){
+  const tuning=tuningDraft({...base,perception:draft.perception},'validation');
+  if(!tuning||!validTuning(tuning))return false;
+  const input=record(draft.perception).input_region;
+  if(input!==undefined&&(!inputCovers(input,roi)||avoidance.enabled===true&&record(avoidance.geometry).mode==='ground'&&JSON.stringify(record(input).bounds)!==JSON.stringify([0,0,1,1])))return false;
+ }
+ return true;
+}
 export function validOperatorNavigation(base:JsonRecord,draft:JsonRecord):boolean {
  if(!collisionNavigationValid(base,draft))return false;
  const number=(value:unknown,min:number,max:number,integer=false)=>typeof value==='number'&&Number.isFinite(value)&&value>=min&&value<=max&&(!integer||Number.isInteger(value));
@@ -18,12 +27,7 @@ export function validOperatorNavigation(base:JsonRecord,draft:JsonRecord):boolea
  if(!Array.isArray(roi)||roi.length!==4||!roi.every(value=>number(value,0,1))||!(roi[0]<roi[2]&&roi[1]<roi[3]))return false;
  const avoidance=record(draft.avoidance);
  if('avoidance' in draft&&(!number(avoidance.turn_speed,.01,navigationSpeedLimit(base,false,true))||!number(avoidance.turn_ms,50,navigationTurnPulseLimit(base),true)))return false;
- if(JSON.stringify(base.perception)!==JSON.stringify(draft.perception)){
-  const tuning=tuningDraft({...base,perception:draft.perception},'validation');
-  if(!tuning||!validTuning(tuning))return false;
-  const input=record(draft.perception).input_region;
-  if(input!==undefined&&(!inputCovers(input,roi)||avoidance.enabled===true&&record(avoidance.geometry).mode==='ground'&&JSON.stringify(record(input).bounds)!==JSON.stringify([0,0,1,1])))return false;
- }
+ if(!validPerceptionChange(base,draft,roi,avoidance))return false;
  if(JSON.stringify(base.behavior)!==JSON.stringify(draft.behavior)){
   const selection=record(draft.behavior),candidate=behaviorDraft(base,String(selection.profile_id),'validation');
   if(!candidate||!validBehaviorDraft({...candidate,selection:selection as typeof candidate.selection},base))return false;

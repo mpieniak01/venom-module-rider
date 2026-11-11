@@ -1037,6 +1037,19 @@ def _reconcile_guidance(run, result, signals, planned, previous):
         }
 
 
+def _temporal_maneuver_allowed(signals, temporal):
+    """Require obstacle, fresh guard and spatial evidence for a correction."""
+    return (
+        signals.action.startswith(("turn_", "steer_"))
+        and temporal.get("action") == "stop"
+        and temporal.get("state") == "obstacle"
+        and temporal.get("near_guard_clear") is True
+        and temporal.get("evidence_frames", 0) >= 3
+        and temporal.get("spatial", {}).get("valid") is True
+        and temporal.get("spatial", {}).get("hard_stop") is not True
+    )
+
+
 def _apply_temporal_decision(run, result, signals, temporal):
     """Retain temporal STOP precedence and the qualified side-path exception."""
     if temporal is None:
@@ -1059,15 +1072,7 @@ def _apply_temporal_decision(run, result, signals, temporal):
         signals.action, signals.vision_action = "stop", "stop"
         return
     if result.get("guidance") and signals.action != "go":
-        qualified = (
-            signals.action.startswith(("turn_", "steer_"))
-            and temporal.get("action") == "stop"
-            and temporal.get("state") == "obstacle"
-            and temporal.get("near_guard_clear") is True
-            and temporal.get("evidence_frames", 0) >= 3
-            and temporal.get("spatial", {}).get("valid") is True
-            and temporal.get("spatial", {}).get("hard_stop") is not True
-        )
+        qualified = _temporal_maneuver_allowed(signals, temporal)
         if not qualified:
             signals.action = "stop"
         return
@@ -1079,13 +1084,6 @@ def _apply_temporal_decision(run, result, signals, temporal):
     ):
         signals.action, signals.reason = "slow", temporal["reason"]
     elif temporal["action"] == "stop":
-        steering_allowed = (
-            signals.action.startswith(("turn_", "steer_"))
-            and temporal.get("state") == "obstacle"
-            and temporal.get("near_guard_clear") is True
-            and temporal.get("evidence_frames", 0) >= 3
-            and temporal.get("spatial", {}).get("valid") is True
-            and temporal.get("spatial", {}).get("hard_stop") is not True
-        )
+        steering_allowed = _temporal_maneuver_allowed(signals, temporal)
         if not steering_allowed:
             signals.action, signals.reason = "stop", temporal["reason"]

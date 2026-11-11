@@ -36,12 +36,16 @@ def axis_evidence(errors, mask, limit, corridor, deadband):
     """Obstacle location in the forward body corridor, never unrelated frame edges."""
     import numpy as np
 
-    h, w = mask.shape
+    _, w = mask.shape
     axis = (corridor[0] + corridor[2]) / 2
     ys, xs = np.nonzero(mask & np.isfinite(errors) & (errors > limit))
     half = (corridor[2] - corridor[0]) / 2
     offset = float(np.mean((xs / w - axis) / half)) if xs.size else 0.0
-    side = "left" if offset < -deadband else "right" if offset > deadband else "center"
+    side = "center"
+    if offset < -deadband:
+        side = "left"
+    elif offset > deadband:
+        side = "right"
     return {
         "version": 1,
         "axis_x": axis,
@@ -100,7 +104,9 @@ def reset_history(state):
 
 
 def _remaining(result, side, settings):
-    image_side = ("right" if side == "left" else "left") if settings.mirrored else side
+    image_side = side
+    if settings.mirrored:
+        image_side = "right" if side == "left" else "left"
     # Turning right moves the obstacle toward the left edge of the forward corridor.
     return result.get("axis_evidence", {}).get(
         "exit_left" if image_side == "right" else "exit_right"
@@ -152,18 +158,20 @@ def _choose(result, state, paths, settings, mode):
     if settings.mirrored and preferred:
         preferred = "right" if preferred == "left" else "left"
     collision = settings.geometry.collision
+
     # The obstacle's side is a preference among physically qualified motions.
+    def shift(side):
+        image_side = side
+        if settings.mirrored:
+            image_side = "right" if side == "left" else "left"
+        return getattr(collision, image_side + "_shift")
+
     chosen = min(
         choices,
         key=lambda side: (
             0 if side == preferred else 1,
             paths.get(side, {}).get("outlier_fraction", 1),
-            getattr(
-                collision,
-                ("right" if side == "left" else "left") + "_shift"
-                if settings.mirrored
-                else side + "_shift",
-            ),
+            shift(side),
         ),
     )
     return chosen, choices[chosen]
@@ -201,6 +209,17 @@ def _obstacle(result, state, paths, settings, guidance):
     )
 
 
+def _clear_forward(state):
+    """Require consecutive clear observations before restoring forward motion."""
+    state["front"] = state.get("front", 0) + 1
+    state["rotation_zero"] = False
+    if state["front"] < 3:
+        return "stop", "clear_frames_pending"
+    state.pop("side", None)
+    state.pop("pending_exit", None)
+    return "go", "clear_frames_ready"
+
+
 def plan_collision(result, previous, settings, phase, eligible, corridor):
     """Plan bounded motion from collision and axis evidence."""
     from .collision_geometry import proof_matches
@@ -235,13 +254,7 @@ def plan_collision(result, previous, settings, phase, eligible, corridor):
         reset_history(state)
         reason = "avoidance_capture_pending"
     elif result.get("state") == "clear" and _clear(paths, "center"):
-        state["front"] = state.get("front", 0) + 1
-        state["rotation_zero"] = False
-        reason = "clear_frames_pending"
-        if state["front"] >= 3:
-            action, reason = "go", "clear_frames_ready"
-            state.pop("side", None)
-            state.pop("pending_exit", None)
+        action, reason = _clear_forward(state)
     elif result.get("state") == "obstacle":
         state["front"] = 0
         action, reason, terminal = _obstacle(

@@ -40,7 +40,8 @@ def test_real_scoring_uses_measured_width_without_blocking_unrelated_side_object
     assert measured["axis_evidence"]["obstacle_side"] == "left"
     assert action == "stop"  # Close obstacle also enters the independent near guard.
     outside, action = evaluate(scene((60, 196, 67, 202, 0.5)), MEASURED, config)
-    assert outside["state"] == "clear" and action == "go"
+    assert outside["state"] == "clear"
+    assert action == "go"
 
 
 def test_perspective_taper_does_not_stop_for_side_object_outside_body_projection():
