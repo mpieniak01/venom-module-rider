@@ -567,6 +567,23 @@ test("v3 steering needs clear near guard and connecting path in addition to side
  }
 });
 
+test("collision steering displays the qualified path despite occupied lateral sectors",()=>{
+ const corridor=[.35,.8,.65,.95],collision={version:1,far_width_ratio:1,left_shift:.3,right_shift:.3,end_fraction:.2,reference_corridor:[.35,.65,.65,.95]};
+ const policy={...permissionPolicy,corridor,collision_geometry_supported:true,avoidance:{enabled:true,sweep_verified:true,protocol_version:3,geometry:{mode:"image",collision}}};
+ const path={state:"clear",coverage_complete:true,geometry:"image_collision_corridor"};
+ const decision={...permissionLoop.decision,protocol_version:3,action:"steer_right",state:"obstacle",vision_action:"stop",geometry:"image_collision_corridor",collision_geometry:{version:1,sha256:"c".repeat(64)},sectors:{right:{state:"obstacle",coverage_complete:true}},paths:{center:{...path,state:"obstacle"},right:path,guard:path}};
+ const state={...permissionLoop,decision};
+ assert.equal(motionPermission(state,{drive:true},policy,permissionDetector,permissionStatus()).venom,true);
+ for(const patch of [{geometry:"image"},{collision_geometry:{}},{paths:{...decision.paths,guard:{...path,state:"obstacle"}}},{paths:{...decision.paths,center:{...path,coverage_complete:false}}},{paths:{...decision.paths,right:{...path,state:"unknown"}}}]){
+  assert.equal(motionPermission({...state,decision:{...decision,...patch}},{drive:true},policy,permissionDetector,permissionStatus()).venom,false);
+ }
+ assert.equal(motionPermission(state,{drive:true},permissionPolicy,permissionDetector,permissionStatus()).venom,false);
+ const detector={...permissionDetector,configured:true,collision_geometry_v1:true};
+ assert.equal(trialBlock(policy,{drive:true},detector,true,false,permissionStatus()),"");
+ assert.equal(trialBlock(policy,{drive:true},{...detector,collision_geometry_v1:false},true,false,permissionStatus()),"collision.unsupported");
+ assert.equal(trialBlock({...policy,collision_geometry_supported:false},{drive:true},detector,true,false,permissionStatus()),"collision.unsupported");
+});
+
 test("ground mode requires configured projection and host support before a trial",()=>{
  const geometry={mode:"ground",fx:.5,fy:.5,radius_ratio:.35};
  const policy={...permissionPolicy,avoidance:{enabled:true,protocol_version:3,geometry}};

@@ -1,11 +1,12 @@
 import {inputBounds} from "./input-region";
+import {validCollision} from "./collision-geometry";
 import { record, str, type JsonRecord } from "./model";
 import { behaviorSelection, type BehaviorSelection } from "./behavior";
 import { SEMANTIC_MODEL_IDS, TUNING_BOUNDS, TUNING_FIELDS } from "./model-tuning";
 
 export type AnalysisProfile = { id: string; installed: boolean; windows: number[]; task?: string; backend?: string; error?: string };
 export const LEGACY_ANALYSIS_BEHAVIOR: BehaviorSelection = { version: 1, profile_id: "legacy", profile_revision: 1 };
-export type RiderAnalysisSettings = { revision: number; behavior: BehaviorSelection; corridor: number[]; perception: JsonRecord };
+export type RiderAnalysisSettings = { revision: number; behavior: BehaviorSelection; corridor: number[]; perception: JsonRecord; collision?:JsonRecord };
 export function semanticProfile(profile: AnalysisProfile | undefined): boolean {
   return profile?.task === "semantic" || profile?.backend === "semantic";
 }
@@ -50,7 +51,9 @@ export function riderAnalysisSettings(value: unknown): RiderAnalysisSettings {
     || corridor[0] >= corridor[2] || corridor[1] >= corridor[3]) throw new Error("analysis_rider_settings_invalid");
   const perception=depthSettings(source);
   if(source.semantic_models!==undefined)perception.semantic_models=semanticSettings(source.semantic_models);
-  return { revision: Number(policy.revision), behavior: { ...behavior }, corridor: [...corridor], perception };
+  const collision=record(record(policy.avoidance).geometry).collision;
+  if(collision!==undefined&&!validCollision(collision,corridor))throw new Error("analysis_rider_settings_invalid");
+  return { revision: Number(policy.revision), behavior: { ...behavior }, corridor: [...corridor], perception, ...(collision!==undefined?{collision:structuredClone(record(collision))}:{}) };
 }
 /** Offline run parameters never alter live selection, and semantic runs never inherit depth geometry or identity. */
 export function analysisProfileSettings(

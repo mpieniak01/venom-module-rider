@@ -3,7 +3,7 @@
 from .ground_fit import pose_change
 
 
-def plan(result, previous, settings, phase, eligible):
+def plan(result, previous, settings, phase, eligible, *, corridor=None):
     """Advance bounded side history and select a qualified correction."""
     state = dict(previous or {})
     sectors = result.get("sectors", {})
@@ -21,10 +21,26 @@ def plan(result, previous, settings, phase, eligible):
         }
     reference = result.get("ground_reference")
     _update_reference(state, reference, result, settings, phase)
-    counts = _advance_side_counts(state, sectors, paths)
+    from .collision_geometry import proof_matches
+
+    collision = settings.geometry.collision
+    matches = proof_matches(result, collision, corridor)
+    counts = _advance_side_counts(
+        state, sectors, paths, path_only=collision is not None
+    )
     action, reason, terminal = "stop", "avoidance_uncertain", False
-    if not eligible or not settings.sweep_verified:
+    if not matches:
+        counts.update(left=0, right=0)
+        state["front"] = 0
+        reason = "collision_geometry_mismatch"
+    elif not eligible or not settings.sweep_verified:
         reason = "avoidance_not_accepted"
+    elif collision is not None and (
+        paths.get("guard", {}).get("state") != "clear"
+        or paths.get("guard", {}).get("coverage_complete") is not True
+    ):
+        state["front"] = 0
+        reason = "avoidance_near_guard"
     elif phase != "ready":
         counts.update(left=0, right=0)
         state["front"] = 0
@@ -107,15 +123,20 @@ def _obstacle_action(result, state, counts, paths, reference):
     return action, reason
 
 
-def _advance_side_counts(state, sectors, paths):
+def _advance_side_counts(state, sectors, paths, *, path_only=False):
     """Advance the same complete-clear sectors and paths before policy gating."""
     counts = dict(state.get("counts", {"left": 0, "right": 0}))
     state["counts"] = counts
     state.setdefault("turns", 0)
     for side in ("left", "right"):
+        rows = (
+            (paths.get(side, {}),)
+            if path_only
+            else (sectors.get(side, {}), paths.get(side, {}))
+        )
         clear = all(
             row.get("state") == "clear" and row.get("coverage_complete") is True
-            for row in (sectors.get(side, {}), paths.get(side, {}))
+            for row in rows
         )
         counts[side] = counts.get(side, 0) + 1 if clear else 0
     return counts

@@ -19,6 +19,7 @@ check-python:
 	PYTHONPATH=$(HOST):. $(PYTHON) -m pytest -q --cov=venom_module_rider --cov-fail-under=90 --cov-report=term-missing --cov-report=xml:test-results/coverage.xml
 
 check-web:
+	node --check tests/browser/collision-geometry.js
 	node --check tests/browser/operator-demo.js
 	node --check tests/browser/height.js
 	node --check tests/browser/figures.js
@@ -92,6 +93,11 @@ research-mapping:
 	PYTHONPATH=$(HOST):$(DA3_SDK_PATH):. $(MAPPING_PYTHON) -m scripts.mapping_research $(ARGS)
 
 .PHONY: check-journey
+.PHONY: check-collision
+check-collision:
+	test -n "$(RIDER_COLLISION_PI_ROOT)" && test -x "$(RIDER_COLLISION_PI_PYTHON)"
+	PYTHONPATH=$(HOST):. RIDER_COLLISION_PI_ROOT="$(RIDER_COLLISION_PI_ROOT)" RIDER_COLLISION_PI_PYTHON="$(RIDER_COLLISION_PI_PYTHON)" $(PYTHON) -m pytest -q tests/test_collision_geometry.py tests/test_steering.py tests/test_directional.py tests/test_overlay_geometry.py tests/test_navigation_ground_veto.py
+
 check-journey:
 	PYTHONPATH=$(HOST):. $(PYTHON) -m pytest -q tests/test_navigation_journey_api.py tests/test_journey_vision.py tests/test_navigation_trial_api.py tests/test_steering.py tests/test_operator_proxy.py
 

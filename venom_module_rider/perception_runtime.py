@@ -441,6 +441,8 @@ def _runtime_inference(detector, payload, frame, model_id, options):
                 **options,
             )
         else:
+            if frame.avoidance.geometry.collision is not None:
+                options["geometry"] = frame.avoidance.geometry
             result = detector.detect(
                 payload, frame.corridor, frame.perception, **options
             )

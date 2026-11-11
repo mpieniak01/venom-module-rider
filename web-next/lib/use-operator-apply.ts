@@ -1,4 +1,5 @@
 import { apiFetch } from "@/lib/api-client";
+import { collisionNavigationValid } from "./collision-geometry";
 import { calibrationDraft, calibrationValues, validCalibration } from "./calibration";
 import { applyOperatorSettings } from "./apply-operator-settings";
 import { loopSettingsValues, navigationPulseLimit, navigationSpeedLimit, navigationTurnPulseLimit } from "./loop-controls";
@@ -10,6 +11,7 @@ import type { useOperatorTuning } from "./operator-tuning";
 import type { RiderClient } from "./use-rider";
 
 export function validOperatorNavigation(base:JsonRecord,draft:JsonRecord):boolean {
+ if(!collisionNavigationValid(base,draft))return false;
  const number=(value:unknown,min:number,max:number,integer=false)=>typeof value==='number'&&Number.isFinite(value)&&value>=min&&value<=max&&(!integer||Number.isInteger(value));
  if(!number(draft.speed,.01,navigationSpeedLimit(base))||!number(draft.max_motion_ms,50,navigationPulseLimit(base),true)||!number(draft.decision_budget_ms,100,500,true))return false;
  const roi=draft.corridor;

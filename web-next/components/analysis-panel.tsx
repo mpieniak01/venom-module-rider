@@ -1,4 +1,6 @@
 import {InputRegionControls} from "./input-region";
+import {CollisionSettings} from "./collision-settings";
+import {validCollision} from "../lib/collision-geometry";
 import {inputCovers,inputBounds,region,RECOMMENDED_INPUT} from "../lib/input-region";
 import { createBrowserUuid } from "@/lib/optional-modules/transport";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -46,10 +48,10 @@ return ([]);
 }
 
   /** Derive validInput from the current captured render without effects. */
-  function validAnalysisInput(){return (profile!=="da2-default"||(inputCovers(inputRegion,roi)&&(geometry!=="ground"||JSON.stringify(inputBounds(inputRegion))===JSON.stringify([0,0,1,1]))));}
+  function validAnalysisInput(){return (profile!=="da2-default"||(inputCovers(inputRegion,roi)&&(geometry!=="ground"||JSON.stringify(inputBounds(inputRegion))===JSON.stringify([0,0,1,1]))&&(geometry!=="image"||collision===undefined||validCollision(collision,roi))));}
 
   /** Derive settings from the current captured render without effects. */
-  function analysisSettings(){return (analysisProfileSettings(available,windowSize,{mode:geometry,fx:Number.isFinite(fx)?fx:null,fy:Number.isFinite(fy)?fy:null,radius_ratio:Number.isFinite(radius)?radius:null,lookahead_ratio:lookahead},{input_region:inputRegion,residual_limit:residual,outlier_limit:outliers,slope_min:slope,...(Object.keys(semanticModels).length?{semantic_models:semanticModels}:{})}));}
+  function analysisSettings(){return (analysisProfileSettings(available,windowSize,{mode:geometry,...(profile==="da2-default"&&geometry==="image"&&collision?{collision}:{}),fx:Number.isFinite(fx)?fx:null,fy:Number.isFinite(fy)?fy:null,radius_ratio:Number.isFinite(radius)?radius:null,lookahead_ratio:lookahead},{input_region:inputRegion,residual_limit:residual,outlier_limit:outliers,slope_min:slope,...(Object.keys(semanticModels).length?{semantic_models:semanticModels}:{})}));}
 
   /** Render the FrozenResult section using this render's captured state. */
   function renderFrozenResult(){
@@ -93,6 +95,7 @@ return ([]);
       {inputSource==="samples"&&<>{number("count",count,setCount,1,200)}{number("offset",offset,setOffset,0,999)}</>}
       {roi.map((value,index)=><span key={index}>{number("roi"+index,value,next=>setRoi(previous=>replaceCoordinate(previous,index,next)),0,1,0.01)}</span>)}
       {!semantic&&<><Field label={t("geometryMode")}><Select aria-label={t("geometryMode")} value={geometry} onChange={event=>setGeometry(event.target.value)}><option value="image">{t("geometryImage")}</option><option value="ground">{t("geometryGround")}</option></Select></Field>
+      {profile==="da2-default"&&geometry==="image"&&<CollisionSettings geometry={{mode:"image",...(collision?{collision}:{})}} corridor={roi} supported={true} disabled={busy} t={t} onChange={value=>setCollision(value.collision===undefined?undefined:record(value.collision))}/>}
       {geometry==="ground"&&<>{number("fx",fx,setFx,0.1,5,0.01)}{number("fy",fy,setFy,0.1,5,0.01)}{number("radius",radius,setRadius,0.05,5,0.01)}{number("lookahead",lookahead,setLookahead,0.25,8,0.05)}<p className={styles.hint}>{t("analysis.calibrationHint")}</p></>}
       {number("residual",residual,setResidual,0.01,0.15,0.001)}{number("outliers",outliers,setOutliers,0,0.02,0.001)}{number("slope",slope,setSlope,1,4,0.1)}{profile==="da2-default"&&<InputRegionControls value={inputRegion} onChange={setInputRegion} t={t}/>}</>}
       <Field label={t("analysis.quality")}><Select aria-label={t("analysis.quality")} value={quality} onChange={event=>setQuality(event.target.value)}><option value="production">{t("analysis.production")}</option><option value="model_probe">{t("analysis.probe")}</option></Select></Field>
@@ -136,6 +139,7 @@ return ([]);
   useEffect(()=>{setImporting(false);setImportError("");return invalidateImport;},[session,invalidateImport]);
 
   const [geometry,setGeometry]=useState("image");
+  const [collision,setCollision]=useState<JsonRecord|undefined>();
   const [fx,setFx]=useState(Number.NaN);
   const [fy,setFy]=useState(Number.NaN);
   const [radius,setRadius]=useState(Number.NaN);
@@ -226,6 +230,8 @@ return ([]);
       if(epoch!==importEpoch.current)return;
       const snapshot=riderAnalysisSettings(data(response).config);
       setBehavior(snapshot.behavior);setSemanticModels(record(snapshot.perception.semantic_models));setRoi(snapshot.corridor);
+      setCollision(snapshot.collision);
+      if(snapshot.collision)setGeometry("image");
       setInputRegion(snapshot.perception.input_region===undefined?region([0,0,1,1]):record(snapshot.perception.input_region));
       setResidual(Number(snapshot.perception.residual_limit));setOutliers(Number(snapshot.perception.outlier_limit));setSlope(Number(snapshot.perception.slope_min));
       setImportedRevision(snapshot.revision);
@@ -233,6 +239,7 @@ return ([]);
     finally{if(epoch===importEpoch.current)setImporting(false);}
   };
   const resetRiderSettings=()=>{
+    setCollision(undefined);
     importEpoch.current++;setImporting(false);setImportError("");setImportedRevision(null);
     setInputRegion(region(RECOMMENDED_INPUT));setBehavior({...LEGACY_ANALYSIS_BEHAVIOR});setSemanticModels({});setRoi([.35,.8,.65,.95]);setResidual(.06);setOutliers(.005);setSlope(2);
   };

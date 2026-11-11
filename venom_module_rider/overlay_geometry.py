@@ -59,7 +59,17 @@ def analysis_geometry(size, assessment, corridor, input_bounds=None):
         "height": h,
         "input_bounds": list(input_bounds or (0, 0, w, h)),
     }
-    if assessment.get("geometry") == "ground_capsule":
+    if assessment.get("geometry") == "image_collision_corridor":
+        masks = assessment.pop("_collision_overlay", {})
+        result["paths"] = {side: masks[side] for side in SIDES if side in masks}
+        result["near"] = masks.get("guard", [])
+        result["guard_clear"] = (
+            assessment.get("paths", {}).get("guard", {}).get("state") == "clear"
+        )
+        result["reference_bounds"] = bounds(
+            assessment["plane_reference_corridor"], size
+        )
+    elif assessment.get("geometry") == "ground_capsule":
         paths = assessment.pop("_path_overlay", {})
         result["paths"] = {
             side: outline(points, size)

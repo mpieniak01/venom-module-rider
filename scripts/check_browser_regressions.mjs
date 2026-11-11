@@ -19,6 +19,7 @@ const coverageEnabled=args.includes("--coverage");
 const filter=args.includes("--only")?args[args.indexOf("--only")+1]:"";
 if(args.includes("--only")&&!filter)throw new Error("--only requires a regression name");
 const fixtures={
+  "collision-geometry":"collision-geometry-fixture.tsx",
   "in-place-turn":"in-place-turn-fixture.tsx",
   "figures":"figures-fixture.tsx",
   "height":"height-fixture.tsx",
@@ -32,6 +33,7 @@ const fixtures={
   workspace:"global-study-fixture.tsx",
 };
 const cases=[
+  {name:"collision-geometry",fixture:"collision-geometry",file:"collision-geometry.js"},
   {name:"in-place-turn",fixture:"in-place-turn",file:"in-place-turn.js"},
   {name:"figures",fixture:"figures",file:"figures.js"},
   {name:"height",fixture:"height",file:"height.js"},

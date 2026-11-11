@@ -495,6 +495,7 @@ def _worker_depth_geometry(state: _AnalysisState):
             tuple(state.spec["corridor"]),
             state.settings,
             input_bounds=state.box if state.settings.input_region is not None else None,
+            collision=state.geometry.collision,
             **{"evidence": True} if state.capture_evidence or state.video else {},
         )
     else:

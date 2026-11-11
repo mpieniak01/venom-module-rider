@@ -62,6 +62,11 @@ class AnalysisSpec(StrictModel):
         if self.input_source == "video" and self.capture_evidence:
             raise ValueError("analysis_video_evidence_unsupported")
         self._validate_input_region()
+        if self.geometry.collision is not None:
+            if self.profile != "da2-default":
+                raise ValueError("analysis_collision_requires_da2")
+            self.geometry.collision.validate_corridor(self.corridor)
+            self.geometry.collision.validate_input(self.perception.input_region)
         semantic = self.profile in {SEGFORMER, YOLO, FAST}
         if semantic and "perception" not in self.model_fields_set:
             self.perception = self.perception.model_copy(update={"engine": "segformer"})

@@ -147,6 +147,8 @@ class VisionLoop:
                 frame.avoidance.geometry,
                 **options,
             )
+        if frame.avoidance.geometry.collision is not None:
+            options["geometry"] = frame.avoidance.geometry
         return self.depth_detector.detect(
             payload, frame.corridor, frame.perception, **options
         )
@@ -178,6 +180,7 @@ class VisionLoop:
             is not None,
             "supported_protocol_versions": [1, 2, 3],
             "navigation_journey_version": 1,
+            "collision_geometry_v1": True,
             "temporal_navigation_v1": importlib.util.find_spec("cv2") is not None,
             "input_region_version": 1,
             "semantic_model_policy_v1": importlib.util.find_spec("cv2") is not None,
@@ -937,7 +940,7 @@ def _decision_preview_space(result):
     image_sectors = preview_sectors(result)
     sector_space = (
         "projected_paths"
-        if result.get("geometry") == "ground_capsule"
+        if result.get("geometry") in {"ground_capsule", "image_collision_corridor"}
         else "image"
         if image_sectors
         else "unavailable"
@@ -980,6 +983,7 @@ def _plan_decision_v3(run, result, signals, depth_mode):
         run.frame.avoidance,
         run.frame.motion_phase,
         signals.permitted and run.frame.avoidance.enabled and depth_mode,
+        corridor=run.frame.corridor,
     )
     run.state["avoidance"] = planner
     result.update(
@@ -998,6 +1002,12 @@ def _plan_decision_v3(run, result, signals, depth_mode):
 def _apply_temporal_decision(run, result, signals, temporal):
     """Retain temporal STOP precedence and the qualified side-path exception."""
     if temporal is None:
+        return
+    if signals.reason == "collision_geometry_mismatch" or (
+        result.get("collision_geometry") is not None
+        and signals.reason == "avoidance_near_guard"
+    ):
+        signals.action, signals.vision_action = "stop", "stop"
         return
     if result.get("reason") == "vision_decision_expired":
         signals.action, signals.vision_action = "stop", "stop"

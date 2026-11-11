@@ -73,6 +73,12 @@ class VisionFrame(BaseModel):
 
     @model_validator(mode="after")
     def avoidance_protocol(self):
+        collision = self.avoidance.geometry.collision
+        if collision is not None:
+            if self.protocol_version != 3 or not self.avoidance.enabled:
+                raise ValueError("navigation_collision_requires_avoidance_v3")
+            collision.validate_corridor(self.corridor)
+            collision.validate_input(self.perception.input_region)
         if self.avoidance.enabled and (
             self.protocol_version != self.avoidance.protocol_version
             or self.perception.engine != "depth_plane"

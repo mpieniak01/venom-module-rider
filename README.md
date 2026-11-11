@@ -614,6 +614,9 @@ straightening, and stale mission/epoch/host/source identities cannot resume a
 journey. Camera and manual controls remain in the same workspace.
 
 See [Journey v1](docs/JOURNEY_V1.md) for protocol, limits and operator acceptance.
+Optional [image collision geometry v1](docs/COLLISION_GEOMETRY_V1.md) qualifies
+the body corridor, maneuver sweep and terminal footprint independently of broad
+lateral sectors. It requires compatible peers and renewed geometry acceptance.
 `make check-journey` runs the focused hardware-free regression. The paired lease
 fixture optionally accepts `RIDER_TEST_PI_LEASE` pointing to the actual matching
 Pi source, with its repository root on `PYTHONPATH`; ordinary tests never locate
