@@ -148,8 +148,12 @@ def draw_sectors(draw, size, sectors, *, outlines=None, projected=False):
 def preview_sectors(result):
     """Bounded source-space metadata for the JPEG, independent of planner keys."""
     keys = ("state", "coverage_complete", "corridor", "heading_deg", "geometry")
+    rows = result.get(
+        "paths" if result.get("geometry") == "image_collision_corridor" else "sectors",
+        {},
+    )
     return {
         side: {key: row[key] for key in keys if key in row}
-        for side, row in result.get("sectors", {}).items()
+        for side, row in rows.items()
         if side in {"left", "center", "right"}
     }

@@ -73,6 +73,8 @@ class VisionFrame(BaseModel):
 
     @model_validator(mode="after")
     def avoidance_protocol(self):
+        collision = self.avoidance.geometry.collision
+        self._validate_collision(collision)
         if self.avoidance.enabled and (
             self.protocol_version != self.avoidance.protocol_version
             or self.perception.engine != "depth_plane"
@@ -86,6 +88,25 @@ class VisionFrame(BaseModel):
         ):
             raise ValueError("journey_requires_accepted_steering_v3")
         return self
+
+    def _validate_collision(self, collision):
+        """Check collision and rotation coverage before protocol admission."""
+        if collision is not None:
+            if self.protocol_version != 3 or not self.avoidance.enabled:
+                raise ValueError("navigation_collision_requires_avoidance_v3")
+            collision.validate_corridor(self.corridor)
+            collision.validate_input(self.perception.input_region)
+            if (
+                self.mode == "drive"
+                and collision.guidance is not None
+                and collision.guidance.motion_mode == "rotate_then_drive"
+            ):
+                bounds = collision.guidance.rotation_bounds
+                if bounds is None:
+                    raise ValueError("navigation_rotation_calibration_missing")
+                region = self.perception.input_region
+                if region is not None and not region.covers(bounds):
+                    raise ValueError("navigation_rotation_input_incomplete")
 
     @model_validator(mode="after")
     def valid_model_input(self):

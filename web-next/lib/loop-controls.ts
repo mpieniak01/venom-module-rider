@@ -1,4 +1,5 @@
 import { slowLeaseFactor } from "./behavior";
+import { collisionNavigationValid, collisionDecisionValid, guidanceReady } from "./collision-geometry";
 import { messages } from "./i18n";
 import { frameAge } from "./vision-frame";
 import { navigationAvailable } from "./navigation";
@@ -186,9 +187,12 @@ export function decisionView(state: JsonRecord, detector: JsonRecord) {
     confidence:typeof decision.confidence_fraction==="number"?decision.confidence_fraction:null,
   };
 }
-/** Validate only the optional ground calibration before other trial blockers. */
+/** Validate optional collision geometry and ground calibration before trial blockers. */
 function trialGeometryBlock(policy:JsonRecord,detector:JsonRecord):string {
   const avoidance=record(policy.avoidance),geometry=record(avoidance.geometry);
+  if("collision" in geometry&&(!collisionNavigationValid(policy,policy)||detector.collision_geometry_v1!==true))return "collision.unsupported";
+  if("guidance" in record(geometry.collision)&&detector.axis_guidance_v1!==true)return "guidance.unsupported";
+  if(!guidanceReady(policy))return "guidance.rotationMissing";
   if(avoidance.enabled!==true||avoidance.protocol_version!==3||geometry.mode!=="ground")return "";
   if(detector.ground_geometry_supported!==true)return "geometryHostUpdate";
   if(!["fx","fy","radius_ratio"].every(key=>typeof geometry[key]==="number"&&Number.isFinite(geometry[key])&&Number(geometry[key])>0))return "geometryCalibrationMissing";
@@ -222,12 +226,16 @@ export function trialBlock(policy: JsonRecord|null, runtime:JsonRecord, detector
 /** A turning display requires all Pi-confirmed clear-path evidence. */
 function turningDecision(decision:JsonRecord,current:boolean,policy:JsonRecord|null,side:string):boolean {
   if(!current)return false;
+  const rotation=["turn_left","turn_right"].includes(str(decision.action));
+  const guided=record(record(record(record(policy?.avoidance).geometry).collision).guidance).version===1;
+  const path=rotation?"rotation":side;
   const supported=decision.protocol_version===2&&["turn_left","turn_right"].includes(str(decision.action))
-    ||decision.protocol_version===3&&["steer_left","steer_right"].includes(str(decision.action))
-      &&["guard",side].every(k=>record(record(decision.paths)[k]).state==="clear"&&record(record(decision.paths)[k]).coverage_complete===true);
+    ||decision.protocol_version===3&&(["steer_left","steer_right"].includes(str(decision.action))||rotation&&guided)
+      &&["guard",path].every(k=>record(record(decision.paths)[k]).state==="clear"&&record(record(decision.paths)[k]).coverage_complete===true);
   return supported&&decision.state==="obstacle"&&record(policy?.avoidance).enabled===true
-    &&record(policy?.avoidance).sweep_verified===true&&record(record(decision.sectors)[side]).state==="clear"
-    &&record(record(decision.sectors)[side]).coverage_complete===true;
+    &&record(policy?.avoidance).sweep_verified===true
+    &&(decision.geometry==="image_collision_corridor"&&collisionDecisionValid(policy,decision)
+      ||record(record(decision.sectors)[side]).state==="clear"&&record(record(decision.sectors)[side]).coverage_complete===true);
 }
 /** Ground geometry remains unavailable until the full device reference is valid. */
 function permissionGroundValid(policy:JsonRecord|null,decision:JsonRecord):boolean {
@@ -259,7 +267,7 @@ function permissionBlock(facts:PermissionFacts):string {
   const decision=record(state.decision);
   const groundValid=permissionGroundValid(policy,decision);
   if(!ready)return "permissionExecutorBlocked";
-  if(!groundValid)return "permissionDecisionStop";
+  if(!groundValid||!collisionDecisionValid(policy,decision))return "permissionDecisionStop";
   if(decision.action==="slow"&&!slow)return "permissionSlowUnconfirmed";
   if(view.current&&view.vision!=="go"&&!turning&&!slow)return "permissionDecisionStop";
   if(goals.drive!==true||state.mode!=="drive")return goals.observe===true?"permissionObservation":"permissionIdle";

@@ -328,6 +328,14 @@ async def _reference_decision(request, device, descriptor, admitted_at):
 def profile_presentation(config, detector):
     """Expose pair support without mutating a cached authoritative Pi snapshot."""
     result = dict(config)
+    result["collision_geometry_supported"] = (
+        config.get("collision_geometry_v1") is True
+        and detector.get("collision_geometry_v1") is True
+    )
+    result["axis_guidance_supported"] = (
+        config.get("axis_guidance_v1") is True
+        and detector.get("axis_guidance_v1") is True
+    )
     result["input_region_supported"] = (
         type(config.get("input_region_version")) is int
         and config["input_region_version"] == 1
@@ -406,6 +414,21 @@ async def configure(request: Request):
     if not isinstance(values, dict):
         raise RiderError("navigation_configuration_invalid", 400)
     detector = request.app.state.rider_vision.status()
+    avoidance = values.get("avoidance")
+    geometry = avoidance.get("geometry") if isinstance(avoidance, dict) else None
+    if (
+        isinstance(geometry, dict)
+        and "collision" in geometry
+        and detector.get("collision_geometry_v1") is not True
+    ):
+        raise RiderError("navigation_collision_update_required", 409)
+    if (
+        isinstance(geometry, dict)
+        and isinstance(geometry.get("collision"), dict)
+        and "guidance" in geometry["collision"]
+        and detector.get("axis_guidance_v1") is not True
+    ):
+        raise RiderError("navigation_guidance_update_required", 409)
     behavior = values.get("behavior")
     if (
         isinstance(behavior, dict)

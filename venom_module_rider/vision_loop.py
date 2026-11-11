@@ -147,6 +147,8 @@ class VisionLoop:
                 frame.avoidance.geometry,
                 **options,
             )
+        if frame.avoidance.geometry.collision is not None:
+            options["geometry"] = frame.avoidance.geometry
         return self.depth_detector.detect(
             payload, frame.corridor, frame.perception, **options
         )
@@ -178,6 +180,8 @@ class VisionLoop:
             is not None,
             "supported_protocol_versions": [1, 2, 3],
             "navigation_journey_version": 1,
+            "collision_geometry_v1": True,
+            "axis_guidance_v1": True,
             "temporal_navigation_v1": importlib.util.find_spec("cv2") is not None,
             "input_region_version": 1,
             "semantic_model_policy_v1": importlib.util.find_spec("cv2") is not None,
@@ -799,11 +803,14 @@ class VisionLoop:
         self._update_decision_sectors(run, result, depth_mode)
         # Preview sectors precede command-side mirroring and planner mutations.
         image_sectors, sector_space = _decision_preview_space(result)
+        guidance_prior = dict(run.planner) if result.get("collision_geometry") else None
         if frame.protocol_version == 2:
             _plan_decision_v2(run, result, signals, depth_mode)
         if frame.protocol_version == 3:
             _plan_decision_v3(run, result, signals, depth_mode)
+        planned_action = signals.action
         _apply_temporal_decision(run, result, signals, temporal)
+        _reconcile_guidance(run, result, signals, planned_action, guidance_prior)
         record_result(run.state, frame, signals.action, result)
         journey_result = (
             {"journey": frame.journey.model_dump(), "host_session": self.host_session}
@@ -937,7 +944,7 @@ def _decision_preview_space(result):
     image_sectors = preview_sectors(result)
     sector_space = (
         "projected_paths"
-        if result.get("geometry") == "ground_capsule"
+        if result.get("geometry") in {"ground_capsule", "image_collision_corridor"}
         else "image"
         if image_sectors
         else "unavailable"
@@ -974,35 +981,107 @@ def _plan_decision_v3(run, result, signals, depth_mode):
     prior = run.planner
     if run.previous and run.now - run.previous["at"] > 0.5:
         prior.update(counts={"left": 0, "right": 0}, front=0)
+        from .axis_guidance import reset_history
+
+        reset_history(prior)
     signals.action, signals.reason, planner, sectors, paths, terminal = steering_plan(
         result,
         prior,
         run.frame.avoidance,
         run.frame.motion_phase,
         signals.permitted and run.frame.avoidance.enabled and depth_mode,
+        corridor=run.frame.corridor,
     )
     run.state["avoidance"] = planner
     result.update(
         sectors=sectors,
         paths=paths,
         terminal_stop=terminal,
-        maneuver_clear_count=3 if signals.action.startswith("steer_") else 0,
+        maneuver_clear_count=3 if signals.action.startswith(("steer_", "turn_")) else 0,
         maneuver_phase=signals.reason,
         turn_count=planner["turns"],
         stalled_corrections=planner.get("stalled", 0),
         progress_delta=planner.get("progress_delta"),
         pose_resets=planner.get("pose_resets", 0),
     )
+    if result.get("guidance"):
+        result["guidance_state"] = {
+            "selected_side": planner.get("side"),
+            "maneuver_kind": planner.get("maneuver_kind"),
+            "reason": signals.reason,
+        }
+
+
+def _reconcile_guidance(run, result, signals, planned, previous):
+    """A policy-vetoed correction must not count as an executed attempt."""
+    if (
+        previous is None
+        or not planned.startswith(("turn_", "steer_"))
+        or planned == signals.action
+    ):
+        return
+    from .axis_guidance import reset_history
+
+    reset_history(previous)
+    run.state["avoidance"] = previous
+    result.update(
+        turn_count=previous.get("turns", 0),
+        maneuver_clear_count=0,
+        maneuver_phase=signals.reason,
+    )
+    if result.get("guidance"):
+        result["guidance_state"] = {
+            "selected_side": previous.get("side"),
+            "maneuver_kind": None,
+            "reason": signals.reason,
+        }
+
+
+def _temporal_maneuver_allowed(signals, temporal):
+    """Require obstacle, fresh guard and spatial evidence for a correction."""
+    return (
+        signals.action.startswith(("turn_", "steer_"))
+        and temporal.get("action") == "stop"
+        and temporal.get("state") == "obstacle"
+        and temporal.get("near_guard_clear") is True
+        and temporal.get("evidence_frames", 0) >= 3
+        and temporal.get("spatial", {}).get("valid") is True
+        and temporal.get("spatial", {}).get("hard_stop") is not True
+    )
+
+
+def _apply_guidance_temporal_gate(result, signals, temporal):
+    """Keep guidance corrections stopped unless temporal evidence admits them."""
+    if not result.get("guidance") or signals.action == "go":
+        return False
+    if not _temporal_maneuver_allowed(signals, temporal):
+        signals.action = "stop"
+    return True
 
 
 def _apply_temporal_decision(run, result, signals, temporal):
     """Retain temporal STOP precedence and the qualified side-path exception."""
     if temporal is None:
         return
+    if signals.reason == "collision_geometry_mismatch" or (
+        result.get("collision_geometry") is not None
+        and signals.reason == "avoidance_near_guard"
+    ):
+        signals.action, signals.vision_action = "stop", "stop"
+        return
     if result.get("reason") == "vision_decision_expired":
         signals.action, signals.vision_action = "stop", "stop"
         return
     signals.vision_action = temporal["action"] if run.count >= 3 else "stop"
+    if (
+        result.get("collision_geometry")
+        and temporal["action"] == "slow"
+        and signals.action != "go"
+    ):
+        signals.action, signals.vision_action = "stop", "stop"
+        return
+    if _apply_guidance_temporal_gate(result, signals, temporal):
+        return
     if (
         signals.vision_action == "slow"
         and signals.permitted
@@ -1011,13 +1090,6 @@ def _apply_temporal_decision(run, result, signals, temporal):
     ):
         signals.action, signals.reason = "slow", temporal["reason"]
     elif temporal["action"] == "stop":
-        steering_allowed = (
-            signals.action.startswith(("turn_", "steer_"))
-            and temporal.get("state") == "obstacle"
-            and temporal.get("near_guard_clear") is True
-            and temporal.get("evidence_frames", 0) >= 3
-            and temporal.get("spatial", {}).get("valid") is True
-            and temporal.get("spatial", {}).get("hard_stop") is not True
-        )
+        steering_allowed = _temporal_maneuver_allowed(signals, temporal)
         if not steering_allowed:
             signals.action, signals.reason = "stop", temporal["reason"]

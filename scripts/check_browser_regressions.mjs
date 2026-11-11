@@ -19,6 +19,7 @@ const coverageEnabled=args.includes("--coverage");
 const filter=args.includes("--only")?args[args.indexOf("--only")+1]:"";
 if(args.includes("--only")&&!filter)throw new Error("--only requires a regression name");
 const fixtures={
+  "collision-geometry":"collision-geometry-fixture.tsx",
   "in-place-turn":"in-place-turn-fixture.tsx",
   "figures":"figures-fixture.tsx",
   "height":"height-fixture.tsx",
@@ -32,6 +33,8 @@ const fixtures={
   workspace:"global-study-fixture.tsx",
 };
 const cases=[
+  {name:"collision-geometry",fixture:"collision-geometry",file:"collision-geometry.js"},
+  {name:"reference-corridor",fixture:"workspace",file:"reference-corridor.js"},
   {name:"in-place-turn",fixture:"in-place-turn",file:"in-place-turn.js"},
   {name:"figures",fixture:"figures",file:"figures.js"},
   {name:"height",fixture:"height",file:"height.js"},
@@ -82,11 +85,12 @@ const gitExecutable=process.env.RIDER_GIT_EXECUTABLE??(process.platform==="win32
 if(!path.isAbsolute(gitExecutable))throw new Error("RIDER_GIT_EXECUTABLE must be an absolute path to a trusted git executable");
 const gitOptions={cwd:root,encoding:"utf8"};
 const report={head:execFileSync(gitExecutable,["rev-parse","HEAD"],gitOptions).trim(),worktree_dirty:!!execFileSync(gitExecutable,["-c","core.fsmonitor=false","status","--porcelain"],gitOptions).trim(),playwright:require("playwright/package.json").version,browser:"",isolation:false,cases:[]};
-let serverApiRequests=0;
+let serverApiRequests=0,activeCase="isolation",activeStage="bootstrap";
+const serverApiViolations=[];
 const html=name=>'<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Isolated Rider regression</title><style>body{margin:0;font-family:Arial,sans-serif}*{box-sizing:border-box}</style><link rel="stylesheet" href="/assets/'+name+'.css"><div id="root"></div><script src="/assets/'+name+'.js"></script>';
 const server=createServer((request,response)=>{
   const url=new URL(request.url,"http://127.0.0.1");
-  if(url.pathname.startsWith("/api/")){serverApiRequests++;response.writeHead(503);response.end("Fixture has no API");return;}
+  if(url.pathname.startsWith("/api/")){serverApiRequests++;serverApiViolations.push({case:activeCase,stage:activeStage,method:request.method,path:url.pathname,at:Date.now(),agent:String(request.headers["user-agent"]??"").slice(0,120)});console.error("Fixture API isolation violation:",JSON.stringify(serverApiViolations.at(-1)));response.writeHead(503);response.end("Fixture has no API");return;}
   if(request.method!=="GET"&&request.method!=="HEAD"){response.writeHead(405);response.end();return;}
   const name=url.pathname.match(/^\/fixtures\/([a-z-]+)\.html$/)?.[1]??(["/","/rider"].includes(url.pathname)?"workspace":null);
   if(name&&Object.hasOwn(fixtures,name)){response.writeHead(200,{"content-type":"text/html; charset=utf-8"});response.end(html(name));return;}
@@ -132,6 +136,8 @@ try{
     assert.equal(serverApiRequests,0);report.isolation=true;console.log("PASS network-isolation");
   }finally{await probe.close();}
   for(const item of cases){
+    activeCase=item.name;
+    activeStage="bootstrap";
     const blocked=[],context=await contextFor(blocked),page=await context.newPage(),errors=[];
     page.setDefaultTimeout(10000);page.setDefaultNavigationTimeout(10000);page.on("pageerror",error=>errors.push(error.stack??error.message));
     const started=Date.now();let timer,caseFailed=false;
@@ -150,7 +156,9 @@ try{
       // vm.runInThisContext does not sandbox code; run only a trusted checkout.
       const source=(await readFile(path.join(root,"tests/browser",item.file),"utf8")).trim().replace(/;$/,"");
       const scenario=vm.runInThisContext("("+source+"\n)",{filename:item.file});
+      activeStage="scenario";
       const result=await Promise.race([scenario(page),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error("Browser case exceeded 90 seconds")),90000);})]);
+      activeStage="verification";
       assert.deepEqual(errors,[],"Uncaught browser exception");assert.deepEqual(blocked,[],"Unmocked request blocked by isolation guard");
       report.cases.push({name:item.name,state:"passed",elapsed_ms:Date.now()-started,result});console.log("PASS "+item.name);
     }catch(error){
@@ -160,16 +168,24 @@ try{
       console.error("FAIL "+item.name+": "+error.message);
     }finally{
       clearTimeout(timer);
+      // Stop new API requests in Chromium before Playwright removes routes while
+      // closing the context. The static-server guard remains active throughout.
+      const session=await context.newCDPSession(page);
+      await session.send("Network.enable");
+      await session.send("Network.setBlockedURLs",{urls:["*://*/api/*"]});
+      activeStage="coverage";
       try{if(coverage)await coverage.add(await page.coverage.stopJSCoverage());}
-      finally{await context.tracing.stop(caseFailed?{path:path.join(output,item.name+"-trace.zip")}:{});await context.close();}
+      finally{activeStage="closing";await context.tracing.stop(caseFailed?{path:path.join(output,item.name+"-trace.zip")}:{});await context.close();}
     }
   }
-  assert.equal(serverApiRequests,0,"A request escaped the browser guard and reached the static server");
+  assert.equal(serverApiRequests,0,"A request escaped the browser guard and reached the static server: "+JSON.stringify(serverApiViolations));
   if(coverage)report.coverage=await coverage.write();
 }catch(error){report.error=String(error.stack??error);console.error(error.message);process.exitCode=1;}
 finally{
   if(browser)await browser.close();await new Promise(resolve=>server.close(resolve));
-  report.server_api_requests=serverApiRequests;await writeFile(path.join(output,"report.json"),JSON.stringify(report,null,2)+"\n");
+  // Include requests already queued by the browser when the final check ran.
+  if(serverApiRequests){report.error??="API request reached the fixture server";process.exitCode=1;}
+  report.server_api_requests=serverApiRequests;report.server_api_violations=serverApiViolations;await writeFile(path.join(output,"report.json"),JSON.stringify(report,null,2)+"\n");
 }
 const failed=report.cases.filter(value=>value.state!=="passed").length;
 if(failed||report.error||report.cases.length!==cases.length||!report.isolation)process.exitCode=1;

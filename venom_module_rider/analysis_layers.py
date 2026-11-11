@@ -186,6 +186,11 @@ def _depth_labels(assessment, labels, height, width, settings):
 def _draw_layer_geometry(layer, assessment, corridor, semantic, width, height):
     """Draw frozen semantic or depth reference geometry on the palette layer."""
     draw = ImageDraw.Draw(layer)
+    if assessment.get("geometry") == "image_collision_corridor":
+        from .collision_geometry import draw_overlay
+
+        draw_overlay(draw, assessment, corridor, (width, height))
+        return
     outlines = assessment.pop("_path_overlay", None)
     projected = assessment.get("geometry") == "ground_capsule"
     draw_sectors(

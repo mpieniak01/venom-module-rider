@@ -3,11 +3,8 @@
 from .ground_fit import pose_change
 
 
-def plan(result, previous, settings, phase, eligible):
-    """Advance bounded side history and select a qualified correction."""
-    state = dict(previous or {})
-    sectors = result.get("sectors", {})
-    paths = result.get("paths", {})
+def _mirror_views(settings, sectors, paths):
+    """Mirror both sector and path evidence together when configured."""
     if settings.mirrored:
         sectors = {
             **sectors,
@@ -19,16 +16,55 @@ def plan(result, previous, settings, phase, eligible):
             "left": paths.get("right", {}),
             "right": paths.get("left", {}),
         }
-    reference = result.get("ground_reference")
-    _update_reference(state, reference, result, settings, phase)
-    counts = _advance_side_counts(state, sectors, paths)
-    action, reason, terminal = "stop", "avoidance_uncertain", False
-    if not eligible or not settings.sweep_verified:
-        reason = "avoidance_not_accepted"
-    elif phase != "ready":
+    return sectors, paths
+
+
+def _preflight(state, counts, paths, collision, eligible, settings, phase, matches):
+    """Preserve geometry, approval, near-guard and fresh-capture check order."""
+    if not matches:
         counts.update(left=0, right=0)
         state["front"] = 0
-        reason = "avoidance_capture_pending"
+        return "collision_geometry_mismatch"
+    if not eligible or not settings.sweep_verified:
+        return "avoidance_not_accepted"
+    if collision is not None and (
+        paths.get("guard", {}).get("state") != "clear"
+        or paths.get("guard", {}).get("coverage_complete") is not True
+    ):
+        state["front"] = 0
+        return "avoidance_near_guard"
+    if phase != "ready":
+        counts.update(left=0, right=0)
+        state["front"] = 0
+        return "avoidance_capture_pending"
+    return None
+
+
+def plan(result, previous, settings, phase, eligible, *, corridor=None):
+    """Advance bounded side history and select a qualified correction."""
+    if settings.geometry.collision is not None:
+        from .axis_guidance import plan_collision
+
+        return plan_collision(result, previous, settings, phase, eligible, corridor)
+    state = dict(previous or {})
+    sectors = result.get("sectors", {})
+    paths = result.get("paths", {})
+    sectors, paths = _mirror_views(settings, sectors, paths)
+    reference = result.get("ground_reference")
+    _update_reference(state, reference, result, settings, phase)
+    from .collision_geometry import proof_matches
+
+    collision = settings.geometry.collision
+    matches = proof_matches(result, collision, corridor)
+    counts = _advance_side_counts(
+        state, sectors, paths, path_only=collision is not None
+    )
+    action, reason, terminal = "stop", "avoidance_uncertain", False
+    rejected = _preflight(
+        state, counts, paths, collision, eligible, settings, phase, matches
+    )
+    if rejected:
+        reason = rejected
     elif (
         state["turns"] >= settings.max_turn_pulses
         or state.get("stalled", 0) >= settings.max_stalled_corrections
@@ -107,15 +143,20 @@ def _obstacle_action(result, state, counts, paths, reference):
     return action, reason
 
 
-def _advance_side_counts(state, sectors, paths):
+def _advance_side_counts(state, sectors, paths, *, path_only=False):
     """Advance the same complete-clear sectors and paths before policy gating."""
     counts = dict(state.get("counts", {"left": 0, "right": 0}))
     state["counts"] = counts
     state.setdefault("turns", 0)
     for side in ("left", "right"):
+        rows = (
+            (paths.get(side, {}),)
+            if path_only
+            else (sectors.get(side, {}), paths.get(side, {}))
+        )
         clear = all(
             row.get("state") == "clear" and row.get("coverage_complete") is True
-            for row in (sectors.get(side, {}), paths.get(side, {}))
+            for row in rows
         )
         counts[side] = counts.get(side, 0) + 1 if clear else 0
     return counts

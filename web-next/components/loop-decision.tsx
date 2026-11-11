@@ -3,7 +3,7 @@ import { NavigationTemporal } from "./navigation-temporal";
 import { frameAge } from "../lib/vision-frame";
 import type { Frame } from "../lib/use-rider";
 import { decisionView, diagnosticImageCurrent } from "../lib/loop-controls";
-import { scalarText, formatNumber, formatTime, record, safetyOf, type JsonRecord, type RiderStatus } from "../lib/model";
+import { str, scalarText, formatNumber, formatTime, record, safetyOf, type JsonRecord, type RiderStatus } from "../lib/model";
 import type { Translator } from "../lib/i18n";
 import styles from "../rider.module.css";
 
@@ -27,6 +27,7 @@ export function LoopDecision({frame,state,detector,policy,status,t,language}:{fr
       <span>{t("decisionAge")}: <b>{scalarText(state.response_age_ms??"—")} ms</b> / {scalarText(policy?.decision_budget_ms??"—")} ms</span>
       <span>{t("decisionPermit")}: <b>{scalarText(state.permit_remaining_ms??"—")} ms</b></span>
       <span>{t("decisionFrame")}: <b>{scalarText(decision.sequence??"—")} · {scalarText(decision.frame_id??"—").slice(0,12)}</b></span>
+      {submission&&<span data-testid="motion-submission">{t("collision.submission")}: <b>{t("collision.submission."+str(submission.status))}</b> · vx {scalarText(submission.vx)} · yaw {scalarText(submission.yaw)} · {scalarText(submission.duration_ms)} ms · {t("decisionFrame")} {scalarText(submission.frame_id).slice(0,12)}</span>}
       <span>{formatTime(state.observed_at,language)} · {t(view.current?"decisionLive":"decisionHistorical")}</span>
     </div></details>);
   }
@@ -74,6 +75,8 @@ return (t("decisionNoReply"));
   const imageState=frame?.analysis ? {running: (sameRun||previewOnly)&&!frame.stale&&age!==null&&age<1000, stale:frame.stale, decision:frame.analysis} : state;
   const imageView=decisionView(imageState,detector);
   const decision=record(state.decision), key="vision.reason."+imageView.imageReason;
+  const submitted=record(state.motion_submission);
+  const submission=typeof state.run_id==="string"&&submitted.run_id===state.run_id&&submitted.config_revision===state.config_revision&&["pending","accepted","rejected"].includes(str(submitted.status))?submitted:null;
   const reason=t(key)===key?t("vision.reason.default"):t(key);
   const replyReasonKey="vision.reason."+view.reason;
   const replyReason=t(replyReasonKey)===replyReasonKey?t("vision.reason.default"):t(replyReasonKey);
@@ -93,6 +96,8 @@ return (t("decisionNoReply"));
     </div>
     <p className={styles.hint} data-testid="decision-timing">{t("decisionTiming",{sequence:scalarText(decision.sequence??"—"),revision:scalarText(decision.config_revision??state.config_revision??"—"),inference:scalarText(decision.inference_ms??"—"),roundtrip:scalarText(state.request_roundtrip_ms??"—"),age:scalarText(state.decision_age_ms??"—"),remaining:scalarText(state.permit_remaining_ms??"—")})}</p>
     <NavigationTemporal view={temporalView(state)} t={t}/>
+    {decision.guidance!==undefined&&<p className={styles.hint} data-testid="axis-guidance-decision">{t("guidance.mode")}: {t("guidance.mode."+str(record(decision.guidance).motion_mode))} · {t("guidance.obstacle")}: {t("guidance.obstacle."+str(record(decision.axis_evidence).obstacle_side||"none"))}</p>}
+    {decision.geometry==="image_collision_corridor"&&<div className={styles.metrics} data-testid="collision-decision"><p>{t("collision.evaluated")}</p>{["center","left","right","guard",...(decision.guidance!==undefined?["rotation"]:[])].map(side=><span key={side}>{t("collision."+side)}: <b>{t("vision."+str(record(record(decision.paths)[side]).state||"unknown"))}</b></span>)}</div>}
     {renderDecisionDiagnostics()}
   </section>;
 }

@@ -2,6 +2,8 @@
 
 An optional Venom module for manual operation of Rider-Pi. Venom supplies the UI, language/theme system and host API; Pi owns hardware, calibration, profiles, motion sequencing and resource orchestration.
 
+Established robot dimensions and camera reference: [ROBOT_GEOMETRY_PL.md](docs/ROBOT_GEOMETRY_PL.md).
+
 ## R1
 
 - Manual arrows: click for a pulse, hold for continuous intent, release for braking. The pad STOP cancels the current motion or sequence; Escape provides the same global STOP. Explicit gestures obtain Pi authority without a separate ARM button. Recording controls occupy the main toolbar.
@@ -614,6 +616,9 @@ straightening, and stale mission/epoch/host/source identities cannot resume a
 journey. Camera and manual controls remain in the same workspace.
 
 See [Journey v1](docs/JOURNEY_V1.md) for protocol, limits and operator acceptance.
+Optional [image collision geometry v1](docs/COLLISION_GEOMETRY_V1.md) qualifies
+the body corridor, maneuver sweep and terminal footprint independently of broad
+lateral sectors. It requires compatible peers and renewed geometry acceptance.
 `make check-journey` runs the focused hardware-free regression. The paired lease
 fixture optionally accepts `RIDER_TEST_PI_LEASE` pointing to the actual matching
 Pi source, with its repository root on `PYTHONPATH`; ordinary tests never locate

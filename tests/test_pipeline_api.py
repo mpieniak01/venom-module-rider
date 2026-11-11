@@ -806,8 +806,9 @@ def test_active_native_preview_keeps_camera_source_distinct_from_pi_run_identity
     import hashlib
 
     app, service, pi = fixture(monkeypatch)
-    pi.latest = native(100)
     with TestClient(app) as client:
+        # Startup must not age the fixture before the camera has started.
+        pi.latest = native(100)
         detector = Detector()
         app.state.rider_vision.detector = detector
         warmup(client)
